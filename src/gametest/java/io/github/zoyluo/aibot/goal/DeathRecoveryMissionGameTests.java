@@ -8,13 +8,12 @@ import io.github.zoyluo.aibot.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
 import io.github.zoyluo.aibot.task.RecoverDropsTask;
 import io.github.zoyluo.aibot.task.TaskManager;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -22,15 +21,16 @@ import net.minecraft.world.GameMode;
 
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.text.Text;
 
 /** Deterministic death suspension coverage for active and queued mining missions. */
-public final class DeathRecoveryMissionGameTests implements FabricGameTest {
+public final class DeathRecoveryMissionGameTests {
     private static final int SUSPENDED_ASSERT_TICK = 10;
     private static final int RESUMED_ASSERT_TICK = 115;
     private static final int ACTIVE_COMPLETE_ASSERT_TICK = 135;
     private static final int ALL_COMPLETE_ASSERT_TICK = 155;
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void mineOreSurvivesDeathRecoveryAndPreservesQueuedHaveItem(TestContext context) {
         runScenario(
                 context,
@@ -41,7 +41,7 @@ public final class DeathRecoveryMissionGameTests implements FabricGameTest {
                 Items.SWEET_BERRIES);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void haveItemSurvivesDeathRecoveryAndPreservesQueuedMineOre(TestContext context) {
         runScenario(
                 context,
@@ -195,14 +195,14 @@ public final class DeathRecoveryMissionGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 
     private static void require(Probe probe, boolean condition, String message) {
         if (!condition) {
             cleanup(probe);
-            probe.context().throwGameTestException(message);
+            probe.context().throwGameTestException(Text.of(message));
         }
     }
 

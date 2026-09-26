@@ -11,7 +11,6 @@ import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
@@ -26,7 +25,7 @@ import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.stat.Stats;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -37,10 +36,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.text.Text;
 
 /** Live scheduling proofs for DangerWatcher's task-preemption boundaries. */
-public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+public final class DangerWatcherLowHealthGameTests {
+    @GameTest(maxTicks = 40)
     public void exactObsidianPickBudgetIsNotPreemptedByGenericResupply(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "ObsidianToolBudgetGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -90,8 +90,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherMiningToolOwnership", tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void createObsidianRawOneSettlementIsNotPreempted(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CreateRawOneOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -117,9 +116,9 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("raw-two CreateObsidianTask ended as "
+                context.throwGameTestException(Text.of("raw-two CreateObsidianTask ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                        + " checkpoint=" + task.checkpoint()));
             }
             if (!scannedRawOneSettlement.get()
                     && bot.getServerWorld().getBlockState(target).isAir()
@@ -148,8 +147,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherMiningToolOwnership", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void oreDigRawOnePickupAndActiveBreakRemainOwned(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "OreRawOneOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -185,8 +183,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherMiningToolOwnership", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void rawOnePickOnNonOwnerStillTriggersGenericResupply(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "RawOneNonOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -210,8 +207,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherMiningToolOwnership", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void stonePickCraftIgnoresNearlyBrokenHeldPick(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CraftHeldPickOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -241,8 +237,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherMiningToolOwnership", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void pausedMiningOwnerResuppliesInPlaceWithoutBaseTravel(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PausedMineLocalSupplyGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -293,8 +288,8 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                     "paused-owner resupply started a base path");
             if (resupply.state() == TaskState.FAILED
                     || resupply.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("local-only resupply ended as "
-                        + resupply.state() + ":" + resupply.failureReason());
+                context.throwGameTestException(Text.of("local-only resupply ended as "
+                        + resupply.state() + ":" + resupply.failureReason()));
             }
             if (resupply.state() != TaskState.COMPLETED) {
                 return;
@@ -314,8 +309,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherMiningToolOwnership", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void pausedMiningOwnerDoesNotTravelForDamagedCombatWeapon(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PausedMineWeaponBoundaryGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -364,8 +358,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "dangerWatcherCombatEntomb", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void healthyMeleeCombatIsNotPreemptedByUndergroundEntomb(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatEntombGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -395,7 +388,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
             ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
             if (zombie == null) {
                 despawnAndComplete(context, bot);
-                context.throwGameTestException("failed to create close-combat zombie fixture");
+                context.throwGameTestException(Text.of("failed to create close-combat zombie fixture"));
                 return;
             }
             BlockPos hostileFeet = origin.east();
@@ -428,8 +421,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void equalDamageWeaponSelectionPrefersRemainingDurability(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatDurabilityGT", 2);
         ItemStack nearlyBroken = new ItemStack(Items.WOODEN_SWORD);
@@ -449,8 +441,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void equalDamageWeaponSelectionPrefersSwordBeforeDurability(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatSwordPriorityGT", 2);
         ItemStack twoUseSword = new ItemStack(Items.STONE_SWORD);
@@ -471,8 +462,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void armorEquipRemainsIndependentFromMeleeWeaponFiltering(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "ArmorFilterIndependenceGT", 2);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
@@ -485,8 +475,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void axeRemainsQualifiedWhilePickaxeCannotDisplaceIt(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "AxeWeaponQualificationGT", 2);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
@@ -499,8 +488,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void pickaxeOnlyInventoryCannotAuthorizeCombat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PickaxeOnlyNoCombatGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -514,7 +502,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create pickaxe-only zombie fixture");
+            context.throwGameTestException(Text.of("failed to create pickaxe-only zombie fixture"));
             return;
         }
         BlockPos hostileFeet = origin.east(2);
@@ -538,8 +526,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void finalUseSwordCannotAuthorizeCombat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseSwordNoCombatGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -555,7 +542,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create final-use sword zombie fixture");
+            context.throwGameTestException(Text.of("failed to create final-use sword zombie fixture"));
             return;
         }
         BlockPos hostileFeet = origin.east(2);
@@ -579,8 +566,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void finalUseAxeIsNotAQualifiedMeleeWeapon(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseAxeNoCombatGT", 2);
         ItemStack finalUseAxe = new ItemStack(Items.STONE_AXE);
@@ -592,8 +578,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rangedLineOfSightBlocksCombatHealBeyondMeleeBoundary(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatRangedHealGT", 2);
         int deathBaseline = deathCount(bot);
@@ -612,7 +597,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (skeleton == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create ranged-heal skeleton fixture");
+            context.throwGameTestException(Text.of("failed to create ranged-heal skeleton fixture"));
             return;
         }
         skeleton.setPersistent();
@@ -657,8 +642,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void nightCreeperWithShelterMaterialsChoosesDedicatedDefense(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "NightCreeperDefenseGT", 36);
         context.getWorld().setTimeOfDay(18000L);
@@ -692,8 +676,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void lowHealthCreeperCannotEnterEmergencyEntomb(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "LowCreeperDefenseGT", 52);
         context.getWorld().setTimeOfDay(18000L);
@@ -727,8 +710,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void observableCreeperAtFifteenBlocksTriggersDedicatedDefense(
             TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(
@@ -757,8 +739,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void completedCreeperDefenseReacquiresWithoutMissionStackGap(
             TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "CreeperReacquireGT", 108);
@@ -812,8 +793,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void closerZombieCannotMaskObservableCreeper(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "MixedCreeperDefenseGT", 76);
         context.getWorld().setTimeOfDay(18000L);
@@ -824,7 +804,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         HuskEntity husk = EntityType.HUSK.create(context.getWorld(), SpawnReason.COMMAND);
         if (husk == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create mixed-pressure Husk fixture");
+            context.throwGameTestException(Text.of("failed to create mixed-pressure Husk fixture"));
             return;
         }
         husk.setPersistent();
@@ -852,8 +832,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void evadeExaminesFifthDirectionWithinBoundedAdmission(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "EvadeFifthDirectionGT", 92);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -883,8 +862,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void observedCreeperDefenseExtendsBeyondFirstWaypoint(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(
                 context, "CreeperExtendDefenseGT", 68);
@@ -906,8 +884,8 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                     || defense.state() == TaskState.CANCELLED) {
                 creeper.discard();
                 despawnAndComplete(context, bot);
-                context.throwGameTestException("extended Creeper defense ended as "
-                        + defense.state() + ":" + defense.failureReason());
+                context.throwGameTestException(Text.of("extended Creeper defense ended as "
+                        + defense.state() + ":" + defense.failureReason()));
                 return;
             }
             // The first projection is twelve blocks west and the task can settle within 2.5 blocks
@@ -925,8 +903,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 340)
+    @GameTest(maxTicks = 340)
     public void pointBlankLiveChargedCreeperDuringStalledEvadeSurvivesAndResumesMission(
             TestContext context) {
         AIPlayerEntity bot = spawnOnReactiveEscapeArena(
@@ -1065,8 +1042,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void creeperIsNeverHitFromStrikeOrSecondaryRetreat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatCreeperRetreatGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1077,7 +1053,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (creeper == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create Creeper combat fixture");
+            context.throwGameTestException(Text.of("failed to create Creeper combat fixture"));
             return;
         }
         creeper.setPersistent();
@@ -1127,7 +1103,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         if (primary == null) {
             creeper.discard();
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create Creeper secondary primary fixture");
+            context.throwGameTestException(Text.of("failed to create Creeper secondary primary fixture"));
             return;
         }
         primary.setPersistent();
@@ -1176,14 +1152,13 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
             } else if (!dedicatedOwnerObserved.get()
                     && (combat.state() == TaskState.FAILED
                     || combat.state() == TaskState.CANCELLED)) {
-                context.throwGameTestException("secondary-Creeper combat ended as "
-                        + combat.state() + ":" + combat.failureReason());
+                context.throwGameTestException(Text.of("secondary-Creeper combat ended as "
+                        + combat.state() + ":" + combat.failureReason()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void primaryDeathDuringHealIsCreditedExactlyOnce(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatHealPrimaryDeathGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1201,7 +1176,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (primary == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create heal-primary fixture");
+            context.throwGameTestException(Text.of("failed to create heal-primary fixture"));
             return;
         }
         primary.setPersistent();
@@ -1232,8 +1207,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void nearestSecondaryPressureBlocksFoodWithoutTakingPrimaryCredit(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatSecondaryPressureGT", 2);
@@ -1268,7 +1242,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 secondary.discard();
             }
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create secondary-pressure fixtures");
+            context.throwGameTestException(Text.of("failed to create secondary-pressure fixtures"));
             return;
         }
         primary.setPersistent();
@@ -1305,14 +1279,13 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 despawnAndComplete(context, bot);
             } else if (combat.state() == TaskState.FAILED
                     || combat.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("secondary-pressure combat ended as "
-                        + combat.state() + ":" + combat.failureReason());
+                context.throwGameTestException(Text.of("secondary-pressure combat ended as "
+                        + combat.state() + ":" + combat.failureReason()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void rangedSecondaryAtFourteenBlocksBlocksPrimarySettlementUntilLosBreaks(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatRangedSecondaryGT", 2);
@@ -1349,7 +1322,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 secondary.discard();
             }
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create ranged-secondary fixtures");
+            context.throwGameTestException(Text.of("failed to create ranged-secondary fixtures"));
             return;
         }
         BlockPos primaryFeet = origin.east();
@@ -1398,8 +1371,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void combatReequipsBackupInTheSameAttackBoundary(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatBackupWeaponGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1422,7 +1394,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create backup-weapon zombie fixture");
+            context.throwGameTestException(Text.of("failed to create backup-weapon zombie fixture"));
             return;
         }
         zombie.setPersistent();
@@ -1440,7 +1412,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
             require(context, bot.isAlive(), "bot died in the disabled-zombie weapon fixture");
             require(context, deathCount(bot) == deathBaseline,
                     "backup-weapon combat changed the bot death counter");
-            ItemStack retiredStoneSword = bot.getInventory().main.stream()
+            ItemStack retiredStoneSword = bot.getInventory().getMainStacks().stream()
                     .filter(stack -> stack.isOf(Items.STONE_SWORD))
                     .findFirst()
                     .orElse(ItemStack.EMPTY);
@@ -1456,21 +1428,20 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                         "newly ineligible weapon was not atomically replaced by its backup"
                                 + " held=" + held.getItem()
                                 + " raw=" + rawDurability(held)
-                                + " selected=" + bot.getInventory().selectedSlot
+                                + " selected=" + bot.getInventory().getSelectedSlot()
                                 + " wood_count="
                                 + InventoryAction.countItem(bot, Items.WOODEN_SWORD));
                 zombie.discard();
                 despawnAndComplete(context, bot);
             } else if (combat.state() == TaskState.FAILED
                     || combat.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("backup-weapon combat ended as "
-                        + combat.state() + ":" + combat.failureReason());
+                context.throwGameTestException(Text.of("backup-weapon combat ended as "
+                        + combat.state() + ":" + combat.failureReason()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void contactHostileBlocksHealingAndForcesCounterattack(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatContactHealGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1496,7 +1467,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create contact-heal zombie fixture");
+            context.throwGameTestException(Text.of("failed to create contact-heal zombie fixture"));
             return;
         }
         zombie.setPersistent();
@@ -1541,14 +1512,13 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 despawnAndComplete(context, bot);
             } else if (combat.state() == TaskState.FAILED
                     || combat.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("contact-heal combat ended as "
-                        + combat.state() + ":" + combat.failureReason());
+                context.throwGameTestException(Text.of("contact-heal combat ended as "
+                        + combat.state() + ":" + combat.failureReason()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "combatSurvivalRecovery", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void leashExitCannotCompleteWhileAHostileRemainsInContact(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatLeashContactGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1559,7 +1529,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create leash-contact zombie fixture");
+            context.throwGameTestException(Text.of("failed to create leash-contact zombie fixture"));
             return;
         }
         zombie.setPersistent();
@@ -1589,7 +1559,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void lowHealthAloneDoesNotReplaceCurrentWorkWithEvade(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "LowHealthNoThreatGT", 2);
         bot.setHealth(4.7F);
@@ -1618,8 +1588,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
     // This fixture opens a fourteen-block hostile corridor, wider than GameTest's default
     // structure spacing. Keep it in an isolated batch so neighbouring mobs/walls cannot change
     // the admission fact between the two synchronous scans.
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "nakedEatThreatCooldownIsolation", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void observedHostileInsideThreatCooldownBlocksNewNakedHealingEat(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "NakedEatAdmissionGT", 2);
@@ -1635,7 +1604,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (skeleton == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create remote naked-eat skeleton fixture");
+            context.throwGameTestException(Text.of("failed to create remote naked-eat skeleton fixture"));
             return;
         }
         BlockPos hostileFeet = origin.east(7);
@@ -1694,8 +1663,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
 
     // The terminal-episode decision counts every observable hostile. An isolated batch proves
     // the intended close zombie without inheriting ranged mobs from adjacent empty structures.
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalShelterEpisodeIsolation", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void terminalShelterEpisodeUsesCloseDefensiveCombatUntilRelocation(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "ShelterEpisodeFallbackGT", 2);
@@ -1718,7 +1686,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create shelter-episode zombie fixture");
+            context.throwGameTestException(Text.of("failed to create shelter-episode zombie fixture"));
             return;
         }
         BlockPos hostileFeet = origin.east(2);
@@ -1768,7 +1736,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void lowHealthWithFoodPausesWorkToEatForHealing(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "LowHealthHealGT", 2);
         bot.setHealth(4.7F);
@@ -1789,7 +1757,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void hostileLowHealthCannotInterruptAtomicHealingEat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "LowHealthAtomicEatGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -1820,7 +1788,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (skeleton == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create low-health skeleton fixture");
+            context.throwGameTestException(Text.of("failed to create low-health skeleton fixture"));
             return;
         }
         BlockPos hostileFeet = origin.east(2);
@@ -1871,7 +1839,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void entitylessLowHealthThreatCannotInventDownwardEscape(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "LowHealthVectorGT", 25);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -1895,8 +1863,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "evadePathAdmissionCleanupStrict", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void failedSurfacePathEvadeReleasesSprintAndAllowsPausedWorkResume(
             TestContext context) {
         // Keep the fixture well above neighbouring templates: Evade deliberately searches about
@@ -1949,8 +1916,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownLavaReturnOwnershipStrict", tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void pausedDigDownClaimsObservedLavaAndPaysExactReturn(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "DigDownLavaReturnGT", 55);
         bot.setHealth(bot.getMaxHealth());
@@ -2078,7 +2044,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void unprovokedEndermanDoesNotInterruptCurrentWork(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PassiveEndermanGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -2091,7 +2057,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
                 context.getWorld(), SpawnReason.COMMAND);
         if (enderman == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create passive Enderman fixture");
+            context.throwGameTestException(Text.of("failed to create passive Enderman fixture"));
             return;
         }
         BlockPos endermanFeet = bot.getBlockPos().east(4);
@@ -2114,8 +2080,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "hostileSafetyRegression", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void endermanAngryAtAnotherEntityDoesNotInterruptCurrentWork(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "OtherAngerEndermanGT", 116);
         HoldingTask work = new HoldingTask();
@@ -2125,7 +2090,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         var bystander = EntityType.COW.create(context.getWorld(), SpawnReason.COMMAND);
         if (bystander == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create Enderman anger bystander");
+            context.throwGameTestException(Text.of("failed to create Enderman anger bystander"));
             return;
         }
         bystander.setPersistent();
@@ -2156,8 +2121,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "hostileSafetyRegression", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void provokedEndermanRoutesToEvade(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "ProvokedEndermanGT", 132);
         HoldingTask work = new HoldingTask();
@@ -2192,8 +2156,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "hostileSafetyRegression", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void directCombatNeverAttacksEnderman(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "CombatEndermanGuardGT", 164);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -2223,8 +2186,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "hostileSafetyRegression", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void combatRetreatAdmitsLateralSurfacePath(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatLateralRetreatGT", 148);
         var world = context.getWorld();
@@ -2255,7 +2217,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         HuskEntity husk = EntityType.HUSK.create(world, SpawnReason.COMMAND);
         if (husk == null) {
             despawnAndComplete(context, bot);
-            context.throwGameTestException("failed to create lateral-retreat Husk fixture");
+            context.throwGameTestException(Text.of("failed to create lateral-retreat Husk fixture"));
             return;
         }
         husk.setPersistent();
@@ -2446,7 +2408,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         CreeperEntity creeper = EntityType.CREEPER.create(
                 context.getWorld(), SpawnReason.COMMAND);
         if (creeper == null) {
-            context.throwGameTestException("failed to create " + fixture);
+            context.throwGameTestException(Text.of("failed to create " + fixture));
             throw new IllegalStateException("failed to create " + fixture);
         }
         creeper.setPersistent();
@@ -2463,7 +2425,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         LightningEntity lightning = EntityType.LIGHTNING_BOLT.create(
                 context.getWorld(), SpawnReason.COMMAND);
         if (lightning == null) {
-            context.throwGameTestException("failed to create charged Creeper fixture");
+            context.throwGameTestException(Text.of("failed to create charged Creeper fixture"));
             throw new IllegalStateException("failed to create charged Creeper fixture");
         }
         creeper.onStruckByLightning(context.getWorld(), lightning);
@@ -2477,7 +2439,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         CreeperEntity creeper = EntityType.CREEPER.create(
                 context.getWorld(), SpawnReason.COMMAND);
         if (creeper == null) {
-            context.throwGameTestException("failed to create " + fixture);
+            context.throwGameTestException(Text.of("failed to create " + fixture));
             throw new IllegalStateException("failed to create " + fixture);
         }
         creeper.setPersistent();
@@ -2494,7 +2456,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
         EndermanEntity enderman = EntityType.ENDERMAN.create(
                 context.getWorld(), SpawnReason.COMMAND);
         if (enderman == null) {
-            context.throwGameTestException("failed to create " + fixture);
+            context.throwGameTestException(Text.of("failed to create " + fixture));
             throw new IllegalStateException("failed to create " + fixture);
         }
         enderman.setPersistent();
@@ -2514,7 +2476,7 @@ public final class DangerWatcherLowHealthGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

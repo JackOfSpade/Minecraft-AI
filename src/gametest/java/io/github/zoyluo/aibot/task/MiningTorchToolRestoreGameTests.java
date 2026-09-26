@@ -5,25 +5,25 @@ import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
 import java.util.Set;
+import net.minecraft.text.Text;
+import net.minecraft.entity.EquipmentSlot;
 
 /** Full-inventory proofs for restoring an active mining tool after offhand torch promotion. */
-public final class MiningTorchToolRestoreGameTests implements FabricGameTest {
+public final class MiningTorchToolRestoreGameTests {
     private static final String BATCH = "miningTorchToolRestoreStrict";
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void descendTorchAttemptRestoresActiveStonePick(TestContext context) {
         Fixture fixture = spawn(context, "DescendTorchRestoreGT", new BlockPos(4, 4, 4));
         BlockMiner miner = beginActiveStoneClear(context, fixture, false);
@@ -35,8 +35,7 @@ public final class MiningTorchToolRestoreGameTests implements FabricGameTest {
         cleanup(context, fixture, miner);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void oreDigTorchAttemptRestoresActiveChannelPick(TestContext context) {
         Fixture fixture = spawn(context, "OreDigTorchRestoreGT", new BlockPos(10, 4, 4));
         BlockMiner miner = beginActiveStoneClear(context, fixture, true);
@@ -52,12 +51,12 @@ public final class MiningTorchToolRestoreGameTests implements FabricGameTest {
                                                      Fixture fixture,
                                                      boolean channelPolicy) {
         AIPlayerEntity bot = fixture.bot();
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            bot.getInventory().main.set(slot, new ItemStack(Items.DIRT));
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            bot.getInventory().getMainStacks().set(slot, new ItemStack(Items.DIRT));
         }
-        bot.getInventory().selectedSlot = 0;
-        bot.getInventory().main.set(0, new ItemStack(Items.STONE_PICKAXE));
-        bot.getInventory().offHand.set(0, new ItemStack(Items.TORCH));
+        bot.getInventory().setSelectedSlot(0);
+        bot.getInventory().getMainStacks().set(0, new ItemStack(Items.STONE_PICKAXE));
+        bot.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.TORCH));
         bot.getInventory().markDirty();
 
         BlockMiner miner = new BlockMiner();
@@ -73,7 +72,7 @@ public final class MiningTorchToolRestoreGameTests implements FabricGameTest {
     private static void attemptOffhandTorchPlacement(TestContext context, Fixture fixture) {
         AIPlayerEntity bot = fixture.bot();
         int torchSlot = InventoryAction.findItem(bot, Items.TORCH).orElse(-1);
-        require(context, torchSlot == bot.getInventory().selectedSlot
+        require(context, torchSlot == bot.getInventory().getSelectedSlot()
                         && bot.getOffHandStack().isOf(Items.STONE_PICKAXE),
                 "full-main torch promotion did not exchange the active pick into offhand");
         InventoryAction.equipFromSlot(bot, torchSlot);
@@ -128,7 +127,7 @@ public final class MiningTorchToolRestoreGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

@@ -16,7 +16,6 @@ import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
@@ -25,7 +24,7 @@ import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.stat.Stats;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -39,11 +38,11 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Live strict-survival regression coverage for OreDig's physical target-drop ledger. */
-public final class OreDigPickupGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupDropCatchStrict", tickLimit = 500)
+public final class OreDigPickupGameTests {
+    @GameTest(maxTicks = 500)
     public void adjacentCoalOverFiveDeepShaftIsCaughtBeforeDeepFall(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCatchGT");
         AIPlayerEntity bot = fixture.bot();
@@ -107,8 +106,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupDiagonalBreakStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void diagonalEyeHeightOreWaitsForCardinalWorkPose(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDiagonalBreakGT");
         AIPlayerEntity bot = fixture.bot();
@@ -160,8 +158,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupHighWorkPoseStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void threeAboveOreRequiresReachableHighWorkPoseForNaturalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupHighFaceGT");
         AIPlayerEntity bot = fixture.bot();
@@ -245,8 +242,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupTwoAboveCardinalStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void twoAboveCardinalOreUsesDropShaftWorkPoseForNaturalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupTwoAboveGT");
         AIPlayerEntity bot = fixture.bot();
@@ -333,8 +329,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupLowerLedgeStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void lowerFloorOreClearsSweptPickupEgressBeforeBreaking(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupLowerLedgeGT");
         AIPlayerEntity bot = fixture.bot();
@@ -391,8 +386,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupLowerShaftCatchStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void lowerFloorCoalOverOpenShaftGetsPhysicalDropSupport(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupLowerShaftGT");
         AIPlayerEntity bot = fixture.bot();
@@ -464,8 +458,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreDropCommitReserveStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void exactProtectedReserveRejectsOpenShaftOreBeforeBreakAndRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCommitReserveGT");
@@ -530,8 +523,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreDropCommitRevokedStrict", tickLimit = 50)
+    @GameTest(maxTicks = 50)
     public void activeBreakCancelsWhenItsOnlySurplusSupportDisappearsBeforeRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCommitRevokedGT");
@@ -593,8 +585,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBonusChannelStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void denseBonusOreCannotStarveActiveChannelBlock(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBonusChannelGT");
         AIPlayerEntity bot = fixture.bot();
@@ -652,8 +643,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBonusWallBandStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void bonusOreMinesSideWallWithoutRemovingCurrentSupport(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBonusWallBandGT");
         AIPlayerEntity bot = fixture.bot();
@@ -710,8 +700,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreLavaRerouteStrict", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void visibleLavaRotatesTheBranchInsteadOfAssigningImpossibleEvade(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreLavaRerouteGT");
         AIPlayerEntity bot = fixture.bot();
@@ -764,8 +753,8 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 rotatedEast.set(true);
             }
             if (rotatedEast.get() && !"1".equals(direction)) {
-                context.throwGameTestException(
-                        "same visible lava repeatedly rotated the branch: direction=" + direction);
+                context.throwGameTestException(Text.of(
+                        "same visible lava repeatedly rotated the branch: direction=" + direction));
             }
             require(context, world.getBlockState(lava).isOf(Blocks.LAVA),
                     "lava reroute mutated the factual lava source");
@@ -779,14 +768,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 140) {
-                context.throwGameTestException(
-                        "OreDig did not physically leave the lava-facing origin within 140 ticks");
+                context.throwGameTestException(Text.of(
+                        "OreDig did not physically leave the lava-facing origin within 140 ticks"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreWatcherLavaClusterRerouteStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void watcherDoesNotMistakeAVisibleLavaPoolForTheActiveBranchCell(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreWatcherLavaClusterGT");
@@ -832,8 +820,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreDirectLavaRerouteStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void directLavaBoundaryAndRestartRetainOreDigOwnership(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDirectLavaRerouteGT");
         AIPlayerEntity bot = fixture.bot();
@@ -877,8 +864,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreFactualCornerLavaStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void factualCornerLavaUsesUntriedReverseAndRestartsExactly(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreFactualCornerLavaGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1013,8 +999,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         return remaining;
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCloseBreakStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void exactTunnelStepAndQueuedHighWorkPoseArePhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCloseBreakGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1113,8 +1098,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
      * raised 1x1 work-pose pedestal beside the shaft. The recovery loop must climb the two-step
      * ascent and physically collect it instead of idling into ore_dig_drop_unrecovered.
      */
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePedestalDropStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void pedestalLandedDropIsPhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePedestalDropGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1173,8 +1157,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreHighPoseRestartStrict", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void restoredObservedHighWorkPoseRoutesWithoutDigging(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseRestartGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1259,8 +1242,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreHighPoseLeaseStrict", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void rememberedHighWorkPoseOwnerLeaseExpiresAcrossSuccessfulReplans(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseLeaseGT");
@@ -1356,8 +1338,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreHighPoseCapacityStrict", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rememberedHighWorkPoseCapacityEvictsDeterministicFarthestUnpinnedOwner(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseCapacityGT");
@@ -1430,8 +1411,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreQueuedHighCatchStrict", tickLimit = 1000)
+    @GameTest(maxTicks = 1000)
     public void queuedHighOreWithoutWorkPoseStaysIntactAndSearchContinues(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreQueuedHighReachGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1516,8 +1496,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreQueuedBeyondReachStrict", tickLimit = 1200)
+    @GameTest(maxTicks = 1200)
     public void queuedOreBeyondVanillaReachIsReleasedWithoutCursorLivelock(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreQueuedBeyondReachGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1581,9 +1560,9 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticksAfterLower.incrementAndGet() > 40) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "queued ore beyond reach retained the vein head for over 40 ticks: "
-                                + live + " bot=" + now.toShortString());
+                                + live + " bot=" + now.toShortString()));
             }
         });
     }
@@ -1592,8 +1571,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         return Math.max(Math.abs(from.getX() - to.getX()), Math.abs(from.getZ() - to.getZ()));
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupCornerStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void hiddenDiagonalDropUsesExactLRouteWithoutChangingCornerWalls(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupCornerGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1689,8 +1667,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupDiagonalStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void diagonalPhysicalPickupClearsDebtAndContinuesMining(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupDiagonalGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1759,8 +1736,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupStrict", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void consecutiveEyeHeightDiamondsWaitForEachPhysicalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupPairGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1843,8 +1819,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void footLevelDiamondDropIsRecoveredByWalkingIntoItsCell(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupFootGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1904,8 +1879,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupStrict", tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void pendingPickupCheckpointResumesBeforeAnyNewMining(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupRestartGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2020,8 +1994,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupFallbackStrict", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void unreachableVisibleLastSeenFallsBackToReachableBreakCell(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupFallbackGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2073,8 +2046,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void sameColumnDropBelowMinerUsesPhysicalDescent(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupBelowGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2124,8 +2096,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void elevatedDropUsesLowerAdjacentStandWithoutPillar(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupElevatedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2181,8 +2152,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "orePickupStrict", tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void airborneDropWaitsForLandingAndUsesNaturalRouteWithoutPillar(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupAirborneGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2269,8 +2239,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void rareTorchEpochStopsAtFortyBeforeExtendingDarkBranch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchEpochLimitGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2303,8 +2272,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void rareDarkBranchWithoutTorchFailsWithItsExactEpoch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchStockEmptyGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2329,8 +2297,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void legacyOpenCheckpointWithoutDeliveredLedgerFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchSchemaMigrationGT");
         Map<String, String> legacyRunning = new LinkedHashMap<>(
@@ -2388,8 +2355,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void rememberedHighWorkPoseCheckpointRejectsForgedEntries(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRememberedPoseCodecGT");
         BlockPos face = fixture.start();
@@ -2443,8 +2409,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void longRareTailRetainsMissionIdentityAcrossRestartAndServiceDebits(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreLongRareTailCheckpointGT");
@@ -2577,8 +2542,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void rareFullInventoryFailsWithoutCreatingOpenRearDrops(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreInventoryServiceRequiredGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2619,8 +2583,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void ordinaryFullInventoryFailsWithoutMutatingInventoryOrCreatingDrops(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrdinaryInventoryServiceRequiredGT");
@@ -2661,8 +2624,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void malformedCheckpointFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreMalformedCheckpointGT");
         Map<String, String> malformed = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
@@ -2690,8 +2652,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void restartCannotResetHardBudget(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHardBudgetGT");
         Map<String, String> exhausted = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
@@ -2715,8 +2676,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void restartCannotResetNoProgressBudget(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreNoProgressBudgetGT");
         Map<String, String> stalled = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
@@ -2736,8 +2696,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 280)
+    @GameTest(maxTicks = 280)
     public void partialDeliveryRebasesOnlyTheTransientStallWindow(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePartialRetryBudgetGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2769,7 +2728,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
             OreDigTask task = active.get();
             if (!restored.get()) {
                 if (task.state() == TaskState.CANCELLED) {
-                    context.throwGameTestException("partial delivery task was cancelled");
+                    context.throwGameTestException(Text.of("partial delivery task was cancelled"));
                 }
                 if (task.state() != TaskState.FAILED) {
                     return;
@@ -2810,13 +2769,12 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                         "retry received a fresh hard-timeout budget: ticks=" + ticks);
                 finish(context, fixture);
             } else if (task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("restored partial delivery task was cancelled");
+                context.throwGameTestException(Text.of("restored partial delivery task was cancelled"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 280)
+    @GameTest(maxTicks = 280)
     public void rarePartialDeliveryRestartOnlyMinesTheLogicalBatchRemainder(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRarePartialDeliveredGT");
@@ -2840,7 +2798,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
             OreDigTask task = active.get();
             if (!restarted.get()) {
                 if (task.state() == TaskState.CANCELLED) {
-                    context.throwGameTestException("partial rare batch was cancelled");
+                    context.throwGameTestException(Text.of("partial rare batch was cancelled"));
                 }
                 if (task.state() != TaskState.FAILED) {
                     return;
@@ -2886,14 +2844,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 finish(context, fixture);
             } else if (task.state() == TaskState.FAILED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("rare remainder replay ended unexpectedly: "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("rare remainder replay ended unexpectedly: "
+                        + task.state() + ":" + task.failureReason()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void restartAtFullyDeliveredOpenBatchSettlesDebtWithoutBreakingAnotherOre(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRareDeliveredGraceGT");
@@ -2930,8 +2887,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void completedBatchPublishesZeroBudgetSuccessor(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCommittedBudgetGT");
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1);
@@ -2954,8 +2910,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void higherTierNonTargetOreClosesBlindBranchWithoutBreakingIt(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierObstacleGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2973,7 +2928,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 openCheckpoint(fixture.start(), 1, Set.of(Blocks.IRON_ORE)));
         checkpoint.put("direction", "0");
         checkpoint.put("steps_left", "48");
-        int stoneDamageBefore = bot.getInventory().main.stream()
+        int stoneDamageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -2990,7 +2945,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                         && "1".equals(task.checkpoint().get("direction")),
                 "higher-tier boundary did not preserve the unfinished leg through fresh east "
                         + "territory: " + task.checkpoint());
-        int stoneDamageAfter = bot.getInventory().main.stream()
+        int stoneDamageAfter = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -3000,8 +2955,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void progressedHigherTierBoundaryPublishesSuccessorAndSurvivesRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierProgressedGT");
@@ -3045,7 +2999,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
                         bot, progressed, "ore_tier_progressed_fixture"),
                 "fixture could not publish its factual EAST advance");
-        int damageBefore = bot.getInventory().main.stream()
+        int damageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -3066,7 +3020,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 "progressed tool boundary did not atomically publish its successor: " + closed);
         require(context, world.getBlockState(gold).isOf(Blocks.GOLD_ORE),
                 "successor publication modified the finite gold obstruction");
-        int damageAfterClose = bot.getInventory().main.stream()
+        int damageAfterClose = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -3099,7 +3053,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
             if (world.getBlockState(successorWork).isAir()
                     && world.getBlockState(successorWork.up()).isAir()) {
                 Map<String, String> live = restored.checkpoint();
-                int damageAfterWork = bot.getInventory().main.stream()
+                int damageAfterWork = bot.getInventory().getMainStacks().stream()
                         .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                         .mapToInt(ItemStack::getDamage)
                         .sum();
@@ -3115,15 +3069,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 180) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "tool-boundary successor never reached physical SOUTH work: "
-                                + restored.checkpoint());
+                                + restored.checkpoint()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void zeroMovementHigherTierBoundaryStillFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierZeroRearGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3142,7 +3095,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 openCheckpoint(start, 1, Set.of(Blocks.IRON_ORE)));
         checkpoint.put("direction", "0");
         checkpoint.put("steps_left", "48");
-        int damageBefore = bot.getInventory().main.stream()
+        int damageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -3151,7 +3104,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         task.start(bot);
         task.tick(bot);
         Map<String, String> failed = task.checkpoint();
-        int damageAfter = bot.getInventory().main.stream()
+        int damageAfter = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -3168,8 +3121,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void stripPhysicallyRetreatsWhenGravityReoccupiesItsHead(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravelGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3219,8 +3171,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void blockedBodyRetreatImmediatelyPublishesMarkerFreeRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRetreatCheckpointGT");
@@ -3274,8 +3225,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void collapsedLateralDetourTriesRemainingFreshSideWithoutClosingLeg(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDetourCollapseGT");
@@ -3354,8 +3304,8 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 // factual cell may have cleared the marker but not yet debited directional progress.
                 if ("39".equals(live.get("steps_left"))) {
                     if (ticks.incrementAndGet() > 300) {
-                        context.throwGameTestException(
-                                "factual south move never consumed its finite cursor: " + live);
+                        context.throwGameTestException(Text.of(
+                                "factual south move never consumed its finite cursor: " + live));
                     }
                     return;
                 }
@@ -3373,14 +3323,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 300) {
-                context.throwGameTestException(
-                        "restored south detour never published factual movement: " + live);
+                context.throwGameTestException(Text.of(
+                        "restored south detour never published factual movement: " + live));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void pendingPickupGravityRetreatDoesNotBecomeBlindBranchTerminal(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupGravityOwnerGT");
@@ -3443,8 +3392,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void stairDescentImmediatelyPublishesMarkerFreeRestartWithoutReverse(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDescentCheckpointGT");
@@ -3521,8 +3469,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void stairDescentSkipsUnsupportedPreferredDirection(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreSupportedDescentGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3579,8 +3526,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreTargetObservedLowerStepStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void targetApproachUsesOnlyObservedSupportedOneBlockLowerStep(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetLowerStepGT");
@@ -3635,8 +3581,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreTargetObservedLowerStepHazardStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void targetLowerStepRejectsObservedFluidNeighbourInStrictMode(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetLowerHazardGT");
@@ -3689,8 +3634,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreTargetHiddenLowerStepHazardStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void lowerStepFluidGateRejectsUnobservableNeighbourInStrictMode(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetHiddenLowerHazardGT");
@@ -3710,8 +3654,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreTargetProjectionRebaseStrict", tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void targetApproachMovementDoesNotSpendBlindBranchProjection(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetProjectionGT");
@@ -3766,15 +3709,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 220) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "target projection never reached its bounded reroute: "
-                                + live + " pos=" + bot.getBlockPos().toShortString());
+                                + live + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreRichPathCursorOwnerStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void alignedRichZonePathDoesNotSpendBlindCursor(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRichCursorOwnerGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3835,15 +3777,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 440) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "rich-zone path never exposed its aligned first step: "
-                                + live + " pos=" + bot.getBlockPos().toShortString());
+                                + live + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBlindPendingOwnerStrict", tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void realBlindWalkerConsumesExactlyOneCursorStep(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBlindPendingOwnerGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3911,15 +3852,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 120) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "real blind walker never committed its first owned step: "
-                                + live + " pos=" + bot.getBlockPos().toShortString());
+                                + live + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchRaisedLandingStrict", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void freshStripUsesUpperEscapeBeforeMiningUnsupportedLateralSupport(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRaisedLandingGT");
@@ -3952,7 +3892,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                         && ObservableWorldQuery.canObserveCell(bot, raised.up())
                         && ObservableWorldQuery.canObserveCell(bot, start.up(2)),
                 "raised escape fixture did not expose its complete support/body/sweep envelope");
-        int ironDamageBefore = bot.getInventory().main.stream()
+        int ironDamageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.IRON_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -3976,7 +3916,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
             require(context, world.getBlockState(support).isOf(Blocks.STONE)
                             && world.getBlockState(support.down()).isAir(),
                     "open-drop recovery mined or manufactured the raised landing support");
-            int liveDamage = bot.getInventory().main.stream()
+            int liveDamage = bot.getInventory().getMainStacks().stream()
                     .filter(stack -> stack.isOf(Items.IRON_PICKAXE))
                     .mapToInt(ItemStack::getDamage)
                     .sum();
@@ -3984,9 +3924,9 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                     "raised landing recovery consumed pick durability");
             if (!bot.getBlockPos().equals(raised)) {
                 if (boundaryTicks.incrementAndGet() > 20) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "fresh strip never revisited its observed open-drop boundary: "
-                                    + task.checkpoint());
+                                    + task.checkpoint()));
                 }
                 return;
             }
@@ -4039,8 +3979,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void blindStripPersistsFreshLateralDetourAcrossCheckpoint(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravityGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4121,14 +4060,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 300) {
-                context.throwGameTestException(
-                        "restored detour did not physically open fresh east territory");
+                context.throwGameTestException(Text.of(
+                        "restored detour did not physically open fresh east territory"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryTrappedStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void blindStripFailsFiniteWhenOnlyOldCorridorsRemain(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripBoundaryTrappedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4158,8 +4096,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchGravityProgressStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void progressedStripClosesVisibleGravityLegAndRestartsSuccessor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravityProgressGT");
@@ -4234,9 +4171,9 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                         || !"1".equals(live.get("direction"))
                         || !"1".equals(live.get("leg"))) {
                     if (callback > 150) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "progressed branch never closed at its visible gravity boundary: "
-                                        + live + " pos=" + bot.getBlockPos().toShortString());
+                                        + live + " pos=" + bot.getBlockPos().toShortString()));
                     }
                     return;
                 }
@@ -4295,9 +4232,9 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                     || !encode(freshEastFace).equals(live.get("face"))
                     || Integer.parseInt(live.get("steps_left")) > 46) {
                 if (callback > 450) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "gravity successor never opened and entered fresh east work: "
-                                    + live + " pos=" + bot.getBlockPos().toShortString());
+                                    + live + " pos=" + bot.getBlockPos().toShortString()));
                 }
                 return;
             }
@@ -4311,8 +4248,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchGravitySuccessorStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void gravityClosedLegRetainsRearAcrossImmediateGravitySuccessorAndRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravitySuccessorGT");
@@ -4432,15 +4368,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
             }
 
             if (callback > 450) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "successive gravity recovery never completed its bounded rear escape: "
-                                + live + " pos=" + bot.getBlockPos().toShortString());
+                                + live + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryDelayedRearStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void minedOpenDropBodyRetainsFactualRearAcrossTicksAndRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripDelayedRearGT");
@@ -4492,7 +4427,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         AtomicInteger lastBudget = new AtomicInteger();
         int healthBefore = Math.round(bot.getHealth());
         int deathBaseline = deathCount(bot);
-        int stonePickDamageBefore = bot.getInventory().main.stream()
+        int stonePickDamageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -4570,9 +4505,9 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                     || !"3".equals(live.get("direction"))
                     || !"4".equals(live.get("leg"))) {
                 if (callback > 450) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "delayed open-drop branch never completed its rear retreat: "
-                                    + live + " pos=" + bot.getBlockPos().toShortString());
+                                    + live + " pos=" + bot.getBlockPos().toShortString()));
                 }
                 return;
             }
@@ -4595,7 +4530,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                             && world.getBlockState(westSupport.down()).isAir()
                             && world.getBlockState(eastSupport.down()).isAir(),
                     "rear retreat entered or modified a protected boundary candidate");
-            int stonePickDamageAfter = bot.getInventory().main.stream()
+            int stonePickDamageAfter = bot.getInventory().getMainStacks().stream()
                     .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                     .mapToInt(ItemStack::getDamage)
                     .sum();
@@ -4631,8 +4566,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryRearRetreatStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void progressedOpenDropLipRetreatsOneFactualStepAndRestartsSuccessor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripRearRetreatGT");
@@ -4723,15 +4657,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 300) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "open-drop branch never completed its factual rear retreat: "
-                                + task.checkpoint() + " pos=" + bot.getBlockPos().toShortString());
+                                + task.checkpoint() + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryRearRetreatStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void rearRetreatKeepsTurnMarkerForImmediateSuccessorDrop(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRetreatSuccessorDropGT");
@@ -4772,7 +4705,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
                         bot, lip, "ore_retreat_successor_drop_fixture"),
                 "fixture could not complete its factual SOUTH advance");
-        int stoneDamageBefore = bot.getInventory().main.stream()
+        int stoneDamageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -4841,7 +4774,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
             }
             if (stage.get() == 2 && world.getBlockState(freshEast).isAir()
                     && world.getBlockState(freshEast.up()).isAir()) {
-                int damageAfter = bot.getInventory().main.stream()
+                int damageAfter = bot.getInventory().getMainStacks().stream()
                         .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                         .mapToInt(ItemStack::getDamage)
                         .sum();
@@ -4858,14 +4791,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 300) {
-                context.throwGameTestException(
-                        "rear retreat never recovered the immediate successor drop: " + live);
+                context.throwGameTestException(Text.of(
+                        "rear retreat never recovered the immediate successor drop: " + live));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryUnsafeRearStrict", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void progressedOpenDropWithUnsafeRearFailsWithoutMovingOrResettingBudget(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripUnsafeRearGT");
@@ -4963,15 +4895,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                     "unsafe rear ended with the wrong terminal state: "
                             + restored.state());
             if (ticks.incrementAndGet() > 40) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "unsafe rear did not fail within its bounded scan window: "
-                                + restored.checkpoint());
+                                + restored.checkpoint()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchScanDelayRestartStrict", tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void scanDelayCheckpointRestoresSafeRearBeforeReplayingBranch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripDelayRestartGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5035,15 +4966,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 180) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "scan-delay restart never returned to its safe factual rear: "
-                                + live + " pos=" + bot.getBlockPos().toShortString());
+                                + live + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchPauseResumeStrict", tickLimit = 260)
+    @GameTest(maxTicks = 260)
     public void survivalGuardPauseDisplacementRestoresUnpublishedRearAndCursor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripPauseResumeGT");
@@ -5126,15 +5056,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 220) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "resumed branch never restored its exact factual rear: checkpoint="
-                                + live + " pos=" + bot.getBlockPos().toShortString());
+                                + live + " pos=" + bot.getBlockPos().toShortString()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryCascadeStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void sameOriginWaterThenLavaTriesUnvisitedReverseAndSurvivesRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripBoundaryCascadeGT");
@@ -5223,15 +5152,14 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 300) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "cascade reroute selected north but never opened its safe exit: "
-                                + restored.checkpoint());
+                                + restored.checkpoint()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryBacktrackStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void sameOriginFluidCascadeBacktracksOneObservedStepAndRestarts(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripBoundaryBacktrackGT");
@@ -5372,14 +5300,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 300) {
-                context.throwGameTestException(
-                        "one-step rear escape never published its successor branch: " + live);
+                context.throwGameTestException(Text.of(
+                        "one-step rear escape never published its successor branch: " + live));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreHiddenLowerTransitionStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void hiddenLowerTransitionRemainsUnknownWhetherBlockedOrOpen(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHiddenTransitionGT");
@@ -5400,8 +5327,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchHiddenFluidParityStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void hiddenSideFluidAndHiddenStoneOpenTheSameSealedChannel(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHiddenFluidParityGT");
@@ -5458,8 +5384,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreRestartUnknownActiveTargetStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void restartKeepsUnknownActiveTargetWithoutInventingPickupDebt(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreUnknownActiveRestartGT");
@@ -5495,8 +5420,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreRestartHighActiveTargetStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void restartRejectsIntactHighActiveBreakButPreservesGoneBreakDebt(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighActiveRestartGT");
@@ -5541,8 +5465,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchVisibleFluidSealStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void blindBranchSealsVisibleSideFluidAndKeepsItsExactCursor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripVisibleFluidSealGT");
@@ -5632,14 +5555,13 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 return;
             }
             if (ticks.incrementAndGet() > 400) {
-                context.throwGameTestException(
-                        "sealed branch never advanced from its exact cursor: " + live);
+                context.throwGameTestException(Text.of(
+                        "sealed branch never advanced from its exact cursor: " + live));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchHeadFluidRestartStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void blindBranchSealsOneHeadSideFluidPerTickAcrossRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripHeadFluidRestartGT");
@@ -5706,8 +5628,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchHeadFluidReserveStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void headSideFluidCannotConsumeExactProtectedReserve(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripHeadFluidReserveGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5754,8 +5675,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchDirectHeadWaterRerouteStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void blindBranchDoesNotSealOrMineItsDirectHeadWater(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripDirectHeadWaterGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5788,8 +5708,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreBranchBoundaryAllDangerStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void allObservedDangerousBranchesFailTypedAndRestartWithoutBudgetReset(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripAllDangerGT");
@@ -5869,8 +5788,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void supportOreRejectsElevatedRelocationOutsideBreakEnvelope(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreSupportElevatedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5915,8 +5833,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void channelToolFailureReportsTheBlockedOreTier(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreChannelTierGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5941,8 +5858,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void channelToolExhaustionFailsBeforeBlacklistingOrIronUse(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreChannelToolGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5951,7 +5867,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         Map<String, String> checkpoint = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
         checkpoint.put("direction", "0");
         checkpoint.put("steps_left", "48");
-        int ironDamageBefore = bot.getInventory().main.stream()
+        int ironDamageBefore = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.IRON_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -5966,7 +5882,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
                 "unexpected channel-tool failure: " + task.failureReason());
         require(context, bot.getServerWorld().getBlockState(wall).isOf(Blocks.STONE),
                 "OreDig broke channel rock without a stone pick");
-        int ironDamageAfter = bot.getInventory().main.stream()
+        int ironDamageAfter = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.IRON_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -5975,8 +5891,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void nearbyRestartPositionCannotReplaceTheExactSavedFace(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreExactFaceRestoreGT");
         AIPlayerEntity bot = fixture.bot();
@@ -6001,8 +5916,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void distantCommittedCursorRebasesToTheCurrentPhysicalBranch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCommittedRebaseGT");
         AIPlayerEntity bot = fixture.bot();
@@ -6029,8 +5943,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void distantOpenCursorStillRetainsTheExactSavedFace(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreOpenFaceRestoreGT");
         AIPlayerEntity bot = fixture.bot();
@@ -6052,8 +5965,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "oreCheckpointStrict", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void stripLightingDoesNotConsumeToolServiceSticks(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchReserveGT");
         AIPlayerEntity bot = fixture.bot();
@@ -6140,8 +6052,8 @@ public final class OreDigPickupGameTests implements FabricGameTest {
 
     private static void failIfTerminalError(TestContext context, OreDigTask task) {
         if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-            context.throwGameTestException("OreDig pickup task ended as " + task.state()
-                    + ":" + task.failureReason() + " checkpoint=" + task.checkpoint());
+            context.throwGameTestException(Text.of("OreDig pickup task ended as " + task.state()
+                    + ":" + task.failureReason() + " checkpoint=" + task.checkpoint()));
         }
     }
 
@@ -6292,7 +6204,7 @@ public final class OreDigPickupGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

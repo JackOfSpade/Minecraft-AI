@@ -5,13 +5,12 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.FakePlayerMotion;
 import io.github.zoyluo.aibot.pathfinding.Standability;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -22,11 +21,11 @@ import java.util.Set;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Live proof that a clientless fake player leaves shallow water through adjacent physical motion. */
-public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 80)
+public final class SurfaceWaterRecoveryGameTests {
+    @GameTest(maxTicks = 80)
     public void proactiveRescueStepsOntoDryGround(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -32));
@@ -40,7 +39,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         }
         world.setBlockState(start, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
         if (Standability.isStandable(world, start)) {
-            context.throwGameTestException("water cell must not be an ordinary A* stand position");
+            context.throwGameTestException(Text.of("water cell must not be an ordinary A* stand position"));
         }
 
         String name = "SurfaceWaterRecoveryGT";
@@ -64,8 +63,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void connectedShoreBeatsAnUnneededVerticalAirStroke(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 8, -106));
@@ -114,8 +112,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void emergencyVerticalStepRequiresLowAir(TestContext context) {
         WaterShaftFixture fixture = sealedWaterShaftFixture(context, -126);
         AIPlayerEntity bot = fixture.bot();
@@ -140,8 +137,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void rescueRoutesAroundAWallEvenWhenTheFirstStepMovesAwayFromShore(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -38));
@@ -214,8 +210,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void descendSealsIngressAndHandsOffADryOreLayer(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -44));
@@ -252,15 +247,15 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         task.start(bot);
         task.tick(bot);
         if (task.state() != TaskState.RUNNING) {
-            context.throwGameTestException("Descend completed before sealing its wet target layer"
+            context.throwGameTestException(Text.of("Descend completed before sealing its wet target layer"
                     + " bot=" + bot.getBlockPos().toShortString()
                     + " expected=" + start.toShortString()
                     + " feet=" + world.getBlockState(bot.getBlockPos()).getBlock()
                     + " east=" + world.getBlockState(start.east()).getBlock()
-                    + " east_fluid=" + world.getFluidState(start.east()));
+                    + " east_fluid=" + world.getFluidState(start.east())));
         }
         if (!world.getBlockState(start.east()).isOf(Blocks.COBBLESTONE)) {
-            context.throwGameTestException("side ingress was not physically sealed");
+            context.throwGameTestException(Text.of("side ingress was not physically sealed"));
         }
 
         context.runAtEveryTick(() -> {
@@ -268,26 +263,25 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("water handoff ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("water handoff ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
             if (bot.isSubmergedInWater() || bot.isTouchingWater()) {
-                context.throwGameTestException("Descend completed on a wet ore-layer handoff");
+                context.throwGameTestException(Text.of("Descend completed on a wet ore-layer handoff"));
             }
             if (!Standability.isStandable(world, bot.getBlockPos())) {
-                context.throwGameTestException("Descend completed without dry footing at "
-                        + bot.getBlockPos().toShortString());
+                context.throwGameTestException(Text.of("Descend completed without dry footing at "
+                        + bot.getBlockPos().toShortString()));
             }
             AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
             context.complete();
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void descendDoesNotRetrySafetyRejectedLanding(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -56));
@@ -354,8 +348,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void descendRelocatesFromAShorelineDeadStarBeforeMutating(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -50));
@@ -446,8 +439,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void descendFreshEntryRelocationCannotCutADiagonalCorner(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -62));
@@ -504,8 +496,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void descendNeverMinesTheWaterSealItJustPlaced(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -68));
@@ -566,8 +557,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void descendHorizontalFallbackNeverMinesItsOwnedWaterSeal(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -76));
@@ -629,8 +619,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void digDownPreservesItsWaterSealAndProtectedWorkstation(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -80));
@@ -690,8 +679,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceWaterRecoveryLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void horizontalFallbackNeverMinesTheOwnedWaterSeal(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -94));
@@ -804,7 +792,7 @@ public final class SurfaceWaterRecoveryGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

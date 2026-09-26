@@ -7,13 +7,12 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.BlockPos;
@@ -22,11 +21,12 @@ import net.minecraft.world.GameMode;
 
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.text.Text;
+import net.minecraft.entity.EquipmentSlot;
 
 /** Reproduces the unsupported first-air furnace placement seen after DigDown returns to the surface. */
-public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "smeltFurnacePlacementLive", tickLimit = 800)
+public final class SmeltFurnacePlacementGameTests {
+    @GameTest(maxTicks = 800)
     public void unsupportedAirRetryCannotReplaceActiveClearingPickaxe(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -48));
@@ -71,17 +71,17 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
         InventoryAction.giveItem(bot, new ItemStack(Items.RAW_IRON));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            if (bot.getInventory().main.get(slot).isEmpty()) {
-                bot.getInventory().main.set(slot, new ItemStack(Items.NETHERRACK));
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            if (bot.getInventory().getMainStacks().get(slot).isEmpty()) {
+                bot.getInventory().getMainStacks().set(slot, new ItemStack(Items.NETHERRACK));
             }
         }
-        bot.getInventory().offHand.set(0, new ItemStack(Items.FURNACE));
+        bot.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.FURNACE));
         bot.getInventory().markDirty();
-        require(context, bot.getInventory().main.stream().noneMatch(stack -> stack.isOf(Items.FURNACE))
+        require(context, bot.getInventory().getMainStacks().stream().noneMatch(stack -> stack.isOf(Items.FURNACE))
                         && bot.getOffHandStack().isOf(Items.FURNACE)
                         && InventoryAction.findItem(bot, Items.STONE_PICKAXE).orElse(-1) > 8
-                        && bot.getInventory().main.stream().noneMatch(ItemStack::isEmpty),
+                        && bot.getInventory().getMainStacks().stream().noneMatch(ItemStack::isEmpty),
                 "fixture did not start full-main with offhand furnace and carried pickaxe");
 
         SmeltTask task = new SmeltTask(Items.RAW_IRON, Items.IRON_INGOT, 1);
@@ -93,18 +93,18 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
                     && !bot.getActionPack().isMiningIdle()) {
                 if (!furnaceRehomedDuringClear[0]) {
                     int furnaceMainSlot = -1;
-                    for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-                        if (bot.getInventory().main.get(slot).isOf(Items.FURNACE)) {
+                    for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+                        if (bot.getInventory().getMainStacks().get(slot).isOf(Items.FURNACE)) {
                             furnaceMainSlot = slot;
                             break;
                         }
                     }
                     require(context, furnaceMainSlot >= 0,
                             "portable furnace was unavailable when active clearing began");
-                    ItemStack furnace = bot.getInventory().main.get(furnaceMainSlot);
+                    ItemStack furnace = bot.getInventory().getMainStacks().get(furnaceMainSlot);
                     ItemStack displaced = bot.getOffHandStack();
-                    bot.getInventory().main.set(furnaceMainSlot, displaced);
-                    bot.getInventory().offHand.set(0, furnace);
+                    bot.getInventory().getMainStacks().set(furnaceMainSlot, displaced);
+                    bot.equipStack(EquipmentSlot.OFFHAND, furnace);
                     bot.getInventory().markDirty();
                     furnaceRehomedDuringClear[0] = true;
                 }
@@ -115,8 +115,8 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
                         "active-clear offhand handoff lost or duplicated the furnace");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("enclosed-furnace smelt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("enclosed-furnace smelt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -128,7 +128,7 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
             require(context, furnaceRehomedDuringClear[0],
                     "fixture never reached the active-clear offhand furnace boundary");
             int pickaxeDamage = java.util.stream.Stream.concat(
-                            bot.getInventory().main.stream(), bot.getInventory().offHand.stream())
+                            bot.getInventory().getMainStacks().stream(), java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                     .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                     .mapToInt(ItemStack::getDamage)
                     .sum();
@@ -143,8 +143,7 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "smeltFurnacePlacementLive", tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void skipsUnsupportedStairMouthAndCooksOnSupportedSide(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -48));
@@ -180,8 +179,8 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_smelt_furnace_placement"));
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("stair-mouth smelt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("stair-mouth smelt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -197,8 +196,7 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "smeltFurnacePlacementLive", tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void craftsLocalFurnaceInsteadOfChasingFarRememberedSurfaceFurnace(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 4, 8));
@@ -232,13 +230,13 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
         InventoryAction.giveItem(bot, new ItemStack(Items.RAW_IRON));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            if (bot.getInventory().main.get(slot).isEmpty()) {
-                bot.getInventory().main.set(slot, new ItemStack(Items.NETHERRACK, 64));
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            if (bot.getInventory().getMainStacks().get(slot).isEmpty()) {
+                bot.getInventory().getMainStacks().set(slot, new ItemStack(Items.NETHERRACK, 64));
             }
         }
         bot.getInventory().markDirty();
-        require(context, bot.getInventory().main.stream().noneMatch(ItemStack::isEmpty),
+        require(context, bot.getInventory().getMainStacks().stream().noneMatch(ItemStack::isEmpty),
                 "fixture did not start with a full main inventory");
 
         SmeltTask task = new SmeltTask(Items.RAW_IRON, Items.IRON_INGOT, 1);
@@ -252,8 +250,8 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
                 observedPhysicalDisposal.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("local-furnace smelt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("local-furnace smelt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -277,8 +275,7 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "smeltFurnacePlacementLive", tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void craftsLocalFurnaceWhenRememberedSurfaceFurnaceIsBeyondLookupRadius(
             TestContext context) {
         var world = context.getWorld();
@@ -327,8 +324,8 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
             require(context, surfaceCraftMaterialCount(bot) == 0,
                     "local furnace repair acquired a log/plank underground");
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("beyond-memory smelt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("beyond-memory smelt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -364,7 +361,7 @@ public final class SmeltFurnacePlacementGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

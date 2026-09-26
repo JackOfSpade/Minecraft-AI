@@ -7,7 +7,6 @@ import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -17,7 +16,7 @@ import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.HuskEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -27,13 +26,13 @@ import net.minecraft.world.GameMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /**
  * Live regressions for emergency-only wood material and safety-task replacement boundaries.
  */
-public final class EmergencyShelterMaterialSchedulingGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 500)
+public final class EmergencyShelterMaterialSchedulingGameTests {
+    @GameTest(maxTicks = 500)
     public void mixedWoodFallbackBuildsHoldsAndPhysicallyExitsWithDirtFirst(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -54,8 +53,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
         context.runAtEveryTick(() -> {
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("mixed-wood shelter ended as "
-                        + task.state() + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("mixed-wood shelter ended as "
+                        + task.state() + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             if (holdStartedElapsed[0] < 0 && task.describe().contains("phase=HOLD")) {
@@ -82,8 +81,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void emergencyWoodNeverAuthorizesPermanentMiningBarricade(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -115,8 +113,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
         finish(context, bot, "BarricadeWoodGuardGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void oneBlockCannotDispatchDoomedShelterOrGrowPauseStack(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 180, 4));
         prepareEscapeCorridor(context, feet);
@@ -165,8 +162,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
         finish(context, bot, "ShelterOneBlockGateGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void emergencyShelterSupersedesSafetyEvadeWithoutNestingPauseFrame(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 220, 4));
@@ -226,8 +222,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
         finish(context, bot, "ShelterSafetySwapGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void genericThreatSupersedesNonDefenseSafetyWithoutNestingMission(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 240, 4));
@@ -274,8 +269,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
         finish(context, bot, "ThreatSafetySwapGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void trappedFightBackReplacesNonDefenseSafetyWithoutNestingMission(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 260, 4));
@@ -352,15 +346,14 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
             require(context, TaskManager.INSTANCE.pausedDepth(bot) == 1,
                     "waiting for trapped_fight_back grew the mission pause stack");
             if (context.getTick() - holderAssignedTick[0] > 120) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "trapped_fight_back never replaced non-defense SAFETY: active="
-                                + (active == null ? "idle" : active.name()));
+                                + (active == null ? "idle" : active.name())));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterMaterialScheduling", tickLimit = 260)
+    @GameTest(maxTicks = 260)
     public void criticalCreeperWithoutRouteOrMaterialsRetainsOneSafetyOwner(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 280, 4));
@@ -603,7 +596,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests implements Fabric
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

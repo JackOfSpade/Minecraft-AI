@@ -7,14 +7,13 @@ import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.CapabilityRuntime;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.state.property.Properties;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -28,11 +27,11 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Live proof that surface water is reached physically, filled through vanilla, and restartable. */
-public final class AcquireWaterTaskGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAcquisitionLive", tickLimit = 600)
+public final class AcquireWaterTaskGameTests {
+    @GameTest(maxTicks = 600)
     public void visibleWaterBeyondInitialViewSurvivesCheckpointRestart(TestContext context) {
         WaterFixture fixture = spawnWaterSeeker(context, "WaterAcquireGT");
         AIPlayerEntity bot = fixture.bot();
@@ -69,8 +68,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("water task failed: " + task.failureReason()
-                        + " checkpoint=" + checkpoint);
+                context.throwGameTestException(Text.of("water task failed: " + task.failureReason()
+                        + " checkpoint=" + checkpoint));
                 return;
             }
             if (task.state() == TaskState.COMPLETED) {
@@ -89,8 +88,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterApproachExactStandStrict", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void approachDescendsToExactReachableStandBeforeFilling(TestContext context) {
         var world = context.getWorld();
         BlockPos stand = context.getAbsolutePos(new BlockPos(8, 6, 8));
@@ -205,8 +203,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
             task.tick(bot);
             previous.set(bot.getBlockPos().toImmutable());
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("exact-stand water approach failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("exact-stand water approach failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -227,8 +225,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentOpenCaveLive", tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void openCaveAscentPlacesOneVisibleSupportAndSurvivesRestart(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -310,8 +307,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                 return;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("open-cave water return failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("open-cave water return failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -333,8 +330,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentOpenCaveLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void multiLevelOpenCaveBuildsVanillaFoundationBridge(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 26));
@@ -372,8 +368,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.runAtEveryTick(() -> {
             task.tick(bot);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("multi-level open-cave ascent failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("multi-level open-cave ascent failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (bot.getBlockPos().getY() < surfaceAnchor.getY()) {
@@ -399,8 +395,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentShallowFluidLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void shallowWaterAtFeetHandsReturnToPhysicalRescueBeforeAscentInspection(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -440,7 +435,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                 "fixture did not isolate feet-only water contact");
         require(context, NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                 "feet-only water did not hand movement to the physical rescue controller");
-        require(context, bot.getInventory().main.stream()
+        require(context, bot.getInventory().getMainStacks().stream()
                         .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                         .allMatch(stack -> stack.getDamage() == 0),
                 "ascent mined a hidden direction before handing off shallow water");
@@ -450,8 +445,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterReturnVisibleAquiferStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void dryReturnCollectsVisibleReachablePlainWaterWithoutMintingSurfaceProof(
             TestContext context) {
         var world = context.getWorld();
@@ -507,8 +501,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterReturnHiddenAquiferStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void returnDoesNotReadOrCollectAnOccludedPlainWaterSource(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -556,8 +549,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentFluidRelocationLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void visibleFluidCeilingForcesSameLevelRelocationBeforeAscent(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 34));
@@ -663,14 +655,14 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                             "relocation did not immediately use the natural side riser: "
                                     + before + " -> " + now);
                 } else {
-                    context.throwGameTestException(
-                            "fluid recovery made an unexpected extra movement: " + before + " -> " + now);
+                    context.throwGameTestException(Text.of(
+                            "fluid recovery made an unexpected extra movement: " + before + " -> " + now));
                 }
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("fluid-ceiling recovery failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("fluid-ceiling recovery failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (now.getY() <= start.getY()) {
@@ -692,8 +684,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentCarvedRelocationStrict", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void sharedFluidArcCarvesDrySameLevelPocketBeforeAscent(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(42, 4, 42));
@@ -825,15 +816,15 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                             "carved pocket did not continue through the supported riser: "
                                     + before + " -> " + now);
                 } else {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "carved relocation made an unexpected extra movement: "
-                                    + before + " -> " + now);
+                                    + before + " -> " + now));
                 }
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("carved fluid relocation failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("carved fluid relocation failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (!now.equals(surfaceAnchor)) {
@@ -849,8 +840,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentPauseRelocationStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void reachedFluidRelocationSurvivesPauseAndSafetyDisplacement(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -1007,14 +997,13 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
 
             task.tick(bot);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("pause relocation recovery failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("pause relocation recovery failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentPauseSettlementStrict", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void reachedRelocationPauseWithoutDisplacementSettlesBeforeResume(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -1091,14 +1080,13 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
             previous.set(now.toImmutable());
             task.tick(bot);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("undisplaced pause settlement failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("undisplaced pause settlement failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchPauseCooldownStrict", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void displacedSearchRetriesOnItsFirstResumeTick(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSearchPauseCooldownGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -1142,8 +1130,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterReturnTeardownStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void surfaceTransitionCancelsPausedAscentCraftAndMotion(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -1211,8 +1198,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAcquisitionLive", tickLimit = 1400)
+    @GameTest(maxTicks = 1400)
     public void deepMineCarvesRestartableStairBackToSurfaceWater(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(32, 4, 32));
@@ -1282,8 +1268,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                 return;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("deep water return failed: " + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("deep water return failed: " + task.failureReason()
+                        + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -1307,8 +1293,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentToolCraftLive", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void deepMineLocallyCraftsAStonePickWhenAscentToolsAreExhausted(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(32, 4, 20));
@@ -1365,12 +1350,12 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                         "ascent pick was not paid for with three cobblestone and two sticks");
             }
             if (!crafted.get() && task.elapsedTicks() > 20) {
-                context.throwGameTestException(
-                        "ascent did not replenish exhausted picks before mining the copper obstruction");
+                context.throwGameTestException(Text.of(
+                        "ascent did not replenish exhausted picks before mining the copper obstruction"));
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("tool-depleted water return failed: "
-                        + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("tool-depleted water return failed: "
+                        + task.failureReason() + " checkpoint=" + task.checkpoint()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1385,8 +1370,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAscentToolMissingLive", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void deepMineFailsFastWithoutStonePickMaterialsAndPreservesIron(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(48, 4, 20));
@@ -1431,13 +1415,13 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.runAtEveryTick(() -> {
             task.tick(bot);
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("missing-material ascent did not fail: " + task.state());
+                context.throwGameTestException(Text.of("missing-material ascent did not fail: " + task.state()));
                 return;
             }
             if (task.state() != TaskState.FAILED) {
                 if (task.elapsedTicks() > 20) {
-                    context.throwGameTestException(
-                            "missing-material ascent did not return a typed failure within 20 ticks");
+                    context.throwGameTestException(Text.of(
+                            "missing-material ascent did not return a typed failure within 20 ticks"));
                 }
                 return;
             }
@@ -1457,8 +1441,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterAcquisitionLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void skyVisibleExitStartsSearchWithoutReenteringTheMinedStair(TestContext context) {
         var world = context.getWorld();
         BlockPos exit = context.getAbsolutePos(new BlockPos(32, 10, 32));
@@ -1540,8 +1523,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                 return;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("surface-exit latch failed: " + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("surface-exit latch failed: " + task.failureReason()
+                        + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -1560,8 +1543,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterOverhangExitStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void dryOverhangFootingUsesItsObservableSkyEdgeAsSurfaceExit(TestContext context) {
         var world = context.getWorld();
         // Keep every mutated cell inside the tiny EMPTY_STRUCTURE footprint. A far local offset
@@ -1630,8 +1612,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchLivenessLive", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void oscillationCannotResetWaypointBudgetAcrossRestart(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterOscillationBudgetGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -1672,14 +1653,14 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("oscillation budget ended unexpectedly: "
-                        + task.state() + ":" + task.failureReason() + " checkpoint=" + checkpoint);
+                context.throwGameTestException(Text.of("oscillation budget ended unexpectedly: "
+                        + task.state() + ":" + task.failureReason() + " checkpoint=" + checkpoint));
                 return;
             }
             if (encode(waypoint).equals(checkpoint.get("waypoint"))) {
                 if (Integer.parseInt(checkpoint.get("budget_used")) > 400) {
-                    context.throwGameTestException(
-                            "oscillation extended the waypoint beyond its absolute budget: " + checkpoint);
+                    context.throwGameTestException(Text.of(
+                            "oscillation extended the waypoint beyond its absolute budget: " + checkpoint));
                 }
                 return;
             }
@@ -1693,8 +1674,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchExpansionLive", tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void searchContinuesPastHundredAndPhysicallyFillsAfterRestart(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(36, 4, 36));
@@ -1787,8 +1767,8 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                 return;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("expanded water search failed: "
-                        + task.failureReason() + " checkpoint=" + checkpoint);
+                context.throwGameTestException(Text.of("expanded water search failed: "
+                        + task.failureReason() + " checkpoint=" + checkpoint));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -1809,8 +1789,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchExpansionLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void legacyHundredTerminalStaysTerminalAcrossSchemaFourRestore(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterLegacyHundredGT", false);
         Map<String, String> legacy = new LinkedHashMap<>(searchCheckpoint(
@@ -1849,8 +1828,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchExpansionLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void currentCursorEndsAfterCompleteSeventhRing(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSeventhRingGT", false);
         // Cursor 223 is grid=(6,-7). Rebase it onto the physical dry fixture so issuing point 224
@@ -1894,8 +1872,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchLivenessLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void restoredHardBudgetRemainsTypedAndDecoderValid(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterHardBudgetGT", false);
         BlockPos waypoint = fixture.start().east(12);
@@ -1977,8 +1954,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchLivenessLive", tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void sealedSurfaceFailsTypedWithoutBurningCursor(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSealedRouteGT", true);
         BlockPos firstWaypoint = fixture.start().east(12);
@@ -2009,7 +1985,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
                 return;
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("sealed route ended unexpectedly: " + task.state());
+                context.throwGameTestException(Text.of("sealed route ended unexpectedly: " + task.state()));
                 return;
             }
             if (task.state() != TaskState.FAILED) {
@@ -2039,8 +2015,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "waterSearchLivenessLive", tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void blockedSurfaceSectorClearsOnlyLocalLedgerAcrossRestart(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -2153,9 +2128,9 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
             active.tick(bot);
             Map<String, String> checkpoint = active.checkpoint();
             if (active.state() == TaskState.FAILED || active.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("blocked sector ended the surface search: "
+                context.throwGameTestException(Text.of("blocked sector ended the surface search: "
                         + active.state() + ":" + active.failureReason()
-                        + " checkpoint=" + checkpoint);
+                        + " checkpoint=" + checkpoint));
                 return;
             }
             if (!"8".equals(checkpoint.get("issued"))
@@ -2193,7 +2168,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void deepSkyLitRavineDoesNotCountAsSurfaceExit(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 4, 8));
@@ -2228,7 +2203,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void nearAnchorSkyPocketWithoutLateralEgressKeepsAscending(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(20, 8, 20));
@@ -2271,7 +2246,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void malformedCheckpointFailsClosed(TestContext context) {
         WaterFixture fixture = spawnWaterSeeker(context, "WaterCheckpointGT");
         AcquireWaterTask task = new AcquireWaterTask(fixture.start(), Map.of(
@@ -2291,7 +2266,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void schemaThreeSearchWithoutSurfaceExitFailsClosed(TestContext context) {
         WaterFixture fixture = spawnWaterSeeker(context, "WaterFalseSurfaceLatchGT");
         Map<String, String> forged = new LinkedHashMap<>(searchCheckpoint(
@@ -2316,7 +2291,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void schemaTwoSearchWithoutSurfaceExitFailsClosed(TestContext context) {
         WaterFixture fixture = spawnWaterSeeker(context, "WaterLegacyFalseSurfaceLatchGT");
         Map<String, String> legacy = new LinkedHashMap<>(searchCheckpoint(
@@ -2345,7 +2320,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void checkpointCursorAndAuthorityForgeryFailsClosed(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterCursorForgeryGT", false);
         BlockPos anchor = fixture.start();
@@ -2399,7 +2374,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void legacyRunningAndSchemaTwoTerminalRetainOldAuthority(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterLegacyAuthorityGT", false);
         BlockPos anchor = fixture.start();
@@ -2692,7 +2667,7 @@ public final class AcquireWaterTaskGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

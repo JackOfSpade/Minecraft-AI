@@ -9,7 +9,6 @@ import io.github.zoyluo.aibot.pathfinding.Node;
 import io.github.zoyluo.aibot.pathfinding.PathExecutor;
 import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
 import io.github.zoyluo.aibot.pathfinding.Standability;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -18,7 +17,7 @@ import net.minecraft.entity.SpawnReason;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.stat.Stats;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -29,11 +28,11 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Strict-survival regression for a one-cell physical recovery from an invalid A* start. */
-public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "physicalCenterReturnLive", tickLimit = 20)
+public final class ActionPackPhysicalSnapGameTests {
+    @GameTest(maxTicks = 20)
     public void centerReturnClearsResidualWalkVelocityBeforeNextServerTick(
             TestContext context) {
         var world = context.getWorld();
@@ -75,7 +74,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void standableBodySnapPreservesSafeOffsetAndRecentersRealCornerOverlap(
             TestContext context) {
         var world = context.getWorld();
@@ -135,7 +134,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void centerReturnRejectsLivingEntityOccupyingLanding(TestContext context) {
         var world = context.getWorld();
         BlockPos anchor = context.getAbsolutePos(new BlockPos(12, 3, 12));
@@ -173,7 +172,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void consecutiveHorizontalJumpsPublishEachVerifiedLanding(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
@@ -222,7 +221,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void horizontalJumpRejectsLivingEntityOnLanding(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(9, 3, 3));
@@ -260,7 +259,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void sameLevelPickupPrefersExactDropCellOverCurrentNeighbour(TestContext context) {
         var world = context.getWorld();
         BlockPos current = context.getAbsolutePos(new BlockPos(4, 5, 4));
@@ -286,8 +285,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "physicalPickupSupportLive", tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void edgePerchedObservedDropUsesPhysicalSupportInsteadOfOnGroundFlag(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -352,8 +350,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "physicalPickupSupportLive", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void sameCellEdgeDropRequiresPhysicalNudgeBeforeVanillaPickup(TestContext context) {
         var world = context.getWorld();
         BlockPos stand = context.getAbsolutePos(new BlockPos(7, 4, 4));
@@ -410,8 +407,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "surfaceReplanFailClosed", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void surfacePathReplanCannotEscalateIntoDigOrPillar(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -481,8 +477,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "constrainedRouteSafetyLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void constrainedInvalidStartFailsWithoutCrossCellSnap(TestContext context) {
         var world = context.getWorld();
         BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 7, 5));
@@ -524,8 +519,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "constrainedRouteSafetyLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void sameGoalDifferentReturnAnchorReplacesInsteadOfThrottling(
             TestContext context) {
         var world = context.getWorld();
@@ -565,8 +559,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "constrainedRouteSafetyLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void constrainedEmptyAndSingletonExecutorsRequireExactTerminal(
             TestContext context) {
         var world = context.getWorld();
@@ -606,8 +599,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "constrainedRouteSafetyLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void minimumYSearchFindsLongSafeRouteInsteadOfShortDescent(
             TestContext context) {
         var world = context.getWorld();
@@ -667,8 +659,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "constrainedRouteSafetyLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void dynamicRearClosureFailsBeforeConstrainedTerminalSuccess(
             TestContext context) {
         var world = context.getWorld();
@@ -754,7 +745,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void invalidStartUsesAdjacentPhysicalLandingBeforePrivilegedSnap(TestContext context) {
         var world = context.getWorld();
         BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 6, 5));
@@ -792,20 +783,17 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "pathStoneReserve76", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void reserve76Rejects76AndPillarSpends77thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 76);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "pathStoneReserve37", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void reserve37Rejects37AndPillarSpends38thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 37);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "pathStoneReserve16", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void reserve16Rejects16AndPillarSpends17thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 16);
     }
@@ -932,7 +920,7 @@ public final class ActionPackPhysicalSnapGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

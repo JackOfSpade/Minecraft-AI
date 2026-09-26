@@ -5,12 +5,11 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -23,13 +22,13 @@ import net.minecraft.world.RaycastContext;
 
 import java.lang.reflect.Field;
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /** Physical strict-survival regressions for support faces exposed only at a reachable edge. */
-public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest {
+public final class BuildActionEdgeVisibilityGameTests {
     private static final String BATCH = "buildActionEdgeVisibilityStrict";
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void supportCenterAndFaceCenterMayBeBeyondReachWhenInsetIsLegal(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -67,8 +66,7 @@ public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest 
         cleanup(context, bot, "BuildReachInset");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void placeAtUsesExactInsetWhenAllTargetFaceCentersAreHidden(TestContext context) {
         BlockPos base = context.getAbsolutePos(new BlockPos(3, 4, 4));
         clear(context, base);
@@ -115,20 +113,17 @@ public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest 
         cleanup(context, bot, "BuildHiddenEdge");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void waterSourceMayBeObservableOnlyThroughAnInsetRay(TestContext context) {
         assertFluidOnlyInsetObservable(context, "BuildInsetWater", Blocks.WATER);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void lavaSourceMayBeObservableOnlyThroughAnInsetRay(TestContext context) {
         assertFluidOnlyInsetObservable(context, "BuildInsetLava", Blocks.LAVA);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void lowPerceptionRadiusRejectsOtherwiseReachableInsetPlacement(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 4));
         clear(context, feet);
@@ -165,8 +160,7 @@ public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest 
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void strictModeNeverUsesDirectHiddenPlacementFallback(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         clear(context, feet);
@@ -190,8 +184,7 @@ public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest 
         cleanup(context, bot, "BuildNoFallback");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = BATCH, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void ordinarySupportedPlacementStillUsesVanillaInteraction(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         clear(context, feet);
@@ -302,8 +295,8 @@ public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest 
     }
 
     private static void equipTwoCobblestone(AIPlayerEntity bot) {
-        bot.getInventory().selectedSlot = 0;
-        bot.getInventory().main.set(0, new ItemStack(Items.COBBLESTONE, 2));
+        bot.getInventory().setSelectedSlot(0);
+        bot.getInventory().getMainStacks().set(0, new ItemStack(Items.COBBLESTONE, 2));
         bot.getInventory().markDirty();
     }
 
@@ -325,7 +318,7 @@ public final class BuildActionEdgeVisibilityGameTests implements FabricGameTest 
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

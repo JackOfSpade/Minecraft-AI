@@ -13,12 +13,11 @@ import io.github.zoyluo.aibot.pathfinding.Standability;
 import io.github.zoyluo.aibot.persist.MissionRecord;
 import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
 import io.github.zoyluo.aibot.persist.MissionSpec;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -29,11 +28,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.text.Text;
 
 /** Restart contracts for the exact staircase hand-off owned by {@link DescendToYTask}. */
-public final class DescendCheckpointGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "descendDeepBudgetLive", tickLimit = 9_000)
+public final class DescendCheckpointGameTests {
+    @GameTest(maxTicks = 9_000)
     public void fullDepthDeepslateDescentWithFiveStonePickaxesFitsItsPersistedWindow(
             TestContext context) {
         BlockPos relativeOrigin = context.getAbsolutePos(new BlockPos(4, 0, 80));
@@ -108,7 +107,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void exhaustedCheckpointFailsOnItsPersistedClock(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(2, 4, 2));
         prepareLanding(context, start);
@@ -133,7 +132,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendBudgetRestoreGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void schemaFourRestartKeepsTheOriginalDepthWindowAtANewHeight(TestContext context) {
         BlockPos lane = context.getAbsolutePos(new BlockPos(3, 0, 12));
         BlockPos start = new BlockPos(lane.getX(), 16, lane.getZ());
@@ -172,7 +171,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void detourCheckpointSchemaRejectsInventedOrIncompleteEdgeHistory(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 7, 2));
         prepareLanding(context, start);
@@ -254,7 +253,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendEdgeSchemaGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void edgeSeventeenCheckpointContinuesToANearbySupportedCaveRim(
             TestContext context) {
         BlockPos restart = context.getAbsolutePos(new BlockPos(8, 7, 8));
@@ -330,7 +329,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void fullThirtyTwoEdgeCheckpointFailsClosedWithoutRefreshingOrReplaying(
             TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 7, 8));
@@ -393,7 +392,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
      * invariant: the descent must re-anchor on the factual pose and keep running instead of
      * terminating the whole mission as descend_landing_pose_drift.
      */
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void knockbackLandingDriftReanchorsInsteadOfFailingTheMission(
             TestContext context) {
         BlockPos floor = context.getAbsolutePos(new BlockPos(11, 7, 6));
@@ -435,7 +434,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void upperRetreatLandingBackOnTheObstacleFloorKeepsItsDetourDebt(
             TestContext context) {
         BlockPos floor = context.getAbsolutePos(new BlockPos(5, 7, 6));
@@ -491,7 +490,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 50)
+    @GameTest(maxTicks = 50)
     public void interruptedLandingAtOriginRejectsTheSameEdgeAfterRestore(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 2));
         prepareLanding(context, start);
@@ -529,7 +528,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendLandingRestoreGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void traversedDetourEdgesSurviveRestartAndUnlockTheUpperSealRoute(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 7, 2));
         BlockPos south = start.south();
@@ -583,7 +582,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendEdgeRestoreGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 50)
+    @GameTest(maxTicks = 50)
     public void unsupportedSolidDetourPreservesUpperRetreatAcrossRestart(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(14, 7, 2));
         for (int dx = -3; dx <= 3; dx++) {
@@ -664,7 +663,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void isolatedPillarBuildsOnePhysicalFloorBeforeDetourMovement(TestContext context) {
         String name = "DescendBridgeReceiptGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
@@ -706,7 +705,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void bridgeWorldReceiptSurvivesRestartWithoutDuplicateMaterial(TestContext context) {
         String name = "DescendBridgeRestartGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
@@ -745,7 +744,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void isolatedPillarKeepsEmergencyReserveAndFailsClosed(TestContext context) {
         String name = "DescendBridgeReserveGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
@@ -769,7 +768,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void visibleAdjacentLavaRejectsBridgePlacement(TestContext context) {
         String name = "DescendBridgeLavaGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
@@ -808,10 +807,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, name);
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "descendSafetyPauseStrict",
-            tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void settledLandingSurvivesSafetyTaskDisplacement(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
         BlockPos firstLanding = start.north().down();
@@ -853,10 +849,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendSafetyPauseGT");
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "descendThreatPauseStrict",
-            tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void threatPausePreservesRejectionAtTheSettledLanding(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
         BlockPos landing = start.north().down();
@@ -888,7 +881,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendThreatPauseGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void plannerOmittedDescentStillReplaysTheActiveCheckpoint(TestContext context) {
         BlockPos anchor = context.getAbsolutePos(new BlockPos(10, 2, 2));
         BlockPos mineFace = new BlockPos(anchor.getX(), -58, anchor.getZ());
@@ -923,7 +916,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendMissionReplayGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void committedDescentAtBudgetBoundaryIsAcknowledgedWithoutReplay(TestContext context) {
         BlockPos anchor = context.getAbsolutePos(new BlockPos(12, 2, 2));
         BlockPos mineFace = new BlockPos(anchor.getX(), -58, anchor.getZ());
@@ -959,7 +952,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendCommittedRestoreGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void satisfiedGoalRejectsMissingDescendCheckpoint(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(14, 4, 2));
         prepareLanding(context, start);
@@ -979,7 +972,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
         finish(context, bot, "DescendMissingCheckpointGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void descentLightingDoesNotConsumeToolServiceSticks(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(16, 4, 2));
         prepareLanding(context, start);
@@ -1124,7 +1117,7 @@ public final class DescendCheckpointGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

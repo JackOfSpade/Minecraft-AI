@@ -10,7 +10,6 @@ import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
@@ -20,13 +19,14 @@ import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /**
  * Black-box safety contracts for the dedicated Creeper owner.
@@ -35,9 +35,8 @@ import java.util.Set;
  * block placement. Task descriptions expose only the public diagnostic state needed to distinguish
  * ESCAPE, BUILD_WALL and HOLD_BARRIER; no test-only production hook is required.</p>
  */
-public final class CreeperDefenseGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 40)
+public final class CreeperDefenseGameTests {
+    @GameTest(maxTicks = 40)
     public void lateFuseAssignmentStartsPhysicalDefenseSynchronously(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateFuseGT", 200);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -56,7 +55,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         require(context, creeper.isAlive()
                         && creeper.isIgnited()
                         && creeper.getFuseSpeed() > 0
-                        && creeper.getClientFuseTime(1.0F) > 0.0F,
+                        && creeper.getLerpedFuseTime(1.0F) > 0.0F,
                 "late-fuse fixture did not retain a live finite explosion clock");
 
         Vec3d before = bot.getPos();
@@ -84,8 +83,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         finish(context, bot, "CreeperLateFuseGT", creeper);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void hiddenNearMemoryIsNotOverwrittenByFarUnarmedCreeper(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperMemoryGT", 206);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -123,8 +121,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         finish(context, bot, "CreeperMemoryGT", near, far);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void olderOccludedRiskCannotCompleteWhileSecondRiskJustTurnedHidden(
             TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperAllRiskGraceGT", 236);
@@ -185,8 +182,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         finish(context, bot, "CreeperAllRiskGraceGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void lateralOscillationCannotResetAwayProgress(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateralStallGT", 212);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -220,8 +216,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         finish(context, bot, "CreeperLateralStallGT", creeper);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void twoLegalBlocksCompleteCoreAndHoldWithoutSideMaterial(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperTwoBlockCoreGT", 218);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -257,8 +252,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         finish(context, bot, "CreeperTwoBlockCoreGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void hiddenCreeperMemoryYieldsToNonCreeperLowHpShelter(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperShelterHandoffGT", 224);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -313,8 +307,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
         finish(context, bot, "CreeperShelterHandoffGT", creeper, zombie);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "creeperDefenseSafety", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void nonSafetyEatIsPausedAndResumedAsExactInstance(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperEatResumeGT", 230);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -516,7 +509,7 @@ public final class CreeperDefenseGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

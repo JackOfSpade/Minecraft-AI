@@ -5,7 +5,6 @@ import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
@@ -17,7 +16,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.stat.Stats;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -31,11 +30,11 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Proves strict hunting can cross an initially empty perception region and collect physical loot. */
-public final class HuntCrossRegionGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntPickupCheckpointRestore", tickLimit = 200)
+public final class HuntCrossRegionGameTests {
+    @GameTest(maxTicks = 200)
     public void restoredPickupCollectsTheSameBoundDrop(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -68,8 +67,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED) {
-                context.throwGameTestException(
-                        "restored pickup failed: " + task.failureReason());
+                context.throwGameTestException(Text.of(
+                        "restored pickup failed: " + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -87,8 +86,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntQuotaMismatchSettlement", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void replanShrunkQuotaStillSettlesOpenPickupDebt(TestContext context) {
         // A mid-mission replan credits the 2 collected raw meat and re-issues the remainder
         // (4 -> 2). The successor task must settle the OPEN transaction instead of dying at
@@ -123,8 +121,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED) {
-                context.throwGameTestException(
-                        "quota-mismatched restore failed: " + task.failureReason());
+                context.throwGameTestException(Text.of(
+                        "quota-mismatched restore failed: " + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -139,8 +137,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntClosedReceiptFreshStart", tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void closedReceiptDoesNotPoisonSuccessorHunt(TestContext context) {
         // A hunt that already settled its pickup can still fail later (for example
         // hunt_no_progress on the next prey) and export a CLOSED_COLLECTED receipt. The
@@ -189,8 +186,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntDistantPreySight", tickLimit = 1600)
+    @GameTest(maxTicks = 1600)
     public void distantPreyIsHuntedAcrossOpenGround(TestContext context) {
         // Surface prey sight must align with SEARCH_RANGE: a real player sees a cow well
         // beyond the interaction-scale perception radius on open ground. The corridor is
@@ -266,8 +262,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntDistantPreySight", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void distantPreySightWidensRangeButStillRequiresLineOfSight(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -321,8 +316,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntDirtHillDigThrough", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void preyApproachProofDigsNearLevelThroughObstacles(TestContext context) {
         // Deterministic proof-level pin (no live hunt timing): a 3-high dirt wall has no
         // walk-only crossing, so SAFE here can only come from the near-level dig fallback.
@@ -387,8 +381,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntPickupDeadlineRestore", tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void nearDeadlineRestoreDoesNotRefreshBoundDebt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -437,8 +430,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntTargetReloadLive", tickLimit = 1200)
+    @GameTest(maxTicks = 1200)
     public void unloadedTargetIsReacquiredInsteadOfInventingPickupDebt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -152));
@@ -503,8 +495,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                         "hunt opened pickup debt while the reloaded chicken was still alive");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("target-reload hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("target-reload hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -523,8 +515,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntRotatedRetryLive", tickLimit = 1400)
+    @GameTest(maxTicks = 1400)
     public void rejectedCompassFanRotatesOntoReversibleRidge(TestContext context) {
         var world = context.getWorld();
         // A low dedicated layer (like the distant-prey strip): the previous 40-up elevated ridge
@@ -601,8 +592,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunt_rotated_retry"));
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("rotated-retry hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("rotated-retry hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -617,8 +608,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntHiddenDropLive", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void rememberedKillCellRoutesAroundNewOccludingWall(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -40));
@@ -678,8 +668,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                 }
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("hidden-drop hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("hidden-drop hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -699,8 +689,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntSplitLootRecoveryLive", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void observedWoolPickupTriggersPhysicalRecoveryOfMissedMutton(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -176));
@@ -764,8 +753,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                 }
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("split-loot hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("split-loot hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -782,7 +771,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void surfaceRoamRejectsOneWayDropPocket(TestContext context) {
         var world = context.getWorld();
         BlockPos origin = context.getAbsolutePos(new BlockPos(4, 8, 4));
@@ -806,8 +795,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntWetPreyRejectionLive", tickLimit = 1000)
+    @GameTest(maxTicks = 1000)
     public void waterRescueDoesNotImmediatelyRetargetSamePrey(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -144));
@@ -865,8 +853,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                 dryTicksAfterRescue.incrementAndGet();
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("wet-prey hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("wet-prey hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (dryTicksAfterRescue.get() < 40) {
                 return;
@@ -882,8 +870,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntFreshSurfaceAnchorPositive", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void freshHuntAcceptsFactualHighSurfaceAndStartsAcquiring(TestContext context) {
         var world = context.getWorld();
         BlockPos template = context.getAbsolutePos(new BlockPos(8, 5, -368));
@@ -921,8 +908,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("fresh surface hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("fresh surface hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             HuntSearchCursor.SurfaceAnchor anchor =
                     cursor.surfaceAnchor(dimension).orElse(null);
@@ -944,8 +931,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntFreshDeepAnchorStrict", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void freshHuntRejectsSkyVisibleDeepMineAsSurfaceAnchor(TestContext context) {
         var world = context.getWorld();
         // Build the sky-visible-deep geometry explicitly instead of trusting ambient terrain
@@ -1002,8 +988,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntQuotaSurfaceReturnStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void satisfiedQuotaReturnsToSurfaceBeforePublishingCompletion(TestContext context) {
         var world = context.getWorld();
         BlockPos deep = context.getAbsolutePos(new BlockPos(8, 5, -240));
@@ -1039,8 +1024,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
             sawReturnDebt.compareAndSet(false, task.describe().contains("phase=RETURN_SURFACE"));
             movedPhysically.compareAndSet(false, !bot.getBlockPos().equals(deep));
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("quota-return hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("quota-return hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1057,8 +1042,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntSurfaceFloorPreyLive", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void visiblePreyBelowMissionSurfaceFloorIsNeverPursued(TestContext context) {
         var world = context.getWorld();
         // The bot has already walked down to the last legal level of a persisted surface
@@ -1135,8 +1119,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                     "hunt descended below the mission surface floor: minY=" + minimumY.get()
                             + " floorY=" + surfaceFloorY);
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("below-floor hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("below-floor hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() == TaskState.FAILED) {
                 require(context, !task.failureReason().isBlank(),
@@ -1151,8 +1135,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntOneWayDropDebtLive", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void killedPreyDropInOneWayPitFailsWithoutFollowingIt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -272));
@@ -1243,8 +1226,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
             require(context, minimumY.get() >= start.getY() - 1,
                     "hunt followed meat into the one-way pit: minY=" + minimumY.get());
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("one-way-drop hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("one-way-drop hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -1267,8 +1250,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntMovingPreyRetargetLive", tickLimit = 1200)
+    @GameTest(maxTicks = 1200)
     public void movingPreyIsRetargetedOnSafeSurfaceAndPhysicallyCollected(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 80, -320));
@@ -1389,8 +1371,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("moving-prey hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("moving-prey hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1409,8 +1391,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntPickupStatCompetitionLive", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void vanillaPickupStatSettlesDebtAfterInventoryMeatIsConsumed(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -368));
@@ -1455,8 +1436,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         AtomicInteger ticksAfterResume = new AtomicInteger();
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("pickup-stat hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("pickup-stat hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
 
             if (!pickupPaused.get()
@@ -1545,8 +1526,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntExternalDeathCreditStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void externallyKilledTargetNeverCreatesPickupDebt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -400));
@@ -1606,8 +1586,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                     "external target death created a PICKUP debt");
             if (task.state() == TaskState.FAILED || task.state() == TaskState.COMPLETED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("external-death hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("external-death hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (ticksAfterDeath.get() < 5
                     || (task.describe().contains("phase=APPROACH")
@@ -1620,8 +1600,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntOldDropIsolationStrict", tickLimit = 1000)
+    @GameTest(maxTicks = 1000)
     public void oldNearbyRawDropCannotPoisonFreshKillTransaction(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -432));
@@ -1695,8 +1674,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                     false, task.describe().contains("phase=PICKUP"));
             if (task.state() == TaskState.FAILED || task.state() == TaskState.COMPLETED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("old-drop hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("old-drop hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (!pickupObserved.get() || !task.describe().contains("phase=ACQUIRE")) {
                 return;
@@ -1721,8 +1700,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntCookedDropNoRawStrict", tickLimit = 1000)
+    @GameTest(maxTicks = 1000)
     public void creditedFireAspectKillWithoutRawMeatReturnsToAcquire(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -464));
@@ -1784,8 +1762,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                             .isEmpty());
             if (task.state() == TaskState.FAILED || task.state() == TaskState.COMPLETED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("cooked-drop hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("cooked-drop hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (!pickupObserved.get() || !task.describe().contains("phase=ACQUIRE")) {
                 return;
@@ -1807,8 +1785,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "huntCrossRegionLive", tickLimit = 2000)
+    @GameTest(maxTicks = 2000)
     public void boundedHuntWalksToPreyOutsideInitialPerception(TestContext context) {
         var world = context.getWorld();
         // GameTest lays every structure on the positive-Z grid before executing batches. Reserve a
@@ -1829,7 +1806,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
 
         var chicken = EntityType.CHICKEN.create(world, SpawnReason.COMMAND);
         if (chicken == null) {
-            context.throwGameTestException("failed to create chicken");
+            context.throwGameTestException(Text.of("failed to create chicken"));
             return;
         }
         chicken.setAiDisabled(true);
@@ -1871,8 +1848,8 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
                         "hunt abandoned an observed meat drop for a new roam: " + task.describe());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("cross-region hunt ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("cross-region hunt ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1946,7 +1923,7 @@ public final class HuntCrossRegionGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

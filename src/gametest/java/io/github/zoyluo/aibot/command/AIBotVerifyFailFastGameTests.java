@@ -11,24 +11,24 @@ import io.github.zoyluo.aibot.runtime.IntentController;
 import io.github.zoyluo.aibot.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.TaskManager;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Items;
 import net.minecraft.stat.Stats;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
 import java.util.List;
+import net.minecraft.text.Text;
 
 /** World-backed contract for strict from-zero acceptance fail-fast boundaries. */
-public final class AIBotVerifyFailFastGameTests implements FabricGameTest {
+public final class AIBotVerifyFailFastGameTests {
     private static final String ZERO_DEATH_VIOLATION = "zero_death_violation";
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 5)
+    @GameTest(maxTicks = 5)
     public void verifyAllExpandsLegacyStripMineByOperatingProfile(TestContext context) {
         List<String> strictAll = AIBotVerifySubcommand.expandFeaturesForGameTest(
                 List.of("all"), OperatingProfile.STRICT_SURVIVAL);
@@ -61,7 +61,7 @@ public final class AIBotVerifyFailFastGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void strictStripMineScenarioRequiresExactTypedRejection(TestContext context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyStripGateGT");
         String feature = AIBotVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE;
@@ -92,7 +92,7 @@ public final class AIBotVerifyFailFastGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void fromZeroMiningDeathFailsInOneVerifierPollAndCancelsAllIntent(TestContext context) {
         var world = context.getWorld();
         var server = world.getServer();
@@ -119,7 +119,7 @@ public final class AIBotVerifyFailFastGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void fromZeroMiningNonSurvivalModeFailsInOneVerifierPollAndClearsAudit(TestContext context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyModeFastGT");
         try {
@@ -144,7 +144,7 @@ public final class AIBotVerifyFailFastGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void fromZeroMiningAllowedPrivilegeFailsInOneVerifierPollAndClearsAudit(TestContext context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyPrivilegeFastGT");
         try {
@@ -235,7 +235,7 @@ public final class AIBotVerifyFailFastGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

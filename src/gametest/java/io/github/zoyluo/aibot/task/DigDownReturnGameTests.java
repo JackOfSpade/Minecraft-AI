@@ -18,13 +18,12 @@ import io.github.zoyluo.aibot.persist.MissionRecord;
 import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
 import io.github.zoyluo.aibot.persist.MissionSpec;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -37,10 +36,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Strict-survival regression for the stone bootstrap's factual staircase return. */
-public final class DigDownReturnGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 900)
+public final class DigDownReturnGameTests {
+    @GameTest(maxTicks = 900)
     public void unsupportedNaturalSlopeRotatesToSupportedStoneStair(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(6, 6, -28));
@@ -82,8 +82,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
                 usedEastStair.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("rotating DigDown ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("rotating DigDown ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -98,7 +98,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void movedDescendCheckpointStartsFreshAtCurrentPose(TestContext context) {
         var world = context.getWorld();
         BlockPos oldStart = context.getAbsolutePos(new BlockPos(3, 6, -48));
@@ -134,8 +134,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("moved-checkpoint DigDown ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("moved-checkpoint DigDown ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -149,10 +149,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownSafetyPauseReturnStrict",
-            tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void safetyPauseRejoinsTrustedTailAndFailsOnlyAfterExactReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
@@ -245,10 +242,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownSafetyReplanRelocationStrict",
-            tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void safetyInterruptedGoalReplanQuarantinesOldEntryAndRelocatesPhysically(
             TestContext context) {
         var world = context.getWorld();
@@ -404,10 +398,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownPausedRestartReturnStrict",
-            tickLimit = 260)
+    @GameTest(maxTicks = 260)
     public void pausedCheckpointRestartKeepsOldEntryReturnDebt(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -478,10 +469,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownReturnRepauseStrict",
-            tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void returnPauseReanchorsTheCurrentFactualCell(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
@@ -549,10 +537,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownDisconnectedDescentStrict",
-            tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void disconnectedDescentImmediatelyBecomesSafetyReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -592,7 +577,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         finish(context, bot, "DigDownDisconnectedGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void minedStoneReturnsAlongRecordedStaircaseBeforeCompleting(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 8));
@@ -628,8 +613,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
                 descended.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("DigDown return task ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("DigDown return task ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -645,8 +630,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownEntryRelocationStrict", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void rememberedWalledEntryPhysicallyRelocatesBeforeMining(TestContext context) {
         var world = context.getWorld();
         BlockPos failedEntry = context.getAbsolutePos(new BlockPos(1, 6, 3));
@@ -711,8 +695,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
                         "mining transaction anchored somewhere other than the replacement entry");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("entry relocation DigDown ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("entry relocation DigDown ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -732,7 +716,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void satisfiedMissionStillRestoresReturnDebtBeforeCompleting(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 8);
@@ -764,7 +748,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (active.state() == TaskState.FAILED || active.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("restored return failed: " + active.failureReason());
+                context.throwGameTestException(Text.of("restored return failed: " + active.failureReason()));
             }
             if (GoalExecutor.INSTANCE.isActiveGoal(bot, goal)) {
                 require(context, active.state() != TaskState.COMPLETED || bot.getBlockPos().equals(start),
@@ -777,7 +761,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void exhaustedReturnBudgetFailsOnItsOwnClock(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 5);
@@ -804,10 +788,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(
-            templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "digDownSafetyRecoveryBudgetStrict",
-            tickLimit = 2600)
+    @GameTest(maxTicks = 2600)
     public void safetyDisplacementCanDigBackAfterLegacyReturnLimit(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 24, 3));
         List<BlockPos> trail = new java.util.ArrayList<>();
@@ -904,8 +885,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
                 physicallyDugRejoin.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("safety-expanded return ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("safety-expanded return ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -923,7 +904,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void safetyReturnHardCapSurvivesPauseAndResume(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -965,7 +946,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         finish(context, bot, "DigDownSafetyHardCapGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void safetyReturnStallLeaseFailsBeforeHardCap(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -988,7 +969,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         finish(context, bot, "DigDownSafetyStallGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void timeoutWithRequestedNetDeliveryCompletesOnlyAfterExactReturn(TestContext context) {
         BlockPos bottom = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = bottom.east().up();
@@ -1040,7 +1021,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void restoredLargeQuotaContinuesPastLegacyBudgetAndKeepsNetDeliveryStrict(
             TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 3));
@@ -1093,7 +1074,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         finish(context, bot, "DigDownScaledRestoreGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void horizontalOpenCorridorAdvancesFactuallyAndNeverBacktracks(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 18));
@@ -1211,9 +1192,9 @@ public final class DigDownReturnGameTests implements FabricGameTest {
             }
             if (frontierTask.state() == TaskState.FAILED
                     || frontierTask.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("supported horizontal frontier ended as "
+                context.throwGameTestException(Text.of("supported horizontal frontier ended as "
                         + frontierTask.state() + ":" + frontierTask.failureReason()
-                        + " checkpoint=" + frontierTask.checkpoint());
+                        + " checkpoint=" + frontierTask.checkpoint()));
             }
             if (frontierTask.state() != TaskState.COMPLETED) {
                 return;
@@ -1230,7 +1211,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void nearBudgetHorizontalPickupDebtSurvivesRestartAndSettlesBeforeTimeout(
             TestContext context) {
         var world = context.getWorld();
@@ -1316,9 +1297,9 @@ public final class DigDownReturnGameTests implements FabricGameTest {
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("near-budget settlement ended as "
+                context.throwGameTestException(Text.of("near-budget settlement ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                        + " checkpoint=" + task.checkpoint()));
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -1339,7 +1320,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void unsafeRecordedLandingIsSkippedAndReturnStillCompletes(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 5);
@@ -1355,8 +1336,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("unsafe return failed: "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("unsafe return failed: "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1370,7 +1351,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void unsupportedAscendingWaypointGetsPhysicalSupportBeforeExactReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(6, 6, 6));
         BlockPos unsupported = start.west();
@@ -1400,8 +1381,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
                 repaired.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("support-repair return failed: "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("support-repair return failed: "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1417,7 +1398,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void unsupportedExactEntryUsesTwoPhysicalPillarsInsteadOfSnapping(TestContext context) {
         BlockPos bottom = context.getAbsolutePos(new BlockPos(6, 4, 6));
         BlockPos middle = bottom.up();
@@ -1439,8 +1420,8 @@ public final class DigDownReturnGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("two-pillar exact return failed: "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("two-pillar exact return failed: "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1459,7 +1440,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void restoredDescentFailureReturnsBeforePublishingFailure(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 5);
@@ -1493,7 +1474,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void promotedSchema2ReturnClearsLocalWaterSealOwnership(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 3);
@@ -1521,7 +1502,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void missingMineCheckpointIsRejectedEvenWhenGoalIsSatisfied(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 2);
@@ -1548,7 +1529,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         finish(context, bot, "DigDownMissingCheckpointGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void exactReturnRejectsGrossCollectionWithNetDeliveryShortfall(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 2);
@@ -1572,7 +1553,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void grossReservePaysTwoPillarsAndStillDeliversRequestedStone(TestContext context) {
         BlockPos bottom = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos start = bottom.up(2);
@@ -1591,7 +1572,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
             if (!bot.getBlockPos().equals(start)) {
                 var result = executor.tick(bot.getActionPack());
                 if (result.isFailed()) {
-                    context.throwGameTestException("two-pillar return failed: " + result);
+                    context.throwGameTestException(Text.of("two-pillar return failed: " + result));
                 }
                 return;
             }
@@ -1617,7 +1598,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void pillarRepairSpendsDirtBeforeMissionCobblestone(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 2);
@@ -1631,7 +1612,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
         context.runAtEveryTick(() -> {
             var result = executor.tick(bot.getActionPack());
             if (result.isFailed()) {
-                context.throwGameTestException("fixture pillar failed: " + result);
+                context.throwGameTestException(Text.of("fixture pillar failed: " + result));
             }
             if (!bot.getBlockPos().equals(start.up())) {
                 return;
@@ -1747,7 +1728,7 @@ public final class DigDownReturnGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

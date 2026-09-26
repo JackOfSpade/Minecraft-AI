@@ -10,14 +10,13 @@ import io.github.zoyluo.aibot.mining.MiningFoodReserve;
 import io.github.zoyluo.aibot.mining.MiningCursor;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -30,11 +29,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
+import net.minecraft.entity.EquipmentSlot;
 
 /** Live fail-closed coverage for underground tool and safe-food service. */
-public final class MiningServiceResourceGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceAdmissionVelocityStrict", tickLimit = 120)
+public final class MiningServiceResourceGameTests {
+    @GameTest(maxTicks = 120)
     public void disposalAdmissionCentersResidualOreWalkBeforePublishingOpenDebt(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceAdmissionVelocityGT", false);
@@ -95,8 +95,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceNaturalPocketSealStrict", tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void naturalOpenPocketWithoutHeadSupportSealsFloorFirst(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceNaturalPocketSealGT", false);
@@ -159,9 +158,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("natural open disposal pocket ended as "
+                context.throwGameTestException(Text.of("natural open disposal pocket ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                        + " checkpoint=" + task.checkpoint()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -181,8 +180,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceUnsafeGeometryRerouteStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void unsafeOpenCaveSealsThenUsesOppositeDisposalPocket(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceGeometryRerouteGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -240,9 +238,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("unsafe geometry reroute ended as "
+                context.throwGameTestException(Text.of("unsafe geometry reroute ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                        + " checkpoint=" + task.checkpoint()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -268,8 +266,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceDoubleUnsafeGeometryStrict", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void twoUnsafeOpenCavesSealOnceEachAndFailWithoutPingPong(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceDoubleGeometryGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -334,8 +331,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePartialLowerSealRestartStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void lowerOnlySealRestartClosesHeadThenFailsLedgerVisibility(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceLowerOnlyRestartGT", false);
@@ -390,8 +386,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             task = active[0];
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(
-                        "lower-only restart incorrectly ended as " + task.state());
+                context.throwGameTestException(Text.of(
+                        "lower-only restart incorrectly ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -412,7 +408,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void restoredHardBudgetCannotBeResetByRestart(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceBudgetGT", false);
         Map<String, String> checkpoint = validCheckpoint(fixture.bot(), "4800", "4800");
@@ -434,7 +430,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void malformedCheckpointFailsClosed(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceInvalidGT", false);
         Map<String, String> checkpoint = new LinkedHashMap<>(
@@ -451,8 +447,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketCheckpointStrict", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void pocketCheckpointCountsAndPhaseAuthorityAreStrictlyBounded(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePocketCountGT", false);
@@ -608,8 +603,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketHardWindowStrict", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void openRetryMarkerAtHardBudgetBecomesTerminalAndCannotReroute(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceOpenRetryBudgetGT", false);
@@ -666,8 +660,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketHardWindowStrict", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void sealRetryMarkerAtHardBudgetBecomesTerminalAndCannotPingPong(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceSealRetryBudgetGT", false);
@@ -723,8 +716,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketRerouteAtomic", tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void sealedOldPocketAlternateStartFailureLeavesValidNonPocketCheckpoint(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceRerouteAtomicGT", false);
@@ -792,8 +784,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceGeometryDebtHardWindow", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void restoredOpenClearZeroWithFactuallyBrokenEntrySealsAtHardWindow(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceOpenMutationBudgetGT", false);
@@ -848,8 +839,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceGeometryDebtHardWindow", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void restoredCaptureEmptyLedgerSealsAtHardWindow(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceCaptureMutationBudgetGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -909,7 +899,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void fullHungerAndRawMeatDoNotBypassSafeReserve(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceRawFoodGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -932,12 +922,12 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 cleanup(context, fixture);
             } else if (task.state() == TaskState.COMPLETED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("unsafe food reserve ended as " + task.state());
+                context.throwGameTestException(Text.of("unsafe food reserve ended as " + task.state()));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void depotWithdrawsSafeFoodAndLeavesDangerousFoodUntouched(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceDepotFoodGT", true);
         AIPlayerEntity bot = fixture.bot();
@@ -954,8 +944,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("safe depot service ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("safe depot service ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -969,7 +959,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void localCraftsTunnelingToolsWithoutDepot(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceLocalToolsGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -987,8 +977,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("local channel-tool service ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("local channel-tool service ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1005,7 +995,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void noDepotThreeFreeSlotsReclaimsDeadPicksAndJunkBeforeService(
             TestContext context) {
         require(context, MiningServiceTask.reconciledPocketBaselineCount(
@@ -1100,9 +1090,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 baselineRebased.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("three-slot no-depot service ended as "
+                context.throwGameTestException(Text.of("three-slot no-depot service ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                        + " checkpoint=" + task.checkpoint()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1117,7 +1107,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                         "service did not preserve both healthy and exhausted iron pickaxes");
                 require(context, InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 4,
                         "service did not craft four replacement tunneling pickaxes");
-                int channelDurability = bot.getInventory().main.stream()
+                int channelDurability = bot.getInventory().getMainStacks().stream()
                         .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                         .mapToInt(MiningServiceTask::usableDurability)
                         .sum();
@@ -1145,8 +1135,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (nextBatch[0].state() == TaskState.FAILED
                     || nextBatch[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException("post-service ore batch ended as "
-                        + nextBatch[0].state() + ":" + nextBatch[0].failureReason());
+                context.throwGameTestException(Text.of("post-service ore batch ended as "
+                        + nextBatch[0].state() + ":" + nextBatch[0].failureReason()));
             }
             if (nextBatch[0].state() != TaskState.COMPLETED
                     || serviceTicks[0] - serviceCompletedAt[0] <= 100) {
@@ -1172,7 +1162,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void committedDisposalRestoreWaitsPastPickupDelayAndSealsWithoutRedrop(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePocketRestoreGT", false);
@@ -1218,8 +1208,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 }
             }
             if (committed[0] == null && original.state() == TaskState.FAILED) {
-                context.throwGameTestException("original disposal failed: "
-                        + original.failureReason());
+                context.throwGameTestException(Text.of("original disposal failed: "
+                        + original.failureReason()));
             }
             if (committed[0] == null || restored[0] != null
                     || elapsed[0] - committedAt[0] <= 60) {
@@ -1262,8 +1252,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (restored[0].state() == TaskState.FAILED
                     || restored[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException("restored disposal ended as "
-                        + restored[0].state() + ":" + restored[0].failureReason());
+                context.throwGameTestException(Text.of("restored disposal ended as "
+                        + restored[0].state() + ":" + restored[0].failureReason()));
             }
             if (restored[0].state() != TaskState.COMPLETED) {
                 return;
@@ -1282,7 +1272,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void committedSettlePauseMoveResumeReturnsAndSealsBothMouthCells(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceDebtReturnGT", false);
@@ -1341,8 +1331,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (active[0].state() == TaskState.FAILED
                     || active[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException("moved disposal debt ended as "
-                        + active[0].state() + ":" + active[0].failureReason());
+                context.throwGameTestException(Text.of("moved disposal debt ended as "
+                        + active[0].state() + ":" + active[0].failureReason()));
             }
             if (active[0].state() != TaskState.COMPLETED) {
                 return;
@@ -1357,8 +1347,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceUnsealedReturnStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void unreachableUnsealedReturnFailsBoundedlyAndKeepsRestartableDebt(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceUnsealedReturnGT", false);
@@ -1413,8 +1402,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             task = active[0];
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("unreachable unsealed debt ended as "
-                        + task.state());
+                context.throwGameTestException(Text.of("unreachable unsealed debt ended as "
+                        + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -1452,8 +1441,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePrebaselineReturnStrict", tickLimit = 1200)
+    @GameTest(maxTicks = 1200)
     public void prebaselineCapturePauseMoveRestartReturnsInCaptureAndCompletes(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePrebaselineReturnGT", false);
@@ -1524,8 +1512,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 returnedInCapture.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("prebaseline CAPTURE return ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("prebaseline CAPTURE return ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -1538,8 +1526,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePrebaselineReturnStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void terminalPrebaselineReturnCheckpointRestoresSealsAndFailsOriginalReason(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePrebaselineTerminalGT", false);
@@ -1604,8 +1591,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 sawTerminalSeal.set(true);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("terminal prebaseline debt ended as "
-                        + task.state());
+                context.throwGameTestException(Text.of("terminal prebaseline debt ended as "
+                        + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -1622,8 +1609,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceGeometryDebtMoveStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void openGeometryDebtMoveRestartsReturnAndFailsOnlyAfterDoubleSeal(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceOpenMoveDebtGT", false);
@@ -1695,7 +1681,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 sawSeal.set(true);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("OPEN geometry debt ended as " + task.state());
+                context.throwGameTestException(Text.of("OPEN geometry debt ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -1712,8 +1698,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceGeometryDebtMoveStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void captureEmptyLedgerMoveRestartsReturnAndFailsOnlyAfterDoubleSeal(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceCaptureMoveDebtGT", false);
@@ -1792,7 +1777,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 sawSeal.set(true);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("CAPTURE geometry debt ended as " + task.state());
+                context.throwGameTestException(Text.of("CAPTURE geometry debt ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -1809,8 +1794,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceRawSinkContainmentStrict", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void straddlingTrackedItemMustEnterRawSinkBeforePresealStability(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceRawSinkGT", false);
@@ -1906,8 +1890,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("raw-sink containment ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("raw-sink containment ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (!movedInside[0]) {
                 straddlingTicks[0]++;
@@ -1934,8 +1918,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceTrackedEscapeStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void settlePhaseInFlightTrackedEntityCannotBeImpersonatedAndTimesOut(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceSettleEscapeGT", false);
@@ -1970,9 +1953,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             Map<String, String> live = task.checkpoint();
             if (!injected.get()) {
                 if (task.state() != TaskState.RUNNING) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "SETTLE tracked-escape fixture ended before injection: "
-                                    + task.state() + ":" + task.failureReason());
+                                    + task.state() + ":" + task.failureReason()));
                 }
                 if (!"SETTLE_DISPOSABLE".equals(live.get("phase"))
                         || live.getOrDefault("pocket_ledger", "").isBlank()) {
@@ -2043,7 +2026,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             task = active[0];
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("SETTLE tracked escape ended as " + task.state());
+                context.throwGameTestException(Text.of("SETTLE tracked escape ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -2063,8 +2046,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceTrackedEscapeStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void sealPhaseTrackedEscapeFailsTypedAndCannotHideBehindNearerSpoil(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceTrackedEscapeGT", false);
@@ -2100,9 +2082,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             Map<String, String> live = task.checkpoint();
             if (!injected.get()) {
                 if (task.state() != TaskState.RUNNING) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "tracked-escape fixture ended before injection: "
-                                    + task.state() + ":" + task.failureReason());
+                                    + task.state() + ":" + task.failureReason()));
                 }
                 if (!"SEAL_DISPOSAL_POCKET".equals(live.get("phase"))
                         || live.getOrDefault("pocket_ledger", "").isBlank()) {
@@ -2156,7 +2138,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             task = active[0];
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("tracked escape ended as " + task.state());
+                context.throwGameTestException(Text.of("tracked escape ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -2180,7 +2162,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void settleTimeoutSealsBothMouthCellsBeforeTypedFailure(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceDebtTimeoutGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -2243,7 +2225,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             task = active[0];
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("settle-timeout debt ended as " + task.state());
+                context.throwGameTestException(Text.of("settle-timeout debt ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -2266,7 +2248,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void consecutiveSameFaceDisposalsUseIncrementalSinkBaseline(TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePocketReuseGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -2297,9 +2279,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (active[0].state() == TaskState.FAILED
                     || active[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException("same-face disposal " + completed[0]
+                context.throwGameTestException(Text.of("same-face disposal " + completed[0]
                         + " ended as " + active[0].state() + ":"
-                        + active[0].failureReason());
+                        + active[0].failureReason()));
             }
             if (active[0].state() != TaskState.COMPLETED) {
                 return;
@@ -2336,8 +2318,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceFullPocketReuseStrict", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void fullInventoryReusedPocketFreesAStackBeforeCollectingOpeningSpoil(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceFullPocketGT", false);
@@ -2388,8 +2369,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 prebaselineIdentityReset[0] = true;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("full-pocket disposal ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("full-pocket disposal ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -2436,8 +2417,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceOpeningSpoilStrict", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void nonWhitelistedNaturalWorkFaceSpoilCannotConsumePromisedSlot(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceClaySpoilGT", false);
@@ -2497,8 +2477,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("non-junk opening spoil ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("non-junk opening spoil ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -2516,7 +2496,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void disposalPocketPreservesObservedOreAndRestartsThroughOppositeSide(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePocketOreGT", false);
@@ -2586,8 +2566,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 return;
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("ore-reroute disposal ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("ore-reroute disposal ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -2612,8 +2592,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceBothPocketOreStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void disposalPocketPreservesBothOreSidesAndFailsAfterDoubleSeal(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceBothPocketOreGT", false);
@@ -2649,7 +2628,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("dual-ore disposal ended as " + task.state());
+                context.throwGameTestException(Text.of("dual-ore disposal ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -2734,16 +2713,14 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketEntryOreStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void secondPocketEntryOreRetiresOnlyAfterVisibleDoubleClosure(
             TestContext context) {
         runSecondPocketMouthOreRetirement(
                 context, "MiningServicePocketEntryOreGT", false);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketUpperOreStrict", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void secondPocketUpperOreRetiresOnlyAfterVisibleDoubleClosure(
             TestContext context) {
         runSecondPocketMouthOreRetirement(
@@ -2823,8 +2800,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(
-                        "mouth-ore disposal ended as " + task.state());
+                context.throwGameTestException(Text.of(
+                        "mouth-ore disposal ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -2853,8 +2830,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceClosedOreEntityDebtStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void preservedOreFailureKeepsPocketIdentityWhenSinkEntityRemains(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceClosedOreEntityDebtGT", false);
@@ -2912,8 +2888,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("entity-debt ore disposal ended as "
-                        + task.state());
+                context.throwGameTestException(Text.of("entity-debt ore disposal ended as "
+                        + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -2938,8 +2914,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceSealLossFiniteStrict", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void disposalOreSealLossTerminatesWithinPocketRecoveryWindow(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceSealLossGT", false);
@@ -2988,7 +2963,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 removedAt[0] = ticks[0];
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("seal-loss disposal ended as " + task.state());
+                context.throwGameTestException(Text.of("seal-loss disposal ended as " + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -3006,7 +2981,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void nearlyBrokenTunnelingToolsDoNotBypassDurabilityService(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceDamagedToolsGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3029,13 +3004,13 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("damaged channel-tool service ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("damaged channel-tool service ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            long fresh = bot.getInventory().main.stream()
+            long fresh = bot.getInventory().getMainStacks().stream()
                     .filter(stack -> stack.isOf(Items.STONE_PICKAXE) && stack.getDamage() == 0)
                     .count();
             require(context, fresh == 4,
@@ -3047,7 +3022,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPreflightUsesItsOwnProfileAndValidatesTheExactKit(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianPreflightGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3063,8 +3038,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("exact obsidian preflight kit was rejected: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("exact obsidian preflight kit was rejected: "
+                        + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3081,7 +3056,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPreflightFailsTypedWithoutItsWaterBucket(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianPreflightWaterGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3098,7 +3073,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("missing water bucket bypassed preflight");
+                context.throwGameTestException(Text.of("missing water bucket bypassed preflight"));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -3110,7 +3085,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void thirtyTwoObsidianServiceHorizonFundsAllFourWorstCaseRepairs(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianHorizonGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3143,7 +3118,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPreflightFailsTypedWithoutCarriedCraftingTable(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianTableGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3160,7 +3135,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("missing crafting table bypassed preflight");
+                context.throwGameTestException(Text.of("missing crafting table bypassed preflight"));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -3173,7 +3148,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPolicyRejectsEightRawDurability(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianRaw8GT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3196,7 +3171,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPolicyAcceptsNineRawDurability(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianRaw9GT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3216,7 +3191,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPolicyWillNotSpendTheLastSixteenStoneLikeBlocks(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianReserveGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3234,7 +3209,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (task.state() == TaskState.COMPLETED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("insufficient stone surplus bypassed reserve gate");
+                context.throwGameTestException(Text.of("insufficient stone surplus bypassed reserve gate"));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -3248,7 +3223,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPolicyRejectsMissingRepairSticksBeforeConsumingStone(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianStickGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3264,7 +3239,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("missing repair sticks bypassed reserve gate");
+                context.throwGameTestException(Text.of("missing repair sticks bypassed reserve gate"));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -3278,7 +3253,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void obsidianPolicyRoundTripsAndCannotRestoreAsDefaultOrePolicy(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianPolicyGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3347,8 +3322,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (restored.state() == TaskState.FAILED
                     || restored.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("matching policy restart failed: "
-                        + restored.failureReason());
+                context.throwGameTestException(Text.of("matching policy restart failed: "
+                        + restored.failureReason()));
             }
             if (restored.state() == TaskState.COMPLETED) {
                 cleanup(context, fixture);
@@ -3356,7 +3331,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void obsidianDepotPreservesDiamondBlackstoneAndSafetySupplies(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianDepositGT", true);
         AIPlayerEntity bot = fixture.bot();
@@ -3379,8 +3354,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (task.state() == TaskState.FAILED
                     || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("obsidian depot service ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("obsidian depot service ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3400,7 +3375,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void obsidianDepotReplenishesMixedEmergencyBlocksToSixteen(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianBlocksGT", true);
         AIPlayerEntity bot = fixture.bot();
@@ -3420,8 +3395,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("mixed emergency-block service ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("mixed emergency-block service ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3436,7 +3411,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void obsidianServiceFailsTypedWhenEmergencyBlocksCannotReachSixteen(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianBlocksFailGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3451,8 +3426,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("insufficient emergency blocks ended as "
-                        + task.state());
+                context.throwGameTestException(Text.of("insufficient emergency blocks ended as "
+                        + task.state()));
             }
             if (task.state() != TaskState.FAILED) {
                 return;
@@ -3465,7 +3440,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void rareBoundary8AcceptsExactResourceHorizonAndRepairsChannel(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonExactGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3482,7 +3457,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("exact rare horizon failed: " + task.failureReason());
+                context.throwGameTestException(Text.of("exact rare horizon failed: " + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3502,7 +3477,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rareBoundary8RejectsOneTorchBelowHorizonBeforeRepair(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonTorchFailGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3527,7 +3502,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rareBoundary8RejectsOneFoodBelowHorizonBeforeRepair(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonFoodFailGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3552,7 +3527,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rareBoundary8RejectsOneStickBelowRepairHorizon(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonStickFailGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3577,7 +3552,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void rareBoundary8PhysicallyWithdrawsMissionHorizonFromDepot(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonDepotGT", true);
         AIPlayerEntity bot = fixture.bot();
@@ -3599,8 +3574,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("depot horizon service failed: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("depot horizon service failed: "
+                        + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3616,7 +3591,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 1400)
+    @GameTest(maxTicks = 1400)
     public void rareBoundary8CrowdedDepotReservesTheWholeRefillPeak(TestContext context) {
         Fixture fixture = spawn(context, "RareCrowdedDepotGT", true);
         AIPlayerEntity bot = fixture.bot();
@@ -3631,9 +3606,9 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         putStackedInventory(depot, depotSlot, Items.STICK,
                 rarePreRepairSticks(policy, false));
         depot.markDirty();
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            if (bot.getInventory().main.get(slot).isEmpty()) {
-                bot.getInventory().main.set(slot, new ItemStack(Items.DIRT, 64));
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            if (bot.getInventory().getMainStacks().get(slot).isEmpty()) {
+                bot.getInventory().getMainStacks().set(slot, new ItemStack(Items.DIRT, 64));
             }
         }
         bot.getInventory().markDirty();
@@ -3648,8 +3623,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("crowded depot service failed: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("crowded depot service failed: "
+                        + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3670,8 +3645,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "rareServiceLocalFirst", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void rareServiceUsesLocalPocketWithoutTouchingRemoteOwnedDepot(
             TestContext context) {
         Fixture fixture = spawn(context, "RareLocalFirstGT", false);
@@ -3703,13 +3677,13 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                         == policy.emergencyBlocksReserved(),
                 "offhand projection fixture retained disposable stone excess");
-        require(context, bot.getInventory().offHand.getFirst().isEmpty(),
+        require(context, bot.getEquippedStack(EquipmentSlot.OFFHAND).isEmpty(),
                 "offhand projection fixture did not start with an empty offhand");
-        bot.getInventory().offHand.set(0, new ItemStack(Items.DIRT, 2));
+        bot.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.DIRT, 2));
         while (freeMainSlots(bot) > 3) {
             int empty = firstEmptyMainSlot(bot);
             require(context, empty >= 0, "local-first fixture lost an expected empty slot");
-            bot.getInventory().main.set(empty, new ItemStack(Items.GLASS, 64));
+            bot.getInventory().getMainStacks().set(empty, new ItemStack(Items.GLASS, 64));
         }
         bot.getInventory().markDirty();
         prepareDisposalPocket(fixture, Direction.EAST);
@@ -3734,8 +3708,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             require(context, bot.getBlockPos().equals(face),
                     "rare local service left its exact work face: " + bot.getBlockPos());
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("rare local-first service ended as "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("rare local-first service ended as "
+                        + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3768,7 +3742,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void boundaryZeroWorstCaseRepairLeavesRetryCushionUsable(TestContext context) {
         Fixture fixture = spawn(context, "RareBoundaryZeroRetryGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3792,8 +3766,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("boundary-zero retry service failed: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("boundary-zero retry service failed: "
+                        + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3816,7 +3790,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void boundary63AcceptsExactlyOneUsableTargetBreak(TestContext context) {
         Fixture fixture = spawn(context, "RareBoundary63ToolGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3825,7 +3799,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
                 policy.foodMinUnits(), rareProtectedSticks(policy), true);
         int ironSlot = InventoryAction.findItem(bot, Items.IRON_PICKAXE).orElseThrow();
-        ItemStack ironPick = bot.getInventory().main.get(ironSlot);
+        ItemStack ironPick = bot.getInventory().getMainStacks().get(ironSlot);
         ironPick.setDamage(ironPick.getMaxDamage() - 2);
         MiningServiceTask task = rareBoundaryTask(bot, 64, 63);
         task.start(bot);
@@ -3839,7 +3813,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 200)
+    @GameTest(maxTicks = 200)
     public void serviceReturnsToExactSavedWorkFace(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceExactFaceGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3857,7 +3831,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("exact-face return failed: " + task.failureReason());
+                context.throwGameTestException(Text.of("exact-face return failed: " + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -3868,7 +3842,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rareServiceSchema6PinsMissionTargetAndBoundary(TestContext context) {
         Fixture fixture = spawn(context, "RareIdentityGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3943,7 +3917,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void rareDescentKitRestoresSchema7OpenAlcoveCheckpoint(TestContext context) {
         Fixture fixture = spawn(context, "RareDescentKitOpenRestoreGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3976,7 +3950,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void rareDescentKitWorldChestBeforeCommitRestoresWithoutDoubleSpend(
             TestContext context) {
         Fixture fixture = spawn(context, "RareDescentKitPlaceRestoreGT", false);
@@ -4027,7 +4001,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rareDescentKitRejectsOwnerPositionDifferentFromCheckpointDepot(
             TestContext context) {
         Fixture fixture = spawn(context, "RareDescentKitOwnerMismatchGT", false);
@@ -4073,7 +4047,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void rareDescentKitRejectsForgedSchemaAndIncompleteDoneCheckpoints(
             TestContext context) {
         Fixture fixture = spawn(context, "RareDescentKitSchemaRejectGT", false);
@@ -4110,8 +4084,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         cleanup(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "rareDescentKitPressureLive", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void rareDescentKitFullInventoryRetiresOnlyCheapPicksThenMinesDiamond(
             TestContext context) {
         Fixture fixture = spawn(context, "RareDescentKitPressureGT", false);
@@ -4136,8 +4109,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
         context.runAtEveryTick(() -> {
             if (service.state() == TaskState.FAILED
                     || service.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("descent-kit service ended as "
-                        + service.state() + ":" + service.failureReason());
+                context.throwGameTestException(Text.of("descent-kit service ended as "
+                        + service.state() + ":" + service.failureReason()));
             }
             if (service.state() != TaskState.COMPLETED) {
                 return;
@@ -4161,7 +4134,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                         "mission chest did not preserve the carried by-product ledger");
                 require(context, InventoryAction.countItem(bot, Items.WOODEN_PICKAXE) == 0
                                 && InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 5
-                                && bot.getInventory().main.stream()
+                                && bot.getInventory().getMainStacks().stream()
                                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                                 .allMatch(stack -> stack.getDamage() == 0),
                         "retirement left old cheap picks on the player or removed a fresh replacement");
@@ -4201,8 +4174,8 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
             }
             if (dig[0].state() == TaskState.FAILED
                     || dig[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException("post-kit diamond dig ended as "
-                        + dig[0].state() + ":" + dig[0].failureReason());
+                context.throwGameTestException(Text.of("post-kit diamond dig ended as "
+                        + dig[0].state() + ":" + dig[0].failureReason()));
             }
             if (dig[0].state() != TaskState.COMPLETED) {
                 return;
@@ -4327,7 +4300,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
 
     private static int usableMainDurability(
             AIPlayerEntity bot, net.minecraft.item.Item item) {
-        return bot.getInventory().main.stream()
+        return bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(item))
                 .mapToInt(MiningServiceTask::usableDurability)
                 .sum();
@@ -4602,7 +4575,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
     }
 
     private static int diamondRawDurability(AIPlayerEntity bot) {
-        return bot.getInventory().main.stream()
+        return bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.DIAMOND_PICKAXE))
                 .mapToInt(stack -> stack.getMaxDamage() - stack.getDamage())
                 .sum();
@@ -4634,7 +4607,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
     }
 
     private static long unusableCheapPickaxes(AIPlayerEntity bot) {
-        return bot.getInventory().main.stream()
+        return bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.WOODEN_PICKAXE)
                         || stack.isOf(Items.STONE_PICKAXE)
                         || stack.isOf(Items.IRON_PICKAXE))
@@ -4643,12 +4616,12 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
     }
 
     private static int freeMainSlots(AIPlayerEntity bot) {
-        return (int) bot.getInventory().main.stream().filter(ItemStack::isEmpty).count();
+        return (int) bot.getInventory().getMainStacks().stream().filter(ItemStack::isEmpty).count();
     }
 
     private static int firstEmptyMainSlot(AIPlayerEntity bot) {
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            if (bot.getInventory().main.get(slot).isEmpty()) {
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            if (bot.getInventory().getMainStacks().get(slot).isEmpty()) {
                 return slot;
             }
         }
@@ -4656,7 +4629,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
     }
 
     private static void exhaustAllStonePicks(AIPlayerEntity bot) {
-        bot.getInventory().main.stream()
+        bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .forEach(stack -> stack.setDamage(stack.getMaxDamage() - 1));
     }
@@ -4674,7 +4647,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
                 stage + " did not retain the exact future stick reserve");
         require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1,
                 stage + " lost the carried crafting table");
-        int channelDurability = bot.getInventory().main.stream()
+        int channelDurability = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(MiningServiceTask::usableDurability)
                 .sum();
@@ -4690,7 +4663,7 @@ public final class MiningServiceResourceGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

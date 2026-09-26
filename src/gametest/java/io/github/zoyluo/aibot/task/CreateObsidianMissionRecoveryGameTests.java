@@ -17,7 +17,6 @@ import io.github.zoyluo.aibot.persist.MissionRecord;
 import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
 import io.github.zoyluo.aibot.persist.MissionSpec;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -26,7 +25,7 @@ import net.minecraft.fluid.Fluids;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -46,13 +45,14 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
 
 /** Mission-level restart boundaries for the 32-block obsidian expedition. */
-public final class CreateObsidianMissionRecoveryGameTests implements FabricGameTest {
+public final class CreateObsidianMissionRecoveryGameTests {
     private static final int TARGET = 32;
     private static final int TARGET_BUDGET = 76800;
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void fifteenOfThirtyTwoRestoresMakeObsidianWithoutDroppingCheckpoint(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMission15GT", 15, true);
         Map<String, String> taskCheckpoint = taskCheckpoint(
@@ -67,7 +67,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void placedWaterDebtRestoresRecoveryBeforeAcquireWater(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMissionWaterGT", 15, false);
         BlockPos waterSource = fixture.start().east(2);
@@ -91,7 +91,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void thirtyOneOfThirtyTwoDoesNotCompleteOrReplaceCheckpoint(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMission31GT", 31, true);
         Map<String, String> taskCheckpoint = taskCheckpoint(
@@ -110,7 +110,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void eightBlockBoundaryRunsObsidianPolicyThenResumesOriginalThirtyTwo(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianBoundary8GT", 8, true);
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
@@ -157,7 +157,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void doneServiceCheckpointAcknowledgesBoundaryWithoutReplay(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceDoneGT", 8, true);
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
@@ -199,7 +199,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void doneServiceCheckpointAlreadyAcknowledgedResumesWithoutReplay(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceAlreadyAckGT", 8, true);
         Map<String, String> acknowledged = CreateObsidianTask.acknowledgeServiceBoundary(
@@ -237,7 +237,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void doneBoundaryEightCannotAcknowledgePendingBoundarySixteen(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianWrongBoundaryGT", 16, true);
         MiningServiceTask staleBoundary = new MiningServiceTask(
@@ -276,7 +276,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void staleTargetThirtyTwoBoundaryCannotImpersonateFreshRemainingEight(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianBoundaryWrongTargetGT", 8, true);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 16);
@@ -312,7 +312,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void staleActiveMakeTargetCannotImpersonateFreshRemainingEight(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMakeWrongTargetGT", 8, true);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 16);
@@ -339,7 +339,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void committedMakeDoneAdvancesToStockpileWithoutReplay(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMakeDoneStockpileGT", TARGET, true);
         Goal goal = new Goal.Stockpile(Items.OBSIDIAN, TARGET);
@@ -374,7 +374,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void interruptedBoundaryServiceRestoresOnlyServiceThenOriginalMake(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceRunningGT", 8, true);
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
@@ -419,7 +419,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void runningBoundaryRestorePreservesUnrelatedBuildMaterialPrefix(TestContext context) {
         String blueprint = "obsidian_restore_mixed_"
                 + UUID.randomUUID().toString().replace("-", "");
@@ -469,7 +469,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void runningBoundaryServiceCannotRestoreAfterBoundaryWasAcknowledged(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceOrphanGT", 8, true);
         Map<String, String> acknowledged = CreateObsidianTask.acknowledgeServiceBoundary(
@@ -492,7 +492,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void interruptedPreflightReplacesTheFreshPlannerCopyWithoutBoundaryAck(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightRestoreGT", 0, true);
 
@@ -535,7 +535,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void runningPreflightUsesCheckpointIdentityWhenFreshTargetIsUnknown(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightUnknownGT", 0, true);
         BlockPos depotPos = movePreflightReadinessToDepot(context, fixture);
@@ -578,7 +578,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void committedPreflightUsesCheckpointIdentityWhenFreshTargetIsUnknown(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightDoneUnknownGT", 0, true);
         MiningServiceTask committed = new MiningServiceTask(
@@ -620,7 +620,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void stalePreflightCannotUseUnknownFreshTargetAuthority(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightUnknownStaleGT", 0, true);
         movePreflightReadinessToDepot(context, fixture);
@@ -649,7 +649,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void compoundBuildCannotUseUnknownPreflightAuthority(TestContext context) {
         String blueprint = "obsidian_unknown_build_"
                 + UUID.randomUUID().toString().replace("-", "");
@@ -688,7 +688,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void compoundBuildWithFailedFreshPlanCannotReplayOnlyBoundaryAndMake(TestContext context) {
         String blueprint = "obsidian_unknown_boundary_build_"
                 + UUID.randomUUID().toString().replace("-", "");
@@ -731,7 +731,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void runningPreflightWithStaleTargetCannotReplaceFreshTarget(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightWrongTargetGT", 0, true);
         MiningServiceTask stale = new MiningServiceTask(
@@ -752,7 +752,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void committedStalePreflightCannotSkipFreshTargetPreflight(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightStaleDoneGT", 0, true);
         // Keep the fresh target32 plan at its preflight boundary. Without carried torches or the
@@ -794,7 +794,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void remainingTargetPreflightCanRepairAnAcknowledgedTransaction(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightRemainingGT", 8, true);
         Map<String, String> acknowledged = CreateObsidianTask.acknowledgeServiceBoundary(
@@ -819,7 +819,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void committedPreflightIsNotReplayedAfterCrashWindowRestore(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightDoneGT", 0, true);
         MiningServiceTask committed = new MiningServiceTask(
@@ -853,7 +853,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void searchPreservesHigherTierOreAndClosesTheStoneOnlyLeg(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchGoldGT", 0, true);
         BlockPos gold = fixture.start().north().up();
@@ -868,7 +868,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
                 fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
         ObsidianSearchCursor.initial(fixture.start(), 12).beginNextLeg().encode()
                 .forEach(checkpoint::put);
-        int stoneDamageBefore = fixture.bot().getInventory().main.stream()
+        int stoneDamageBefore = fixture.bot().getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(ItemStack::getDamage)
                 .sum();
@@ -888,15 +888,15 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
                     "stone-only obsidian search destroyed the finite gold obstruction");
             if (!"0".equals(task.checkpoint().get("steps_left"))) {
                 if (ticks.incrementAndGet() > 10) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "gold-facing search leg was not durably closed: "
-                                    + task.checkpoint());
+                                    + task.checkpoint()));
                 }
                 return;
             }
             require(context, "0".equals(task.checkpoint().get("direction")),
                     "gold obstruction changed the wrong search leg: " + task.checkpoint());
-            int stoneDamageAfter = fixture.bot().getInventory().main.stream()
+            int stoneDamageAfter = fixture.bot().getInventory().getMainStacks().stream()
                     .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                     .mapToInt(ItemStack::getDamage)
                     .sum();
@@ -906,7 +906,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void restoredScanReturnsToDedicatedRimBeforeBindingDisplacedObsidian(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianScanResumeGT", 0, true);
         var world = fixture.bot().getServerWorld();
@@ -946,8 +946,8 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("scan resume failed before its durable face: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("scan resume failed before its durable face: "
+                        + task.failureReason()));
             }
             Map<String, String> live = task.checkpoint();
             require(context, !live.containsKey("obsidian")
@@ -965,7 +965,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void auditScanDefersPreExistingObsidianAndBindsOnlyWaterBackedCell(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditGateGT", 0, true);
@@ -1005,7 +1005,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void auditedServiceRestartDoesNotPromoteUnrelatedInventoryObsidian(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditServiceRestartGT", 0, true);
@@ -1045,7 +1045,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void strictAuditSessionLossAndReplacementMismatchFailBeforeAnotherAction(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditSessionGT", 0, true);
@@ -1079,7 +1079,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void searchPhysicallyLightsTheDarkTrailBehindItsReachedFace(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchTorchGT", 0, true);
         var world = fixture.bot().getServerWorld();
@@ -1139,8 +1139,8 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("dark search trail failed before lighting: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("dark search trail failed before lighting: "
+                        + task.failureReason()));
             }
             if (fixture.bot().getServerWorld().getBlockState(fixture.start()).isOf(Blocks.TORCH)
                     && fixture.bot().getBlockPos().equals(fixture.start())) {
@@ -1165,7 +1165,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void threeBlockedDirectionsClearOnlyAfterTheOpenFaceIsReached(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchOneExitGT", 0, true);
         for (net.minecraft.util.math.Direction direction : List.of(
@@ -1187,8 +1187,8 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("one-exit search failed before moving: "
-                        + task.failureReason());
+                context.throwGameTestException(Text.of("one-exit search failed before moving: "
+                        + task.failureReason()));
             }
             if (!fixture.bot().getBlockPos().equals(fixture.start().west())) {
                 return;
@@ -1201,7 +1201,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void skyLitSearchDoesNotSpendTheUndergroundTorchReserve(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchSkyGT", 0, true);
         require(context, fixture.bot().getServerWorld().isSkyVisible(fixture.start()),
@@ -1219,7 +1219,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("sky-lit search failed: " + task.failureReason());
+                context.throwGameTestException(Text.of("sky-lit search failed: " + task.failureReason()));
             }
             if (!fixture.bot().getBlockPos().equals(fixture.start().north())) {
                 return;
@@ -1233,7 +1233,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void fourClosedSearchDirectionsFailTypedWithoutRotatingAsProgress(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchClosedGT", 0, true);
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.IRON_PICKAXE));
@@ -1255,7 +1255,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         ObsidianSearchCursor.initial(fixture.start(), 12).encode().forEach(checkpoint::put);
         CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
         task.start(fixture.bot());
-        int toolDamageBefore = fixture.bot().getInventory().main.stream()
+        int toolDamageBefore = fixture.bot().getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE)
                         || stack.isOf(Items.IRON_PICKAXE)
                         || stack.isOf(Items.DIAMOND_PICKAXE))
@@ -1291,7 +1291,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
             require(context, "0".equals(task.checkpoint().get("topology_epoch"))
                             && "390".equals(task.checkpoint().get("last_progress")),
                     "pure blocked rotation was recorded as topology/progress: " + task.checkpoint());
-            int toolDamageAfter = fixture.bot().getInventory().main.stream()
+            int toolDamageAfter = fixture.bot().getInventory().getMainStacks().stream()
                     .filter(stack -> stack.isOf(Items.STONE_PICKAXE)
                             || stack.isOf(Items.IRON_PICKAXE)
                             || stack.isOf(Items.DIAMOND_PICKAXE))
@@ -1313,7 +1313,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void darkRestoredClosedMaskOutranksMissingTorch(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianDarkClosedGT", 0, true);
         var world = fixture.bot().getServerWorld();
@@ -1377,7 +1377,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void pickupMicrostepsCloseTwoCellGapWithoutAcceptingAdjacentPathSnap(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupMicroGT", 0, true);
         BlockPos start = fixture.start();
@@ -1399,7 +1399,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void pickupCheckpointPhysicallyCollectsSurvivingItemEntity(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupEntityGT", 0, true);
         BlockPos target = fixture.start().add(2, 0, 1);
@@ -1416,8 +1416,8 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("obsidian pickup task ended as " + task.state()
-                        + ":" + task.failureReason() + " checkpoint=" + task.checkpoint());
+                context.throwGameTestException(Text.of("obsidian pickup task ended as " + task.state()
+                        + ":" + task.failureReason() + " checkpoint=" + task.checkpoint()));
             }
             int obsidian = InventoryAction.countItem(fixture.bot(), Items.OBSIDIAN);
             if (obsidian > 0 && !collisionPickupObserved.get()) {
@@ -1438,8 +1438,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "obsidianActiveBreakAirRestoreLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void airAtRestoredActiveBreakRebuildsProtectedPickupTransaction(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakAirGT", 1, true);
         BlockPos target = fixture.start().east();
@@ -1478,8 +1477,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "obsidianActiveBreakLiveSourceRestore", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void airAtRestoredActiveBreakRetainsLiveSourceForFreshProtectionWindow(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakWaterGT", 0, false);
@@ -1519,8 +1517,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "obsidianLastDurabilitySettlementLive", tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void rawTwoPickSettlesFinalBreakAndPhysicalPickupAtRawOne(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianLastDurabilityGT", 0, true);
         BlockPos target = fixture.start().east();
@@ -1529,7 +1526,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
 
         int diamondSlot = InventoryAction.findItem(fixture.bot(), Items.DIAMOND_PICKAXE)
                 .orElseThrow(() -> new IllegalStateException("fixture missing diamond pickaxe"));
-        ItemStack diamond = fixture.bot().getInventory().main.get(diamondSlot);
+        ItemStack diamond = fixture.bot().getInventory().getMainStacks().get(diamondSlot);
         diamond.setDamage(diamond.getMaxDamage() - 2);
 
         Map<String, String> checkpoint = activeBreakCheckpoint(
@@ -1550,9 +1547,9 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("last-durability obsidian task ended as "
+                context.throwGameTestException(Text.of("last-durability obsidian task ended as "
                         + task.state() + ":" + task.failureReason()
-                        + " checkpoint=" + task.checkpoint());
+                        + " checkpoint=" + task.checkpoint()));
             }
             int obsidian = InventoryAction.countItem(fixture.bot(), Items.OBSIDIAN);
             Map<String, String> live = task.checkpoint();
@@ -1641,7 +1638,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void unsafePickupEndpointIsRejectedWithoutDiscardingLedger(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupGuardGT", 0, true);
         BlockPos target = fixture.start().add(2, 0, 1);
@@ -1679,7 +1676,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
      * resume。修复前 resume 步被插到 fresh 计划的补给前缀之前,恢复任务第一 tick 以同因重败,
      * 三次零进展 replan 直接终结任务;修复后 CRAFT 补镐先执行,MAKE 以同一事务身份恢复。
      */
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void missingToolFailureWithOpenTransactionResuppliesBeforeResuming(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianResupplyFirstGT", 0, true);
@@ -2083,7 +2080,7 @@ public final class CreateObsidianMissionRecoveryGameTests implements FabricGameT
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

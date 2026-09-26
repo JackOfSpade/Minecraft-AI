@@ -12,12 +12,11 @@ import io.github.zoyluo.aibot.task.AbstractTask;
 import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskStatus;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.server.command.CommandOutput;
 import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
@@ -28,30 +27,30 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Runtime registry coverage for the public mine_ore argument contract. */
-public final class ToolRegistryMiningGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+public final class ToolRegistryMiningGameTests {
+    @GameTest(maxTicks = 20)
     public void aliasesResolveOnlyTheirRequestedOreFamily(TestContext context) {
         if (!OreScan.oreFamily(Blocks.DIAMOND_ORE)
                 .equals(ToolRegistry.oreTargetsFrom("minecraft:diamond"))) {
-            context.throwGameTestException("diamond alias resolved to the wrong ore family");
+            context.throwGameTestException(Text.of("diamond alias resolved to the wrong ore family"));
             return;
         }
         if (!OreScan.oreFamily(Blocks.IRON_ORE)
                 .equals(ToolRegistry.oreTargetsFrom("minecraft:raw_iron"))) {
-            context.throwGameTestException("raw_iron alias resolved to the wrong ore family");
+            context.throwGameTestException(Text.of("raw_iron alias resolved to the wrong ore family"));
             return;
         }
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void obsidianAndNonOreTargetsFailClosed(TestContext context) {
         requireRejected(context, "minecraft:obsidian", true);
         requireRejected(context, "minecraft:stone", false);
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void strictDirectHandlersRejectWithoutDisturbingActiveWork(TestContext context) {
         ActiveFixture fixture = activeFixture(context, "StripDirectGT");
         try {
@@ -68,7 +67,7 @@ public final class ToolRegistryMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void strictAssignTaskRejectsWithoutDisturbingActiveWork(TestContext context) {
         ActiveFixture fixture = activeFixture(context, "StripAssignGT");
         try {
@@ -91,7 +90,7 @@ public final class ToolRegistryMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void strictPlayerCommandsRejectWithoutDisturbingActiveWork(TestContext context) {
         ActiveFixture fixture = activeFixture(context, "StripCmdGT");
         try {
@@ -113,14 +112,14 @@ public final class ToolRegistryMiningGameTests implements FabricGameTest {
     private static void requireRejected(TestContext context, String id, boolean requireCorrection) {
         try {
             ToolRegistry.oreTargetsFrom(id);
-            context.throwGameTestException(id + " silently became a common-ore target");
+            context.throwGameTestException(Text.of(id + " silently became a common-ore target"));
         } catch (IllegalArgumentException expected) {
             String message = expected.getMessage();
             if (message == null || !message.contains("unsupported_mine_ore_target: " + id)) {
-                context.throwGameTestException("unexpected rejection for " + id + ": " + message);
+                context.throwGameTestException(Text.of("unexpected rejection for " + id + ": " + message));
             }
             if (requireCorrection && !message.contains("use achieve_goal with item=" + id)) {
-                context.throwGameTestException("missing achieve_goal correction for " + id);
+                context.throwGameTestException(Text.of("missing achieve_goal correction for " + id));
             }
         }
     }
@@ -227,7 +226,7 @@ public final class ToolRegistryMiningGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

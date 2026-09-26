@@ -26,7 +26,6 @@ import io.github.zoyluo.aibot.task.ResupplyTask;
 import io.github.zoyluo.aibot.task.Task;
 import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskState;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
@@ -34,7 +33,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.inventory.Inventory;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -49,10 +48,12 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.text.Text;
+import net.minecraft.entity.EquipmentSlot;
 
 /** Mission-level proof that a live ore batch restores its durable branch cursor. */
-public final class MiningCheckpointMissionGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+public final class MiningCheckpointMissionGameTests {
+    @GameTest(maxTicks = 140)
     public void trappedBlindBranchFailsMissionWithoutRecreatingOreDig(TestContext context) {
         String name = "OreBoundaryMissionGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -74,8 +75,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 if (!(active instanceof OreDigTask)
                         || !"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 55) {
-                        context.throwGameTestException(
-                                "fixture never reached OreDig: " + checkpointSummary(checkpoint));
+                        context.throwGameTestException(Text.of(
+                                "fixture never reached OreDig: " + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -151,13 +152,13 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 115) {
-                context.throwGameTestException(
-                        "trapped branch did not terminate on its first typed failure");
+                context.throwGameTestException(Text.of(
+                        "trapped branch did not terminate on its first typed failure"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void completedToolResupplyRetriesTheSameOreBatchWithoutParentReplan(
             TestContext context) {
         String name = "OreToolRetryGT";
@@ -197,8 +198,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     exhaustAllPickaxes(bot);
                     toolsExhausted.set(true);
                 } else if (context.getTick() > 45) {
-                    context.throwGameTestException(
-                            "fixture never reached OreDig: " + checkpointSummary(checkpoint));
+                    context.throwGameTestException(Text.of(
+                            "fixture never reached OreDig: " + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -241,10 +242,10 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!resumed.get()) {
                 if (GoalExecutor.INSTANCE.resultAfter(bot, resultBaseline).isPresent()
                         || context.getTick() > 125) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "post-resupply OreDig was not retried: active="
                                     + (active == null ? "idle" : active.getClass().getSimpleName())
-                                    + " checkpoint=" + checkpointSummary(checkpoint));
+                                    + " checkpoint=" + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -257,12 +258,12 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 165) {
-                context.throwGameTestException("retried ore mission did not complete");
+                context.throwGameTestException(Text.of("retried ore mission did not complete"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void diamond64BootstrapCoalUsesOrdinaryCheckpointAndPhysicalResupply(
             TestContext context) {
         String name = "DiamondBootstrapCoalGT";
@@ -359,9 +360,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             "could not keep a healthy target pickaxe in hand");
                     exhausted.set(true);
                 } else if (context.getTick() > 80) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "diamond bootstrap never reached ordinary coal OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -391,15 +392,15 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             }
             if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 200) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "bootstrap coal did not use one physical ordinary resupply: active="
                                 + (active == null ? "idle" : active.getClass().getSimpleName())
-                                + " checkpoint=" + checkpointSummary(checkpoint));
+                                + " checkpoint=" + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void diamond64RestoresMissionKitAndSealsInventoryBeforeFinalDescent(
             TestContext context) {
         String name = "DiamondFreshRareKitGT";
@@ -475,9 +476,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 sawRareKit.set(true);
             } else if (sawRareKit.get() && active != null
                     && !(active instanceof DescendToYTask)) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "a task was inserted between RARE_DESCENT_KIT and final descent: "
-                                + active.getClass().getSimpleName());
+                                + active.getClass().getSimpleName()));
                 return;
             }
             if (!restartedAtVerify.get()
@@ -542,15 +543,15 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 280) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "fresh rare kit never handed off to final descent: active="
                                 + (active == null ? "idle" : active.getClass().getSimpleName())
-                                + " checkpoint=" + checkpointSummary(checkpoint));
+                                + " checkpoint=" + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void ordinarySecondBatchOwnsItsSecondBoundedPhysicalChannelRepair(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "OrdinaryTwoRepairGT");
@@ -572,11 +573,11 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             }
             if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 290) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "ordinary second bounded repair did not complete: stage=" + stage.get()
                                 + " active="
                                 + (active == null ? "idle" : active.getClass().getSimpleName())
-                                + " checkpoint=" + checkpointSummary(checkpoint));
+                                + " checkpoint=" + checkpointSummary(checkpoint)));
                 return;
             }
             if (stage.get() == 0) {
@@ -680,7 +681,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void completedChannelToolResupplyRetriesSmallDiamondBatchWithoutParentReplan(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "OreChannelRetryGT");
@@ -726,9 +727,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     exhaustStonePickaxes(bot);
                     toolsExhausted.set(true);
                 } else if (context.getTick() > 80) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "small diamond fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -766,14 +767,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 205) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "small channel recovery did not complete: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void activeOreBatchRestoresSameMissionAndBranchCursor(TestContext context) {
         AIPlayerEntity bot = spawnPreparedMiner(context);
         giveRareMissionReadiness(bot, 8);
@@ -822,7 +823,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 110)
+    @GameTest(maxTicks = 110)
     public void satisfiedGoalRestoresFullyDeliveredOpenOreLedgerBeforeCommit(
             TestContext context) {
         String name = "FullyDeliveredOreLedgerGT";
@@ -842,8 +843,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                         || Integer.parseInt(checkpoint.getOrDefault(
                         "task.budget_used", "0")) <= 0) {
                     if (context.getTick() > 55) {
-                        context.throwGameTestException(
-                                "fully-delivered fixture never reached OreDig");
+                        context.throwGameTestException(Text.of(
+                                "fully-delivered fixture never reached OreDig"));
                     }
                     return;
                 }
@@ -887,13 +888,13 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 90) {
-                context.throwGameTestException(
-                        "fully-delivered open ledger never committed");
+                context.throwGameTestException(Text.of(
+                        "fully-delivered open ledger never committed"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void activeOreRestoreRejectsSameFamilyWithWrongLogicalBatchCount(
             TestContext context) {
         String name = "WrongOreBatchCountGT";
@@ -928,7 +929,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void satisfiedGoalRejectsInvalidActiveOreCheckpoint(TestContext context) {
         String name = "InvalidOreTaskGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -960,7 +961,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void satisfiedGoalRejectsInvalidMiningNamespace(TestContext context) {
         String name = "InvalidMiningGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -992,7 +993,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void bootstrapOrdinaryNamespaceIsDiscardedAtRareBoundaryZeroRestart(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareBootstrapNamespaceGT");
@@ -1054,9 +1055,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     GoalExecutor.INSTANCE.restoreRuntime(bot, withCheckpoint(runtime, restart));
                     stage.set(1);
                 } else if (context.getTick() > 80) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "bootstrap never reached ordinary OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -1081,9 +1082,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             bot, withCheckpoint(runtime, forged));
                     stage.set(2);
                 } else if (context.getTick() > 130) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "fresh plan never reached rare boundary zero: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -1120,7 +1121,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void ordinaryServiceRestoreRejectsWrongMission(TestContext context) {
         withRunningOrdinaryService(context, "OrdinaryWrongMissionGT",
                 (fixture, goal, runtime, checkpoint) -> {
@@ -1145,7 +1146,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void ordinaryFirstServiceWithoutMiningNamespaceRestoresFromOwnCursor(
             TestContext context) {
         withRunningOrdinaryService(context, "OrdinaryFirstServiceGT",
@@ -1178,7 +1179,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void interBatchServiceRestoreSurvivesFailedFreshPlan(TestContext context) {
         withRunningOrdinaryService(context, "OrdinaryFailedFreshPlanGT",
                 (fixture, goal, runtime, checkpoint) -> {
@@ -1233,7 +1234,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void terminalOrdinaryHandoffRestoresWithoutARepeatedOreSuccessor(
             TestContext context) {
         withRunningOrdinaryService(context, "TerminalOrdinaryHandoffGT",
@@ -1276,8 +1277,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "failedPrimaryServiceIsolation", tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void failedNonPocketPrimaryServiceReplansWithoutStaleReplay(
             TestContext context) {
         String name = "FailedPrimaryServiceGT";
@@ -1448,8 +1448,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServiceGuardSlotRepair", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void terminalServiceGuardAllowsSlotRepairAndRemainsDurable(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1484,8 +1483,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServiceGuardRepairRestart", tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void terminalServiceGuardSurvivesCraftRestartAndBlocksWithoutMutation(
             TestContext context) {
         String name = "TerminalGuardRepairRestartGT";
@@ -1601,14 +1599,13 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             }
             if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 190) {
-                context.throwGameTestException(
-                        "CraftTask never reached the guarded service");
+                context.throwGameTestException(Text.of(
+                        "CraftTask never reached the guarded service"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServiceGuardGeometry", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void foreignServiceIsBlockedButRotatedAxisIsAllowed(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1664,8 +1661,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServiceGuardCodec", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void settledServiceGuardNamespaceRestoresFailClosed(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1775,8 +1771,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServiceGuardRestoreCompatibility", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void settledServiceGuardRestoreCompatibilityIsStrict(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1931,8 +1926,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServiceReceiptCrossDimension", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void terminalReceiptKeepsOriginalReasonAcrossDimensionDrift(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1977,8 +1971,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalServicePocketDimensionSuspend", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void activePocketWaitsForItsPersistedDimensionBeforeRestore(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2052,8 +2045,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServicePocketKindAuthority", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void activePocketKindIsInferredAndSemanticFailureIsQuarantined(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2153,8 +2145,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "settledServiceGuardCausalReason", tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void guardOnlyRestoreUsesTypedReasonOnlyWhenCausalityIsUnique(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2209,8 +2200,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "terminalCapacityGuardOneShot", tickLimit = 240)
+    @GameTest(maxTicks = 240)
     public void terminalCapacityGuardSurvivesRepairRestartAndStopsGenericReplan(
             TestContext context) {
         String name = "TerminalCapacityGuardGT";
@@ -2355,12 +2345,12 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             }
             if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 225) {
-                context.throwGameTestException(
-                        "capacity repair never resumed its exact parent OreDig");
+                context.throwGameTestException(Text.of(
+                        "capacity repair never resumed its exact parent OreDig"));
             }
         });
     }
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void ordinaryServicePreservesProtectedRareMiningNamespace(TestContext context) {
         BlockPos rareFace = context.getAbsolutePos(new BlockPos(1, 2, 1));
         MiningCursor rareCursor = MiningCursor.initial(rareFace, 48);
@@ -2375,7 +2365,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void capacityParentIdentityRequiresExactDebitedFamilyFaceAndCursor(
             TestContext context) {
         String name = "CapacityParentIdentityGT";
@@ -2448,7 +2438,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void protectedRareRestoreKeepsByteExactRareAndAuxiliaryCapacityLedgers(
             TestContext context) {
         String name = "ProtectedRareAuxCapacityGT";
@@ -2518,7 +2508,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void protectedRareRestoreSettlesClosedAuxiliaryCapacityCommit(
             TestContext context) {
         String name = "ProtectedRareClosedAuxGT";
@@ -2602,8 +2592,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "failedAuxServiceIsolation", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void failedNonPocketAuxiliaryServiceReplansWithoutStaleReplay(
             TestContext context) {
         String name = "ProtectedRareFailedAuxGT";
@@ -2767,8 +2756,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
      * miningCheckpoint 更新,下一个成功提交的稀有批次在成功那一刻死于
      * rare_batch_commit_checkpoint_invalid。
      */
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "capacityOrphanRollback", tickLimit = 260)
+    @GameTest(maxTicks = 260)
     public void failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles(
             TestContext context) {
         String name = "CapacityOrphanRollbackGT";
@@ -2961,8 +2949,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "failedAuxServiceContinuation", tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void failedInterBatchAuxiliaryServicePreservesLaterSameFamilyCursor(
             TestContext context) {
         String name = "ProtectedRareAuxContinueGT";
@@ -3085,8 +3072,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "completedAuxServiceContinuation", tickLimit = 220)
+    @GameTest(maxTicks = 220)
     public void completedInterBatchServicePromotesAuxCursorToNextBatch(
             TestContext context) {
         String name = "ProtectedRareAuxCompleteGT";
@@ -3213,7 +3199,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 260)
+    @GameTest(maxTicks = 260)
     public void protectedRareOrdinaryFullInventorySchedulesAuxiliaryCapacityParent(
             TestContext context) {
         String name = "ProtectedRareAuxScheduleGT";
@@ -3242,9 +3228,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 if (!ordinaryCoal) {
                     if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                             || context.getTick() > 100) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "diamond64 bootstrap never reached a debt-free coal OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -3349,14 +3335,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 230) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "ordinary full inventory did not schedule auxiliary capacity service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void ordinaryServiceRestoreRejectsWrongFamilyOpenMiningNamespace(
             TestContext context) {
         withRunningOrdinaryService(context, "OrdinaryWrongFamilyGT",
@@ -3387,7 +3373,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 110)
+    @GameTest(maxTicks = 110)
     public void satisfiedGoalRejectsOrphanedOrdinaryBreakLedger(TestContext context) {
         String name = "SatisfiedOreLedgerGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -3404,9 +3390,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     || Integer.parseInt(checkpoint.getOrDefault(
                     "task.budget_used", "0")) <= 0) {
                 if (context.getTick() > 55) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "ordinary ledger fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -3432,7 +3418,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void ordinaryTaskAndMiningLedgerMustBeByteExact(TestContext context) {
         String name = "MismatchedOreLedgerGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -3448,8 +3434,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     || Integer.parseInt(checkpoint.getOrDefault(
                     "task.budget_used", "0")) <= 0) {
                 if (context.getTick() > 55) {
-                    context.throwGameTestException(
-                            "ledger mismatch fixture never reached OreDig");
+                    context.throwGameTestException(Text.of(
+                            "ledger mismatch fixture never reached OreDig"));
                 }
                 return;
             }
@@ -3473,7 +3459,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void standaloneOrdinaryMiningLedgerCannotBeDiscarded(TestContext context) {
         String name = "StandaloneOreLedgerGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -3489,8 +3475,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     || Integer.parseInt(checkpoint.getOrDefault(
                     "task.budget_used", "0")) <= 0) {
                 if (context.getTick() > 55) {
-                    context.throwGameTestException(
-                            "standalone mining-ledger fixture never reached OreDig");
+                    context.throwGameTestException(Text.of(
+                            "standalone mining-ledger fixture never reached OreDig"));
                 }
                 return;
             }
@@ -3517,7 +3503,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void rareServiceRestoreRejectsSelfConsistentWrongMissionTarget(TestContext context) {
         String name = "RareServiceWrongTargetGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -3569,7 +3555,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void boundaryRareServiceRestoreRejectsMissingMiningNamespace(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareServiceMissingMiningGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3589,9 +3575,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     fillWithGlassUntilFreeSlots(bot, 3);
                     firstBatchFed.set(true);
                 } else if (context.getTick() > 80) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "boundary-zero service never handed off to OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -3625,14 +3611,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 135) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "fixture never reached boundary-eight rare service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void firstRareTorchEpochFailureSchedulesOneServiceAndPreservesCursor(TestContext context) {
         String name = "RareTorchRetryGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -3650,9 +3636,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 70) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "rare retry fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -3688,14 +3674,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 110) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "first torch epoch failure did not hand off to service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void firstRareChannelToolFailureSchedulesOneServiceAndPreservesCursor(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareChannelRetryGT");
@@ -3796,9 +3782,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     equipHealthyIronPickaxe(context, bot);
                     exhausted.set(true);
                 } else if (context.getTick() > 100) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "rare channel fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -3855,14 +3841,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 serviceBudget.set(Integer.parseInt(checkpoint.get("mining.budget_used")));
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 560) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "rare channel failure did not complete service and resume: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void sameBatchEpochOneChannelToolFailureIsTerminalWithoutAnotherService(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareChannelRetryExhaustedGT");
@@ -3931,9 +3917,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     equipHealthyIronPickaxe(context, bot);
                     forged.set(true);
                 } else if (context.getTick() > 100) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "same-batch epoch-one channel fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -3954,14 +3940,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 560) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "same-batch epoch-one channel failure did not terminate: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void sameBatchEpochOneTorchExhaustionIsRejectedWithoutAnotherService(
             TestContext context) {
         String name = "RareTorchRetryExhaustedGT";
@@ -3978,9 +3964,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 70) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "same-batch epoch-one torch fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -4004,14 +3990,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 110) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "same-batch epoch-one torch failure did not terminate: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void epochOneTimeoutWithMissionMarginSurvivesAndDrawsOneEpoch(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareMarginTimeoutGT");
@@ -4049,9 +4035,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             bot, withCheckpoint(epochOne, exhausted));
                     forged.set(true);
                 } else if (context.getTick() > 200) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "margin timeout fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4076,16 +4062,16 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 560) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "epoch-one timeout with margin available terminated the mission: "
                                 + GoalExecutor.INSTANCE.lastResult(bot)
                                 .map(GoalResult::reason).orElse("no_result")
-                                + " " + checkpointSummary(checkpoint));
+                                + " " + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void epochTimeoutWithExhaustedMarginPoolStaysTerminal(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareMarginExhaustedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4125,9 +4111,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             bot, withCheckpoint(epochOne, exhausted));
                     forged.set(true);
                 } else if (context.getTick() > 200) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "exhausted margin fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4145,14 +4131,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 560) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "exhausted margin timeout did not terminate: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 800)
+    @GameTest(maxTicks = 800)
     public void committedRareBatchResetsEpochAndNextBatchCanRetry(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareEpochPerBatchGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4179,9 +4165,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     GoalExecutor.INSTANCE.restoreRuntime(bot, epochOne);
                     phase.set(1);
                 } else if (context.getTick() > 180) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "two-batch fixture never reached first OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4199,9 +4185,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             "first batch fixture did not deliver exactly eight diamonds");
                     phase.set(2);
                 } else if (context.getTick() > 220) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "first epoch-one batch did not resume: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4234,9 +4220,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     phase.set(3);
                 } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                         || context.getTick() > 360) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "first batch never committed at boundary eight: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4262,9 +4248,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     phase.set(4);
                 } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                         || context.getTick() > 680) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "boundary service never handed off to the second batch: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4284,14 +4270,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 760) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "second batch retry did not schedule its own service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void firstRareInventoryFailureSchedulesOneCursorBoundService(TestContext context) {
         String name = "RareInventoryServiceGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -4314,9 +4300,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             "fixture did not produce a factual full inventory");
                     filled.set(true);
                 } else if (context.getTick() > 80) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "rare inventory fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4353,14 +4339,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 115) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "first rare inventory failure did not hand off to service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void secondRareInventoryFailureIsTerminalWithoutAnotherService(TestContext context) {
         String name = "RareInventoryServiceExhaustedGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -4377,9 +4363,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 80) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "second inventory fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -4408,14 +4394,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 115) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "second inventory failure did not terminate: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void smallRareFullInventorySchedulesOneCursorBoundCapacityService(
             TestContext context) {
         String name = "SmallRareInventoryGT";
@@ -4438,9 +4424,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     fillWithGlassUntilFreeSlots(bot, 0);
                     filled.set(true);
                 } else if (context.getTick() > 65) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "small rare fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4476,14 +4462,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 110) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "small rare full inventory did not enter capacity service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsUndebitedDeclaredParent(
             TestContext context) {
         String name = "CapacityUndebitedParentGT";
@@ -4508,7 +4494,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsMissingDeclaredParent(
             TestContext context) {
         String name = "CapacityMissingParentGT";
@@ -4533,7 +4519,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsWatermarkAheadOfParent(
             TestContext context) {
         String name = "CapacityWatermarkAheadGT";
@@ -4561,7 +4547,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsWatermarkWithoutParent(
             TestContext context) {
         String name = "CapacityWatermarkOrphanGT";
@@ -4586,7 +4572,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRequiresWatermarkAtServiceBoundary(
             TestContext context) {
         String name = "CapacityWatermarkBoundaryGT";
@@ -4612,7 +4598,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsStaleFaceAtServiceBoundary(
             TestContext context) {
         String name = "CapacityFaceBoundaryGT";
@@ -4639,7 +4625,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsServiceCountAboveTarget(
             TestContext context) {
         String name = "CapacityServiceCountAheadGT";
@@ -4664,7 +4650,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void capacityServiceRestoreMigratesLegacyMissingWatermarkConservatively(
             TestContext context) {
         String name = "CapacityLegacyWatermarkGT";
@@ -4700,8 +4686,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "capacityCompletionSafetyIsolation", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void completedCapacityRetryDefersSafetyAndRestoresClosedCommit(
             TestContext context) {
         String name = "CapacityCompletionSafetyGT";
@@ -4733,9 +4718,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             "marked capacity parent did not replay its exact OreDig retry: "
                                     + checkpointSummary(running));
 
-                    for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-                        if (bot.getInventory().main.get(slot).isOf(Items.GLASS)) {
-                            bot.getInventory().main.set(slot, ItemStack.EMPTY);
+                    for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+                        if (bot.getInventory().getMainStacks().get(slot).isOf(Items.GLASS)) {
+                            bot.getInventory().getMainStacks().set(slot, ItemStack.EMPTY);
                             break;
                         }
                     }
@@ -4798,8 +4783,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "goalExecutorPocketFailureStrict", tickLimit = 650)
+    @GameTest(maxTicks = 650)
     public void satisfiedGoalRestoresPocketFirstThenFailsWithOriginalTypedReason(
             TestContext context) {
         String name = "GoalPocketTypedFailureGT";
@@ -4830,9 +4814,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             "active-pocket fixture did not fill inventory");
                     filled.set(true);
                 } else if (context.getTick() > 80) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "active-pocket fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -4847,9 +4831,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 if (!committedPocket) {
                     if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                             || context.getTick() > 300) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "capacity service never committed a disposal pocket: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -4893,16 +4877,16 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
 
             if (runtime.active() != null
                     && !"MINING_SERVICE".equals(checkpoint.get("task_kind"))) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "active pocket escaped into generic replan: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
                 return;
             }
             GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElse(null);
             if (result == null) {
                 if (context.getTick() > 610) {
-                    context.throwGameTestException(
-                            "unreachable restored pocket did not terminate");
+                    context.throwGameTestException(Text.of(
+                            "unreachable restored pocket did not terminate"));
                 }
                 return;
             }
@@ -4921,7 +4905,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void usedSmallRareCapacityDebitMakesTheSecondFullInventoryTerminal(
             TestContext context) {
         String name = "SmallRareCapacityExhaustedGT";
@@ -4938,9 +4922,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 80) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "small rare exhaustion fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -4971,14 +4955,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 115) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "used small-rare capacity debit did not terminate: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 150)
+    @GameTest(maxTicks = 150)
     public void advancedCapacityWorkFaceSchedulesSecondServiceAcrossRestart(
             TestContext context) {
         String name = "SmallRareCapacityFaceProgressGT";
@@ -4996,9 +4980,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!restored.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 80) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "work-face progress fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -5056,14 +5040,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 130) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "work-face capacity retry did not enter its second service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void capacityServiceCountCapRejectsAnotherProgressedHandoff(
             TestContext context) {
         String name = "SmallRareCapacityCountCapGT";
@@ -5080,9 +5064,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!restored.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 80) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "capacity cap fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -5120,14 +5104,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (context.getTick() > 120) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "capacity service-count cap did not terminate the retry: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 170)
+    @GameTest(maxTicks = 170)
     public void progressedCapacityRetrySchedulesSecondServiceAcrossRestart(
             TestContext context) {
         String name = "SmallRareCapacityProgressGT";
@@ -5145,9 +5129,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!restored.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 80) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "progressed capacity fixture never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -5197,14 +5181,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 145) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "progressed capacity retry did not enter its second service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 160)
+    @GameTest(maxTicks = 160)
     public void diamond64TailOfOneRestartsAndAdvancesItsRareResourceEpoch(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "Diamond64TailEpochGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5223,9 +5207,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
                     if (context.getTick() > 90) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "diamond64 tail never reached OreDig: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -5290,14 +5274,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 135) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "diamond64 tail epoch did not hand off to service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 320)
+    @GameTest(maxTicks = 320)
     public void diamond64RestoreReplaysOnlyFourItemsBeforeBoundaryEight(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "Diamond64PartialBatchRestoreGT");
@@ -5319,18 +5303,18 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 4));
                     phase.set(1);
                 } else if (context.getTick() > 160) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "diamond64 partial fixture never reached first OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
             if (phase.get() == 1) {
                 if (!"4".equals(checkpoint.get("task.delivered"))) {
                     if (context.getTick() > 190) {
-                        context.throwGameTestException(
+                        context.throwGameTestException(Text.of(
                                 "first OreDig never published delivered=4: "
-                                        + checkpointSummary(checkpoint));
+                                        + checkpointSummary(checkpoint)));
                     }
                     return;
                 }
@@ -5376,15 +5360,14 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 285) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "restored partial batch never handed off at boundary8: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningServiceMissionRestoreStrict", tickLimit = 520)
+    @GameTest(maxTicks = 520)
     public void serviceRestartReturnsToSavedFaceBeforeSecondDiamondBatch(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context);
         AIPlayerEntity bot = fixture.bot();
@@ -5433,9 +5416,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                                     == cobblestoneBaseline,
                             "fixture did not retain the exact 17-block cobblestone excess");
-                    require(context, bot.getInventory().offHand.getFirst().isEmpty(),
+                    require(context, bot.getEquippedStack(EquipmentSlot.OFFHAND).isEmpty(),
                             "fixture offhand was not empty before seal setup");
-                    bot.getInventory().offHand.set(0, new ItemStack(Items.DIRT, 2));
+                    bot.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.DIRT, 2));
                     bot.getInventory().markDirty();
                     protectedCobblestone.set(cobblestoneBaseline);
                     InventoryAction.giveItem(bot, new ItemStack(Items.TUFF, 64));
@@ -5449,9 +5432,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     prepareDisposalPocket(bot, fixture.face(), Direction.WEST);
                     firstBatchFed.set(true);
                 } else if (context.getTick() > 150) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "boundary-zero service never handed off to first OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -5531,8 +5514,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     sawLocalService.set(true);
                     restarted.set(true);
                 } else if (context.getTick() > 300) {
-                    context.throwGameTestException("boundary-eight service never opened a local pocket: "
-                            + checkpointSummary(checkpoint));
+                    context.throwGameTestException(Text.of("boundary-eight service never opened a local pocket: "
+                            + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -5552,8 +5535,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8));
                     secondBatchFed.set(true);
                 } else if (context.getTick() > 450) {
-                    context.throwGameTestException("restored service never handed off: "
-                            + checkpointSummary(checkpoint));
+                    context.throwGameTestException(Text.of("restored service never handed off: "
+                            + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -5586,12 +5569,12 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 500) {
-                context.throwGameTestException("restored two-batch mission did not complete");
+                context.throwGameTestException(Text.of("restored two-batch mission did not complete"));
             }
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 100)
+    @GameTest(maxTicks = 100)
     public void replanBudgetAndProgressSnapshotRoundTrip(TestContext context) {
         String name = "ReplanCheckpointGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -5954,10 +5937,10 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
 
     private static InventorySnapshot snapshotInventory(AIPlayerEntity bot) {
         java.util.List<ItemStack> stacks = new java.util.ArrayList<>();
-        bot.getInventory().main.forEach(stack -> stacks.add(stack.copy()));
-        bot.getInventory().offHand.forEach(stack -> stacks.add(stack.copy()));
+        bot.getInventory().getMainStacks().forEach(stack -> stacks.add(stack.copy()));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.OFFHAND).copy());
         return new InventorySnapshot(java.util.List.copyOf(stacks),
-                bot.getInventory().selectedSlot);
+                bot.getInventory().getSelectedSlot());
     }
 
     private static Map<String, String> withOpenGuardedPocket(
@@ -6027,9 +6010,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                     fillWithGlassUntilFreeSlots(bot, 1);
                     firstBatchFed.set(true);
                 } else if (context.getTick() > 65) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "ordinary fixture never reached first OreDig batch: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -6042,9 +6025,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 probe.accept(fixture, goal, runtime, checkpoint);
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 130) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "ordinary fixture never reached running service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
@@ -6073,9 +6056,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                             "capacity fixture did not produce a full inventory");
                     filled.set(true);
                 } else if (context.getTick() > 70) {
-                    context.throwGameTestException(
+                    context.throwGameTestException(Text.of(
                             "capacity fixture never reached OreDig: "
-                                    + checkpointSummary(checkpoint));
+                                    + checkpointSummary(checkpoint)));
                 }
                 return;
             }
@@ -6090,9 +6073,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                 probe.accept(bot, goal, runtime, checkpoint);
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 120) {
-                context.throwGameTestException(
+                context.throwGameTestException(Text.of(
                         "capacity fixture never reached its marked service: "
-                                + checkpointSummary(checkpoint));
+                                + checkpointSummary(checkpoint)));
             }
         });
     }
@@ -6307,12 +6290,10 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
     }
 
     private static void clearCarriedInventory(AIPlayerEntity bot) {
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            bot.getInventory().main.set(slot, ItemStack.EMPTY);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            bot.getInventory().getMainStacks().set(slot, ItemStack.EMPTY);
         }
-        for (int slot = 0; slot < bot.getInventory().offHand.size(); slot++) {
-            bot.getInventory().offHand.set(slot, ItemStack.EMPTY);
-        }
+        bot.equipStack(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
         bot.getInventory().markDirty();
         bot.getActionPack().stopAll();
     }
@@ -6382,10 +6363,10 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
 
     private static void exhaustAllPickaxes(AIPlayerEntity bot) {
         java.util.stream.Stream.concat(
-                        bot.getInventory().main.stream(),
-                        bot.getInventory().offHand.stream())
+                        bot.getInventory().getMainStacks().stream(),
+                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                 .filter(stack -> !stack.isEmpty()
-                        && stack.getItem() instanceof net.minecraft.item.PickaxeItem)
+                        && stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES))
                 .forEach(stack -> stack.setDamage(stack.getMaxDamage() - 1));
         bot.getInventory().markDirty();
     }
@@ -6394,8 +6375,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
         InventoryAction.findItem(bot, Items.STONE_PICKAXE)
                 .ifPresent(slot -> InventoryAction.equipFromSlot(bot, slot));
         java.util.stream.Stream.concat(
-                        bot.getInventory().main.stream(),
-                        bot.getInventory().offHand.stream())
+                        bot.getInventory().getMainStacks().stream(),
+                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .forEach(stack -> stack.setDamage(stack.getMaxDamage() - 1));
         bot.getInventory().markDirty();
@@ -6412,8 +6393,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
 
     private static boolean hasUsableStonePickaxe(AIPlayerEntity bot) {
         return java.util.stream.Stream.concat(
-                        bot.getInventory().main.stream(),
-                        bot.getInventory().offHand.stream())
+                        bot.getInventory().getMainStacks().stream(),
+                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                 .anyMatch(stack -> stack.isOf(Items.STONE_PICKAXE)
                         && io.github.zoyluo.aibot.task.MiningServiceTask
                         .usableDurability(stack) > 0);
@@ -6421,8 +6402,8 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
 
     private static int totalUsableStonePickaxeDurability(AIPlayerEntity bot) {
         return java.util.stream.Stream.concat(
-                        bot.getInventory().main.stream(),
-                        bot.getInventory().offHand.stream())
+                        bot.getInventory().getMainStacks().stream(),
+                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                 .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
                 .mapToInt(MiningServiceTask::usableDurability)
                 .sum();
@@ -6440,7 +6421,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
     }
 
     private static int freeMainSlots(AIPlayerEntity bot) {
-        return (int) bot.getInventory().main.stream().filter(ItemStack::isEmpty).count();
+        return (int) bot.getInventory().getMainStacks().stream().filter(ItemStack::isEmpty).count();
     }
 
     private static int countItem(Inventory inventory, Item item) {
@@ -6496,7 +6477,7 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 
@@ -6554,9 +6535,9 @@ public final class MiningCheckpointMissionGameTests implements FabricGameTest {
                                      int selectedSlot) {
         private boolean matches(AIPlayerEntity bot) {
             java.util.List<ItemStack> current = new java.util.ArrayList<>();
-            current.addAll(bot.getInventory().main);
-            current.addAll(bot.getInventory().offHand);
-            if (selectedSlot != bot.getInventory().selectedSlot
+            current.addAll(bot.getInventory().getMainStacks());
+            current.add(bot.getEquippedStack(EquipmentSlot.OFFHAND));
+            if (selectedSlot != bot.getInventory().getSelectedSlot()
                     || current.size() != stacks.size()) {
                 return false;
             }

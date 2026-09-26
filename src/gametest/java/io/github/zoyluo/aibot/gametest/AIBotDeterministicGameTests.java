@@ -3,15 +3,15 @@ package io.github.zoyluo.aibot.gametest;
 import io.github.zoyluo.aibot.goal.Goal;
 import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
 import io.github.zoyluo.aibot.persist.MissionSpec;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.List;
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /**
  * Minimal world-backed smoke tests for the isolated GameTest source set.
@@ -19,15 +19,15 @@ import java.util.Set;
  * <p>These tests deliberately avoid random state, external services and AIBot persistence so a
  * failure always reflects the compiled mod/runtime rather than a reused world.</p>
  */
-public final class AIBotDeterministicGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+public final class AIBotDeterministicGameTests {
+    @GameTest(maxTicks = 20)
     public void blockMutationIsVisible(TestContext context) {
         context.setBlockState(1, 1, 1, Blocks.STONE);
         context.expectBlock(Blocks.STONE, 1, 1, 1);
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void scheduledAssertionRunsAtExpectedTick(TestContext context) {
         context.setBlockState(2, 1, 2, Blocks.OAK_PLANKS);
         context.runAtTick(2, () -> {
@@ -36,7 +36,7 @@ public final class AIBotDeterministicGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void blockedEndpointPrefersNearestUpperStandOverDeeperCave(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(1, 3, 1));
         BlockPos requested = start.add(3, 0, 0);
@@ -59,13 +59,13 @@ public final class AIBotDeterministicGameTests implements FabricGameTest {
 
         var result = new AStarPathfinder(world, start, requested, 1_000, 50L, false, false).findPath();
         if (!result.success() || !requested.up().equals(result.resolvedGoal())) {
-            context.throwGameTestException("blocked endpoint resolved away from nearest upper stand: "
-                    + result.resolvedGoal() + " reason=" + result.reason());
+            context.throwGameTestException(Text.of("blocked endpoint resolved away from nearest upper stand: "
+                    + result.resolvedGoal() + " reason=" + result.reason()));
         }
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void missionSpecsRoundTripWithBootstrappedRegistries(TestContext context) {
         List<Goal> goals = List.of(
                 new Goal.HaveItem(Items.IRON_INGOT, 3),
@@ -81,7 +81,7 @@ public final class AIBotDeterministicGameTests implements FabricGameTest {
         for (Goal goal : goals) {
             Goal restored = MissionSpec.fromGoal(goal).toGoal().orElseThrow();
             if (!goal.equals(restored)) {
-                context.throwGameTestException("MissionSpec round-trip mismatch for " + goal);
+                context.throwGameTestException(Text.of("MissionSpec round-trip mismatch for " + goal));
             }
         }
         context.complete();

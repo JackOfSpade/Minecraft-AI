@@ -9,7 +9,6 @@ import io.github.zoyluo.aibot.mode.CapabilityRuntime;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -17,7 +16,7 @@ import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -29,10 +28,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.text.Text;
 
 /** Live regressions for preserving a mining mission across a hostile cave opening. */
-public final class MiningHostileRecoveryGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+public final class MiningHostileRecoveryGameTests {
+    @GameTest(maxTicks = 40)
     public void blindStripRotatesAtUnsupportedCaveLipBeforeFalling(TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningOpenDropGT");
         AIPlayerEntity bot = fixture.bot();
@@ -89,8 +89,7 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningHostileRecovery", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void unmarkedStraightLegRejectsWrongSideAndOwnsItsFrontBarricade(
             TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningUnmarkedBarricadeGT");
@@ -135,8 +134,7 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningHostileRecovery", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void markerOnlyRerouteRejectsStandableGeometricReverseWithoutMutation(
             TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningMarkerOnlyBarricadeGT");
@@ -190,11 +188,10 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            // This long live-entity sequence builds beyond EMPTY_STRUCTURE's tiny template.
-            // Keep it out of the short sibling batch so a neighbouring context cannot complete
-            // and clear one of these deliberately retained hostiles before the final assertion.
-            batchId = "miningHostileRecoveryLong", tickLimit = 500)
+    // This long live-entity sequence builds beyond EMPTY_STRUCTURE's tiny template.
+    // Keep it out of the short sibling batch so a neighbouring context cannot complete
+    // and clear one of these deliberately retained hostiles before the final assertion.
+    @GameTest(maxTicks = 500)
     public void oreDigRetreatsAndPermanentlyBarricadesFourHostiles(TestContext context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
@@ -301,8 +298,8 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         context.runAtEveryTick(() -> {
             DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
             if (mining.state() == TaskState.FAILED || mining.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("mining cursor ended during hostile recovery: "
-                        + mining.state() + ":" + mining.failureReason());
+                context.throwGameTestException(Text.of("mining cursor ended during hostile recovery: "
+                        + mining.state() + ":" + mining.failureReason()));
             }
             if (!isSealed(context, fixture.gateFeet())
                     || !isSealed(context, fixture.gateFeet().up())
@@ -310,8 +307,8 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
                     || TaskManager.INSTANCE.pausedDepth(bot) != 0
                     || TaskManager.INSTANCE.getActive(bot).orElse(null) != mining) {
                 if (ticks.incrementAndGet() > 420) {
-                    context.throwGameTestException("barricade did not seal and resume: active="
-                            + TaskManager.INSTANCE.status(bot));
+                    context.throwGameTestException(Text.of("barricade did not seal and resume: active="
+                            + TaskManager.INSTANCE.status(bot)));
                 }
                 return;
             }
@@ -369,8 +366,7 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "miningHostileRecovery", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void oneBlockCannotCommitATwoCellMiningBarricade(TestContext context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeOneBlockGT");
         AIPlayerEntity bot = fixture.bot();
@@ -420,7 +416,7 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void survivalGuardPausesMissionInstanceInsteadOfFailingIt(TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "GuardPauseGT");
         AIPlayerEntity bot = fixture.bot();
@@ -443,7 +439,7 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
         finish(context, fixture);
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void pausedWorkOnlyResumesAfterThreatAndDamageClear(TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "ResumeGateGT");
         AIPlayerEntity bot = fixture.bot();
@@ -578,7 +574,7 @@ public final class MiningHostileRecoveryGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

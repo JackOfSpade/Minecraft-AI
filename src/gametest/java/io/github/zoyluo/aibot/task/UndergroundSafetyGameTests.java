@@ -10,7 +10,6 @@ import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -18,7 +17,7 @@ import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -29,10 +28,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /** Deterministic regressions for the bounded underground safety contracts. */
-public final class UndergroundSafetyGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+public final class UndergroundSafetyGameTests {
+    @GameTest(maxTicks = 20)
     public void emergencyShelterRejectsAnUnstableOriginBeforeWorldMutation(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -58,8 +58,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "ShelterOriginGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void emergencyShelterCannotCompleteBeforeRoofAndAllSidesArePhysicallySealed(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -81,8 +80,8 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         int[] sealedAt = {-1};
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
             }
             if (sealedAt[0] < 0 && shell.stream().allMatch(pos -> isSealed(context, pos))) {
                 sealedAt[0] = task.elapsedTicks();
@@ -100,8 +99,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void emergencyShelterBuildsAFoundationFromASingleSupportedLanding(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         for (int dx = -3; dx <= 3; dx++) {
@@ -130,8 +128,8 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         int[] sealedAt = {-1};
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("single-pillar shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("single-pillar shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 if (sealedAt[0] < 0 && shelterShell(feet).stream()
@@ -152,8 +150,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void emergencyShelterRejectsInsufficientFoundationBudgetBeforeWorldMutation(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -183,7 +180,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
                 "unexpected shelter preflight reason: " + task.failureReason());
         require(context, required.stream().allMatch(pos -> context.getWorld().getBlockState(pos).isAir()),
                 "shelter preflight mutated the world before rejecting its budget");
-        int remaining = bot.getInventory().main.stream()
+        int remaining = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.DIRT))
                 .mapToInt(ItemStack::getCount)
                 .sum();
@@ -196,8 +193,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "ShelterBudgetGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void partialShelterFailureOpensOwnedDoorwayBeforePublishingFailure(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -237,8 +233,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 120)
+    @GameTest(maxTicks = 120)
     public void displacedPartialShelterReleasesItsStaleAnchorWithoutSpinning(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -278,8 +273,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void shelterMaterialLossBeforeFirstPlacementFailsWithoutInventingExitDebt(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -317,8 +311,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void shelterExitNeverMinesPreexistingWorldBlocks(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -337,8 +330,8 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("ownership shelter ended as " + task.state()
-                        + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("ownership shelter ended as " + task.state()
+                        + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
@@ -354,8 +347,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void shelterSkipsFoundationHiddenBelowAPreexistingTunnelWall(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -391,8 +383,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterLifecycleLive", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void shelterOpensItsOwnedDoorBeforeFailingWhenExitSupportDisappears(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -448,7 +439,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void standableStepRejectsUnsupportedAndWaterCells(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 5, 12));
         clearVolume(context, start, 3);
@@ -473,7 +464,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "StandableStepGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void adjacentFakePlayerStepRejectsAnEntityOccupiedLanding(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(12, 5, 12));
         preparePlatform(context, start, 2);
@@ -482,7 +473,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             finish(context, bot, "OccupiedStepGT");
-            context.throwGameTestException("failed to create occupied landing fixture");
+            context.throwGameTestException(Text.of("failed to create occupied landing fixture"));
             return;
         }
         zombie.setPersistent();
@@ -500,7 +491,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "OccupiedStepGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void descendLateralDetourRejectsUnsupportedAirShaft(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 8, 20));
         clearVolume(context, start, 4);
@@ -526,7 +517,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescendDetourGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void descendLateralDetourKeepsHeadingInsteadOfReversingInTwoCellLoop(
             TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(12, 8, 20));
@@ -557,7 +548,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescendHeadingGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void descendLateralDetourNeverReplaysATraversedDirectedEdge(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 8, 20));
         clearVolume(context, start, 4);
@@ -602,8 +593,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescendEdgeLoopGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "descendCollapsedDetourLive", tickLimit = 180)
+    @GameTest(maxTicks = 180)
     public void descendRollsBackCollapsedSameLevelDetourAndRetriesFromOrigin(
             TestContext context) {
         BlockPos origin = context.getAbsolutePos(new BlockPos(24, 10, 20));
@@ -663,8 +653,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "descendCollapsedUpperDetourRestore", tickLimit = 80)
+    @GameTest(maxTicks = 80)
     public void descendRestoredUpperDetourRetreatsDownToPersistedOrigin(
             TestContext context) {
         BlockPos origin = context.getAbsolutePos(new BlockPos(30, 9, 20));
@@ -715,7 +704,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescendUpperRollbackGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 60)
+    @GameTest(maxTicks = 60)
     public void descendLateralBudgetResetsOnlyAfterAConfirmedLowerLanding(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 12, 20));
         List<BlockPos> upperCorridor = new ArrayList<>();
@@ -769,7 +758,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescBudgetGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void descendNeverCompletesBelowTarget(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(20, 12, 20));
         clearVolume(context, start, 10);
@@ -796,7 +785,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescendOvershootGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void standableCornerOverlapRecentersOnceAndRetiresStaleRoute(
             TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(5, 12, 5));
@@ -857,7 +846,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "CornerOverlapSuffocationGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void partialHeightDirtPathTopDoesNotTriggerSuffocation(TestContext context) {
         BlockPos support = context.getAbsolutePos(new BlockPos(5, 12, 12));
         clearVolume(context, support.up(), 3);
@@ -892,7 +881,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DirtPathSuffocationGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void strictSuffocationDenialFallsBackToAdjacentPhysicalExit(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(12, 12, 12));
         clearVolume(context, start, 4);
@@ -943,7 +932,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "StrictSuffocationGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void descendPhysicallyRetreatsWhenGravelReoccupiesItsHeadInStrictSurvival(
             TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(20, 12, 12));
@@ -1035,7 +1024,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DescendGravelGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 40)
+    @GameTest(maxTicks = 40)
     public void descendMinesItsOccupiedHeadWhenNoPhysicalRetreatLandingExists(
             TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(20, 12, 4));
@@ -1074,7 +1063,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void defensiveCombatDoesNotDescendTowardAHostileBelowItsAnchorFloor(TestContext context) {
         BlockPos anchor = context.getAbsolutePos(new BlockPos(4, 8, 4));
         preparePlatform(context, anchor, 2);
@@ -1088,7 +1077,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
         if (zombie == null) {
             finish(context, bot, "DefCombatGT");
-            context.throwGameTestException("failed to create defensive hostile fixture");
+            context.throwGameTestException(Text.of("failed to create defensive hostile fixture"));
             return;
         }
         zombie.setPersistent();
@@ -1113,7 +1102,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
         finish(context, bot, "DefCombatGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 140)
+    @GameTest(maxTicks = 140)
     public void unreachableDropRecoveryTypedFailsWithinItsNoProgressBudget(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, start, 2);
@@ -1219,7 +1208,7 @@ public final class UndergroundSafetyGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

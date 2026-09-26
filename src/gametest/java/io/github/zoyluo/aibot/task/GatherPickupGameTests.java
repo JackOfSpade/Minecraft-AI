@@ -4,14 +4,13 @@ import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.stat.Stats;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -20,11 +19,11 @@ import net.minecraft.world.GameMode;
 
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.text.Text;
 
 /** Strict-survival regressions for Gather's physical drop transaction. */
-public final class GatherPickupGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "gatherPickupLive", tickLimit = 500)
+public final class GatherPickupGameTests {
+    @GameTest(maxTicks = 500)
     public void vanillaPickupStatSurvivesConcurrentLogConsumption(TestContext context) {
         Fixture fixture = fixture(context, "GatherPickupStatGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -59,8 +58,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "gatherPickupLive", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void realMissRetriesNearbyResourceBeforeRegionalRoam(TestContext context) {
         Fixture fixture = fixture(context, "GatherMissRetryGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -113,8 +111,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "gatherPickupLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void reachableHarvestRestartsImmediatelyAfterSafetyPause(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeHarvestGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -157,8 +154,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "gatherPickupLive", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void safetyDisplacementReselectsInsteadOfMiningRemoteTarget(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeReselectGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -193,8 +189,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "gatherPickupLive", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void outOfReachRetryCannotRenewHarvestDeadline(TestContext context) {
         Fixture fixture = fixture(context, "GatherHarvestLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -236,8 +231,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "gatherPickupLive", tickLimit = 400)
+    @GameTest(maxTicks = 400)
     public void repeatedSafetyResumeCannotRenewHarvestDeadline(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -315,7 +309,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
             task.tick(bot);
         }
         if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-            context.throwGameTestException("gather ended as " + task.state() + ":" + task.failureReason());
+            context.throwGameTestException(Text.of("gather ended as " + task.state() + ":" + task.failureReason()));
         }
     }
 
@@ -326,7 +320,7 @@ public final class GatherPickupGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 

@@ -1,22 +1,22 @@
 package io.github.zoyluo.aibot.goal;
 
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 
 import java.util.List;
 import java.util.Map;
+import net.minecraft.text.Text;
 
 /**
  * World-runtime coverage for the player-visible "start from nothing" tool chain, without an
  * LLM-crafted step list. Needs bootstrapped Minecraft registries (Items/Blocks), so it lives
  * here rather than in src/test.
  */
-public final class GoalPlannerChainedCraftingGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+public final class GoalPlannerChainedCraftingGameTests {
+    @GameTest(maxTicks = 20)
     public void twoStonePickaxesFromNothingPlansLogsWoodToolStoneAndFinalCraft(TestContext context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(
                 null,
@@ -63,7 +63,7 @@ public final class GoalPlannerChainedCraftingGameTests implements FabricGameTest
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

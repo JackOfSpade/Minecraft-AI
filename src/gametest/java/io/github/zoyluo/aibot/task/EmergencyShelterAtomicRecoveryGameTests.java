@@ -5,7 +5,6 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -15,7 +14,7 @@ import net.minecraft.entity.mob.HuskEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -26,11 +25,11 @@ import net.minecraft.world.GameMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /** Physical regressions for the shelter's ordered build and sealed healing transaction. */
-public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAnchorSettlement", tickLimit = 500)
+public final class EmergencyShelterAtomicRecoveryGameTests {
+    @GameTest(maxTicks = 500)
     public void movingEdgeAnchorSettlesBeforeEnvelopePlacement(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -58,8 +57,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         context.runAtEveryTick(() -> {
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("moving-edge shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("moving-edge shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             if (isSealed(context, feet.east()) && isSealed(context, feet.east().up())) {
@@ -75,8 +74,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterBuildSettlement", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void buildTimeEdgeCorrectionPlacesWallInSameTick(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -106,8 +104,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         finish(context, bot, "ShelterBuildSettleGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterWallBlocker", tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void persistentHostileGetsOneStrikeThenForcesPhysicalExit(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -154,8 +151,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterCenteredEntityGuard", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void occupiedCenteredAabbRejectsSameCellCorrection(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -168,7 +164,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
                 context.getWorld(), SpawnReason.COMMAND);
         if (occupant == null) {
             finish(context, bot, "ShelterCenteredEntityGuardGT");
-            context.throwGameTestException("failed to create centered non-living occupant");
+            context.throwGameTestException(Text.of("failed to create centered non-living occupant"));
             return;
         }
         occupant.refreshPositionAndAngles(
@@ -189,8 +185,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         finish(context, bot, "ShelterCenteredEntityGuardGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAiPressure", tickLimit = 600)
+    @GameTest(maxTicks = 600)
     public void aiEnabledClosePressureUsesOneStrikeAndLowHealthBotSurvives(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -258,8 +253,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterForbiddenWallBlocker", tickLimit = 300)
+    @GameTest(maxTicks = 300)
     public void meleeForbiddenOccupiedEgressUsesAlternateOwnedExit(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -270,7 +264,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
                 context.getWorld(), SpawnReason.COMMAND);
         if (creeper == null) {
             finish(context, bot, "ShelterForbiddenBlockerGT");
-            context.throwGameTestException("failed to create forbidden wall blocker");
+            context.throwGameTestException(Text.of("failed to create forbidden wall blocker"));
             return;
         }
         creeper.setPersistent();
@@ -320,8 +314,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAtomicRecovery", tickLimit = 700)
+    @GameTest(maxTicks = 700)
     public void adjacentSecondShelterReusesResidualRoofWithoutBlockedSupportJump(
             TestContext context) {
         BlockPos firstFeet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -341,8 +334,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
             context.getWorld().setTimeOfDay(1000L);
             if (second[0] == null) {
                 if (first.state() == TaskState.FAILED || first.state() == TaskState.CANCELLED) {
-                    context.throwGameTestException("first shelter ended as " + first.state()
-                            + ":" + first.failureReason() + " " + first.describe());
+                    context.throwGameTestException(Text.of("first shelter ended as " + first.state()
+                            + ":" + first.failureReason() + " " + first.describe()));
                     return;
                 }
                 BlockPos firstRoof = firstFeet.up(2);
@@ -381,9 +374,9 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
 
             if (second[0].state() == TaskState.FAILED
                     || second[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException("adjacent second shelter ended as "
+                context.throwGameTestException(Text.of("adjacent second shelter ended as "
                         + second[0].state() + ":" + second[0].failureReason()
-                        + " " + second[0].describe());
+                        + " " + second[0].describe()));
                 return;
             }
             if (second[0].state() != TaskState.COMPLETED) {
@@ -399,8 +392,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAtomicRecovery", tickLimit = 2000)
+    @GameTest(maxTicks = 2000)
     public void lowHealthShelterConsumesBackpackFoodAndHealsBeforeOpening(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -421,8 +413,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         context.runAtEveryTick(() -> {
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("sealed-eat shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("sealed-eat shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
@@ -471,8 +463,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterFoodNineteenEfficiency", tickLimit = 1600)
+    @GameTest(maxTicks = 1600)
     public void foodNineteenWaitsForNaturalHealingWithoutEating(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -490,8 +481,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         context.runAtEveryTick(() -> {
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("food-19 shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("food-19 shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
@@ -526,8 +517,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterNightHoldIsolation", tickLimit = 1200)
+    @GameTest(maxTicks = 1200)
     public void surfaceShelterStaysSealedUntilDaylight(TestContext context) {
         BlockPos feet = highSurfaceFeet(context);
         preparePlatform(context, feet, 4);
@@ -548,8 +538,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
 
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("night shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("night shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             if (!daylightReleased[0] && task.describe().contains("phase=HOLD")) {
@@ -603,24 +593,21 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterCanopyNightIsolation", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void leafCanopyStillUsesSurfaceNightHold(TestContext context) {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.OAK_LEAVES, 4,
                 "ShelterCanopyNightGT", "leaf canopy");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterOverhangNightIsolation", tickLimit = 500)
+    @GameTest(maxTicks = 500)
     public void shallowOverhangStillUsesSurfaceNightHold(TestContext context) {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.STONE, 5,
                 "ShelterOverhangNightGT", "shallow overhang");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterObservationIsolation", tickLimit = 1000)
+    @GameTest(maxTicks = 1000)
     public void observedHostileAtHeadPortIsResealedBeforeFootDoorOpens(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -638,8 +625,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         context.runAtEveryTick(() -> {
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException("observation shelter ended as " + task.state()
-                        + ":" + task.failureReason() + " " + task.describe());
+                context.throwGameTestException(Text.of("observation shelter ended as " + task.state()
+                        + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             if (hostile[0] == null && !resealObserved[0]
@@ -648,8 +635,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
                 HuskEntity husk = EntityType.HUSK.create(
                         context.getWorld(), SpawnReason.COMMAND);
                 if (husk == null) {
-                    context.throwGameTestException(
-                            "failed to create shelter observation hostile");
+                    context.throwGameTestException(Text.of(
+                            "failed to create shelter observation hostile"));
                     return;
                 }
                 husk.setPersistent();
@@ -684,8 +671,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAllPressureIsolation", tickLimit = 1400)
+    @GameTest(maxTicks = 1400)
     public void fourSidedPressureForcesPhysicalExitOnlyAfterGlobalDeadline(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -760,8 +746,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterObservationResealFailureIsolation", tickLimit = 1400)
+    @GameTest(maxTicks = 1400)
     public void missingResealBlockCannotPublishTerminalInsideShelter(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -784,9 +769,9 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
                     && task.describe().contains("phase=HOLD")) {
                 require(context, InventoryAction.countItem(bot, Items.NETHERRACK) == 0,
                         "exact-material fixture retained a reseal block");
-                for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-                    if (bot.getInventory().main.get(slot).isEmpty()) {
-                        bot.getInventory().main.set(slot, new ItemStack(Items.STICK, 64));
+                for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+                    if (bot.getInventory().getMainStacks().get(slot).isEmpty()) {
+                        bot.getInventory().getMainStacks().set(slot, new ItemStack(Items.STICK, 64));
                     }
                 }
                 bot.getInventory().markDirty();
@@ -821,8 +806,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAtomicRecovery", tickLimit = 30)
+    @GameTest(maxTicks = 30)
     public void waterRescueAndBodyFluidRejectFixedShelterAdmission(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -854,8 +838,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         finish(context, bot, "ShelterWaterAdmissionGT");
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE,
-            batchId = "shelterAtomicRecovery", tickLimit = 900)
+    @GameTest(maxTicks = 900)
     public void sealedShelterReopensOwnedDoorBeforeEnvironmentalFailure(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -884,8 +867,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
             if (!injected[0] && (task.state() == TaskState.FAILED
                     || task.state() == TaskState.CANCELLED
                     || task.state() == TaskState.COMPLETED)) {
-                context.throwGameTestException("shelter ended before water injection: "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of("shelter ended before water injection: "
+                        + task.state() + ":" + task.failureReason()));
                 return;
             }
             if (!injected[0] || task.state() == TaskState.RUNNING) {
@@ -935,8 +918,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
         context.runAtEveryTick(() -> {
             context.getWorld().setTimeOfDay(18000L);
             if (task.state() != TaskState.RUNNING) {
-                context.throwGameTestException(fixtureName + " shelter ended during night HOLD: "
-                        + task.state() + ":" + task.failureReason());
+                context.throwGameTestException(Text.of(fixtureName + " shelter ended during night HOLD: "
+                        + task.state() + ":" + task.failureReason()));
                 return;
             }
             if (!task.describe().contains("phase=HOLD")) {
@@ -1085,7 +1068,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests implements FabricGame
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }

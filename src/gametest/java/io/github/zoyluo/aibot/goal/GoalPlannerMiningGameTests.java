@@ -6,12 +6,11 @@ import io.github.zoyluo.aibot.mining.MiningBudget;
 import io.github.zoyluo.aibot.mining.ToolTier;
 import io.github.zoyluo.aibot.task.EmergencyShelterTask;
 import io.github.zoyluo.aibot.task.MiningServiceTask;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
-import net.minecraft.test.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
 
@@ -19,10 +18,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.text.Text;
 
 /** World-runtime coverage for mining plans that need bootstrapped Minecraft registries. */
-public final class GoalPlannerMiningGameTests implements FabricGameTest {
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+public final class GoalPlannerMiningGameTests {
+    @GameTest(maxTicks = 20)
     public void surfaceCoalWithoutVisibleOreDescendsToRockLayerBeforeMining(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.MineOre(Set.of(Blocks.COAL_ORE), 8));
         int descend = indexOf(plan, step -> step.kind() == GoalStep.Kind.DESCEND_TO_Y);
@@ -45,7 +45,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void nestedCoalTorchProvisionDoesNotRepeatTheSameLayerHandoff(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.OBSIDIAN, 32));
         int acquireWater = indexOf(plan, step -> step.kind() == GoalStep.Kind.ACQUIRE_WATER);
@@ -68,7 +68,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void emptyInventoryObsidianGoalBuildsDiamondPickaxeChain(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.OBSIDIAN, 32));
         int hunt = indexOf(plan, step -> step.kind() == GoalStep.Kind.HUNT);
@@ -199,7 +199,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void mixedLogFuelInventoryOnlyPlansTheFamilyDeficit(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.of(
                 Items.OAK_LOG, 1,
@@ -230,7 +230,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void preparedObsidianExpeditionAcquiresWaterBeforeMining(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.of(
                 Items.BUCKET, 1,
@@ -256,7 +256,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void missingStoneSwordHasAnIndependentPreWaterBudget(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.BUCKET, 1),
@@ -289,7 +289,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void preparedWaterBucketSkipsDuplicateAcquisition(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.of(
                 Items.WATER_BUCKET, 1,
@@ -314,7 +314,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void preparedSevenAndEightTorchesFundTheWholePreWaterDescentBatch(
             TestContext context) {
         Map<net.minecraft.item.Item, Integer> sevenTorches = Map.ofEntries(
@@ -393,7 +393,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void preparedObsidianKitStillPlansItsMissingCarriedCraftingTable(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.of(
                 Items.WATER_BUCKET, 1,
@@ -419,7 +419,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void obsidianReadinessUsesAggregateDiamondPickDurability(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.of(
                 Items.WATER_BUCKET, 1,
@@ -471,7 +471,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void rawTwoDiamondPickUsesLooseDiamondsBeforeAddingAnAcquisitionPick(
             TestContext context) {
         Map<net.minecraft.item.Item, Integer> noLooseDiamonds = Map.ofEntries(
@@ -549,7 +549,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void lowAndExactNetheriteDurabilityUseTheSameObsidianContract(TestContext context) {
         Map<net.minecraft.item.Item, Integer> lowKit = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
@@ -606,7 +606,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void mixedDiamondAndNetheriteDurabilityUsesTheAggregateBoundary(TestContext context) {
         Map<net.minecraft.item.Item, Integer> exactKit = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
@@ -653,7 +653,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void undergroundObsidianReplanUsesCarriedKitWithoutSurfaceWork(TestContext context) {
         Map<net.minecraft.item.Item, Integer> carried = Map.ofEntries(
                 Map.entry(Items.RAW_IRON, 2),
@@ -691,7 +691,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void undergroundObsidianReplanConsumesMixedLogFuelAsOneFamily(TestContext context) {
         Map<net.minecraft.item.Item, Integer> carried = Map.ofEntries(
                 Map.entry(Items.OAK_LOG, 6),
@@ -725,7 +725,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void undergroundObsidianReplanUsesBirchLogsForMissingStickPlanks(TestContext context) {
         // seed 3000 evidence inventory at the hostile-cave interruption: one stray oak plank must
         // not bind the eight-stick readiness contract to oak when nine carried birch logs can make
@@ -761,7 +761,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void mixedLogFamiliesAggregateBeforePlanningOneRemainingPlankGap(
             TestContext context) {
         Map<net.minecraft.item.Item, Integer> mixedLogs = Map.of(
@@ -802,7 +802,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void undergroundRawMeatCannotMasqueradeAsMiningFoodReserve(TestContext context) {
         Map<net.minecraft.item.Item, Integer> carried = Map.of(
                 Items.BEEF, 64,
@@ -825,7 +825,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void netheriteTierDoesNotSilentlyDowngrade(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HavePickaxeTier(ToolTier.NETHERITE));
         require(context, !plan.success(), "netherite acquisition is not implemented and must remain explicit");
@@ -834,7 +834,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void surfaceDiamondStackAddsExactlyFourteenRawLogShelterReserve(
             TestContext context) {
         Goal goal = new Goal.HaveItem(Items.DIAMOND, 64);
@@ -863,7 +863,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void surfaceDiamondStackTopsUpThirteenButNotFourteenShelterBlocks(
             TestContext context) {
         Goal goal = new Goal.HaveItem(Items.DIAMOND, 64);
@@ -896,7 +896,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void surfaceDiamondStackDoesNotTreatPlanksAsHardShelterReserve(
             TestContext context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
@@ -915,7 +915,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void undergroundDiamondStackResumeDoesNotGatherShelterWood(
             TestContext context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
@@ -932,7 +932,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void surfaceObsidianStackAlsoReservesFourteenShelterBlocks(
             TestContext context) {
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 32);
@@ -958,7 +958,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void partialSurfaceObsidianStackRetainsThirtyTwoItemShelterContract(
             TestContext context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
@@ -975,7 +975,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void diamondStackStrictlyAlternatesBoundedBatchesAndServiceCheckpoints(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 64));
 
@@ -1153,7 +1153,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void diamondStackReplansExactNetHuntAfterShelterConsumesRawMeat(
             TestContext context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(
@@ -1184,7 +1184,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void nearBrokenStonePicksStillPlanRareKitImmediatelyBeforeFinalDescent(
             TestContext context) {
         MiningBudget rareBudget = MiningBudget.forQuota(64, true, ToolTier.IRON);
@@ -1217,7 +1217,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void subStackRareTargetsRetainDirectFreshCraftWithoutTarget64Kit(
             TestContext context) {
         for (int target : List.of(8, 32, 63)) {
@@ -1242,7 +1242,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void runningKitRestoreKeepsOnlyServiceAndProvenDescentTail(TestContext context) {
         Set<net.minecraft.block.Block> diamonds = Set.of(Blocks.DIAMOND_ORE);
         MiningBudget rareBudget = MiningBudget.forQuota(64, true, ToolTier.IRON);
@@ -1278,7 +1278,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void sixteenDiamondsUseExactlyTwoBatchesWithOneCumulativeCheckpoint(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 16));
 
@@ -1287,7 +1287,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void preparedAtMineLayerStartsDirectlyWithDiamondBatch(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.of(
                 Items.IRON_PICKAXE, 5,
@@ -1325,7 +1325,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void partialDiamondStackRetainsLongMissionServiceIdentity(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.DIAMOND, 55),
@@ -1363,7 +1363,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void fourDeliveredDiamondsResumeToTheNextEightBoundary(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.DIAMOND, 4),
@@ -1410,7 +1410,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void finalDiamondAtMineLayerServicesMissingChannelToolsBeforeOreDig(TestContext context) {
         Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.DIAMOND, 63),
@@ -1437,7 +1437,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void emptyInventoryBootstrapIsNotMistakenForOptionalProvisioning(TestContext context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.DIAMOND, 64));
         int ironPickaxe = indexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
@@ -1450,7 +1450,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
         context.complete();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE, tickLimit = 20)
+    @GameTest(maxTicks = 20)
     public void directFoodGoalDoesNotInheritExpeditionBestEffortFlag(TestContext context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
                 new Goal.Food(4), Map.of(), 64, 64,
@@ -1639,7 +1639,7 @@ public final class GoalPlannerMiningGameTests implements FabricGameTest {
 
     private static void require(TestContext context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(message);
+            context.throwGameTestException(Text.of(message));
         }
     }
 }
