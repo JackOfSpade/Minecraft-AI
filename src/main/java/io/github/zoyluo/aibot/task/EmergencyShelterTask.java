@@ -1524,12 +1524,20 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     /** True when this world has at least one exact-state bot-owned shelter artifact to remove
-     *  within a reasonable travel distance of this bot. */
+     *  within a reasonable travel distance of this bot, that this bot could actually claim right
+     *  now. This must mirror {@link #claimPendingCleanup}'s own eligibility exactly (including the
+     *  claim-lease check): a debt already leased to a different bot is not "pending" for this one.
+     *  Reporting true for a debt this bot cannot claim used to make DangerWatcher dispatch a
+     *  {@code ShelterCleanupTask} that immediately discovered nothing claimable and completed as a
+     *  no-op -- burning that bot's one scan-priority slot on housekeeping instead of falling through
+     *  to resume its own paused mission work in the same scan. */
     static boolean hasPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
+            int now = bot.getServer().getTicks();
             return PENDING_CLEANUPS.values().stream()
-                    .anyMatch(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot));
+                    .anyMatch(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot)
+                            && debt.claimAvailableTo(bot.getUuid(), now));
         }
     }
 
@@ -1643,6 +1651,28 @@ public final class EmergencyShelterTask extends AbstractTask {
             if (PENDING_CLEANUPS.get(debt.id()) == debt && debt.claimedBy(bot.getUuid())) {
                 debt.release(bot.getUuid());
             }
+        }
+    }
+
+    /**
+     * Explicit despawn (GameTest's end-of-test teardown, and the equivalent production command)
+     * permanently removes this bot: it will never return to finish or hand off its own shelter
+     * debt. In production the placed blocks are still real and worth leaving for another bot to
+     * claim, so this only runs under the GameTest harness ({@link #AGE_PRUNING_ENABLED}).
+     * There it closes a gap {@link #CLEANUP_MAX_AGE_TICKS} cannot: two unrelated fixtures placed
+     * close together in the same batch, tested back-to-back, produce a debt only moments old --
+     * far too young to be pruned by age -- yet within {@link #CLEANUP_MAX_DISTANCE} of the very
+     * next bot spawned. Forgetting it at despawn removes the leak at its source instead of relying
+     * on distance/age to reject it downstream, which is what let it slip into some other test's
+     * DangerWatcher scan as a phantom "shelter_cleanup" task.
+     */
+    public static void forgetCleanupDebtsOwnedBy(AIPlayerEntity bot) {
+        if (!AGE_PRUNING_ENABLED) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        synchronized (PENDING_CLEANUPS) {
+            PENDING_CLEANUPS.values().removeIf(debt -> debt.owner.equals(uuid));
         }
     }
 

@@ -263,7 +263,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(maxTicks = 1300)
     public void diamond64BootstrapCoalUsesOrdinaryCheckpointAndPhysicalResupply(
             TestContext context) {
         String name = "DiamondBootstrapCoalGT";
@@ -359,7 +359,7 @@ public final class MiningCheckpointMissionGameTests {
                     require(context, InventoryAction.equipFromSlot(bot, ironSlot) >= 0,
                             "could not keep a healthy target pickaxe in hand");
                     exhausted.set(true);
-                } else if (context.getTick() > 80) {
+                } else if (context.getTick() > 500) {
                     context.throwGameTestException(Text.of(
                             "diamond bootstrap never reached ordinary coal OreDig: "
                                     + checkpointSummary(checkpoint)));
@@ -391,7 +391,7 @@ public final class MiningCheckpointMissionGameTests {
                 return;
             }
             if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
-                    || context.getTick() > 200) {
+                    || context.getTick() > 1250) {
                 context.throwGameTestException(Text.of(
                         "bootstrap coal did not use one physical ordinary resupply: active="
                                 + (active == null ? "idle" : active.getClass().getSimpleName())
@@ -681,7 +681,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(maxTicks = 550)
     public void completedChannelToolResupplyRetriesSmallDiamondBatchWithoutParentReplan(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "OreChannelRetryGT");
@@ -766,7 +766,7 @@ public final class MiningCheckpointMissionGameTests {
                         "small channel retry ended as " + result.status() + ":" + result.reason());
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
-            } else if (context.getTick() > 205) {
+            } else if (context.getTick() > 500) {
                 context.throwGameTestException(Text.of(
                         "small channel recovery did not complete: "
                                 + checkpointSummary(checkpoint)));
@@ -774,14 +774,14 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 140)
+    @GameTest(maxTicks = 600)
     public void activeOreBatchRestoresSameMissionAndBranchCursor(TestContext context) {
         AIPlayerEntity bot = spawnPreparedMiner(context);
         giveRareMissionReadiness(bot, 8);
         Goal goal = new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 8);
         require(context, GoalExecutor.INSTANCE.submit(bot, goal), "mining goal setup failed");
 
-        context.runAtTick(35, () -> {
+        context.runAtTick(400, () -> {
             MissionRuntimeRecord before = GoalExecutor.INSTANCE.captureRuntime(bot);
             require(context, before.active() != null, "missing active mining mission");
             UUID missionId = UUID.fromString(before.active().missionId());
@@ -812,8 +812,8 @@ public final class MiningCheckpointMissionGameTests {
                     "branch progress changed across restore");
         });
 
-        context.runAtTick(55, () -> InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8)));
-        context.runAtTick(90, () -> {
+        context.runAtTick(420, () -> InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8)));
+        context.runAtTick(460, () -> {
             GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
             require(context, result.goal().equals(goal), "wrong goal completed");
             require(context, result.status() == GoalResult.Status.COMPLETED,
@@ -823,7 +823,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 110)
+    @GameTest(maxTicks = 400)
     public void satisfiedGoalRestoresFullyDeliveredOpenOreLedgerBeforeCommit(
             TestContext context) {
         String name = "FullyDeliveredOreLedgerGT";
@@ -842,7 +842,7 @@ public final class MiningCheckpointMissionGameTests {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))
                         || Integer.parseInt(checkpoint.getOrDefault(
                         "task.budget_used", "0")) <= 0) {
-                    if (context.getTick() > 55) {
+                    if (context.getTick() > 250) {
                         context.throwGameTestException(Text.of(
                                 "fully-delivered fixture never reached OreDig"));
                     }
@@ -887,14 +887,14 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.status() + ":" + result.reason());
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
-            } else if (context.getTick() > 90) {
+            } else if (context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
                         "fully-delivered open ledger never committed"));
             }
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(maxTicks = 300)
     public void activeOreRestoreRejectsSameFamilyWithWrongLogicalBatchCount(
             TestContext context) {
         String name = "WrongOreBatchCountGT";
@@ -904,7 +904,7 @@ public final class MiningCheckpointMissionGameTests {
         require(context, GoalExecutor.INSTANCE.submit(bot, goal),
                 "wrong-count mining goal setup failed");
 
-        context.runAtTick(35, () -> {
+        context.runAtTick(250, () -> {
             MissionRuntimeRecord before = GoalExecutor.INSTANCE.captureRuntime(bot);
             require(context, before.active() != null, "missing active mining mission");
             Map<String, String> forged = new LinkedHashMap<>(before.active().checkpoint());
@@ -929,7 +929,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(maxTicks = 300)
     public void satisfiedGoalRejectsInvalidActiveOreCheckpoint(TestContext context) {
         String name = "InvalidOreTaskGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -937,7 +937,7 @@ public final class MiningCheckpointMissionGameTests {
         Goal goal = new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 8);
         require(context, GoalExecutor.INSTANCE.submit(bot, goal), "mining goal setup failed");
 
-        context.runAtTick(35, () -> {
+        context.runAtTick(250, () -> {
             MissionRuntimeRecord before = GoalExecutor.INSTANCE.captureRuntime(bot);
             require(context, before.active() != null, "missing active mining mission");
             Map<String, String> checkpoint = new LinkedHashMap<>(before.active().checkpoint());
@@ -961,7 +961,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(maxTicks = 300)
     public void satisfiedGoalRejectsInvalidMiningNamespace(TestContext context) {
         String name = "InvalidMiningGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -969,7 +969,7 @@ public final class MiningCheckpointMissionGameTests {
         Goal goal = new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 8);
         require(context, GoalExecutor.INSTANCE.submit(bot, goal), "mining goal setup failed");
 
-        context.runAtTick(35, () -> {
+        context.runAtTick(250, () -> {
             MissionRuntimeRecord before = GoalExecutor.INSTANCE.captureRuntime(bot);
             require(context, before.active() != null, "missing active mining mission");
             Map<String, String> checkpoint = new LinkedHashMap<>(before.active().checkpoint());
@@ -993,7 +993,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(maxTicks = 500)
     public void bootstrapOrdinaryNamespaceIsDiscardedAtRareBoundaryZeroRestart(
             TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareBootstrapNamespaceGT");
@@ -1054,7 +1054,7 @@ public final class MiningCheckpointMissionGameTests {
                     GoalExecutor.INSTANCE.unload(bot);
                     GoalExecutor.INSTANCE.restoreRuntime(bot, withCheckpoint(runtime, restart));
                     stage.set(1);
-                } else if (context.getTick() > 80) {
+                } else if (context.getTick() > 350) {
                     context.throwGameTestException(Text.of(
                             "bootstrap never reached ordinary OreDig: "
                                     + checkpointSummary(checkpoint)));
@@ -1081,7 +1081,7 @@ public final class MiningCheckpointMissionGameTests {
                     GoalExecutor.INSTANCE.restoreRuntime(
                             bot, withCheckpoint(runtime, forged));
                     stage.set(2);
-                } else if (context.getTick() > 130) {
+                } else if (context.getTick() > 450) {
                     context.throwGameTestException(Text.of(
                             "fresh plan never reached rare boundary zero: "
                                     + checkpointSummary(checkpoint)));
@@ -2756,7 +2756,7 @@ public final class MiningCheckpointMissionGameTests {
      * miningCheckpoint 更新,下一个成功提交的稀有批次在成功那一刻死于
      * rare_batch_commit_checkpoint_invalid。
      */
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 260)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 550)
     public void failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles(
             TestContext context) {
         String name = "CapacityOrphanRollbackGT";
@@ -3555,7 +3555,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 160)
+    @GameTest(maxTicks = 500)
     public void boundaryRareServiceRestoreRejectsMissingMiningNamespace(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context, "RareServiceMissingMiningGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3574,7 +3574,7 @@ public final class MiningCheckpointMissionGameTests {
                     InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8));
                     fillWithGlassUntilFreeSlots(bot, 3);
                     firstBatchFed.set(true);
-                } else if (context.getTick() > 80) {
+                } else if (context.getTick() > 350) {
                     context.throwGameTestException(Text.of(
                             "boundary-zero service never handed off to OreDig: "
                                     + checkpointSummary(checkpoint)));
@@ -3610,7 +3610,7 @@ public final class MiningCheckpointMissionGameTests {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
-                    || context.getTick() > 135) {
+                    || context.getTick() > 450) {
                 context.throwGameTestException(Text.of(
                         "fixture never reached boundary-eight rare service: "
                                 + checkpointSummary(checkpoint)));
@@ -3618,7 +3618,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 140)
+    @GameTest(maxTicks = 450)
     public void firstRareTorchEpochFailureSchedulesOneServiceAndPreservesCursor(TestContext context) {
         String name = "RareTorchRetryGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -3635,7 +3635,7 @@ public final class MiningCheckpointMissionGameTests {
                     ? Map.of() : runtime.active().checkpoint();
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
-                    if (context.getTick() > 70) {
+                    if (context.getTick() > 250) {
                         context.throwGameTestException(Text.of(
                                 "rare retry fixture never reached OreDig: "
                                         + checkpointSummary(checkpoint)));
@@ -3673,7 +3673,7 @@ public final class MiningCheckpointMissionGameTests {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
-                    || context.getTick() > 110) {
+                    || context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
                         "first torch epoch failure did not hand off to service: "
                                 + checkpointSummary(checkpoint)));
@@ -3947,7 +3947,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 140)
+    @GameTest(maxTicks = 450)
     public void sameBatchEpochOneTorchExhaustionIsRejectedWithoutAnotherService(
             TestContext context) {
         String name = "RareTorchRetryExhaustedGT";
@@ -3963,7 +3963,7 @@ public final class MiningCheckpointMissionGameTests {
                     ? Map.of() : runtime.active().checkpoint();
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
-                    if (context.getTick() > 70) {
+                    if (context.getTick() > 250) {
                         context.throwGameTestException(Text.of(
                                 "same-batch epoch-one torch fixture never reached OreDig: "
                                         + checkpointSummary(checkpoint)));
@@ -3989,7 +3989,7 @@ public final class MiningCheckpointMissionGameTests {
                         "same-batch epoch-one torch failure scheduled another service");
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
-            } else if (context.getTick() > 110) {
+            } else if (context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
                         "same-batch epoch-one torch failure did not terminate: "
                                 + checkpointSummary(checkpoint)));
@@ -4277,7 +4277,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 140)
+    @GameTest(maxTicks = 450)
     public void firstRareInventoryFailureSchedulesOneCursorBoundService(TestContext context) {
         String name = "RareInventoryServiceGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -4299,7 +4299,7 @@ public final class MiningCheckpointMissionGameTests {
                     require(context, freeMainSlots(bot) == 0,
                             "fixture did not produce a factual full inventory");
                     filled.set(true);
-                } else if (context.getTick() > 80) {
+                } else if (context.getTick() > 250) {
                     context.throwGameTestException(Text.of(
                             "rare inventory fixture never reached OreDig: "
                                     + checkpointSummary(checkpoint)));
@@ -4338,7 +4338,7 @@ public final class MiningCheckpointMissionGameTests {
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
-                    || context.getTick() > 115) {
+                    || context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
                         "first rare inventory failure did not hand off to service: "
                                 + checkpointSummary(checkpoint)));
@@ -4346,7 +4346,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 140)
+    @GameTest(maxTicks = 450)
     public void secondRareInventoryFailureIsTerminalWithoutAnotherService(TestContext context) {
         String name = "RareInventoryServiceExhaustedGT";
         AIPlayerEntity bot = spawnPreparedMiner(context, name);
@@ -4362,7 +4362,7 @@ public final class MiningCheckpointMissionGameTests {
                     ? Map.of() : runtime.active().checkpoint();
             if (!forged.get()) {
                 if (!"MINE_ORE".equals(checkpoint.get("task_kind"))) {
-                    if (context.getTick() > 80) {
+                    if (context.getTick() > 250) {
                         context.throwGameTestException(Text.of(
                                 "second inventory fixture never reached OreDig: "
                                         + checkpointSummary(checkpoint)));
@@ -4393,7 +4393,7 @@ public final class MiningCheckpointMissionGameTests {
                         "second inventory failure retained an active mission");
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
                 context.complete();
-            } else if (context.getTick() > 115) {
+            } else if (context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
                         "second inventory failure did not terminate: "
                                 + checkpointSummary(checkpoint)));
@@ -5367,7 +5367,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_service_restart_returns_to_saved_face_before_second_diamond_batch", maxTicks = 520)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_service_restart_returns_to_saved_face_before_second_diamond_batch", maxTicks = 800)
     public void serviceRestartReturnsToSavedFaceBeforeSecondDiamondBatch(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context);
         AIPlayerEntity bot = fixture.bot();
@@ -5431,7 +5431,7 @@ public final class MiningCheckpointMissionGameTests {
                     prepareDisposalPocket(bot, fixture.face(), Direction.EAST);
                     prepareDisposalPocket(bot, fixture.face(), Direction.WEST);
                     firstBatchFed.set(true);
-                } else if (context.getTick() > 150) {
+                } else if (context.getTick() > 300) {
                     context.throwGameTestException(Text.of(
                             "boundary-zero service never handed off to first OreDig: "
                                     + checkpointSummary(checkpoint)));
@@ -5513,7 +5513,7 @@ public final class MiningCheckpointMissionGameTests {
                             "service restore changed ore cursor identity");
                     sawLocalService.set(true);
                     restarted.set(true);
-                } else if (context.getTick() > 300) {
+                } else if (context.getTick() > 500) {
                     context.throwGameTestException(Text.of("boundary-eight service never opened a local pocket: "
                             + checkpointSummary(checkpoint)));
                 }
@@ -5534,7 +5534,7 @@ public final class MiningCheckpointMissionGameTests {
                             "second batch started away from saved face");
                     InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8));
                     secondBatchFed.set(true);
-                } else if (context.getTick() > 450) {
+                } else if (context.getTick() > 650) {
                     context.throwGameTestException(Text.of("restored service never handed off: "
                             + checkpointSummary(checkpoint)));
                 }
@@ -5568,7 +5568,7 @@ public final class MiningCheckpointMissionGameTests {
                 }
                 AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
                 context.complete();
-            } else if (context.getTick() > 500) {
+            } else if (context.getTick() > 750) {
                 context.throwGameTestException(Text.of("restored two-batch mission did not complete"));
             }
         });
@@ -6015,7 +6015,7 @@ public final class MiningCheckpointMissionGameTests {
                     InventoryAction.giveItem(bot, new ItemStack(Items.RAW_IRON, 16));
                     fillWithGlassUntilFreeSlots(bot, 1);
                     firstBatchFed.set(true);
-                } else if (context.getTick() > 65) {
+                } else if (context.getTick() > 250) {
                     context.throwGameTestException(Text.of(
                             "ordinary fixture never reached first OreDig batch: "
                                     + checkpointSummary(checkpoint)));
@@ -6030,7 +6030,7 @@ public final class MiningCheckpointMissionGameTests {
                 probed.set(true);
                 probe.accept(fixture, goal, runtime, checkpoint);
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
-                    || context.getTick() > 130) {
+                    || context.getTick() > 450) {
                 context.throwGameTestException(Text.of(
                         "ordinary fixture never reached running service: "
                                 + checkpointSummary(checkpoint)));

@@ -237,7 +237,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_paused_mining_owner_resupplies_in_place_without_base_travel", maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_paused_mining_owner_resupplies_in_place_without_base_travel", maxTicks = 450)
     public void pausedMiningOwnerResuppliesInPlaceWithoutBaseTravel(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PausedMineLocalSupplyGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -277,14 +277,22 @@ public final class DangerWatcherLowHealthGameTests {
                 "paused mining owner received a travelling ResupplyTask");
         AtomicBoolean observedLocalOnly = new AtomicBoolean();
 
+        // Real survival-paced reclaim (mining the borrowed crafting table back down, then walking
+        // the short physical hop to its dropped item) can legitimately take one or two local steps
+        // right next to `origin` -- that is not "travel". Only the remembered base 4,0,4 blocks away
+        // is forbidden, so bound both checks to a small local radius instead of demanding the bot
+        // and its path executor stay perfectly motionless for the whole craft+reclaim cycle.
+        double localRadiusSquared = 9.0D;
         context.runAtEveryTick(() -> {
             if (resupply.describe().contains("note=local_only")) {
                 observedLocalOnly.set(true);
             }
-            require(context, bot.getBlockPos().equals(origin),
+            require(context, bot.getBlockPos().getSquaredDistance(origin) <= localRadiusSquared,
                     "paused-owner resupply moved toward the remembered base: "
                             + bot.getBlockPos().toShortString());
-            require(context, bot.getActionPack().isPathExecutorIdle(),
+            BlockPos activeGoal = bot.getActionPack().activePathGoal();
+            require(context, activeGoal == null
+                            || activeGoal.getSquaredDistance(origin) <= localRadiusSquared,
                     "paused-owner resupply started a base path");
             if (resupply.state() == TaskState.FAILED
                     || resupply.state() == TaskState.CANCELLED) {

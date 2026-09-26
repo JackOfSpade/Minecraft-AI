@@ -26,6 +26,7 @@ import io.github.zoyluo.aibot.observe.TpsGuard;
 import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
 import io.github.zoyluo.aibot.persist.BotPersistence;
 import io.github.zoyluo.aibot.task.DangerWatcher;
+import io.github.zoyluo.aibot.task.EmergencyShelterTask;
 import io.github.zoyluo.aibot.task.EpisodeMemory;
 import io.github.zoyluo.aibot.task.NavSafetyNet;
 import io.github.zoyluo.aibot.task.StuckWatcher;
@@ -96,6 +97,10 @@ public final class RuntimeLifecycleCoordinator {
         IdleCoordinator.INSTANCE.onBotRemoved(bot);
         TaskManager.INSTANCE.onBotDespawn(bot);
         GoalExecutor.INSTANCE.unload(bot);
+        // GameTest-only (see EmergencyShelterTask#forgetCleanupDebtsOwnedBy): this bot is gone for
+        // good, so its own still-pending shelter cleanup debt can no longer be a real chore for
+        // another bot to inherit -- only a same-batch cross-test leak. No-op in production.
+        EmergencyShelterTask.forgetCleanupDebtsOwnedBy(bot);
         forgetBot(bot);
     }
 
