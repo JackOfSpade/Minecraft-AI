@@ -15,6 +15,11 @@ import java.util.Optional;
  * the aggro count fluctuating mid-flight, so a bot hovering near the trigger boundary does not
  * flicker in and out of a forced regroup every tick.
  *
+ * <p>The bot only ever runs to a player who is within {@link #MAX_REGROUP_DISTANCE} blocks: past
+ * that the run is too long to be a sensible retreat (it drags the fight along and leaves the work
+ * site), so the bot stands and fights with the ordinary combat logic instead. A retreat under way
+ * is abandoned if the player ends up beyond that distance.</p>
+ *
  * <p>This class holds no per-bot state of its own -- {@code currentlyRegrouping} is derived by the
  * caller from whether a {@link CombatRegroupTask} already owns (or is paused for) the bot, so there
  * is nothing here to leak or to clear on despawn/respawn.</p>
@@ -22,11 +27,13 @@ import java.util.Optional;
 final class CombatRegroupGuard {
     static final int AGGRO_THRESHOLD = 3;
     /** At or below this distance from the owning player, retreat never triggers. */
-    static final double NO_RETREAT_DISTANCE = 10.0D;
+    static final double NO_RETREAT_DISTANCE = 15.0D;
+    /** Beyond this distance from the owning player the bot never runs to them. */
+    static final double MAX_REGROUP_DISTANCE = 32.0D;
     /** Once triggered, a retreat continues until the bot is this close to the owning player. */
     static final double RETREAT_TARGET_DISTANCE = 5.0D;
     /** How far around the bot itself (not the player) hostiles are counted for the aggro check. */
-    private static final double AGGRO_SCAN_DISTANCE = 10.0D;
+    static final double AGGRO_SCAN_DISTANCE = 15.0D;
 
     private CombatRegroupGuard() {
     }
@@ -53,9 +60,13 @@ final class CombatRegroupGuard {
      * The single decision point, isolated from world/entity state so it is directly unit-testable.
      * A retreat already in progress keeps going until {@link #RETREAT_TARGET_DISTANCE}, even while
      * passing back through {@link #NO_RETREAT_DISTANCE} -- that threshold only gates whether a NEW
-     * retreat starts, not whether one already under way is allowed to finish.
+     * retreat starts, not whether one already under way is allowed to finish. Neither a new nor a
+     * running retreat is allowed while the player is farther than {@link #MAX_REGROUP_DISTANCE}.
      */
     static boolean shouldRegroup(double distanceToOwner, int aggroCount, boolean currentlyRegrouping) {
+        if (distanceToOwner > MAX_REGROUP_DISTANCE) {
+            return false;
+        }
         if (currentlyRegrouping) {
             return distanceToOwner > RETREAT_TARGET_DISTANCE;
         }

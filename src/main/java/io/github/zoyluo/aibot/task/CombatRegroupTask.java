@@ -61,6 +61,14 @@ public final class CombatRegroupTask extends AbstractTask {
         ServerPlayerEntity player = owner.get();
         strikeAnyAdjacentHostile(bot);
         double distance = bot.distanceTo(player);
+        if (distance > CombatRegroupGuard.MAX_REGROUP_DISTANCE) {
+            // The player moved (or the bot was pushed) out of range mid-retreat: a run that long
+            // is no longer a sensible fallback, so hand control back to ordinary combat.
+            bot.getActionPack().stopAll();
+            BotLog.danger(bot, "combat_regroup_owner_too_far", "distance", (int) distance);
+            complete();
+            return;
+        }
         if (distance <= CombatRegroupGuard.RETREAT_TARGET_DISTANCE) {
             bot.getActionPack().stopAll();
             BotLog.danger(bot, "combat_regroup_reached_owner", "distance", (int) distance);
