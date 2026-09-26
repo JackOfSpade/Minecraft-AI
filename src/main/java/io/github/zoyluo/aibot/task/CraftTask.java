@@ -8,6 +8,7 @@ import io.github.zoyluo.aibot.craft.RecipeRegistry;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -162,8 +163,8 @@ public final class CraftTask extends AbstractTask {
      */
     private static PreparedCraft prepareCraft(
             AIPlayerEntity bot, CraftingHelper.CraftStep step) {
-        List<ItemStack> main = copyStacks(bot.getInventory().main);
-        List<ItemStack> offHand = copyStacks(bot.getInventory().offHand);
+        List<ItemStack> main = copyStacks(bot.getInventory().getMainStacks());
+        List<ItemStack> offHand = copyStacks(List.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)));
         for (RecipeRegistry.Ingredient ingredient : step.recipe().ingredients()) {
             int required = ingredient.count() * step.crafts();
             if (!removeIngredient(main, offHand, ingredient, required)) {
@@ -269,12 +270,11 @@ public final class CraftTask extends AbstractTask {
 
     private static void commitPreparedCraft(AIPlayerEntity bot, PreparedCraft prepared) {
         var inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            inventory.main.set(slot, prepared.main().get(slot));
+        List<ItemStack> mainStacks = inventory.getMainStacks();
+        for (int slot = 0; slot < mainStacks.size(); slot++) {
+            mainStacks.set(slot, prepared.main().get(slot));
         }
-        for (int slot = 0; slot < inventory.offHand.size(); slot++) {
-            inventory.offHand.set(slot, prepared.offHand().get(slot));
-        }
+        bot.equipStack(EquipmentSlot.OFFHAND, prepared.offHand().get(0));
         inventory.markDirty();
     }
 

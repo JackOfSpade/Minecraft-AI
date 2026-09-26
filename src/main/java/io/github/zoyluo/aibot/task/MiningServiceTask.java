@@ -22,6 +22,7 @@ import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
@@ -2496,7 +2497,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return true;
         }
         int capacity = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (stack.isEmpty()) {
                 capacity += incoming.getMaxCount();
             } else if (ItemStack.areItemsAndComponentsEqual(stack, incoming)) {
@@ -3422,15 +3423,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return false;
         }
         int targetUsable = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (ToolTier.pickaxeTier(stack) >= ToolTier.IRON) {
                 targetUsable += usableDurability(stack);
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (ToolTier.pickaxeTier(stack) >= ToolTier.IRON) {
-                targetUsable += usableDurability(stack);
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (ToolTier.pickaxeTier(offHandStack) >= ToolTier.IRON) {
+            targetUsable += usableDurability(offHandStack);
         }
         return targetUsable >= 8;
     }
@@ -3531,17 +3531,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private boolean hasSafelyRetirableKitPickaxe(AIPlayerEntity bot) {
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (isSafelyRetirableKitPickaxe(bot, stack)) {
                 return true;
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (isSafelyRetirableKitPickaxe(bot, stack)) {
-                return true;
-            }
-        }
-        return false;
+        return isSafelyRetirableKitPickaxe(bot, bot.getEquippedStack(EquipmentSlot.OFFHAND));
     }
 
     private boolean isSafelyRetirableKitPickaxe(AIPlayerEntity bot, ItemStack stack) {
@@ -3566,7 +3561,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private static int freeMainSlots(AIPlayerEntity bot) {
         int free = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (stack.isEmpty()) {
                 free++;
             }
@@ -3624,7 +3619,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 && InventoryAction.countItem(bot, Items.WATER_BUCKET) < 1) {
             supplySlots++;
         }
-        return Math.min(bot.getInventory().main.size(),
+        return Math.min(bot.getInventory().getMainStacks().size(),
                 policy.freeSlotsMin() + outputSlots + supplySlots);
     }
 
@@ -3635,7 +3630,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         int mergeCapacity = 0;
         int maxCount = Math.max(1, new ItemStack(item).getMaxCount());
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (stack.isOf(item)) {
                 mergeCapacity += Math.max(0, stack.getMaxCount() - stack.getCount());
             }
@@ -3725,8 +3720,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                                                    boolean requireProjectedCapacityGain) {
         int requiredSeals = Math.max(0, sealsStillRequired);
         int projectedBefore = projectedFreeSlotsAfterSealing(bot);
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            ItemStack stack = bot.getInventory().main.get(slot);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
             boolean disposablePick = isRareDescentKit()
                     ? isSafelyRetirableKitPickaxe(bot, stack)
                     : isUnusableCheapPickaxe(stack);
@@ -3740,8 +3735,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         int protectedStone = protectedStoneLikeForPendingCrafts(bot);
         int stoneLike = stoneLikeCount(bot);
         DisposalCandidate partialFallback = null;
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            ItemStack stack = bot.getInventory().main.get(slot);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
             if (stack.isEmpty() || targetDrops.contains(stack.getItem())
                     || excludedItems.contains(stack.getItem())
                     || !isDisposableJunk(stack.getItem())) {
@@ -3791,7 +3786,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private int availableDisposableSealBlocks(AIPlayerEntity bot) {
         int nonStone = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty() && isDisposalSealItem(stack.getItem())
                     && !isStoneLikeItem(stack.getItem())) {
                 nonStone += stack.getCount();
@@ -3801,11 +3796,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         // reservation and the post-seal projection must therefore use that same physical domain;
         // otherwise a valid offhand seal is ignored and a whole disposable main stack is reduced
         // to a non-slot-releasing partial drop.
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (!stack.isEmpty() && isDisposalSealItem(stack.getItem())
-                    && !isStoneLikeItem(stack.getItem())) {
-                nonStone += stack.getCount();
-            }
+        ItemStack offHandSealStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandSealStack.isEmpty() && isDisposalSealItem(offHandSealStack.getItem())
+                && !isStoneLikeItem(offHandSealStack.getItem())) {
+            nonStone += offHandSealStack.getCount();
         }
         return nonStone + Math.max(0,
                 stoneLikeCount(bot) - protectedStoneLikeForPendingCrafts(bot));
@@ -3813,8 +3807,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private int sealBlockSlot(AIPlayerEntity bot) {
         SealSource source = selectSealSource(
-                bot.getInventory().main,
-                bot.getInventory().offHand,
+                bot.getInventory().getMainStacks(),
+                java.util.List.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)),
                 protectedStoneLikeForPendingCrafts(bot));
         if (source == null) {
             return -1;
@@ -3833,12 +3827,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         int originalFreeSlots = freeMainSlots(bot);
         java.util.List<ItemStack> projectedMain = new java.util.ArrayList<>();
         java.util.List<ItemStack> projectedOffhand = new java.util.ArrayList<>();
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             projectedMain.add(stack.copy());
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            projectedOffhand.add(stack.copy());
-        }
+        projectedOffhand.add(bot.getEquippedStack(EquipmentSlot.OFFHAND).copy());
         if (hypotheticalDrop != null) {
             int slot = hypotheticalDrop.slot();
             if (slot < 0 || slot >= projectedMain.size()
@@ -3849,7 +3841,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             projectedMain.get(slot).decrement(hypotheticalDrop.count());
         }
 
-        int selectedSlot = bot.getInventory().selectedSlot;
+        int selectedSlot = bot.getInventory().getSelectedSlot();
         if (selectedSlot < 0 || selectedSlot >= Math.min(9, projectedMain.size())) {
             selectedSlot = 0;
         }
@@ -4019,15 +4011,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private static int usableDurability(AIPlayerEntity bot, Item item) {
         int remaining = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (stack.isOf(item)) {
                 remaining += usableDurability(stack);
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (stack.isOf(item)) {
-                remaining += usableDurability(stack);
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (offHandStack.isOf(item)) {
+            remaining += usableDurability(offHandStack);
         }
         return remaining;
     }
@@ -4038,15 +4029,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return Integer.MAX_VALUE;
         }
         int usable = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (ToolTier.pickaxeTier(stack) >= requiredTier) {
                 usable += usableDurability(stack);
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (ToolTier.pickaxeTier(stack) >= requiredTier) {
-                usable += usableDurability(stack);
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (ToolTier.pickaxeTier(offHandStack) >= requiredTier) {
+            usable += usableDurability(offHandStack);
         }
         return usable;
     }

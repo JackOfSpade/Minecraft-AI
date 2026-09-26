@@ -16,6 +16,7 @@ import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
@@ -1038,8 +1039,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         int bestOffhandSlot = -1;
         int bestTier = Integer.MAX_VALUE;
         int bestRemaining = -1;
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            var stack = bot.getInventory().main.get(slot);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            var stack = bot.getInventory().getMainStacks().get(slot);
             int tier = ToolTier.pickaxeTier(stack);
             if (tier < required || tier > ToolTier.STONE
                     || (state.isToolRequired() && !stack.isSuitableFor(state))
@@ -1055,21 +1056,18 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 bestOffhandSlot = -1;
             }
         }
-        for (int slot = 0; slot < bot.getInventory().offHand.size(); slot++) {
-            var stack = bot.getInventory().offHand.get(slot);
-            int tier = ToolTier.pickaxeTier(stack);
-            if (tier < required || tier > ToolTier.STONE
-                    || (state.isToolRequired() && !stack.isSuitableFor(state))
-                    || (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1)) {
-                continue;
-            }
-            int remaining = stack.isDamageable()
-                    ? stack.getMaxDamage() - stack.getDamage() : Integer.MAX_VALUE;
-            if (tier < bestTier || (tier == bestTier && remaining > bestRemaining)) {
-                bestTier = tier;
+        var offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        int offHandTier = ToolTier.pickaxeTier(offHandStack);
+        if (offHandTier >= required && offHandTier <= ToolTier.STONE
+                && (!state.isToolRequired() || offHandStack.isSuitableFor(state))
+                && (!offHandStack.isDamageable() || offHandStack.getDamage() < offHandStack.getMaxDamage() - 1)) {
+            int remaining = offHandStack.isDamageable()
+                    ? offHandStack.getMaxDamage() - offHandStack.getDamage() : Integer.MAX_VALUE;
+            if (offHandTier < bestTier || (offHandTier == bestTier && remaining > bestRemaining)) {
+                bestTier = offHandTier;
                 bestRemaining = remaining;
                 bestSlot = -1;
-                bestOffhandSlot = slot;
+                bestOffhandSlot = 0;
             }
         }
         if (bestSlot < 0 && bestOffhandSlot < 0) {

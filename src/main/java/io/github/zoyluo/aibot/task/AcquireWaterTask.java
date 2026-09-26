@@ -15,6 +15,7 @@ import io.github.zoyluo.aibot.mode.FakePlayerMotion;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
@@ -744,7 +745,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             ascentTarget = null;
             return;
         }
-        String item = String.valueOf(bot.getInventory().main.get(slot.getAsInt()).getItem());
+        String item = String.valueOf(bot.getInventory().getMainStacks().get(slot.getAsInt()).getItem());
         if (InventoryAction.equipFromSlot(bot, slot.getAsInt()) < 0) {
             failedAscentSupports.add(support.toImmutable());
             ascentTarget = null;
@@ -794,7 +795,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             return;
         }
         int sourceSlot = slot.getAsInt();
-        String item = String.valueOf(bot.getInventory().main.get(sourceSlot).getItem());
+        String item = String.valueOf(bot.getInventory().getMainStacks().get(sourceSlot).getItem());
         if (InventoryAction.equipFromSlot(bot, sourceSlot) < 0) {
             failedAscentSupports.add(support.toImmutable());
             ascentTarget = null;
@@ -1122,15 +1123,13 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private static boolean hasHealthyStonePickaxe(AIPlayerEntity bot) {
-        for (var stack : bot.getInventory().main) {
+        for (var stack : bot.getInventory().getMainStacks()) {
             if (ToolTier.pickaxeTier(stack) == ToolTier.STONE) {
                 return true;
             }
         }
-        for (var stack : bot.getInventory().offHand) {
-            if (ToolTier.pickaxeTier(stack) == ToolTier.STONE) {
-                return true;
-            }
+        if (ToolTier.pickaxeTier(bot.getEquippedStack(EquipmentSlot.OFFHAND)) == ToolTier.STONE) {
+            return true;
         }
         return false;
     }
