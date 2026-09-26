@@ -579,7 +579,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // A final horizontal break can land exactly on the hard boundary. Observe the now-closed
             // geometry before timing out; otherwise the drop's vanilla pickup delay is preempted by
             // up to PICKUP_GRACE_TICKS and the same entry can be retried without settling its debt.
-            if (horizontalMode && isObservedClosedHorizontalFrontier(world, bot.getBlockPos())) {
+            if (horizontalMode && isObservedClosedHorizontalFrontier(bot, world, bot.getBlockPos())) {
                 armHorizontalFrontierSettle(bot);
                 settleHorizontalFrontier(bot);
             } else {
@@ -1206,19 +1206,34 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * Strict survival cannot pre-read a direction's hidden floor/fluid to decide this; a
      * direction only counts as closed here once its own rejection bit is already set (an
      * observed fact from an earlier tick: a real hazard, an unsupported landing, or a failed
-     * step) or it has literally nothing left to mine and has already been walked. Never peeks
-     * through unmined rock to manufacture an extra "closed" verdict.
+     * step), it has literally nothing left to mine and has already been walked, or -- for a
+     * direction never actually stepped into -- its body is already touching an observed hazard
+     * fluid or its landing is already observably (never behind unmined rock) unsupported. That
+     * last case mirrors {@link #isViableStairDirection}'s unconditional touching-hazard gate: a
+     * real player standing next to a visibly open, visibly unsupported drop already knows it is a
+     * dead end without needing to physically step into it first to "discover" the same fact one
+     * tick later. Never peeks through unmined rock to manufacture an extra "closed" verdict.
      */
-    private boolean isObservedClosedHorizontalFrontier(ServerWorld world, BlockPos feet) {
+    private boolean isObservedClosedHorizontalFrontier(AIPlayerEntity bot,
+                                                        ServerWorld world,
+                                                        BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int directionIndex = 0; directionIndex < HDIRS.length; directionIndex++) {
             if ((rejectedLandingDirections & 1 << directionIndex) != 0) {
                 continue;
             }
             BlockPos side = feet.offset(HDIRS[directionIndex]);
-            if (firstSolid(world, side, side.up()) != null || !descentTrail.contains(side)) {
+            if (firstSolid(world, side, side.up()) != null) {
                 return false;
             }
+            if (descentTrail.contains(side)) {
+                continue;
+            }
+            if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.up())
+                    || !isAcceptableLanding(bot, world, side.down())) {
+                continue;
+            }
+            return false;
         }
         return true;
     }

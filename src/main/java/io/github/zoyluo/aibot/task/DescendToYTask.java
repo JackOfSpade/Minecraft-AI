@@ -95,6 +95,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private BlockPos latestSafeLanding;
     private BlockPos previousSafeLanding;
     private BlockPos blockedBodyRecoveryTarget;
+    // Not checkpointed: purely a same-instance, same-level memory of whether THIS task itself has
+    // already started mining `ahead`/`ahead.up()` from the current `feet` -- i.e. whether a later
+    // "ahead is open" observation reflects genuinely pre-existing terrain (a real cave rim, never
+    // touched yet) or is merely an artifact of the bot's own in-progress excavation of this exact
+    // stair tread. See the flat-landing shortcut below for why this distinction matters.
+    private BlockPos selfCarvedAheadAt;
     private boolean started;    // 是否已打 descend_started 日志
     private int lastTorchY = Integer.MAX_VALUE; // P1:上次插火把的 Y(每下 TORCH_EVERY 格插一支)
     private static final int TORCH_EVERY = 6;   // 火把光照半径足够覆盖 6 格落差,不刷怪
@@ -535,6 +541,78 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // 前方 Y+1 的实心顶,对角下台阶只剩 1 格可走高、正常玩家(1.8高)钻不进(实测下潜矿道人过不去)。
         // 补 ahead.up() 后下潜巷道沿对角线真正 2 格净空可通行。firstSolid3 跳流体防溃浆。
         BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
+        DetourEdge flatLandingEdge = new DetourEdge(feet, ahead);
+        if (solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
+                && !feet.equals(selfCarvedAheadAt)
+                && lateralDetours < MAX_LATERAL
+                && !traversedDetourEdges.contains(flatLandingEdge)) {
+            // `ahead`/`ahead.up()` are already open and `ahead` itself is a fully observed, dry,
+            // safely supported landing at the CURRENT height -- only the riser one level further
+            // down (`next`) is solid. A real player standing here sees ordinary flat ground
+            // immediately in front of them and just walks onto it; mining through that ground to
+            // force a descent nothing asked for would only destroy the one solid floor this same
+            // level may still need (a supported cave rim's own footing). Take the free flat step
+            // instead of digging through it -- unless that exact same-level edge was already
+            // traversed (and possibly backed out of) earlier in this detour, or the lateral budget
+            // is already spent: this shortcut is itself a lateral, same-level hop and must be
+            // recorded and bounded exactly like tryLateralDetour's own moves, or a restored
+            // checkpoint could bounce forever between two cells / smuggle unbounded free detours.
+            // `!feet.equals(selfCarvedAheadAt)` excludes the OTHER way `ahead`/`ahead.up()` can end
+            // up open: this same task, from this same `feet`, having just mined them itself as the
+            // first two of this level's own three-block stair tread. That is not a pre-existing cave
+            // rim at all -- it is this task's own excavation, one step from finishing -- and a real
+            // player mid-dig on their own planned staircase keeps mining the tread instead of
+            // spontaneously wandering sideways just because the headroom happened to clear first.
+            // Without this, an ordinary uniform straight staircase (every level: mine ahead, mine
+            // ahead.up(), discover its own third block still solid) would take this "shortcut" at
+            // literally every level, forever trading a level of real descent for a same-height
+            // sideways hop until the lateral budget ran out -- never the honest reactive detour this
+            // shortcut exists for.
+            if (FakePlayerMotion.stepToStandable(bot, ahead, "descend_flat_landing")) {
+                if (!traversedDetourEdges.add(flatLandingEdge)) {
+                    throw new IllegalStateException("detour edge replay escaped preflight");
+                }
+                lateralDetours++;
+                detourHeadingIndex = stairDirIndex;
+                markStarted(bot, feet);
+                return;
+            }
+        }
+        BlockPos climbTarget = ahead.up();
+        DetourEdge climbEdge = new DetourEdge(feet, climbTarget);
+        if (solid != null && solid.equals(ahead)
+                && !(canObservePosition(bot, next.down()) && hasSafeSupport(world, next))
+                && !Standability.isDangerous(world.getBlockState(ahead))
+                && isObservedDryPassableColumn(bot, world, ahead.up())
+                && lateralDetours < MAX_LATERAL
+                && !traversedDetourEdges.contains(climbEdge)) {
+            // `ahead` is solid and would have to be mined to make any progress this direction at
+            // all, but the landing one level further down (`next`) is not a CONFIRMED-safe
+            // support -- isViableDescentDirection only allowed this attempt because that deeper
+            // cell is still hidden behind `ahead` itself. `ahead` also ALREADY, visibly, right
+            // now (no mining needed) supports a completely safe climb-over landing on its own top
+            // face. Mining `ahead` merely to test the hidden landing would permanently destroy
+            // that support even if the gamble fails -- unlike an ordinary staircase riser, this
+            // block cannot be un-mined once the reactive check below rejects a bad landing. A real
+            // player facing a chest-high block with clear headroom above it climbs over it instead
+            // of digging through it; take that zero-risk step instead. This is itself a lateral
+            // hop (dy == 1, exactly tryLateralDetour's own upper-retreat shape), so it shares that
+            // same budget and no-replay bookkeeping.
+            if (FakePlayerMotion.jumpTo(bot, climbTarget, "descend_climb_over")) {
+                if (!traversedDetourEdges.add(climbEdge)) {
+                    throw new IllegalStateException("detour edge replay escaped preflight");
+                }
+                lateralDetours++;
+                detourHeadingIndex = stairDirIndex;
+                // Durably reject the exact reverse stair from the new landing so a restart cannot
+                // immediately descend back down into the cell just escaped -- mirrors the lateral
+                // detour's own upper-retreat bookkeeping (tryLateralDetour, dy == 1).
+                rejectLandingDirection(climbTarget,
+                        (stairDirIndex + HORIZONTAL.length / 2) % HORIZONTAL.length);
+                markStarted(bot, feet);
+                return;
+            }
+        }
         if (solid != null) {
             // 工具闸(与 DigDownTask 一致):无合格镐时立即以类型化原因失败,交 GoalExecutor
             // 倒推补镐;否则空手磨深板岩会把整个下潜窗口烧成无类型的 descend_timeout。
@@ -544,6 +622,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(
                         world.getBlockState(solid).getBlock()));
                 return;
+            }
+            if (solid.equals(ahead) || solid.equals(ahead.up())) {
+                // Remember that THIS task, from THIS `feet`, is the one clearing the headroom --
+                // see the flat-landing shortcut's guard above.
+                selfCarvedAheadAt = feet.toImmutable();
             }
             miner.begin(bot, solid);
             miner.tick(bot);
@@ -1373,17 +1456,26 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     // 台阶斜下:换到下一个"不挨水/岩浆"的斜下方向;四面都不行返回 false(交横移兜底)。
+    // 顺序与 tryLateralDetour 的 detourDirectionOrder 一致(右转、左转,最后才原路返回):被拒方向
+    // 背后的深层支撑一旦不可见就"未知即放行",反向格因此也可能显得"可行"——但那只是刚离开的
+    // 起点,直着走两侧新方向才是真探索,回头是最后才该试的选项,否则两格间会来回摆动耗尽预算。
     private boolean rotateStair(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
-        for (int i = 0; i < HORIZONTAL.length; i++) {
-            stairDirIndex = (stairDirIndex + 1) % HORIZONTAL.length;
-            if ((rejectedLandingDirections & 1 << stairDirIndex) != 0) {
+        int forward = stairDirIndex;
+        int[] candidates = {
+                (forward + 1) % HORIZONTAL.length,
+                (forward + HORIZONTAL.length - 1) % HORIZONTAL.length,
+                (forward + 2) % HORIZONTAL.length
+        };
+        for (int candidate : candidates) {
+            if ((rejectedLandingDirections & 1 << candidate) != 0) {
                 continue;
             }
-            BlockPos ahead = feet.offset(HORIZONTAL[stairDirIndex]);
+            BlockPos ahead = feet.offset(HORIZONTAL[candidate]);
             BlockPos next = ahead.down();
             if (!containsOwnedWaterSeal(world, ahead, ahead.up(), next)
-                    && isViableDescentDirection(bot, world, feet, stairDirIndex)) {
+                    && isViableDescentDirection(bot, world, feet, candidate)) {
+                stairDirIndex = candidate;
                 return true;
             }
         }
@@ -1402,13 +1494,32 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * {@code descendInto}/{@code stepToStandable} landing check below reacts the instant that
      * happens by rejecting the direction and rotating away.
      */
-    private static boolean isViableDescentDirection(AIPlayerEntity bot,
-                                                     ServerWorld world,
-                                                     BlockPos feet,
-                                                     int directionIndex) {
+    private boolean isViableDescentDirection(AIPlayerEntity bot,
+                                              ServerWorld world,
+                                              BlockPos feet,
+                                              int directionIndex) {
         BlockPos ahead = feet.offset(HORIZONTAL[directionIndex]);
         BlockPos next = ahead.down();
         BlockPos support = next.down();
+        // An edge already recorded as traversed (in either direction) was explicitly explored and
+        // backed out of by the lateral detour -- most tellingly when BOTH directions of the same
+        // edge are present, a round trip that found nothing useful. The primary stair flow must
+        // honor that same history instead of blindly re-selecting it as a "fresh" direction the
+        // instant a hidden/allowed deeper cell makes it look newly viable; that would silently
+        // undo the whole point of recording it.
+        if (traversedDetourEdges.contains(new DetourEdge(feet, ahead))) {
+            return false;
+        }
+        // `ahead`/`ahead.up()` touch the bot's body exactly like the fluid check below -- a
+        // magma block, cactus, or other already-dangerous block sitting there is exactly as
+        // visible as a wall a real player would recognize and route around rather than dig into,
+        // whatever might be hidden behind it. This does not depend on what is behind it because
+        // there is no confirmed benefit to ever risk touching it in the first place.
+        if ((canObservePosition(bot, ahead) && Standability.isDangerous(world.getBlockState(ahead)))
+                || (canObservePosition(bot, ahead.up())
+                        && Standability.isDangerous(world.getBlockState(ahead.up())))) {
+            return false;
+        }
         if (isObservedHazardFluid(bot, ahead) || isObservedHazardFluid(bot, ahead.up())) {
             return false;
         }

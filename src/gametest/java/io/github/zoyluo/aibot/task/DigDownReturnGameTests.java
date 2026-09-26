@@ -1571,13 +1571,24 @@ public final class DigDownReturnGameTests {
         PathExecutor executor = new PathExecutor(List.of(origin, middle, upper), start);
 
         context.runAtEveryTick(() -> {
-            if (!bot.getBlockPos().equals(start)) {
-                var result = executor.tick(bot.getActionPack());
-                if (result.isFailed()) {
-                    context.throwGameTestException(Text.of("two-pillar return failed: " + result));
-                }
+            // A real jump-arc's raw Y can transiently reach (or even overshoot) the target
+            // block's Y band mid-flight, well before PathExecutor itself considers that node
+            // landed and commits to the next one (tickPillar only advances once the bot is
+            // genuinely grounded there). Driving this off a raw bot.getBlockPos() match -- as an
+            // instant pillar teleport always coincided exactly with "arrived" -- can therefore
+            // stop ticking the executor (and asserting "arrival") one tick before the second
+            // pillar has actually placed its support block. Ask the executor itself whether the
+            // whole path is done instead.
+            var result = executor.tick(bot.getActionPack());
+            if (result.isFailed()) {
+                context.throwGameTestException(Text.of("two-pillar return failed: " + result));
+            }
+            if (!result.isSuccess()) {
                 return;
             }
+            require(context, bot.getBlockPos().equals(start),
+                    "two-pillar path reported success away from its goal: "
+                            + bot.getBlockPos().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 3,
                     "two physical pillar repairs did not preserve the requested net delivery");
             require(context, context.getWorld().getBlockState(bottom).isOf(Blocks.COBBLESTONE)

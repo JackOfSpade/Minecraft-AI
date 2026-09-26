@@ -302,31 +302,45 @@ public final class DescendCheckpointGameTests {
                         restored.checkpoint().get("traversed_detour_edges"))
                         && budgetLimit.equals(restored.checkpoint().get("budget_limit")),
                 "restart refreshed the persisted edge debt: " + restored.checkpoint());
-        int maxDebt = 17;
-        for (int tick = 0; tick < 40 && restored.state() == TaskState.RUNNING; tick++) {
-            restored.tick(bot);
-            maxDebt = Math.max(maxDebt,
-                    Integer.parseInt(restored.checkpoint().get("lateral_detours")));
-        }
-
-        require(context, restored.state() == TaskState.COMPLETED,
-                "edge-17 restart did not reach the supported rim: "
-                        + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(lowerExit),
-                "edge-17 restart completed at the wrong landing: expected="
-                        + lowerExit.toShortString() + " actual="
-                        + bot.getBlockPos().toShortString());
-        require(context, maxDebt == 21,
-                "edge-17 restart refreshed or skipped its factual debt: max_debt=" + maxDebt);
-        require(context, Integer.parseInt(restored.checkpoint().get("budget_used")) > 17
-                        && budgetLimit.equals(restored.checkpoint().get("budget_limit")),
-                "edge-17 restart refreshed or rewound its persisted clock: "
-                        + restored.checkpoint());
-        require(context, "0".equals(restored.checkpoint().get("lateral_detours"))
-                        && "".equals(restored.checkpoint().get("traversed_detour_edges")),
-                "confirmed lower landing retained the restored detour history: "
-                        + restored.checkpoint());
-        finish(context, bot, name);
+        int[] maxDebt = {17};
+        // A plain synchronous loop over task.tick() never yields back to the real server between
+        // calls, so any code path that depended on genuine per-tick progress (MiningController's
+        // ActionPack#onUpdate-driven advancement) could never complete inside one. Drive one task
+        // tick per real server tick instead, matching every other fixture in this suite whose
+        // outcome must reflect real ticked state rather than a synchronous burst of calls.
+        context.runAtEveryTick(() -> {
+            if (restored.state() == TaskState.RUNNING) {
+                restored.tick(bot);
+                maxDebt[0] = Math.max(maxDebt[0],
+                        Integer.parseInt(restored.checkpoint().get("lateral_detours")));
+                return;
+            }
+            require(context, restored.state() == TaskState.COMPLETED,
+                    "edge-17 restart did not reach the supported rim: "
+                            + restored.state() + ":" + restored.failureReason());
+            require(context, bot.getBlockPos().equals(lowerExit),
+                    "edge-17 restart completed at the wrong landing: expected="
+                            + lowerExit.toShortString() + " actual="
+                            + bot.getBlockPos().toShortString());
+            // DescendToYTask now recognizes ahead as an already-open, already-supported flat
+            // landing before ever treating the riser below it as a stair to mine through (a real
+            // player standing here would just walk onto visibly-open, visibly-supported ground
+            // rather than dig through it). The whole rim is therefore crossed with ordinary flat
+            // steps instead of lateral detours -- but each flat step is itself still a same-level
+            // hop, so it is recorded and budgeted exactly like a lateral detour (four more steps
+            // across the rim on top of the persisted 17), never refreshed and never replayed.
+            require(context, maxDebt[0] == 21,
+                    "edge-17 restart refreshed or skipped its factual debt: max_debt=" + maxDebt[0]);
+            require(context, Integer.parseInt(restored.checkpoint().get("budget_used")) > 17
+                            && budgetLimit.equals(restored.checkpoint().get("budget_limit")),
+                    "edge-17 restart refreshed or rewound its persisted clock: "
+                            + restored.checkpoint());
+            require(context, "0".equals(restored.checkpoint().get("lateral_detours"))
+                            && "".equals(restored.checkpoint().get("traversed_detour_edges")),
+                    "confirmed lower landing retained the restored detour history: "
+                            + restored.checkpoint());
+            finish(context, bot, name);
+        });
     }
 
     @GameTest(maxTicks = 20)
@@ -611,15 +625,22 @@ public final class DescendCheckpointGameTests {
         AIPlayerEntity bot = spawn(context, name, start);
         Map<String, String> initial = new LinkedHashMap<>(
                 freshCheckpoint(bot, start.getY() - 5));
-        // Start WEST so the upper EAST retreat's reverse is also the persisted staircase heading.
-        // Without restoring the rejection bit, the next task would immediately descend WEST into
-        // the lower cell it just escaped; NORTH remains the only fresh supported column.
+        // Start WEST: the only other candidate in this fixture (EAST, the unsupported solid body)
+        // must also be discovered and skipped honestly by Descend itself.
         initial.put("stair_direction", "3");
         require(context, DescendToYTask.inspectCheckpoint(initial).isPresent(),
                 "upper-retreat fixture checkpoint was invalid: " + initial);
         DescendToYTask first = new DescendToYTask(start.getY() - 5, initial);
         first.start(bot);
-        first.tick(bot);
+        // WEST is rejected outright (its own landing is observably unsupported). EAST's ahead
+        // (unsupportedBody) is solid and its deeper landing is unconfirmed (hidden behind that
+        // riser), so rotateStair now correctly allows Descend to consider it -- one tick to rotate
+        // onto EAST, a second to recognize the safe climb-over onto its own top face instead of
+        // mining through it (see DescendToYTask's climb-over branch). Bound the wait generously.
+        for (int i = 0; i < 5 && first.state() == TaskState.RUNNING
+                && !bot.getBlockPos().equals(upperRetreat); i++) {
+            first.tick(bot);
+        }
 
         require(context, first.state() == TaskState.RUNNING,
                 "unsupported detour ended before its bounded upper retreat: "
@@ -633,6 +654,10 @@ public final class DescendCheckpointGameTests {
         Map<String, String> checkpoint = first.checkpoint();
         require(context, DescendToYTask.inspectCheckpoint(checkpoint).isPresent(),
                 "upper-retreat checkpoint was invalid: " + checkpoint);
+        // The climb-over durably rejects the exact reverse of whichever direction it climbed from
+        // (here EAST, so its reverse WEST) at the new origin, exactly like the lateral detour's own
+        // upper-retreat bookkeeping -- a restart must not immediately step back down into the
+        // escaped, unsupported lower cell.
         require(context, encode(upperRetreat).equals(checkpoint.get("rejected_landing_origin"))
                         && (Integer.parseInt(checkpoint.get("rejected_landing_directions"))
                         & 1 << 3) != 0,
@@ -645,14 +670,25 @@ public final class DescendCheckpointGameTests {
                         .get("rejected_landing_directions")) & 1 << 3) != 0,
                 "restart discarded the WEST reverse rejection before the first tick: "
                         + restored.checkpoint());
+        // The persisted heading (EAST) is not itself the rejected bit, so the first restored tick
+        // must discover EAST is unsupported from this new vantage and rotate onto NORTH in place
+        // before the second tick can physically use the fresh column.
         restored.tick(bot);
         require(context, restored.state() == TaskState.RUNNING,
                 "restored upper retreat ended unexpectedly: "
                         + restored.state() + ":" + restored.failureReason());
         require(context, bot.getBlockPos().equals(upperRetreat),
-                "restored Descend ignored WEST rejection instead of rotating in place: "
+                "restored Descend moved instead of rotating in place on its first tick: "
                         + upperRetreat.toShortString() + " -> " + bot.getBlockPos().toShortString());
-        restored.tick(bot);
+        require(context, context.getWorld().getBlockState(unsupportedBody).isOf(Blocks.STONE),
+                "restored Descend destroyed the only support for its upper retreat");
+        for (int i = 0; i < 5 && restored.state() == TaskState.RUNNING
+                && !bot.getBlockPos().equals(freshLanding); i++) {
+            restored.tick(bot);
+        }
+        require(context, restored.state() == TaskState.RUNNING,
+                "restored upper retreat failed before reaching the fresh column: "
+                        + restored.state() + ":" + restored.failureReason());
         require(context, bot.getBlockPos().equals(freshLanding),
                 "restored Descend replayed the rejected stair instead of using the fresh column: "
                         + upperRetreat.toShortString() + " -> " + bot.getBlockPos().toShortString());

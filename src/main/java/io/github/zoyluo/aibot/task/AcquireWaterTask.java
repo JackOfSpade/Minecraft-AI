@@ -20,9 +20,11 @@ import net.minecraft.item.Items;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -636,7 +638,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             return true;
         }
         if (candidate.supportMissing()) {
-            placeAscentSupport(bot, ascentTarget.down());
+            placeAscentSupport(bot, current, ascentTarget.down());
             return true;
         }
 
@@ -738,7 +740,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         lastAscentBlockedLogBudget = totalBudget() - ASCENT_BLOCKED_LOG_INTERVAL;
     }
 
-    private void placeAscentSupport(AIPlayerEntity bot, BlockPos support) {
+    private void placeAscentSupport(AIPlayerEntity bot, BlockPos current, BlockPos support) {
         var slot = MaterialPalette.pickPathSupportBlockSlot(bot);
         if (slot.isEmpty()) {
             failedAscentSupports.add(support.toImmutable());
@@ -754,6 +756,14 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             return;
         }
         bot.getActionPack().stopAll();
+        // A real jump-arc landing can leave the server-side onGround bit stale for one tick even
+        // though the new cell has a collision-verified support (the same clientless fake-player
+        // quirk placeAscentFoundation already accounts for below). Publish the equivalent movement
+        // packet fact before this precise placement; never do this for a genuinely unsupported pose.
+        Standability.clearCache();
+        if (!bot.isOnGround() && Standability.isStandable(bot.getServerWorld(), current)) {
+            bot.setOnGround(true);
+        }
         ActionResult result = BuildAction.placeBlockAt(bot, support);
         if (result.isFailed()) {
             failedAscentSupports.add(support.toImmutable());
@@ -1417,6 +1427,18 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             retryPath(bot, waterStand, false);
             return;
         }
+        if (!bot.isOnGround()) {
+            // A real jump/fall arc's block position can match the target one tick before the bot
+            // has actually landed there (the genuine multi-tick physics fix, unlike the old instant
+            // teleport that always settled onGround the same instant its position changed).
+            // Interrupting that landing and judging bucket-interaction reach from a still-airborne
+            // eye height wrongly rejected a perfectly reachable source; let the landing finish
+            // first, bounded by the same APPROACH_LIMIT watchdog as an unreachable stand.
+            if (phaseAge() > APPROACH_LIMIT) {
+                rejectAndResumeSearch(bot, "stand_unreachable");
+            }
+            return;
+        }
         bot.getActionPack().stopAll();
         ActionResult result = BucketAction.fillWaterSource(bot, waterSource);
         if (result.isFailed()) {
@@ -1692,6 +1714,17 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
                     if (eye.squaredDistanceTo(source.toCenterPos()) > reachSquared) {
                         continue;
                     }
+                    // Being within reach and able to see the STAND cell itself says nothing about
+                    // whether the water block's face would actually be visible from there -- an
+                    // intervening wall (e.g. a walled-well's curb) can sit directly between a
+                    // nearby, perfectly standable cell and the source. BucketAction's own real fill
+                    // attempt later performs exactly this SOURCE_ONLY ray from the bot's true eye;
+                    // simulate it here from the CANDIDATE's would-be eye so a stand this task itself
+                    // offers is one the real interaction can actually honor, instead of discovering
+                    // the obstruction only after physically walking there and being rejected.
+                    if (!hasVisibleWaterFace(bot, eye, source)) {
+                        continue;
+                    }
                     double distance = bot.getBlockPos().getSquaredDistance(candidate);
                     if (distance < bestDistance) {
                         best = candidate.toImmutable();
@@ -1701,6 +1734,21 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             }
         }
         return best;
+    }
+
+    /**
+     * Mirrors BucketAction.fillWaterSource's real SOURCE_ONLY ray, but from a hypothetical eye
+     * position instead of the bot's actual one -- lets a candidate stand be pre-validated before
+     * ever walking there.
+     */
+    private static boolean hasVisibleWaterFace(AIPlayerEntity bot, Vec3d eye, BlockPos source) {
+        var hit = bot.getServerWorld().raycast(new RaycastContext(
+                eye,
+                source.toCenterPos(),
+                RaycastContext.ShapeType.OUTLINE,
+                RaycastContext.FluidHandling.SOURCE_ONLY,
+                bot));
+        return hit instanceof BlockHitResult blockHit && blockHit.getBlockPos().equals(source);
     }
 
     private static boolean observableStandCell(AIPlayerEntity bot, BlockPos candidate) {

@@ -504,7 +504,16 @@ public final class UndergroundSafetyGameTests {
         AIPlayerEntity bot = spawn(context, "DescendDetourGT", start);
         DescendToYTask task = new DescendToYTask(start.getY() - 5);
         task.start(bot);
-        task.tick(bot);
+        // NORTH's own unsupported shaft is observably empty all the way down, so it is rejected
+        // outright on the first tick exactly as before. EAST's deeper landing is hidden behind its
+        // own solid floor tile, so rotateStair now needs one tick just to pick EAST (a real player
+        // cannot yet know what's under a floor they have not stood on); a second tick recognizes
+        // that floor is already an observed, dry, standable landing and takes the flat step onto
+        // it without ever mining through it.
+        for (int i = 0; i < 5 && task.state() == TaskState.RUNNING
+                && !bot.getBlockPos().equals(safeEast); i++) {
+            task.tick(bot);
+        }
 
         require(context, task.state() == TaskState.RUNNING,
                 "descend detour ended unexpectedly: " + task.state() + ":" + task.failureReason());
@@ -537,7 +546,15 @@ public final class UndergroundSafetyGameTests {
                 "first lateral move did not enter the north corridor: "
                         + start.toShortString() + " -> " + bot.getBlockPos().toShortString());
 
-        task.tick(bot);
+        // From `north`, continuing NORTH is observably a real unsupported drop (rejected outright).
+        // WEST's own deeper landing is hidden behind its solid floor tile, so -- exactly like the
+        // flat-landing rim case -- one tick is spent just rotating onto WEST (rotateStair now tries
+        // the sideways options before ever reversing back toward `start`) and a second recognizes
+        // that floor is already open, dry and standable and steps onto it without mining.
+        for (int i = 0; i < 5 && task.state() == TaskState.RUNNING
+                && !bot.getBlockPos().equals(westExit); i++) {
+            task.tick(bot);
+        }
         require(context, task.state() == TaskState.RUNNING,
                 "heading-aware detour ended unexpectedly: "
                         + task.state() + ":" + task.failureReason());
@@ -565,7 +582,15 @@ public final class UndergroundSafetyGameTests {
         require(context, bot.getBlockPos().equals(north),
                 "fixture did not traverse A->B: " + bot.getBlockPos().toShortString());
 
-        task.tick(bot);
+        // From `north`, continuing NORTH is an observable, confirmed unsupported drop (rejected
+        // outright). EAST/WEST are equally open dead air. SOUTH's own deeper landing is hidden
+        // behind `start`'s floor tile, so -- exactly like the other rim/heading fixtures -- one
+        // tick is spent only rotating onto SOUTH before a second physically retraces the one
+        // necessary B->A backtrack via the flat-landing step.
+        for (int i = 0; i < 5 && task.state() == TaskState.RUNNING
+                && !bot.getBlockPos().equals(start); i++) {
+            task.tick(bot);
+        }
         require(context, task.state() == TaskState.RUNNING && bot.getBlockPos().equals(start),
                 "fixture did not permit the one necessary B->A backtrack: "
                         + task.state() + ":" + task.failureReason()
@@ -948,8 +973,14 @@ public final class UndergroundSafetyGameTests {
                     Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
         // Keep the following north stair solid so the second task tick confirms the first landing
-        // without immediately descending a second level.
+        // without immediately descending a second level. Its own top face must stay solid too --
+        // an already-open top would let Descend's honest climb-over shortcut clear this exact
+        // obstacle in a single free step (a real player climbs a chest-high block with open
+        // headroom instead of mining through it), which is correct behavior but would move the bot
+        // on this very tick instead of leaving it holding the confirmed landing this fixture needs.
         context.getWorld().setBlockState(buriedLanding.north(),
+                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getWorld().setBlockState(buriedLanding.north().up(),
                 Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         context.getWorld().setBlockState(buriedLanding.north().down(2),
                 Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
