@@ -1312,6 +1312,13 @@ public final class AcquireWaterTaskGameTests {
         }
         world.setBlockState(start, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(start.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        // A genuinely external, properly supported air cell beside the shaft: the bot's own head
+        // cell can never be a legal block-placement target (vanilla rejects any placement whose
+        // collision shape intersects a live entity, the placer included), and the open cavern
+        // starting at dy 2 has no adjacent solid face within reach either. Without this, a mid-test
+        // ascent-tool craft that needs to place a carried crafting table has nowhere valid to put it.
+        world.setBlockState(start.south(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(start.south().up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         BlockPos copperObstruction = start.north().up();
         world.setBlockState(copperObstruction,
                 Blocks.COPPER_ORE.getDefaultState(), Block.NOTIFY_ALL);
