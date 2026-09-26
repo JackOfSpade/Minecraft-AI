@@ -8,6 +8,7 @@ import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.MaterialPalette;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.mining.ToolTier;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.pathfinding.Standability;
@@ -678,7 +679,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // 下一级或其踏面是水/岩浆就换斜下方向绕,像挖楼梯一样一级一级斜下(与 DescendToYTask 台阶逻辑一致)。
         ensureRejectedLandingOrigin(feet);
         if ((rejectedLandingDirections & 1 << stairDirIndex) != 0) {
-            if (rotateStair(world, feet)) {
+            if (rotateStair(bot, world, feet)) {
                 return;
             }
             digHorizontal(bot, world, feet);
@@ -687,8 +688,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         Direction dir = HDIRS[stairDirIndex];
         BlockPos ahead = feet.offset(dir);   // 下一级头位 (x+d, y)
         BlockPos next = ahead.down();         // 下一级站位 (x+d, y-1)
-        if (!isViableStairDirection(world, feet, dir)) {
-            if (rotateStair(world, feet)) {
+        if (!isViableStairDirection(bot, feet, dir)) {
+            if (rotateStair(bot, world, feet)) {
                 return; // 换到既不挨流体、又能形成真实落脚面的斜下方向
             }
             // 四个斜下方向都被水/岩浆挡 → 转水平掘进(此层还能继续凑石料),实在不行那里再判失败。
@@ -726,7 +727,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // 200 ticks: rotate to a different safe staircase, then fall back to supported horizontal
         // mining if all four directions are gone.
         rejectLandingDirection(feet, stairDirIndex);
-        if (!rotateStair(world, feet)) {
+        if (!rotateStair(bot, world, feet)) {
             digHorizontal(bot, world, feet);
         }
     }
@@ -1200,20 +1201,21 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         pickupGrace++;
     }
 
-    /** True only when every currently owned horizontal option is closed by factual geometry. */
+    /**
+     * True only when every currently owned horizontal option is closed by factual geometry.
+     * Strict survival cannot pre-read a direction's hidden floor/fluid to decide this; a
+     * direction only counts as closed here once its own rejection bit is already set (an
+     * observed fact from an earlier tick: a real hazard, an unsupported landing, or a failed
+     * step) or it has literally nothing left to mine and has already been walked. Never peeks
+     * through unmined rock to manufacture an extra "closed" verdict.
+     */
     private boolean isObservedClosedHorizontalFrontier(ServerWorld world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int directionIndex = 0; directionIndex < HDIRS.length; directionIndex++) {
             if ((rejectedLandingDirections & 1 << directionIndex) != 0) {
                 continue;
             }
-            Direction direction = HDIRS[directionIndex];
-            BlockPos side = feet.offset(direction);
-            if (isLava(world, side) || isLava(world, side.up()) || isLava(world, side.down())
-                    || isWater(world, side) || isWater(world, side.up()) || isWater(world, side.down())
-                    || !isSafeSupport(world, side.down())) {
-                continue;
-            }
+            BlockPos side = feet.offset(HDIRS[directionIndex]);
             if (firstSolid(world, side, side.up()) != null || !descentTrail.contains(side)) {
                 return false;
             }
@@ -1295,14 +1297,14 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     // 台阶斜下:换到下一个既不挨流体、又有真实踏面支撑的方向。天然坡面接悬崖时 ahead/next
     // 可能全是空气；旧逻辑只查水/岩浆，会永远对同一 unsupported next 调 descendInto。
-    private boolean rotateStair(ServerWorld world, BlockPos feet) {
+    private boolean rotateStair(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int i = 0; i < HDIRS.length; i++) {
             stairDirIndex = (stairDirIndex + 1) % HDIRS.length;
             if ((rejectedLandingDirections & 1 << stairDirIndex) != 0) {
                 continue;
             }
-            if (isViableStairDirection(world, feet, HDIRS[stairDirIndex])) {
+            if (isViableStairDirection(bot, feet, HDIRS[stairDirIndex])) {
                 return true;
             }
         }
@@ -1328,22 +1330,47 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         rejectedLandingDirections = 0;
     }
 
-    static boolean isViableStairDirection(ServerWorld world, BlockPos feet, Direction direction) {
+    /**
+     * Strict-survival stair viability. {@code ahead}/{@code ahead.up()} touch the bot's body at
+     * foot and head height, so any fluid there is exactly as visible as a wall a real player is
+     * standing next to — that fluid check runs unconditionally. {@code next}/{@code support} sit
+     * behind that unmined wall and are unknowable until it is actually opened: they can only
+     * reject this direction when they are ALREADY genuinely observable right now (natural open
+     * terrain, a previously mined cavity, or a nearby exposed pocket — never a peek through solid
+     * rock). Cells still hidden behind unmined rock report UNKNOWN here and never block progress;
+     * mining ahead is what legitimately exposes them, and the per-tick {@code descendInto}/
+     * {@code stepToStandable} landing check reacts the instant that happens.
+     */
+    static boolean isViableStairDirection(AIPlayerEntity bot, BlockPos feet, Direction direction) {
+        ServerWorld world = bot.getServerWorld();
         BlockPos ahead = feet.offset(direction);
         BlockPos next = ahead.down();
         BlockPos support = next.down();
-        if (isLava(world, ahead) || isLava(world, ahead.up())
-                || isLava(world, next) || isLava(world, support)
-                || isWater(world, ahead) || isWater(world, ahead.up())
-                || isWater(world, next) || isWater(world, support)) {
+        if (isObservedHazardFluid(bot, ahead) || isObservedHazardFluid(bot, ahead.up())
+                || !isClearableForStair(world, ahead) || !isClearableForStair(world, ahead.up())) {
             return false;
         }
-        if (!isSafeSupport(world, support)) {
+        if (isObservedHazardFluid(bot, next) || isObservedHazardFluid(bot, support)) {
             return false;
         }
-        return isClearableForStair(world, ahead)
-                && isClearableForStair(world, ahead.up())
-                && isClearableForStair(world, next);
+        return isAcceptableLanding(bot, world, support);
+    }
+
+    /**
+     * Strict-survival fluid gate: true only when a lava/water hazard is already genuinely
+     * observable at pos (touching the bot, an already-mined cavity, or naturally exposed
+     * terrain). A cell still hidden behind unmined rock is UNKNOWN and never counts as a hazard.
+     */
+    private static boolean isObservedHazardFluid(AIPlayerEntity bot, BlockPos pos) {
+        return OreScan.observeDangerFluid(bot, pos) == OreScan.Observation.OBSERVED_PRESENT;
+    }
+
+    /**
+     * True when a landing/support cell is either not yet honestly knowable (still hidden behind
+     * unmined rock, so it may not be treated as unsafe) or is genuinely observable and solid.
+     */
+    private static boolean isAcceptableLanding(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        return !ObservableWorldQuery.canObserveCell(bot, pos) || isSafeSupport(world, pos);
     }
 
     private static boolean isSafeSupport(ServerWorld world, BlockPos pos) {
@@ -1375,15 +1402,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             }
             Direction dir = HDIRS[hdirIndex];
             BlockPos side = feet.offset(dir);
-            // 对称岩浆检查也避开水:横挖挖进水里同样溺水(原仅查 lava 是缺口);四面皆水/浆则下面 walled 失败交生存层。
-            if (isLava(world, side) || isLava(world, side.up()) || isLava(world, side.down())
-                    || isWater(world, side) || isWater(world, side.up()) || isWater(world, side.down())) {
-                hdirIndex = (hdirIndex + 1) % HDIRS.length; // 这个方向挨水/岩浆,换一个
+            // side/side.up 贴身(脚位/头位邻格),流体状态与站在墙边的真人一样天然可见,无条件可查。
+            // side.down()(踏面)在 side 被挖开前始终藏在实心岩后不可知——绝不在此预读;下面
+            // stepToStandable() 在真要落脚的那一刻才复查它,正是"挖穿才看见"的诚实反应式检查。
+            if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.up())) {
+                hdirIndex = (hdirIndex + 1) % HDIRS.length; // 这个方向贴身可见水/岩浆,换一个
                 continue;
-            }
-            if (!isSafeSupport(world, side.down())) {
-                hdirIndex = (hdirIndex + 1) % HDIRS.length;
-                continue; // 横移也不能走进悬空格；换有支撑的方向
             }
             BlockPos solid = firstSolid(world, side, side.up());
             if (solid != null) {
@@ -1428,10 +1452,6 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // the bot steps into its drop cell. Persist an explicit bounded pickup debt before WALLED;
         // onTick services it ahead of the hard work budget, including after restart.
         armHorizontalFrontierSettle(bot);
-    }
-
-    private static boolean isLava(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.LAVA);
     }
 
     // 3 参版:依次返回第一个"固体且非流体"的格(流体跳过不挖→防溃浆/溃水)。下潜台阶清三格身位

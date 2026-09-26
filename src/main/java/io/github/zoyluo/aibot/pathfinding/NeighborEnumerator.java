@@ -189,6 +189,29 @@ public final class NeighborEnumerator {
         }
         // P0 安全预检(深层挖矿头号死因):挖开这两格后侧面/上方岩浆会涌入——-59 钻石层就是岩浆层,
         // 实操挖钻石最常见死法。脚/头任一格暴露面贴岩浆 → 这条路不挖,A* 自然绕行。
+        //
+        // KNOWN STRICT-SURVIVAL GAP (tracked, not silently left in place): adjacentLava() below
+        // reads target/head's neighbour fluid state directly, with no ObservableWorldQuery/
+        // capability gate — it can "see" lava through unbroken rock the bot has never observed,
+        // the same category of bug already fixed in DigDownTask/DescendToYTask. It is left
+        // unfixed here deliberately rather than patched two different unsafe ways:
+        //   1. Gating the read with ObservableWorldQuery but keeping today's raw check as the
+        //      "unobserved" fallback would be a no-op: an unmined neighbour's raw fluid state is
+        //      never actually lava (it's solid rock), so the fallback would recompute the exact
+        //      same true/false the ungated code already returns. That is theater, not a fix.
+        //   2. Gating the read and treating "not yet observable" as merely allowed/unknown-risk
+        //      (the honest per-cell answer) would remove the ONLY safety net for this move: unlike
+        //      DigDownTask/DescendToYTask, PathExecutor.tickDigThrough() (the sole executor of
+        //      MoveType.DIG_THROUGH) calls MiningController with no fluid/observability check of
+        //      its own once mining actually starts, and NeighborEnumerator has no bot reference or
+        //      per-tick state to add one here. Relaxing this check alone would trade the x-ray for
+        //      exactly the "bot walks into lava" regression this project forbids trading for.
+        // A real fix needs a companion reactive check inside PathExecutor.tickDigThrough (recheck
+        // the newly-exposed neighbours once the foot cell is actually mined, and abort/replan if a
+        // hazard is found there) before this preflight can honestly be loosened to "unknown, react
+        // later." PathExecutor is a widely shared, heavily-used generic navigation primitive used
+        // far beyond mining, so that companion change was judged out of scope for this pass and is
+        // reported rather than guessed at.
         boolean isGoal = pathGoal != null && (target.equals(pathGoal) || head.equals(pathGoal));
         if (!isGoal && (adjacentLava(world, target) || adjacentLava(world, head))) {
             return false; // 终点格豁免:贴岩浆的矿仍可达,挖前由任务层先封岩浆(ore_dig_lava_seal)
@@ -201,6 +224,8 @@ public final class NeighborEnumerator {
     }
 
     // 暴露面岩浆:四水平邻+上方任一岩浆即危险(下方由 target.down 实心保证不漏)。
+    // See the KNOWN STRICT-SURVIVAL GAP note on digEnterable() above: this raw read is not gated
+    // by ObservableWorldQuery, and that is a deliberate, reported, open gap rather than an oversight.
     private static boolean adjacentLava(ServerWorld world, BlockPos pos) {
         if (world.getFluidState(pos.up()).isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
             return true;

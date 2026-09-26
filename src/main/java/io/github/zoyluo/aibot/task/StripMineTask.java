@@ -12,7 +12,9 @@ import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.mining.ToolTier;
+import io.github.zoyluo.aibot.mode.CapabilityRuntime;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
+import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.block.Block;
@@ -37,6 +39,14 @@ import java.util.stream.Collectors;
 public final class StripMineTask extends AbstractTask {
     public static final String STRICT_SURVIVAL_REJECTION =
             "legacy_strip_mine_unavailable_in_strict_survival:use_mine_ore_or_achieve_goal";
+    /**
+     * The coarse {@link #profileRejectionReason} check only looks at the operating profile enum.
+     * An operator who enables OPERATOR mode for something unrelated (e.g. manual teleport) but has
+     * not explicitly turned on hidden-block-scan capability must still be denied this legacy task's
+     * unguarded {@code OreScan.adjacentHazard(ServerWorld, BlockPos)} raw-world hazard reads.
+     */
+    public static final String HIDDEN_BLOCK_SCAN_REJECTION =
+            "legacy_strip_mine_requires_hidden_block_scan_capability:use_mine_ore_or_achieve_goal";
 
     private enum Phase {
         PREP,
@@ -181,6 +191,25 @@ public final class StripMineTask extends AbstractTask {
                     "result", "rejected",
                     "profile", OperatingProfile.STRICT_SURVIVAL.configValue(),
                     "reason", reason,
+                    "task", name());
+            return;
+        }
+        // The coarse profile gate above only fails closed under STRICT_SURVIVAL. This task's
+        // mineBlock/mineVein/safeStandTarget legacy paths still call the raw, un-gated
+        // OreScan.adjacentHazard(ServerWorld, BlockPos) overload, so an OPERATOR-profile bot must
+        // also hold the fine-grained HIDDEN_BLOCK_SCAN capability before this task may run at all;
+        // otherwise an operator who enabled OPERATOR mode for something unrelated (e.g. manual
+        // teleport) while leaving hiddenBlockScan unset/false would still get unguarded hazard
+        // x-ray from this file.
+        var hiddenBlockScanDecision = CapabilityRuntime.decide(
+                bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "strip_mine_onStart");
+        if (!hiddenBlockScanDecision.allowed()) {
+            fail(HIDDEN_BLOCK_SCAN_REJECTION);
+            BotLog.action(bot, "strip_mine_capability_gate",
+                    "result", "rejected",
+                    "capability", PrivilegedCapability.HIDDEN_BLOCK_SCAN,
+                    "reason", HIDDEN_BLOCK_SCAN_REJECTION,
+                    "decision_reason", hiddenBlockScanDecision.reason(),
                     "task", name());
             return;
         }

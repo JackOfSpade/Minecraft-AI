@@ -63,14 +63,16 @@ public final class DigDownReturnGameTests {
             world.setBlockState(start.add(dx, 1, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(start.add(dx, 2, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
+        // isViableStairDirection now takes the bot (strict-survival observation is gated on its
+        // eye position/profile), so it must be spawned before these fixture assertions run.
+        AIPlayerEntity bot = spawn(context, "DigDownRotateGT", start);
         require(context, !DigDownTask.isViableStairDirection(
-                        world, start, net.minecraft.util.math.Direction.NORTH),
+                        bot, start, net.minecraft.util.math.Direction.NORTH),
                 "fixture's unsupported north stair was accepted");
         require(context, DigDownTask.isViableStairDirection(
-                        world, start, net.minecraft.util.math.Direction.EAST),
+                        bot, start, net.minecraft.util.math.Direction.EAST),
                 "fixture's supported east stair was rejected");
 
-        AIPlayerEntity bot = spawn(context, "DigDownRotateGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
         DigDownTask task = new DigDownTask(Blocks.STONE, 3);
         TaskManager.INSTANCE.assign(bot, task,
