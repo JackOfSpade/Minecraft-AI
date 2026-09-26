@@ -1,18 +1,21 @@
 package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.action.ActionResult;
+import io.github.zoyluo.aibot.action.BlockMiner;
+import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.FarmAction;
+import io.github.zoyluo.aibot.action.InventoryAction;
+import io.github.zoyluo.aibot.action.MaterialPalette;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.pathfinding.Standability;
-import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 
 /**
  * 建一个 2×2 无限水源(灌溉 / 取水用)。在 center 所在的地面挖出 1 深的 2×2 坑,
@@ -26,7 +29,10 @@ public final class IrrigateTask extends AbstractTask {
     private static final int SETTLE_TICKS = 20; // 放水后等水流扩散、两空格转为源
     private final BlockPos center;
     private final List<BlockPos> cells = new ArrayList<>(); // 2×2 的 4 格(同一 y 层)
+    private final BlockMiner digMiner = new BlockMiner();
     private Phase phase = Phase.GOTO;
+    private int digIndex;
+    private boolean digFloorPlaced;
     private int settle;
     private String note = "";
 
@@ -64,6 +70,8 @@ public final class IrrigateTask extends AbstractTask {
         cells.add(center.offset(Direction.SOUTH));
         cells.add(center.offset(Direction.EAST).offset(Direction.SOUTH));
         phase = Phase.GOTO;
+        digIndex = 0;
+        digFloorPlaced = false;
     }
 
     @Override
@@ -89,7 +97,9 @@ public final class IrrigateTask extends AbstractTask {
         }
         BlockPos stand = adjacentStand(bot, center);
         if (stand == null) {
-            note = "unreachable"; // setBlockState 不依赖精确站位,够不到也就地施工
+            // 没有可站立的相邻格:仍进入 DIG,让 BlockMiner 用当前位置尝试挖掘(够不到会按正常挖掘
+            // 逻辑因超出交互距离而失败,不会瞬间破坏方块)。
+            note = "unreachable";
             phase = Phase.DIG;
             return;
         }
@@ -98,17 +108,57 @@ public final class IrrigateTask extends AbstractTask {
         }
     }
 
+    /**
+     * Digs the 2x2 pit one cell at a time: floors any open cell below with a real block drawn from
+     * inventory (never conjured), then mines the cell itself through the same tool-and-hardness-
+     * paced BlockMiner every other digging task uses -- no instant/creative-style block removal.
+     */
     private void dig(AIPlayerEntity bot) {
+        if (digIndex >= cells.size()) {
+            phase = Phase.PLACE;
+            return;
+        }
+        BlockPos cell = cells.get(digIndex);
         ServerWorld world = bot.getServerWorld();
-        for (BlockPos cell : cells) {
-            // 坑底必须实心(否则水往下漏);坑内清空成空气以容水。四周由现有地面充当挡水墙。
+        // 坑底必须实心(否则水往下漏);四周由现有地面充当挡水墙。
+        if (!digFloorPlaced) {
             BlockState below = world.getBlockState(cell.down());
             if (below.isAir() || !world.getFluidState(cell.down()).isEmpty()) {
-                world.setBlockState(cell.down(), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
+                OptionalInt slot = MaterialPalette.pickSacrificialBlockSlot(bot);
+                if (slot.isEmpty()) {
+                    fail("irrigate_missing_floor_material");
+                    return;
+                }
+                if (InventoryAction.equipFromSlot(bot, slot.getAsInt()) < 0) {
+                    fail("irrigate_floor_equip_failed");
+                    return;
+                }
+                ActionResult placed = BuildAction.placeBlockAt(bot, cell.down());
+                if (placed.isFailed()) {
+                    fail("irrigate_floor_place_failed:" + placed.reason());
+                    return;
+                }
             }
-            world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            digFloorPlaced = true;
         }
-        phase = Phase.PLACE;
+        // 坑内清空成空气以容水:真实按硬度/工具逐 tick 挖掘,不瞬间破坏。
+        if (world.getBlockState(cell).isAir()) {
+            digIndex++;
+            digFloorPlaced = false;
+            return;
+        }
+        if (digMiner.target() == null) {
+            digMiner.begin(bot, cell);
+        }
+        BlockMiner.Status status = digMiner.tick(bot);
+        if (status == BlockMiner.Status.FAILED) {
+            fail("irrigate_dig_failed:" + digMiner.failureReason());
+            return;
+        }
+        if (status == BlockMiner.Status.DONE) {
+            digIndex++;
+            digFloorPlaced = false;
+        }
     }
 
     private void place(AIPlayerEntity bot) {
