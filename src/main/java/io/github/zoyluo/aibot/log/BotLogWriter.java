@@ -13,9 +13,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.ArrayDeque;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +31,8 @@ public final class BotLogWriter {
 
     private static final Logger MIRROR = LoggerFactory.getLogger("aibot");
     private static final DateTimeFormatter TS_FORMAT = DateTimeFormatter.ISO_INSTANT;
+    private static final DateTimeFormatter SESSION_ID_FORMAT =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
 
     private final ArrayBlockingQueue<LogEntry> queue = new ArrayBlockingQueue<>(4096);
     private final ArrayDeque<LogEntry> bootstrapEntries = new ArrayDeque<>();
@@ -45,6 +51,13 @@ public final class BotLogWriter {
     private BotLogWriter() {
     }
 
+    /**
+     * Each server start is one play session (matching the played-session-then-review workflow):
+     * logs live under {@code <directory>/sessions/<sessionId>/}, and only the {@link
+     * AIBotConfig.Logging#maxSessions()} most recently started sessions are kept -- older session
+     * directories are deleted outright on the next start, so historical logs never accumulate
+     * past that bound regardless of how much any one session logs.
+     */
     public synchronized void start(AIBotConfig config) {
         if (started) {
             return;
@@ -54,12 +67,16 @@ public final class BotLogWriter {
         if (!this.config.enabled()) {
             return;
         }
-        baseDir = FabricLoader.getInstance().getGameDir().resolve(this.config.directory());
+        Path sessionsDir = FabricLoader.getInstance().getGameDir()
+                .resolve(this.config.directory()).resolve("sessions");
         try {
+            Files.createDirectories(sessionsDir);
+            baseDir = sessionsDir.resolve(newSessionId(sessionsDir));
             Files.createDirectories(baseDir.resolve("by-bot"));
             Files.createDirectories(baseDir.resolve("archive"));
             currentDate = LocalDate.now();
             allWriter = Files.newBufferedWriter(baseDir.resolve("all.log"), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+            pruneOldSessions(sessionsDir);
             stopRequested = false;
             workerThread = new Thread(this::workerLoop, "AIBotLogWriter");
             workerThread.setDaemon(true);
@@ -71,8 +88,50 @@ public final class BotLogWriter {
         }
     }
 
-    public void submit(LogCategory category, Level level, String botName, String event, Map<String, String> fields, String humanMessage, Throwable throwable) {
-        LogEntry entry = new LogEntry(System.currentTimeMillis(), category, level, botName, event, Map.copyOf(fields), humanMessage, throwable);
+    /** Timestamp-sortable id, disambiguated in the rare case two sessions start the same second. */
+    private static String newSessionId(Path sessionsDir) {
+        String base = SESSION_ID_FORMAT.format(Instant.now());
+        String candidate = base;
+        int suffix = 2;
+        while (Files.exists(sessionsDir.resolve(candidate))) {
+            candidate = base + "-" + suffix++;
+        }
+        return candidate;
+    }
+
+    private void pruneOldSessions(Path sessionsDir) throws IOException {
+        int keep = Math.max(1, config.maxSessions());
+        List<Path> sessions;
+        try (var stream = Files.list(sessionsDir)) {
+            sessions = stream.filter(Files::isDirectory)
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                    .toList();
+        }
+        List<Path> stale = sessions.size() > keep
+                ? sessions.subList(0, sessions.size() - keep)
+                : List.of();
+        for (Path old : new ArrayList<>(stale)) {
+            deleteRecursively(old);
+        }
+    }
+
+    private void deleteRecursively(Path root) {
+        try (var stream = Files.walk(root)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException exception) {
+                    MIRROR.warn("[AIBot] failed to delete stale session log entry {}", path, exception);
+                }
+            });
+        } catch (IOException exception) {
+            MIRROR.warn("[AIBot] failed to prune stale session log directory {}", root, exception);
+        }
+    }
+
+    public void submit(LogCategory category, Level level, String botName, String scope, String event, Map<String, String> fields, String humanMessage, Throwable throwable) {
+        LogEntry entry = new LogEntry(System.currentTimeMillis(), category, level, botName,
+                scope == null || scope.isBlank() ? "-" : scope, event, Map.copyOf(fields), humanMessage, throwable);
         boolean security = category == LogCategory.SECURITY;
         boolean bootstrapCritical = (category == LogCategory.CONFIG || category == LogCategory.ERROR)
                 && (!started || !config.enabled());
@@ -132,6 +191,7 @@ public final class BotLogWriter {
                     LogCategory.ACTION,
                     Level.INFO,
                     "-",
+                    "-",
                     "overflow_test_event",
                     Map.of("index", Integer.toString(index)),
                     "manual overflow validation",
@@ -146,6 +206,7 @@ public final class BotLogWriter {
                     System.currentTimeMillis(),
                     LogCategory.ERROR,
                     Level.ERROR,
+                    "-",
                     "-",
                     "overflow_test_marker",
                     Map.of("requested", Integer.toString(attempts)),
@@ -260,6 +321,7 @@ public final class BotLogWriter {
                 .append(" [").append(pad(entry.level().name(), 5)).append("] ")
                 .append("[").append(pad(entry.category().name(), 10)).append("] ")
                 .append("bot=").append(entry.botName())
+                .append(" scope=").append(entry.scope())
                 .append(" event=").append(entry.event());
         for (Map.Entry<String, String> field : entry.fields().entrySet()) {
             builder.append(' ').append(field.getKey()).append('=').append(quote(field.getValue()));

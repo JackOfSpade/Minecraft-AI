@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.log;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.task.TaskManager;
 import org.slf4j.event.Level;
 
 import java.util.LinkedHashMap;
@@ -83,15 +84,35 @@ public final class BotLog {
     }
 
     private static void submit(LogCategory category, Level level, AIPlayerEntity bot, String event, String humanMessage, Throwable throwable, Object... kv) {
-        submit(category, level, nameOf(bot), event, humanMessage, throwable, kv);
+        BotLogWriter.INSTANCE.submit(category, level, nameOf(bot), scopeOf(bot), event, toMap(kv), humanMessage, throwable);
     }
 
     private static void submit(LogCategory category, Level level, String botName, String event, String humanMessage, Throwable throwable, Object... kv) {
-        BotLogWriter.INSTANCE.submit(category, level, botName, event, toMap(kv), humanMessage, throwable);
+        BotLogWriter.INSTANCE.submit(category, level, botName, "-", event, toMap(kv), humanMessage, throwable);
     }
 
     private static String nameOf(AIPlayerEntity bot) {
         return bot == null ? "-" : bot.getGameProfile().getName();
+    }
+
+    /**
+     * Every log call automatically inherits the bot's currently active request scope (see {@link
+     * io.github.zoyluo.aibot.runtime.TaskOrigin#scopeId()}) -- no call site anywhere in the
+     * codebase needs to pass it explicitly. This is what lets a played session's log be filtered
+     * down to exactly one player instruction's execution (grep for its scope tag) instead of
+     * wading through every bot's interleaved activity.
+     */
+    private static String scopeOf(AIPlayerEntity bot) {
+        if (bot == null) {
+            return "-";
+        }
+        return TaskManager.INSTANCE.activeOrigin(bot).map(origin -> {
+            try {
+                return origin.scopeId();
+            } catch (RuntimeException ignored) {
+                return "-";
+            }
+        }).orElse("-");
     }
 
     private static Map<String, String> toMap(Object... kv) {

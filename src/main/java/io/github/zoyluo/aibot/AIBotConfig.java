@@ -137,7 +137,7 @@ public record AIBotConfig(
                 new Perception(16, 20, 10, 10, false),
                 new Brain(36, 6, 3, false, true, false, 3, true),
                 new Watchdog(200),
-                new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
+                new Logging(true, "logs/aibot", true, "daily", 50, 30, 3, true, Map.of(
                         "LIFECYCLE", "INFO",
                         "COMM", "INFO",
                         "API", "INFO",
@@ -377,6 +377,10 @@ public record AIBotConfig(
             String rotation,
             int maxFileSizeMb,
             int maxBackups,
+            /** How many play sessions' (one per server start) logs to keep under
+             *  {@code <directory>/sessions/}; older sessions are deleted outright on the next
+             *  start regardless of size, so history never grows past this many sessions. */
+            int maxSessions,
             boolean mirrorToSlf4j,
             Map<String, String> categories
     ) {
@@ -388,6 +392,7 @@ public record AIBotConfig(
                     blankToDefault(rotation, defaults.rotation),
                     positiveOrDefault(maxFileSizeMb, defaults.maxFileSizeMb),
                     positiveOrDefault(maxBackups, defaults.maxBackups),
+                    positiveOrDefault(maxSessions, defaults.maxSessions),
                     mirrorToSlf4j,
                     categories == null || categories.isEmpty() ? defaults.categories : categories);
         }

@@ -9,6 +9,7 @@ record LogEntry(
         LogCategory category,
         Level level,
         String botName,
+        String scope,
         String event,
         Map<String, String> fields,
         String humanMessage,
