@@ -3,6 +3,7 @@
 ## 文档入口
 
 - [运行模式与特权能力](OPERATING_PROFILES.md)：`strict_survival` / `operator` 的解析、迁移和 capability matrix。
+- [智能日志](LOGGING.md)：按请求 scope 打标、按会话保留、以及排查发现记录不足时的自我改进原则。
 - [测试与证据](TESTING_AND_EVIDENCE.md)：JUnit、GameTest、测试 harness、不可变 evidence bundle 与 baseline pin 流程。
 - [能力矩阵](CAPABILITY_MATRIX.md)：当前显式证据与 legacy 诊断的生成结果。
 - [P0 Runtime Hardening](P0_RUNTIME_HARDENING.md)：运行时加固阶段与验收项。

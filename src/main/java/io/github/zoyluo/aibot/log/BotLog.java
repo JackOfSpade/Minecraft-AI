@@ -7,6 +7,18 @@ import org.slf4j.event.Level;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Smart-logging entry point: every call here is auto-tagged with the scope of whatever request
+ * is currently active for the bot (see {@link #scopeOf}), so debugging one request means reading
+ * only its scope's lines, not the whole session. This is deliberately NOT "log everything" --
+ * only what a class of request needs to reliably prove it completed correctly.
+ *
+ * <p>This is meant to be self-improving: if reviewing a scope's log trace ever turns out not to
+ * be enough to tell whether/why a request succeeded or failed, that is a gap in this logging, not
+ * just in that one debugging session. Add the missing call(s) at the point the fact was known,
+ * scoped to that class of request -- don't just note the gap and leave the same blind spot for
+ * next time, and don't respond to one gap by broadly raising verbosity elsewhere.
+ */
 public final class BotLog {
     private BotLog() {
     }
