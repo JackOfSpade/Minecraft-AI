@@ -24,6 +24,11 @@ import java.util.Objects;
 public final class PathExecutor {
     private static final int STUCK_TICKS_LIMIT = 60;
     private static final int REPLAN_COOLDOWN_TICKS = 40;
+    // A real vanilla 1-block step-up arcs in ~6-10 ticks. Grace gives it room to actually land
+    // before treating a still-grounded-at-the-base pose as the documented clientless stale-onGround
+    // quirk; the hard cap is a fail-safe ceiling so a genuinely wedged jump never spins forever.
+    private static final int JUMP_UP_ARC_GRACE_TICKS = 20;
+    private static final int JUMP_UP_HARD_TIMEOUT_TICKS = 30;
     private static final int CONSTRAINED_ROUTE_MAX_NODES = 10_000;
     private static final long CONSTRAINED_ROUTE_MAX_MILLIS = 50L;
 
@@ -45,6 +50,12 @@ public final class PathExecutor {
     private int activeWalkTargetIndex = -1;
     private int nodeRetry;
     private BlockPos lastRuntimeContractPosition;
+    // Real-physics DROP_DOWN: the Y the bot was standing at when it started falling this node,
+    // captured once so the fall height can be sanity-checked against maxSafeFall every tick.
+    private Integer dropOriginY;
+    // Real-physics JUMP_UP: ticks spent on the current node's genuine vanilla jump attempt before
+    // the bounded FakePlayerMotion.jumpTo teleport is used as a rescue.
+    private int jumpAttemptTicks;
 
     public PathExecutor(List<Node> path, BlockPos originalGoal) {
         this(path, originalGoal, false, false, 0);
@@ -154,15 +165,16 @@ public final class PathExecutor {
     }
 
     private ActionResult tickWalk(ActionPack pack, Node next) {
+        if (next.moveType() == MoveType.JUMP_UP) {
+            // A real, multi-tick jump arc can pass directly over the target column mid-flight
+            // (block position matching for an instant while still airborne, ascending or on the
+            // way back down). The generic blockPos-only arrivedAt() below is safe for WALK/DIAGONAL
+            // (always grounded), but JUMP_UP needs its own onGround-aware arrival check so the
+            // executor never advances to the next node before the bot has actually landed.
+            return tickJumpUp(pack, next);
+        }
         if (arrivedAt(pack.player().getBlockPos(), next.pos())) {
             return commitAdvance(pack, index + 1);
-        }
-        if (next.moveType() == MoveType.JUMP_UP) {
-            if (FakePlayerMotion.jumpTo(pack.player(), next.pos(), "path_jump_up")) {
-                BotLog.path(pack.player(), "path_jump_complete", "to", LogFields.pos(next.pos()));
-                return commitAdvance(pack, index + 1);
-            }
-            return handleStuck(pack, "jump_up_blocked");
         }
         if (subWalker == null) {
             activeWalkTargetIndex = chooseWalkTargetIndex(pack);
@@ -197,33 +209,94 @@ public final class PathExecutor {
         return ActionResult.IN_PROGRESS;
     }
 
-    /** Executes a safe fall one collision-validated adjacent cell at a time for a clientless bot. */
+    /**
+     * Ordinary 1-block step-up: real vanilla jump input first (matching {@link #tickPillar}'s
+     * real-input pattern for the ascent), spread over the genuine ~6-10 tick jump arc that a
+     * real player's jump takes. The bounded {@link FakePlayerMotion#jumpTo} teleport is used only
+     * as a rescue once real progress has had a fair chance and stalled -- the same documented
+     * clientless stale-{@code isOnGround} quirk {@code jumpTo} itself already accounts for --
+     * never as the routine mechanism.
+     */
+    private ActionResult tickJumpUp(ActionPack pack, Node next) {
+        AIPlayerEntity player = pack.player();
+        BlockPos target = next.pos();
+        if (arrivedAt(player.getBlockPos(), target) && player.isOnGround()) {
+            BotLog.path(player, "path_jump_complete", "to", LogFields.pos(target));
+            return commitAdvance(pack, index + 1);
+        }
+        jumpAttemptTicks++;
+        double dx = (target.getX() + 0.5D) - player.getX();
+        double dz = (target.getZ() + 0.5D) - player.getZ();
+        LookAction.lookHorizontallyAt(player, player.getPos().add(dx, 0.0D, dz));
+        pack.setForward(1.0F);
+        pack.setStrafing(0.0F);
+        pack.setSprinting(false);
+        pack.setJumping(true);
+        // "Stalled" = still standing at the original (lower) footing with no vertical progress at
+        // all -- the same clientless-quirk symptom documented on FakePlayerMotion.jumpTo, where a
+        // held jump input alone can leave the fake player bouncing on the same block forever.
+        boolean stalledAtBase = player.isOnGround() && player.getBlockY() < target.getY();
+        boolean arcGraceExpired = jumpAttemptTicks > JUMP_UP_ARC_GRACE_TICKS && stalledAtBase;
+        boolean hardTimeout = jumpAttemptTicks > JUMP_UP_HARD_TIMEOUT_TICKS;
+        if (!arcGraceExpired && !hardTimeout) {
+            return ActionResult.IN_PROGRESS;
+        }
+        pack.setJumping(false);
+        if (FakePlayerMotion.jumpTo(player, target, "path_jump_up_rescue")) {
+            BotLog.path(player, "path_jump_complete_rescue", "to", LogFields.pos(target));
+            return commitAdvance(pack, index + 1);
+        }
+        return handleStuck(pack, "jump_up_blocked");
+    }
+
+    /**
+     * Executes a real, multi-tick vanilla fall for a clientless bot instead of teleporting one
+     * block per tick. Server-side {@code travel()}/gravity has been empirically confirmed to run
+     * for this entity independent of any {@link FakePlayerMotion} intervention (see the
+     * accompanying commit message), so this method only steers the horizontal drift toward the
+     * landing column and watches for a real, physically-resolved landing; vanilla's own collision
+     * and gravity integration produce the same accelerating multi-tick descent, arrival position
+     * and fall damage a real player would experience for an identical drop.
+     */
     private ActionResult tickDrop(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
         BlockPos current = player.getBlockPos();
         BlockPos target = next.pos();
-        if (current.equals(target)) {
+        if (current.equals(target) && player.isOnGround()) {
+            BotLog.path(player, "path_drop_complete", "to", LogFields.pos(target));
             return commitAdvance(pack, index + 1);
         }
-        if (current.getY() <= target.getY()
+        if (dropOriginY == null) {
+            dropOriginY = current.getY();
+        }
+        int fallBlocks = dropOriginY - target.getY();
+        if (fallBlocks <= 0
+                || fallBlocks > AIBotConfig.get().nav().maxSafeFall()
                 || Math.abs(current.getX() - target.getX()) > 1
                 || Math.abs(current.getZ() - target.getZ()) > 1) {
             return handleStuck(pack, "drop_pose_drift");
         }
-        int stepX = Integer.compare(target.getX(), current.getX());
-        int stepZ = stepX == 0 ? Integer.compare(target.getZ(), current.getZ()) : 0;
-        BlockPos step = current.add(stepX, -1, stepZ);
-        if (DangerCheck.scan(player.getServerWorld(), step) != null
-                || !FakePlayerMotion.stepTo(player, step, "path_drop_down")) {
-            return handleStuck(pack, "drop_step_blocked");
+        if (current.getY() < target.getY()) {
+            // Real collision against the pre-validated landing floor should never let the bot pass
+            // below it; treat this as corruption (e.g. the floor changed mid-fall) rather than
+            // silently continuing past a landing we can no longer trust.
+            return handleStuck(pack, "drop_overshot_landing");
         }
+        double dx = (target.getX() + 0.5D) - player.getX();
+        double dz = (target.getZ() + 0.5D) - player.getZ();
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        if (horizontal > 0.05D) {
+            LookAction.lookHorizontallyAt(player, player.getPos().add(dx, 0.0D, dz));
+            pack.setForward(1.0F);
+        } else {
+            pack.setForward(0.0F);
+        }
+        pack.setStrafing(0.0F);
+        pack.setSprinting(false);
+        pack.setJumping(false);
         ActionResult stepContract = ensureRuntimeContract(pack, false);
         if (stepContract.isFailed()) {
             return stepContract;
-        }
-        if (step.equals(target)) {
-            BotLog.path(player, "path_drop_complete", "to", LogFields.pos(target));
-            return commitAdvance(pack, index + 1);
         }
         return ActionResult.IN_PROGRESS;
     }
@@ -366,6 +439,8 @@ public final class PathExecutor {
         // A committed node starts a new safety lease even when rounding keeps the same BlockPos.
         // This catches a return corridor changed between two executor ticks before the next node.
         lastRuntimeContractPosition = null;
+        dropOriginY = null;
+        jumpAttemptTicks = 0;
     }
 
     private int chooseWalkTargetIndex(ActionPack pack) {
@@ -517,6 +592,8 @@ public final class PathExecutor {
                 stuckTicks = 0;
                 lastPos = null;
                 lastRuntimeContractPosition = null;
+                dropOriginY = null;
+                jumpAttemptTicks = 0;
                 return ActionResult.IN_PROGRESS;
             }
             reason = reason + "; replan_failed: "
@@ -763,6 +840,8 @@ public final class PathExecutor {
         }
         subWalker = null;
         digWalking = false;
+        dropOriginY = null;
+        jumpAttemptTicks = 0;
         pack.stopMovement();
     }
 

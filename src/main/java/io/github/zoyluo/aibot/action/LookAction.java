@@ -35,7 +35,7 @@ public final class LookAction {
         return lookAt(player, target);
     }
 
-    static ActionResult lookHorizontallyAt(AIPlayerEntity player, Vec3d target) {
+    public static ActionResult lookHorizontallyAt(AIPlayerEntity player, Vec3d target) {
         Vec3d current = player.getPos();
         double dx = target.x - current.x;
         double dz = target.z - current.z;
