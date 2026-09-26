@@ -126,7 +126,7 @@ public final class ActionPack {
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
-        PathfindingResult result = new AStarPathfinder(player.getServerWorld(), player.getBlockPos(), goal,
+        PathfindingResult result = new AStarPathfinder(player, player.getServerWorld(), player.getBlockPos(), goal,
                 DIG_APPROACH_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true, 10.0D).findPath();
         if (!result.success()) {
             lastPathRequest = request;
@@ -240,7 +240,7 @@ public final class ActionPack {
         // 纯步行无解再允许挖穿兜底(隧道/破障),挖穿预算更小以限制被困/地下时的 3D 体积爆搜。
         AStarPathfinder walkFinder =
                 new AStarPathfinder(
-                        world, from, goal, WALK_MAX_NODES, PATHFIND_MAX_MILLIS,
+                        player, world, from, goal, WALK_MAX_NODES, PATHFIND_MAX_MILLIS,
                         canPillar, false);
         PathfindingResult result = routeContract.constrained()
                 ? walkFinder.findPathUncachedAtOrAbove(routeContract.minimumY())
@@ -248,7 +248,7 @@ public final class ActionPack {
         boolean dugOutbound = false;
         if (!result.success() && allowDigFallback) {
             AStarPathfinder digFinder = new AStarPathfinder(
-                    world, from, goal, DIG_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true);
+                    player, world, from, goal, DIG_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true);
             PathfindingResult dig = routeContract.constrained()
                     ? digFinder.findPathUncachedAtOrAbove(routeContract.minimumY())
                     : digFinder.findPath();
@@ -276,7 +276,7 @@ public final class ActionPack {
                         result.resolvedGoal(), result.resolvedStart());
             } else {
                 returnProof = new AStarPathfinder(
-                        world, immutableGoal, routeContract.returnAnchor(),
+                        player, world, immutableGoal, routeContract.returnAnchor(),
                         WALK_MAX_NODES, PATHFIND_MAX_MILLIS, false, false)
                         .findPathUncachedAtOrAbove(routeContract.minimumY());
             }

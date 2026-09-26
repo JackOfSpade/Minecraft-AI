@@ -352,7 +352,7 @@ public final class HuntCrossRegionGameTests {
         BlockPos beyond = new BlockPos(start.getX() + 12, baseY, start.getZ());
         int floorY = baseY - 16;
         HuntTask.SurfaceRouteProof proof = HuntTask.provePreyApproachRoute(
-                world, start, beyond, floorY, null);
+                null, world, start, beyond, floorY, null);
         require(context, proof == HuntTask.SurfaceRouteProof.SAFE,
                 "near-level dirt wall was not dig-provable: " + proof);
 

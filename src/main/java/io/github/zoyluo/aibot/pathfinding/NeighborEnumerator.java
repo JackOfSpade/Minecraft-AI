@@ -1,6 +1,8 @@
 package io.github.zoyluo.aibot.pathfinding;
 
 import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.mining.OreScan;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.registry.tag.BlockTags;
@@ -9,7 +11,9 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class NeighborEnumerator {
     private static final Direction[] HORIZONTAL = {
@@ -19,24 +23,34 @@ public final class NeighborEnumerator {
             Direction.WEST
     };
 
+    private final AIPlayerEntity bot;
     private final boolean canPillar;
     private final boolean allowDig;
     private BlockPos pathGoal; // 终点格:岩浆预检豁免用(终点贴岩浆由任务层封堵处理,不该让唯一入口无解)
+    // digEnterable()/adjacentHazardFluid() 每 tick 内会被同一批候选格反复问到同一个邻位(挖穿泛洪
+    // 时尤其明显),而 OreScan.observeDangerFluid 的可观测性判定要发真实射线,不能像 Standability
+    // 那样全局缓存(结果依赖 bot 的实时眼位/朝向)。本实例只服务单次 findPath() 调用,搜索期间世界
+    // 与 bot 位置都不变,按格记忆结果是安全的,把重复射线开销降到"每个格子最多问一次"。
+    private final Map<BlockPos, OreScan.Observation> hazardObservationCache = new HashMap<>();
 
-    public NeighborEnumerator() {
-        this(false, true);
+    public NeighborEnumerator(AIPlayerEntity bot) {
+        this(bot, false, true);
     }
 
     // NAV-9:canPillar=true 时允许"垫方块上升"邻接(仅当 bot 背包有可放置方块时由 A* 传入)。
-    public NeighborEnumerator(boolean canPillar) {
-        this(canPillar, true);
+    public NeighborEnumerator(AIPlayerEntity bot, boolean canPillar) {
+        this(bot, canPillar, true);
     }
 
     // NAV-OPT:allowDig=false 时**禁用 DIG_THROUGH 邻居**——只在空气格上做"纯步行"搜索。
     // 用于两阶段寻路的第一阶段:绝大多数移动靠纯步行即可达,搜索空间小(只空气格)、收敛快;
     // 而启用挖穿会把每个相邻实心方块都当邻居,使搜索退化成"3D 体积扩散",被困/地下时极易撑爆到
     // SEARCH_LIMIT(实测 5 格距离的 move 都 SEARCH_LIMIT 的机制根因)。纯步行无解再开第二阶段挖穿。
-    public NeighborEnumerator(boolean canPillar, boolean allowDig) {
+    //
+    // bot 仅用于 digEnterable() 的岩浆/水观测门控(可为 null——没有 bot 就没法证明"已观测",
+    // adjacentHazardFluid 会诚实地把每个邻位都判 UNKNOWN 并放行,而不是退化回未门控的原始读取)。
+    public NeighborEnumerator(AIPlayerEntity bot, boolean canPillar, boolean allowDig) {
+        this.bot = bot;
         this.canPillar = canPillar;
         this.allowDig = allowDig;
     }
@@ -188,32 +202,23 @@ public final class NeighborEnumerator {
             return false;
         }
         // P0 安全预检(深层挖矿头号死因):挖开这两格后侧面/上方岩浆会涌入——-59 钻石层就是岩浆层,
-        // 实操挖钻石最常见死法。脚/头任一格暴露面贴岩浆 → 这条路不挖,A* 自然绕行。
+        // 实操挖钻石最常见死法。脚/头任一格暴露面贴岩浆/水 → 这条路不挖,A* 自然绕行。
         //
-        // KNOWN STRICT-SURVIVAL GAP (tracked, not silently left in place): adjacentLava() below
-        // reads target/head's neighbour fluid state directly, with no ObservableWorldQuery/
-        // capability gate — it can "see" lava through unbroken rock the bot has never observed,
-        // the same category of bug already fixed in DigDownTask/DescendToYTask. It is left
-        // unfixed here deliberately rather than patched two different unsafe ways:
-        //   1. Gating the read with ObservableWorldQuery but keeping today's raw check as the
-        //      "unobserved" fallback would be a no-op: an unmined neighbour's raw fluid state is
-        //      never actually lava (it's solid rock), so the fallback would recompute the exact
-        //      same true/false the ungated code already returns. That is theater, not a fix.
-        //   2. Gating the read and treating "not yet observable" as merely allowed/unknown-risk
-        //      (the honest per-cell answer) would remove the ONLY safety net for this move: unlike
-        //      DigDownTask/DescendToYTask, PathExecutor.tickDigThrough() (the sole executor of
-        //      MoveType.DIG_THROUGH) calls MiningController with no fluid/observability check of
-        //      its own once mining actually starts, and NeighborEnumerator has no bot reference or
-        //      per-tick state to add one here. Relaxing this check alone would trade the x-ray for
-        //      exactly the "bot walks into lava" regression this project forbids trading for.
-        // A real fix needs a companion reactive check inside PathExecutor.tickDigThrough (recheck
-        // the newly-exposed neighbours once the foot cell is actually mined, and abort/replan if a
-        // hazard is found there) before this preflight can honestly be loosened to "unknown, react
-        // later." PathExecutor is a widely shared, heavily-used generic navigation primitive used
-        // far beyond mining, so that companion change was judged out of scope for this pass and is
-        // reported rather than guessed at.
+        // Strict-survival gate (companion fix to the DigDownTask/DescendToYTask x-ray closed in
+        // a0c4edd): adjacentHazardFluid() below only rejects a direction on a hazard that is
+        // ALREADY genuinely observable through the bot's own eyes right now (an open pocket, a
+        // previously mined cavity, or a naturally exposed face) via OreScan.observeDangerFluid's
+        // ObservableWorldQuery gate. A neighbour still hidden behind unmined rock reports UNKNOWN
+        // and is never treated as a hazard here — that used to be unsound (the earlier code read
+        // raw, un-mined fluid state with no gate at all, letting the bot "see" lava through solid
+        // rock it had never observed). Leaving an unknown cell unrejected is safe now because
+        // PathExecutor.tickDigThrough() (the sole executor of MoveType.DIG_THROUGH) reactively
+        // re-checks every newly-exposed neighbour the instant mining actually opens each cell, and
+        // aborts/replans on a real hazard there — see the comment on that method. This preflight is
+        // therefore a proactive best-effort optimization (avoid a route the bot can already see is
+        // dangerous), not the safety boundary; the reactive check is.
         boolean isGoal = pathGoal != null && (target.equals(pathGoal) || head.equals(pathGoal));
-        if (!isGoal && (adjacentLava(world, target) || adjacentLava(world, head))) {
+        if (!isGoal && (adjacentHazardFluid(target) || adjacentHazardFluid(head))) {
             return false; // 终点格豁免:贴岩浆的矿仍可达,挖前由任务层先封岩浆(ore_dig_lava_seal)
         }
         // P0 沙砾坍塌预检:头位上方是悬沙/砾(FallingBlock)→ 挖开即连环下落,砸头窒息+填回通道。
@@ -223,19 +228,28 @@ public final class NeighborEnumerator {
         return true;
     }
 
-    // 暴露面岩浆:四水平邻+上方任一岩浆即危险(下方由 target.down 实心保证不漏)。
-    // See the KNOWN STRICT-SURVIVAL GAP note on digEnterable() above: this raw read is not gated
-    // by ObservableWorldQuery, and that is a deliberate, reported, open gap rather than an oversight.
-    private static boolean adjacentLava(ServerWorld world, BlockPos pos) {
-        if (world.getFluidState(pos.up()).isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+    // 暴露面危险流体(岩浆/水):四水平邻+上方任一已观测到危险流体即危险(下方由 target.down
+    // 实心保证不漏)。见 digEnterable() 上方的门控说明:只在真已观测到时拒绝,未观测的邻位一律
+    // UNKNOWN 放行,交给 PathExecutor.tickDigThrough() 的反应式复查兜底。
+    private boolean adjacentHazardFluid(BlockPos pos) {
+        if (isObservedHazardFluid(pos.up())) {
             return true;
         }
         for (Direction d : HORIZONTAL) {
-            if (world.getFluidState(pos.offset(d)).isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+            if (isObservedHazardFluid(pos.offset(d))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private boolean isObservedHazardFluid(BlockPos pos) {
+        return cachedHazardObservation(pos) == OreScan.Observation.OBSERVED_PRESENT;
+    }
+
+    private OreScan.Observation cachedHazardObservation(BlockPos pos) {
+        return hazardObservationCache.computeIfAbsent(
+                pos.toImmutable(), p -> OreScan.observeDangerFluid(bot, p));
     }
 
     private static boolean hasHeadroom(ServerWorld world, BlockPos target) {

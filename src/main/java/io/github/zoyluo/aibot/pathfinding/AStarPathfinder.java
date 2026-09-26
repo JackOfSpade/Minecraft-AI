@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.pathfinding;
 
+import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
 import net.minecraft.server.world.ServerWorld;
@@ -22,6 +23,22 @@ public final class AStarPathfinder {
     private static final int MAX_CACHE_ENTRIES = 256;
     private static final long SUCCESS_CACHE_MILLIS = 2_000L;
     private static final long FAILURE_CACHE_MILLIS = 5_000L;
+    // Cross-bot cache-reuse note (bot identity is deliberately NOT part of CacheKey below):
+    // NeighborEnumerator's DIG_THROUGH preflight now gates its lava/water peek on the acting
+    // bot's own real-time observation (see the constructor taking AIPlayerEntity). That makes a
+    // cached PathfindingResult, in principle, a function of which bot planned it -- two bots at
+    // the exact same start/goal could, in theory, get different digEnterable() answers if one of
+    // them can currently see a hazard the other cannot. Adding bot identity to the key was
+    // considered and rejected: this cache's TTL is a couple of seconds (SUCCESS_CACHE_MILLIS/
+    // FAILURE_CACHE_MILLIS below) and its key already pins the exact start AND goal BlockPos, so
+    // two different bots colliding on a cache hit at all is already a rare coincidence. More
+    // importantly, plan-time digEnterable() is only ever a proactive optimization now, never the
+    // safety boundary: PathExecutor.tickDigThrough() is the sole executor of MoveType.DIG_THROUGH
+    // and reactively re-observes every newly-exposed neighbour with the REAL executing bot the
+    // instant mining opens it, regardless of which bot's observation shaped the cached plan. So a
+    // stale cross-bot hit can at worst make a plan slightly less proactively hazard-aware (it
+    // still gets caught reactively, never silently walked into) or slightly more conservative
+    // (a route another bot could rule out that this bot would have allowed) -- never unsafe.
     private static final Map<CacheKey, CachedResult> RESULT_CACHE = new LinkedHashMap<>(MAX_CACHE_ENTRIES, 0.75F, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<CacheKey, CachedResult> eldest) {
@@ -43,42 +60,81 @@ public final class AStarPathfinder {
     private static volatile long cacheVersion;
 
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal) {
-        this(world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, false);
+        this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, false);
+    }
+
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal) {
+        this(bot, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, false);
     }
 
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis) {
-        this(world, start, goal, maxNodes, maxMillis, false);
+        this(null, world, start, goal, maxNodes, maxMillis, false);
+    }
+
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis) {
+        this(bot, world, start, goal, maxNodes, maxMillis, false);
     }
 
     // NAV-9:canPillar=true 允许垫方块越障(由有方块的调用方传入)。
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, boolean canPillar) {
-        this(world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar);
+        this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar);
+    }
+
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, boolean canPillar) {
+        this(bot, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar);
     }
 
     /** Replans with the caller's original movement-capability ceiling intact. */
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal,
                            boolean canPillar, boolean allowDig) {
-        this(world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar, allowDig);
+        this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar, allowDig);
+    }
+
+    /** Replans with the caller's original movement-capability ceiling intact. */
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal,
+                           boolean canPillar, boolean allowDig) {
+        this(bot, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar, allowDig);
     }
 
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar) {
-        this(world, start, goal, maxNodes, maxMillis, canPillar, true);
+        this(null, world, start, goal, maxNodes, maxMillis, canPillar, true);
+    }
+
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar) {
+        this(bot, world, start, goal, maxNodes, maxMillis, canPillar, true);
     }
 
     // NAV-OPT:allowDig 区分"纯步行"与"允许挖穿"两种搜索模式,支撑两阶段寻路(纯步行优先、挖穿兜底)。
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
-        this(world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
+        this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
+    }
+
+    /**
+     * Same search, plus the acting bot so NeighborEnumerator's DIG_THROUGH preflight
+     * (digEnterable/adjacentHazardFluid) can gate its lava/water peek on what that bot can
+     * genuinely observe right now, instead of treating every unmined neighbour as unknown risk
+     * without ever proactively avoiding a hazard the bot can already see. {@code bot} may be
+     * null (e.g. a walk-only search that never invokes digEnterable, or a caller with no bot
+     * handy); OreScan.observeDangerFluid treats a null bot as "cannot observe," which safely
+     * degrades to the same allow-unknown behavior as the no-bot constructors below.
+     */
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
+        this(bot, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
     }
 
     // 带权构造(统一接近原语用 ε=3):见 heuristicWeight 注释。
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
+        this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, heuristicWeight);
+    }
+
+    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
         this.world = world;
         this.start = start.toImmutable();
         this.goal = goal.toImmutable();
         this.canPillar = canPillar;
         this.allowDig = allowDig;
         this.heuristicWeight = heuristicWeight;
-        this.enumerator = new NeighborEnumerator(canPillar, allowDig);
+        this.enumerator = new NeighborEnumerator(bot, canPillar, allowDig);
         this.maxNodes = maxNodes;
         this.maxMillis = maxMillis;
     }

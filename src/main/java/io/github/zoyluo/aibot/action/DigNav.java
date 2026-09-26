@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -29,8 +30,8 @@ public final class DigNav {
         if (step == null) {
             return false;
         }
-        if (adjacentLava(world, step)) {
-            return false; // 朝向格挨着岩浆 → 不挖,交还调用方
+        if (adjacentHazardFluid(bot, step)) {
+            return false; // 朝向格挨着已观测到的危险流体(岩浆/水) → 不挖,交还调用方
         }
         BlockPos solid = firstSolid(world, step, step.up());
         if (solid == null) {
@@ -46,6 +47,12 @@ public final class DigNav {
         BlockMiner.Status st = miner.target() != null && miner.target().equals(solid)
                 ? miner.tick(bot)
                 : begin(bot, miner, solid);
+        // 反应式复查(与 NeighborEnumerator/PathExecutor 挖穿同款):solid 刚被挖成真实空气,
+        // 它的邻位第一次对 bot 的眼睛真正可查。挖前 adjacentHazardFluid 拒的是"已观测"危险,
+        // 未观测的隐藏邻位诚实放行;这里补上挖开瞬间的复查兜底,而不是盲目继续挖/走进去。
+        if (st == BlockMiner.Status.DONE && adjacentHazardFluid(bot, solid)) {
+            return false; // 挖开即暴露已观测到的危险流体 → 交还调用方改道,同前置检查的约定
+        }
         return st == BlockMiner.Status.DONE || st == BlockMiner.Status.MINING;
     }
 
@@ -88,15 +95,25 @@ public final class DigNav {
         return null;
     }
 
-    private static boolean adjacentLava(ServerWorld world, BlockPos pos) {
-        if (world.getBlockState(pos).getFluidState().isIn(FluidTags.LAVA)) {
+    // 门控版(取代原始 adjacentLava):pos 本身贴身可见,如实读取合法(同 Standability 对物理下一步
+    // 的处理);但 pos 的六邻位可能仍藏在未挖的实心方块后面,只有已经真被 bot 观测到才算危险——
+    // 未观测的隐藏邻位诚实放行,交给挖开瞬间的反应式复查(见 digStep 内的 DONE 分支)兜底,而不是
+    // 像旧版那样无门控直读邻位流体状态(能透过没挖过的岩石"看见"岩浆/水)。
+    private static boolean adjacentHazardFluid(AIPlayerEntity bot, BlockPos pos) {
+        FluidState here = bot.getServerWorld().getFluidState(pos);
+        if (here.isIn(FluidTags.LAVA) || here.isIn(FluidTags.WATER)) {
             return true;
         }
         for (Direction d : Direction.values()) {
-            if (world.getBlockState(pos.offset(d)).getFluidState().isIn(FluidTags.LAVA)) {
+            if (isObservedHazardFluid(bot, pos.offset(d))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isObservedHazardFluid(AIPlayerEntity bot, BlockPos pos) {
+        return io.github.zoyluo.aibot.mining.OreScan.observeDangerFluid(bot, pos)
+                == io.github.zoyluo.aibot.mining.OreScan.Observation.OBSERVED_PRESENT;
     }
 }

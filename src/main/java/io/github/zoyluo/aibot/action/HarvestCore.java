@@ -551,7 +551,7 @@ public final class HarvestCore {
         if (stand == null || bot.getBlockPos().equals(stand)) {
             return true; // 够得着直接挖 / 已在站位,无需寻路
         }
-        return new AStarPathfinder(bot.getServerWorld(), bot.getBlockPos(), stand,
+        return new AStarPathfinder(bot, bot.getServerWorld(), bot.getBlockPos(), stand,
                 REACH_MAX_NODES, REACH_MAX_MILLIS, false, false).findPath().success();
     }
 

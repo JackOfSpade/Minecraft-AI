@@ -27,6 +27,11 @@ public final class MiningController {
         this.face = face;
     }
 
+    /** The cell this controller is (or was) mining. Lets a caller react once it finishes. */
+    public BlockPos pos() {
+        return pos;
+    }
+
     public ActionResult tick(ActionPack pack) {
         AIPlayerEntity player = pack.player();
         var world = player.getServerWorld();

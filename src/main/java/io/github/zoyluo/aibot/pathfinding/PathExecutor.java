@@ -308,12 +308,28 @@ public final class PathExecutor {
                 LookAction.lookAtBlock(pack.player(), next.pos(), face);
                 subMiner = new MiningController(next.pos(), face);
             }
+            BlockPos miningPos = subMiner.pos();
             ActionResult mine = subMiner.tick(pack);
             if (mine.isFailed()) {
                 return handleStuck(pack, "dig_failed: " + mine.reason());
             }
             if (mine.isInProgress()) {
                 return ActionResult.IN_PROGRESS;
+            }
+            // Reactive strict-survival hazard check -- the companion to NeighborEnumerator's
+            // relaxed, observability-gated digEnterable() preflight (see the comment there).
+            // miningPos just turned to real air: its own neighbours are genuinely checkable
+            // through the bot's own eyes for the first time, exactly like any cell a real
+            // survival player just broke into. This is the ONLY hazard net for
+            // MoveType.DIG_THROUGH -- NeighborEnumerator cannot see a cell still hidden behind
+            // unmined rock at plan time, so it honestly reports it as unknown and lets the route
+            // through; this check is what actually keeps that honest "unknown" safe by catching
+            // a real, now-exposed lava/water pocket before the bot mines further or walks in, and
+            // routing it back through the ordinary handleStuck()-driven replan instead of
+            // blindly continuing.
+            ActionResult hazard = rejectIfHazardExposed(pack, miningPos);
+            if (hazard != null) {
+                return hazard;
             }
             // 穿山双格挖:脚位挖完后头位仍有碰撞(实心山体内部每步如此)→ 再挖头位,人才进得去。
             // 配合 NeighborEnumerator.hasHeadroom 的"头位可挖即可"放宽,挖掘寻路从贴地刨坑升级为穿山打洞。
@@ -569,11 +585,11 @@ public final class PathExecutor {
             AStarPathfinder.invalidateCache("runtime_path_obstruction");
             AStarPathfinder finder = routeContract.constrained()
                     ? new AStarPathfinder(
-                    pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal,
+                    pack.player(), pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal,
                     CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                     false, false)
                     : new AStarPathfinder(
-                    pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal,
+                    pack.player(), pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal,
                     canPillar, allowDig);
             PathfindingResult fresh = routeContract.constrained()
                     ? finder.findPathUncachedAtOrAbove(routeContract.minimumY())
@@ -623,7 +639,7 @@ public final class PathExecutor {
     private PathfindingResult proveConstrainedReturnRoute(
             ActionPack pack, BlockPos returnAnchor) {
         return new AStarPathfinder(
-                pack.player().getServerWorld(), originalGoal, returnAnchor,
+                pack.player(), pack.player().getServerWorld(), originalGoal, returnAnchor,
                 CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                 false, false).findPathUncachedAtOrAbove(routeContract.minimumY());
     }
@@ -644,7 +660,7 @@ public final class PathExecutor {
             return ActionResult.SUCCESS;
         }
         PathfindingResult proof = new AStarPathfinder(
-                pack.player().getServerWorld(), current, routeContract.returnAnchor(),
+                pack.player(), pack.player().getServerWorld(), current, routeContract.returnAnchor(),
                 CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                 false, false).findPathUncachedAtOrAbove(routeContract.minimumY());
         RouteValidation validation =
@@ -843,6 +859,35 @@ public final class PathExecutor {
         dropOriginY = null;
         jumpAttemptTicks = 0;
         pack.stopMovement();
+    }
+
+    private static final Direction[] HORIZONTAL_NEIGHBORS = {
+            Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST
+    };
+
+    /**
+     * Reactive DIG_THROUGH hazard check: aborts the current node (via the ordinary
+     * handleStuck()-driven replan) the instant a cell mining just exposed turns out to have a
+     * genuinely observed lava/water neighbour. Returns null when nothing hazardous was found so
+     * the caller may keep mining/walking; returns the terminal ActionResult otherwise.
+     */
+    private ActionResult rejectIfHazardExposed(ActionPack pack, BlockPos justMined) {
+        AIPlayerEntity bot = pack.player();
+        if (hasObservedHazardFluid(bot, justMined.up())) {
+            return handleStuck(pack, "dig_through_hazard_exposed: " + compact(justMined.up()));
+        }
+        for (Direction direction : HORIZONTAL_NEIGHBORS) {
+            BlockPos neighbor = justMined.offset(direction);
+            if (hasObservedHazardFluid(bot, neighbor)) {
+                return handleStuck(pack, "dig_through_hazard_exposed: " + compact(neighbor));
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasObservedHazardFluid(AIPlayerEntity bot, BlockPos pos) {
+        return io.github.zoyluo.aibot.mining.OreScan.observeDangerFluid(bot, pos)
+                == io.github.zoyluo.aibot.mining.OreScan.Observation.OBSERVED_PRESENT;
     }
 
     private static Direction faceFromPlayer(ActionPack pack, BlockPos pos) {

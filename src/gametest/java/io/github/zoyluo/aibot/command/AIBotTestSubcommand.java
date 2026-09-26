@@ -140,7 +140,7 @@ public final class AIBotTestSubcommand {
             return 0;
         }
         AIPlayerEntity player = bot.get();
-        PathfindingResult result = new AStarPathfinder(player.getServerWorld(), player.getBlockPos(), getBlockPos(context)).findPath();
+        PathfindingResult result = new AStarPathfinder(player, player.getServerWorld(), player.getBlockPos(), getBlockPos(context)).findPath();
         String message = "[AIBot] pathfind success=" + result.success()
                 + ", reason=" + result.reason()
                 + ", nodes=" + result.nodesExplored()

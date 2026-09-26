@@ -625,7 +625,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 continue;
             }
             SurfaceRouteProof outbound = provePreyApproachRoute(
-                    bot.getServerWorld(), current, candidate, floorY, null);
+                    bot, bot.getServerWorld(), current, candidate, floorY, null);
             if (outbound == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -960,10 +960,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
      * Every other route (surface returns, roams, pickup sweeps) stays strict.
      */
     static SurfaceRouteProof provePreyApproachRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination,
+            AIPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos destination,
             int minimumY, BlockPos returnAnchor) {
         SurfaceRouteProof outbound =
-                proveExactDigFallbackRoute(world, origin, destination, minimumY);
+                proveExactDigFallbackRoute(bot, world, origin, destination, minimumY);
         if (outbound != SurfaceRouteProof.SAFE) {
             return outbound;
         }
@@ -978,8 +978,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 Math.min(origin.getY(), destination.getY()) - 1);
     }
 
+    // bot is only used to gate NeighborEnumerator's DIG_THROUGH lava/water preflight on real
+    // observability (see AStarPathfinder's AIPlayerEntity constructor); it may be null (e.g. a
+    // proof run with no live bot handy), which safely degrades to allow-unknown at plan time --
+    // PathExecutor.tickDigThrough()'s reactive check is what actually keeps that safe at runtime.
     private static SurfaceRouteProof proveExactDigFallbackRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
+            AIPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
         SurfaceRouteProof walk = proveExactSurfaceRoute(world, origin, destination, minimumY);
         if (walk == SurfaceRouteProof.SAFE) {
             return walk;
@@ -991,7 +995,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         int digFloor = digBreakthroughFloor(origin, destination, minimumY);
         Standability.clearCache();
         PathfindingResult result = new AStarPathfinder(
-                world, origin, destination,
+                bot, world, origin, destination,
                 SURFACE_ROUTE_MAX_NODES, SURFACE_ROUTE_MAX_MILLIS,
                 false, true).findPathUncachedAtOrAbove(digFloor);
         if (result.success()) {
@@ -1044,7 +1048,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         ServerWorld world = bot.getServerWorld();
         BlockPos origin = bot.getBlockPos();
         SurfaceRouteProof proof = digFallbackOutbound
-                ? provePreyApproachRoute(world, origin, destination, minimumY, returnAnchor)
+                ? provePreyApproachRoute(bot, world, origin, destination, minimumY, returnAnchor)
                 : proveSurfaceRouteContract(
                         world, origin, destination, minimumY, returnAnchor);
         if (proof == SurfaceRouteProof.RETRY) {
