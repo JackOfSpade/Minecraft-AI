@@ -131,7 +131,7 @@ public final class GuardTask extends AbstractTask {
             phase = Phase.RETURN;
             return;
         }
-        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 0.75F) {
+        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE) {
             phase = Phase.APPROACH;
             CombatCore.startApproach(bot, target);
             return;

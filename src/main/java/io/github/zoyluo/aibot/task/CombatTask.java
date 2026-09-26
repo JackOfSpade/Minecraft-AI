@@ -374,7 +374,7 @@ public final class CombatTask extends AbstractTask {
             beginBlock(bot);
             return;
         }
-        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 0.75F) {
+        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE) {
             phase = Phase.APPROACH;
             startApproach(bot);
             return;
@@ -457,7 +457,7 @@ public final class CombatTask extends AbstractTask {
         // A blocked tunnel must not turn retreat into passive death. Keep trying to open distance,
         // but counterattack whenever the pursuer remains in melee range.
         boolean meleeForbidden = CombatCore.isMeleeForbiddenThreat(threat);
-        if (!meleeForbidden && distance <= CombatCore.ATTACK_RANGE + 0.25D) {
+        if (!meleeForbidden && distance <= CombatCore.ATTACK_RANGE) {
             CombatCore.lookAt(bot, threat);
             CombatCore.ensureMeleeWeapon(bot);
             if (CombatCore.strikeIfReady(bot, threat)) {

@@ -16,7 +16,7 @@ import java.util.Optional;
  * way -- this is a fighting retreat, not a flee.
  */
 public final class CombatRegroupTask extends AbstractTask {
-    private static final double MELEE_STRIKE_RANGE = CombatCore.ATTACK_RANGE + 0.25D;
+    private static final double MELEE_STRIKE_RANGE = CombatCore.ATTACK_RANGE;
     private static final int REPATH_INTERVAL_TICKS = 20;
 
     private int nextRepathElapsed;

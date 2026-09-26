@@ -180,6 +180,9 @@ public final class CombatCore {
 
     public static boolean strikeIfReady(AIPlayerEntity bot, LivingEntity target) {
         lookAt(bot, target);
+        if (!inMeleeRange(bot, target)) {
+            return false;
+        }
         if (bot.getAttackCooldownProgress(0.5F) < 0.95F) {
             return false;
         }
