@@ -1,7 +1,5 @@
 package io.github.zoyluo.aibot.gametest;
 
-import net.minecraft.test.TestContext;
-
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -13,6 +11,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * stable time of day opt into this in-process mutual-exclusion lock instead: only one such
  * scenario runs its real body at a time, while every other (non-time-sensitive) scenario is
  * unaffected and keeps running fully concurrently.
+ *
+ * <p>Registering a fresh {@code TestContext#runAtEveryTick} callback from inside one that is
+ * already executing corrupts vanilla's internal per-test tracking (a live bug in 1.21.5's
+ * GameTest rewrite: {@code GameTestState#tickTests} iterates its own tracking map while
+ * invoking each test's tick callbacks, and mutating that state admits a new one mid-iteration
+ * crashes the whole test server). So a lock user must poll {@link #tryAcquire()} and run its
+ * one-time setup plus its real per-tick body from inside the SAME, single, top-level
+ * {@code runAtEveryTick} callback it already registers -- never register a second one once
+ * the lock is held.</p>
  */
 public final class GameTestTimeLock {
     private static final AtomicBoolean HELD = new AtomicBoolean(false);
@@ -20,30 +27,13 @@ public final class GameTestTimeLock {
     private GameTestTimeLock() {
     }
 
-    /**
-     * Runs {@code body} once this scenario has exclusive claim on world time-of-day, and
-     * releases that claim when the scenario ends (success, failure, or timeout) via
-     * {@link TestContext#addFinalTask}. Waiting for the claim does not run any of
-     * {@code body}'s logic yet, so give the scenario's {@code maxTicks} enough headroom to
-     * cover both a worst-case queueing wait behind every other time-sensitive scenario and
-     * its own real duration.
-     */
-    public static void runExclusive(TestContext context, Runnable body) {
-        boolean[] acquired = {false};
-        context.addFinalTask(() -> {
-            if (acquired[0]) {
-                HELD.set(false);
-            }
-        });
-        context.runAtEveryTick(() -> {
-            if (acquired[0]) {
-                return;
-            }
-            if (!HELD.compareAndSet(false, true)) {
-                return;
-            }
-            acquired[0] = true;
-            body.run();
-        });
+    /** Returns true if the caller now holds the lock (either just now, or already). */
+    public static boolean tryAcquire() {
+        return HELD.compareAndSet(false, true);
+    }
+
+    /** Releases the lock. Only call this if a prior {@link #tryAcquire()} returned true. */
+    public static void release() {
+        HELD.set(false);
     }
 }

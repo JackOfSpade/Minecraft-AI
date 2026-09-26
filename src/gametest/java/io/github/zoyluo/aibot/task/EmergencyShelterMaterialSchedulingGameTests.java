@@ -35,7 +35,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
     @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_mixed_wood_fallback_builds_holds_and_physically_exits_with_dirt_first", maxTicks = 16000)
     public void mixedWoodFallbackBuildsHoldsAndPhysicallyExitsWithDirtFirst(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterMixedWoodGT", feet);
@@ -51,7 +50,20 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         "gametest_shelter_mixed_wood_fallback"));
 
         int[] holdStartedElapsed = {-1};
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("mixed-wood shelter ended as "
@@ -79,8 +91,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                     "mixed emergency enclosure skipped its bounded HOLD transaction");
             assertOwnedNorthExit(context, bot, feet);
             finish(context, bot, "ShelterMixedWoodGT");
-        });
-    
         });
     }
 
@@ -275,7 +285,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
     @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_trapped_fight_back_replaces_non_defense_safety_without_nesting_mission", maxTicks = 16000)
     public void trappedFightBackReplacesNonDefenseSafetyWithoutNestingMission(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 260, 4));
         prepareIsolatedTrap(context, feet);
         AIPlayerEntity bot = spawn(context, "TrappedFightBackSwapGT", feet);
@@ -304,7 +313,20 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
         HoldingTask[] safetyHolder = {null};
         long[] holderAssignedTick = {-1L};
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             require(context, bot.isAlive() && bot.getBlockPos().equals(feet),
                     "trapped fight-back fixture moved or died before replacement");
@@ -355,14 +377,11 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                                 + (active == null ? "idle" : active.name())));
             }
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_critical_creeper_without_route_or_materials_retains_one_safety_owner", maxTicks = 16000)
     public void criticalCreeperWithoutRouteOrMaterialsRetainsOneSafetyOwner(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 280, 4));
         prepareIsolatedTrap(context, feet);
         AIPlayerEntity bot = spawn(context, "CreeperBackoffOwnerGT", feet);
@@ -400,7 +419,20 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 "first Creeper defense did not preserve exactly one mission frame");
 
         long started = context.getTick();
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             bot.setHealth(4.7F);
             bot.getHungerManager().setFoodLevel(17);
@@ -428,8 +460,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 hostile.discard();
                 finish(context, bot, "CreeperBackoffOwnerGT");
             }
-        });
-    
         });
     }
 

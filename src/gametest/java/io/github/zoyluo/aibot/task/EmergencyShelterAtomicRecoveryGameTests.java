@@ -31,7 +31,6 @@ import net.minecraft.text.Text;
 public final class EmergencyShelterAtomicRecoveryGameTests {
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_moving_edge_anchor_settles_before_envelope_placement", maxTicks = 16000)
     public void movingEdgeAnchorSettlesBeforeEnvelopePlacement(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterAnchorSettleGT", feet);
@@ -55,7 +54,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 "shelter admission did not settle the moving edge pose");
 
         boolean[] eastWallSealed = {false};
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("moving-edge shelter ended as " + task.state()
@@ -72,8 +84,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     "settled shelter never sealed the formerly overlapping east wall");
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterAnchorSettleGT");
-        });
-    
         });
     }
 
@@ -109,7 +119,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_persistent_hostile_gets_one_strike_then_forces_physical_exit", maxTicks = 16000)
     public void persistentHostileGetsOneStrikeThenForcesPhysicalExit(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterWallBlockerGT", feet);
@@ -126,7 +135,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         float[] previousBlockerHealth = {blockerHealth};
         int[] damageEvents = {0};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (blocker.getHealth() < previousBlockerHealth[0]) {
                 damageEvents[0]++;
@@ -152,8 +174,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             assertPhysicalExit(context, bot, feet);
             blocker.discard();
             finish(context, bot, "ShelterWallBlockerGT");
-        });
-    
         });
     }
 
@@ -194,7 +214,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_ai_enabled_close_pressure_uses_one_strike_and_low_health_bot_survives", maxTicks = 16000)
     public void aiEnabledClosePressureUsesOneStrikeAndLowHealthBotSurvives(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterAiPressureGT", feet);
@@ -210,7 +229,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         int[] closePressureTicks = {0};
         boolean[] lowHealthInjected = {false};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (hostile[0] == null
                     && isSealed(context, feet.north())
@@ -258,13 +290,10 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             hostile[0].discard();
             finish(context, bot, "ShelterAiPressureGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_melee_forbidden_occupied_egress_uses_alternate_owned_exit", maxTicks = 16000)
     public void meleeForbiddenOccupiedEgressUsesAlternateOwnedExit(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterForbiddenBlockerGT", feet);
@@ -292,7 +321,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_forbidden_wall_blocker"));
         boolean[] blockerReleasedAfterRejection = {false};
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             require(context, creeper.getHealth() == creeperHealth,
                     "shelter performed forbidden melee against a Creeper");
@@ -322,14 +364,11 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             creeper.discard();
             finish(context, bot, "ShelterForbiddenBlockerGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_adjacent_second_shelter_reuses_residual_roof_without_blocked_support_jump", maxTicks = 16000)
     public void adjacentSecondShelterReusesResidualRoofWithoutBlockedSupportJump(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos firstFeet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, firstFeet, 5);
         AIPlayerEntity bot = spawn(context, "ShelterAdjacentGT", firstFeet);
@@ -343,7 +382,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         BlockPos[] inheritedCenterRoof = {null};
         BlockPos[] unnecessarySecondRim = {null};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (second[0] == null) {
                 if (first.state() == TaskState.FAILED || first.state() == TaskState.CANCELLED) {
@@ -403,14 +455,11 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             assertPhysicalExit(context, bot, secondFeet[0]);
             finish(context, bot, "ShelterAdjacentGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_low_health_shelter_consumes_backpack_food_and_heals_before_opening", maxTicks = 16000)
     public void lowHealthShelterConsumesBackpackFoodAndHealsBeforeOpening(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
@@ -426,7 +475,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         boolean[] healed = {false};
         boolean[] safeThresholdObserved = {false};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("sealed-eat shelter ended as " + task.state()
@@ -477,13 +539,10 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterSealedEatGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_food_nineteen_waits_for_natural_healing_without_eating", maxTicks = 16000)
     public void foodNineteenWaitsForNaturalHealingWithoutEating(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
@@ -497,7 +556,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         "gametest_shelter_food_nineteen_efficiency"));
         boolean[] boundaryInjected = {false};
         boolean[] naturalHealingObserved = {false};
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("food-19 shelter ended as " + task.state()
@@ -534,13 +606,10 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterFoodNineteenGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_surface_shelter_stays_sealed_until_daylight", maxTicks = 16000)
     public void surfaceShelterStaysSealedUntilDaylight(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = highSurfaceFeet(context);
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterNightHoldGT", feet);
@@ -558,7 +627,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         boolean[] nightInterruptedGrace = {false};
         boolean[] interruptedGraceReset = {false};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("night shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
@@ -613,34 +695,25 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterNightHoldGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_leaf_canopy_still_uses_surface_night_hold", maxTicks = 16000)
     public void leafCanopyStillUsesSurfaceNightHold(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.OAK_LEAVES, 4,
                 "ShelterCanopyNightGT", "leaf canopy");
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_shallow_overhang_still_uses_surface_night_hold", maxTicks = 16000)
     public void shallowOverhangStillUsesSurfaceNightHold(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.STONE, 5,
                 "ShelterOverhangNightGT", "shallow overhang");
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_observed_hostile_at_head_port_is_resealed_before_foot_door_opens", maxTicks = 16000)
     public void observedHostileAtHeadPortIsResealedBeforeFootDoorOpens(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterObservationResealGT", feet);
@@ -653,7 +726,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         HuskEntity[] hostile = {null};
         boolean[] resealObserved = {false};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("observation shelter ended as " + task.state()
@@ -700,14 +786,11 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterObservationResealGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_four_sided_pressure_forces_physical_exit_only_after_global_deadline", maxTicks = 16000)
     public void fourSidedPressureForcesPhysicalExitOnlyAfterGlobalDeadline(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterAllPressureGT", feet);
@@ -722,7 +805,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         int[] forcedUnsupportedTicks = {0};
         int[] forcedAtExitAge = {-1};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (hostiles.isEmpty()
                     && task.state() == TaskState.RUNNING
@@ -778,13 +874,10 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             hostiles.forEach(HuskEntity::discard);
             finish(context, bot, "ShelterAllPressureGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_missing_reseal_block_cannot_publish_terminal_inside_shelter", maxTicks = 16000)
     public void missingResealBlockCannotPublishTerminalInsideShelter(TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterResealFailureGT", feet);
@@ -799,7 +892,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         HuskEntity[] hostile = {null};
         int[] sealedRetryTicks = {0};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (hostile[0] == null
                     && task.state() == TaskState.RUNNING
@@ -841,8 +947,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             }
             finish(context, bot, "ShelterResealFailureGT");
         });
-    
-        });
     }
 
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_water_rescue_and_body_fluid_reject_fixed_shelter_admission", maxTicks = 30)
@@ -880,7 +984,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_sealed_shelter_reopens_owned_door_before_environmental_failure", maxTicks = 16000)
     public void sealedShelterReopensOwnedDoorBeforeEnvironmentalFailure(
             TestContext context) {
-        io.github.zoyluo.aibot.gametest.GameTestTimeLock.runExclusive(context, () -> {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterWaterExitGT", feet);
@@ -891,7 +994,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_water_exit"));
         boolean[] injected = {false};
 
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(1000L);
             if (!injected[0]
                     && task.state() == TaskState.RUNNING
@@ -924,8 +1040,6 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             NavSafetyNet.INSTANCE.clear(bot);
             finish(context, bot, "ShelterWaterExitGT");
         });
-    
-        });
     }
 
     private static void verifyOccludedSurfaceNightHold(TestContext context,
@@ -957,7 +1071,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_occluded_surface_night"));
         int[] sealedNightTicks = {0};
+        boolean[] timeLockAcquired = {false};
+        context.addFinalTask(() -> {
+            if (timeLockAcquired[0]) {
+                io.github.zoyluo.aibot.gametest.GameTestTimeLock.release();
+            }
+        });
         context.runAtEveryTick(() -> {
+            if (!timeLockAcquired[0]) {
+                if (!io.github.zoyluo.aibot.gametest.GameTestTimeLock.tryAcquire()) {
+                    return;
+                }
+                timeLockAcquired[0] = true;
+            }
+            
             context.getWorld().setTimeOfDay(18000L);
             if (task.state() != TaskState.RUNNING) {
                 context.throwGameTestException(Text.of(fixtureName + " shelter ended during night HOLD: "
