@@ -29,7 +29,7 @@ public final class BotMemoryStore {
             return;
         }
         try {
-            NbtCompound root = StringNbtReader.parse(snbt);
+            NbtCompound root = StringNbtReader.readCompound(snbt);
             of(botId).load(root);
             BotLog.comm(null, "bot_memory_loaded", "bot_uuid", botId);
         } catch (Exception exception) {

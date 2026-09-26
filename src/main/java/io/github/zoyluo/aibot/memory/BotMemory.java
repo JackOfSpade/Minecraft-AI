@@ -211,22 +211,22 @@ public final class BotMemory {
         goalSteps.clear();
         goalCursor = 0;
         goalTitle = "";
-        NbtCompound factNbt = root.getCompound("facts");
+        NbtCompound factNbt = root.getCompoundOrEmpty("facts");
         for (String key : factNbt.getKeys()) {
-            facts.put(key, factNbt.getString(key));
+            facts.put(key, factNbt.getString(key, ""));
         }
-        NbtCompound placeNbt = root.getCompound("places");
+        NbtCompound placeNbt = root.getCompoundOrEmpty("places");
         for (String key : placeNbt.getKeys()) {
-            NbtCompound place = placeNbt.getCompound(key);
+            NbtCompound place = placeNbt.getCompoundOrEmpty(key);
             places.put(key, new Place(
-                    place.getString("dimension"),
-                    new BlockPos(place.getInt("x"), place.getInt("y"), place.getInt("z"))));
+                    place.getString("dimension", ""),
+                    new BlockPos(place.getInt("x", 0), place.getInt("y", 0), place.getInt("z", 0))));
         }
-        goalTitle = root.getString("goalTitle");
-        goalCursor = Math.max(0, root.getInt("goalCursor"));
-        NbtList steps = root.getList("goalSteps", net.minecraft.nbt.NbtElement.STRING_TYPE);
+        goalTitle = root.getString("goalTitle", "");
+        goalCursor = Math.max(0, root.getInt("goalCursor", 0));
+        NbtList steps = root.getListOrEmpty("goalSteps");
         for (int index = 0; index < steps.size(); index++) {
-            goalSteps.addLast(steps.getString(index));
+            goalSteps.addLast(steps.getString(index, ""));
         }
         goalCursor = Math.min(goalCursor, goalSteps.size());
     }

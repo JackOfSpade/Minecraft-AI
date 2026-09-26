@@ -122,7 +122,7 @@ public final class RuntimeRecipeIndex {
         Map<List<Item>, Integer> merged = new HashMap<>();
         for (Ingredient ing : crafting.getIngredientPlacement().getIngredients()) {
             List<Item> anyOf = new ArrayList<>();
-            for (net.minecraft.registry.entry.RegistryEntry<Item> e : ing.getMatchingItems()) {
+            for (net.minecraft.registry.entry.RegistryEntry<Item> e : ing.getMatchingItems().toList()) {
                 Item item = e.value();
                 if (!anyOf.contains(item)) {
                     anyOf.add(item);

@@ -13,7 +13,6 @@ import io.github.zoyluo.aibot.task.TaskManager;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.server.MinecraftServer;
@@ -197,7 +196,7 @@ public final class BotPersistence {
                 bot.getGameProfile().getName(),
                 bot.getWorld().getRegistryKey().getValue().toString(),
                 bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), bot.getPitch(),
-                bot.interactionManager.getGameMode().getName(),
+                bot.interactionManager.getGameMode().asString(),
                 bot.getHealth(), bot.getHungerManager().getFoodLevel(),
                 encodeInventory(bot), AIPlayerManager.INSTANCE.role(bot),
                 BotMemoryStore.INSTANCE.saveString(bot.getUuid()),
@@ -215,8 +214,8 @@ public final class BotPersistence {
             return;
         }
         try {
-            NbtCompound root = StringNbtReader.parse(snbt);
-            NbtList inventory = root.getList(INVENTORY_KEY, NbtElement.COMPOUND_TYPE);
+            NbtCompound root = StringNbtReader.readCompound(snbt);
+            NbtList inventory = root.getListOrEmpty(INVENTORY_KEY);
             PlayerInventory playerInventory = player.getInventory();
             playerInventory.readNbt(inventory);
             playerInventory.markDirty();

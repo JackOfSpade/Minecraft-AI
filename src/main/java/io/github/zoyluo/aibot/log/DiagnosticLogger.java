@@ -236,11 +236,11 @@ public final class DiagnosticLogger {
         s.food = bot.getHungerManager().getFoodLevel();
         s.air = bot.getAir();
         s.onGround = bot.isOnGround();
-        s.fallDistance = bot.fallDistance;
+        s.fallDistance = (float) bot.fallDistance;
         s.alive = bot.isAlive();
         s.removed = bot.isRemoved();
         try {
-            s.mode = bot.interactionManager.getGameMode().getName();
+            s.mode = bot.interactionManager.getGameMode().asString();
         } catch (RuntimeException ignored) {
             s.mode = "?";
         }
@@ -275,7 +275,7 @@ public final class DiagnosticLogger {
 
     private static String inventorySummary(AIPlayerEntity bot) {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty()) {
                 counts.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
             }

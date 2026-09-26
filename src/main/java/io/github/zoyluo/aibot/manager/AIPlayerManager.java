@@ -148,7 +148,7 @@ public final class AIPlayerManager {
             ownerIndex.put(ownerUuid, player.getUuid());
             botOwners.put(player.getUuid(), ownerUuid);
         }
-        BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.getBlockPos()), "mode", effectiveMode.getName());
+        BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.getBlockPos()), "mode", effectiveMode.asString());
         BotPersistence.INSTANCE.markDirty(server);
         return Optional.of(player);
     }
@@ -173,7 +173,7 @@ public final class AIPlayerManager {
             bot.getHungerManager().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));
             BotLog.lifecycle(bot, "bot_restored",
                     "pos", LogFields.pos(bot.getBlockPos()),
-                    "mode", gameMode.getName(),
+                    "mode", gameMode.asString(),
                     "dimension", bot.getWorld().getRegistryKey().getValue(),
                     "fallback", target.fallback());
         });

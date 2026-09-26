@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.craft;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
@@ -100,12 +101,10 @@ public final class CraftingHelper {
 
     private static Map<Item, Integer> inventoryCounts(AIPlayerEntity bot) {
         Map<Item, Integer> counts = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             add(counts, stack);
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            add(counts, stack);
-        }
+        add(counts, bot.getEquippedStack(EquipmentSlot.OFFHAND));
         return counts;
     }
 
