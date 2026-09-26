@@ -58,7 +58,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "ShelterOriginGT");
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_emergency_shelter_cannot_complete_before_roof_and_all_sides_are_physically_sealed", maxTicks = 400)
     public void emergencyShelterCannotCompleteBeforeRoofAndAllSidesArePhysicallySealed(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -99,7 +99,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_emergency_shelter_builds_a_foundation_from_a_single_supported_landing", maxTicks = 500)
     public void emergencyShelterBuildsAFoundationFromASingleSupportedLanding(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         for (int dx = -3; dx <= 3; dx++) {
@@ -150,7 +150,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_emergency_shelter_rejects_insufficient_foundation_budget_before_world_mutation", maxTicks = 20)
     public void emergencyShelterRejectsInsufficientFoundationBudgetBeforeWorldMutation(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -193,7 +193,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "ShelterBudgetGT");
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_partial_shelter_failure_opens_owned_doorway_before_publishing_failure", maxTicks = 300)
     public void partialShelterFailureOpensOwnedDoorwayBeforePublishingFailure(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -233,7 +233,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 120)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_displaced_partial_shelter_releases_its_stale_anchor_without_spinning", maxTicks = 120)
     public void displacedPartialShelterReleasesItsStaleAnchorWithoutSpinning(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -273,7 +273,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_material_loss_before_first_placement_fails_without_inventing_exit_debt", maxTicks = 40)
     public void shelterMaterialLossBeforeFirstPlacementFailsWithoutInventingExitDebt(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -311,7 +311,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_exit_never_mines_preexisting_world_blocks", maxTicks = 400)
     public void shelterExitNeverMinesPreexistingWorldBlocks(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -347,7 +347,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_skips_foundation_hidden_below_a_preexisting_tunnel_wall", maxTicks = 400)
     public void shelterSkipsFoundationHiddenBelowAPreexistingTunnelWall(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -383,7 +383,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_opens_its_owned_door_before_failing_when_exit_support_disappears", maxTicks = 400)
     public void shelterOpensItsOwnedDoorBeforeFailingWhenExitSupportDisappears(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -593,7 +593,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "DescendEdgeLoopGT");
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_descend_rolls_back_collapsed_same_level_detour_and_retries_from_origin", maxTicks = 180)
     public void descendRollsBackCollapsedSameLevelDetourAndRetriesFromOrigin(
             TestContext context) {
         BlockPos origin = context.getAbsolutePos(new BlockPos(24, 10, 20));
@@ -653,7 +653,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_descend_restored_upper_detour_retreats_down_to_persisted_origin", maxTicks = 80)
     public void descendRestoredUpperDetourRetreatsDownToPersistedOrigin(
             TestContext context) {
         BlockPos origin = context.getAbsolutePos(new BlockPos(30, 9, 20));

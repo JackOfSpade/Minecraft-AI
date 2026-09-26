@@ -149,7 +149,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 320)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_safety_pause_rejoins_trusted_tail_and_fails_only_after_exact_return", maxTicks = 320)
     public void safetyPauseRejoinsTrustedTailAndFailsOnlyAfterExactReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
@@ -242,7 +242,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_safety_interrupted_goal_replan_quarantines_old_entry_and_relocates_physically", maxTicks = 500)
     public void safetyInterruptedGoalReplanQuarantinesOldEntryAndRelocatesPhysically(
             TestContext context) {
         var world = context.getWorld();
@@ -398,7 +398,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 260)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_paused_checkpoint_restart_keeps_old_entry_return_debt", maxTicks = 260)
     public void pausedCheckpointRestartKeepsOldEntryReturnDebt(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -469,7 +469,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_return_pause_reanchors_the_current_factual_cell", maxTicks = 220)
     public void returnPauseReanchorsTheCurrentFactualCell(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
@@ -537,7 +537,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_disconnected_descent_immediately_becomes_safety_return", maxTicks = 40)
     public void disconnectedDescentImmediatelyBecomesSafetyReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -630,7 +630,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 900)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_remembered_walled_entry_physically_relocates_before_mining", maxTicks = 900)
     public void rememberedWalledEntryPhysicallyRelocatesBeforeMining(TestContext context) {
         var world = context.getWorld();
         BlockPos failedEntry = context.getAbsolutePos(new BlockPos(1, 6, 3));
@@ -788,7 +788,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(maxTicks = 2600)
+    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_safety_displacement_can_dig_back_after_legacy_return_limit", maxTicks = 2600)
     public void safetyDisplacementCanDigBackAfterLegacyReturnLimit(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 24, 3));
         List<BlockPos> trail = new java.util.ArrayList<>();

@@ -26,7 +26,7 @@ import net.minecraft.entity.EquipmentSlot;
 
 /** Reproduces the unsupported first-air furnace placement seen after DigDown returns to the surface. */
 public final class SmeltFurnacePlacementGameTests {
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_unsupported_air_retry_cannot_replace_active_clearing_pickaxe", maxTicks = 800)
     public void unsupportedAirRetryCannotReplaceActiveClearingPickaxe(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -48));
@@ -143,7 +143,7 @@ public final class SmeltFurnacePlacementGameTests {
         });
     }
 
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_skips_unsupported_stair_mouth_and_cooks_on_supported_side", maxTicks = 800)
     public void skipsUnsupportedStairMouthAndCooksOnSupportedSide(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -48));
@@ -196,7 +196,7 @@ public final class SmeltFurnacePlacementGameTests {
         });
     }
 
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_crafts_local_furnace_instead_of_chasing_far_remembered_surface_furnace", maxTicks = 800)
     public void craftsLocalFurnaceInsteadOfChasingFarRememberedSurfaceFurnace(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 4, 8));
@@ -275,7 +275,7 @@ public final class SmeltFurnacePlacementGameTests {
         });
     }
 
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_crafts_local_furnace_when_remembered_surface_furnace_is_beyond_lookup_radius", maxTicks = 800)
     public void craftsLocalFurnaceWhenRememberedSurfaceFurnaceIsBeyondLookupRadius(
             TestContext context) {
         var world = context.getWorld();

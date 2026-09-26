@@ -32,7 +32,7 @@ import net.minecraft.text.Text;
 
 /** Strict-survival regression for a one-cell physical recovery from an invalid A* start. */
 public final class ActionPackPhysicalSnapGameTests {
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_center_return_clears_residual_walk_velocity_before_next_server_tick", maxTicks = 20)
     public void centerReturnClearsResidualWalkVelocityBeforeNextServerTick(
             TestContext context) {
         var world = context.getWorld();
@@ -285,7 +285,7 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 160)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_edge_perched_observed_drop_uses_physical_support_instead_of_on_ground_flag", maxTicks = 160)
     public void edgePerchedObservedDropUsesPhysicalSupportInsteadOfOnGroundFlag(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -350,7 +350,7 @@ public final class ActionPackPhysicalSnapGameTests {
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_same_cell_edge_drop_requires_physical_nudge_before_vanilla_pickup", maxTicks = 100)
     public void sameCellEdgeDropRequiresPhysicalNudgeBeforeVanillaPickup(TestContext context) {
         var world = context.getWorld();
         BlockPos stand = context.getAbsolutePos(new BlockPos(7, 4, 4));
@@ -407,7 +407,7 @@ public final class ActionPackPhysicalSnapGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_surface_path_replan_cannot_escalate_into_dig_or_pillar", maxTicks = 400)
     public void surfacePathReplanCannotEscalateIntoDigOrPillar(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -477,7 +477,7 @@ public final class ActionPackPhysicalSnapGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_constrained_invalid_start_fails_without_cross_cell_snap", maxTicks = 20)
     public void constrainedInvalidStartFailsWithoutCrossCellSnap(TestContext context) {
         var world = context.getWorld();
         BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 7, 5));
@@ -519,7 +519,7 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_same_goal_different_return_anchor_replaces_instead_of_throttling", maxTicks = 20)
     public void sameGoalDifferentReturnAnchorReplacesInsteadOfThrottling(
             TestContext context) {
         var world = context.getWorld();
@@ -559,7 +559,7 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_constrained_empty_and_singleton_executors_require_exact_terminal", maxTicks = 20)
     public void constrainedEmptyAndSingletonExecutorsRequireExactTerminal(
             TestContext context) {
         var world = context.getWorld();
@@ -599,7 +599,7 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_minimum_y_search_finds_long_safe_route_instead_of_short_descent", maxTicks = 20)
     public void minimumYSearchFindsLongSafeRouteInsteadOfShortDescent(
             TestContext context) {
         var world = context.getWorld();
@@ -659,7 +659,7 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_dynamic_rear_closure_fails_before_constrained_terminal_success", maxTicks = 300)
     public void dynamicRearClosureFailsBeforeConstrainedTerminalSuccess(
             TestContext context) {
         var world = context.getWorld();
@@ -783,17 +783,17 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_reserve76_rejects76_and_pillar_spends77th_stone", maxTicks = 200)
     public void reserve76Rejects76AndPillarSpends77thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 76);
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_reserve37_rejects37_and_pillar_spends38th_stone", maxTicks = 200)
     public void reserve37Rejects37AndPillarSpends38thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 37);
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(environment = "aibot-gametest:action_pack_physical_snap_game_tests_reserve16_rejects16_and_pillar_spends17th_stone", maxTicks = 200)
     public void reserve16Rejects16AndPillarSpends17thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 16);
     }

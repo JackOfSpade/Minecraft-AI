@@ -32,7 +32,7 @@ import net.minecraft.text.Text;
 
 /** Restart contracts for the exact staircase hand-off owned by {@link DescendToYTask}. */
 public final class DescendCheckpointGameTests {
-    @GameTest(maxTicks = 9_000)
+    @GameTest(environment = "aibot-gametest:descend_checkpoint_game_tests_full_depth_deepslate_descent_with_five_stone_pickaxes_fits_its_persisted_window", maxTicks = 9_000)
     public void fullDepthDeepslateDescentWithFiveStonePickaxesFitsItsPersistedWindow(
             TestContext context) {
         BlockPos relativeOrigin = context.getAbsolutePos(new BlockPos(4, 0, 80));
@@ -807,7 +807,7 @@ public final class DescendCheckpointGameTests {
         finish(context, bot, name);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:descend_checkpoint_game_tests_settled_landing_survives_safety_task_displacement", maxTicks = 40)
     public void settledLandingSurvivesSafetyTaskDisplacement(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
         BlockPos firstLanding = start.north().down();
@@ -849,7 +849,7 @@ public final class DescendCheckpointGameTests {
         finish(context, bot, "DescendSafetyPauseGT");
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:descend_checkpoint_game_tests_threat_pause_preserves_rejection_at_the_settled_landing", maxTicks = 30)
     public void threatPausePreservesRejectionAtTheSettledLanding(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
         BlockPos landing = start.north().down();

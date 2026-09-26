@@ -26,7 +26,7 @@ import net.minecraft.text.Text;
 public final class OffhandExecutionGameTests {
     private static final String BATCH = "offhandExecutionStrict";
 
-    @GameTest(maxTicks = 260)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_raw33_offhand_diamond_pick_is_selected_and_breaks_obsidian", maxTicks = 260)
     public void raw33OffhandDiamondPickIsSelectedAndBreaksObsidian(TestContext context) {
         Fixture fixture = spawn(context, "OffhandObsidianPickGT", new BlockPos(4, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -88,7 +88,7 @@ public final class OffhandExecutionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_mining_channel_breaks_soft_obstruction_with_empty_hand", maxTicks = 80)
     public void miningChannelBreaksSoftObstructionWithEmptyHand(TestContext context) {
         Fixture fixture = spawn(context, "EmptyHandSoftBlockGT", new BlockPos(7, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -133,7 +133,7 @@ public final class OffhandExecutionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_soft_block_speed_tie_preserves_wooden_sword_durability", maxTicks = 80)
     public void softBlockSpeedTiePreservesWoodenSwordDurability(TestContext context) {
         Fixture fixture = spawn(context, "SoftBlockSwordPreserveGT", new BlockPos(7, 4, 7));
         AIPlayerEntity bot = fixture.bot();
@@ -170,7 +170,7 @@ public final class OffhandExecutionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_offhand_only_crafting_table_completes_three_by_three_recipe", maxTicks = 40)
     public void offhandOnlyCraftingTableCompletesThreeByThreeRecipe(TestContext context) {
         Fixture fixture = spawn(context, "OffhandCraftingTableGT", new BlockPos(9, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -199,7 +199,7 @@ public final class OffhandExecutionGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_mixed_oak_and_birch_logs_complete_one_atomic_stick_plan", maxTicks = 40)
     public void mixedOakAndBirchLogsCompleteOneAtomicStickPlan(TestContext context) {
         Fixture fixture = spawn(context, "MixedFamilyCraftGT", new BlockPos(12, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -226,7 +226,7 @@ public final class OffhandExecutionGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_insufficient_mixed_family_capacity_leaves_inventory_bit_exact", maxTicks = 40)
     public void insufficientMixedFamilyCapacityLeavesInventoryBitExact(TestContext context) {
         Fixture fixture = spawn(context, "MixedFamilyRollbackGT", new BlockPos(15, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -251,7 +251,7 @@ public final class OffhandExecutionGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_insufficient_craft_output_capacity_leaves_inventory_bit_exact", maxTicks = 40)
     public void insufficientCraftOutputCapacityLeavesInventoryBitExact(TestContext context) {
         Fixture fixture = spawn(context, "AtomicCraftCapacityGT", new BlockPos(14, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -291,7 +291,7 @@ public final class OffhandExecutionGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_full_inventory_tool_resupply_drops_junk_and_crafts_usable_pickaxe", maxTicks = 80)
     public void fullInventoryToolResupplyDropsJunkAndCraftsUsablePickaxe(TestContext context) {
         Fixture fixture = spawn(context, "ResupplyCapacityGT", new BlockPos(17, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -341,7 +341,7 @@ public final class OffhandExecutionGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_offhand_food_promotion_preserves_a_full_selected_slot", maxTicks = 20)
     public void offhandFoodPromotionPreservesAFullSelectedSlot(TestContext context) {
         Fixture fixture = spawn(context, "OffhandFoodGT", new BlockPos(14, 4, 4));
         AIPlayerEntity bot = fixture.bot();

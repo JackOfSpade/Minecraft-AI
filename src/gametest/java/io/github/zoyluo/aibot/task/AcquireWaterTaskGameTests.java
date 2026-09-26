@@ -31,7 +31,7 @@ import net.minecraft.text.Text;
 
 /** Live proof that surface water is reached physically, filled through vanilla, and restartable. */
 public final class AcquireWaterTaskGameTests {
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_visible_water_beyond_initial_view_survives_checkpoint_restart", maxTicks = 600)
     public void visibleWaterBeyondInitialViewSurvivesCheckpointRestart(TestContext context) {
         WaterFixture fixture = spawnWaterSeeker(context, "WaterAcquireGT");
         AIPlayerEntity bot = fixture.bot();
@@ -88,7 +88,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_approach_descends_to_exact_reachable_stand_before_filling", maxTicks = 200)
     public void approachDescendsToExactReachableStandBeforeFilling(TestContext context) {
         var world = context.getWorld();
         BlockPos stand = context.getAbsolutePos(new BlockPos(8, 6, 8));
@@ -225,7 +225,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_open_cave_ascent_places_one_visible_support_and_survives_restart", maxTicks = 600)
     public void openCaveAscentPlacesOneVisibleSupportAndSurvivesRestart(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -330,7 +330,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_multi_level_open_cave_builds_vanilla_foundation_bridge", maxTicks = 300)
     public void multiLevelOpenCaveBuildsVanillaFoundationBridge(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 26));
@@ -395,7 +395,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_shallow_water_at_feet_hands_return_to_physical_rescue_before_ascent_inspection", maxTicks = 40)
     public void shallowWaterAtFeetHandsReturnToPhysicalRescueBeforeAscentInspection(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -445,7 +445,7 @@ public final class AcquireWaterTaskGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_dry_return_collects_visible_reachable_plain_water_without_minting_surface_proof", maxTicks = 40)
     public void dryReturnCollectsVisibleReachablePlainWaterWithoutMintingSurfaceProof(
             TestContext context) {
         var world = context.getWorld();
@@ -501,7 +501,7 @@ public final class AcquireWaterTaskGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_return_does_not_read_or_collect_an_occluded_plain_water_source", maxTicks = 40)
     public void returnDoesNotReadOrCollectAnOccludedPlainWaterSource(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -549,7 +549,7 @@ public final class AcquireWaterTaskGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_visible_fluid_ceiling_forces_same_level_relocation_before_ascent", maxTicks = 300)
     public void visibleFluidCeilingForcesSameLevelRelocationBeforeAscent(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 34));
@@ -684,7 +684,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_shared_fluid_arc_carves_dry_same_level_pocket_before_ascent", maxTicks = 400)
     public void sharedFluidArcCarvesDrySameLevelPocketBeforeAscent(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(42, 4, 42));
@@ -840,7 +840,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_reached_fluid_relocation_survives_pause_and_safety_displacement", maxTicks = 500)
     public void reachedFluidRelocationSurvivesPauseAndSafetyDisplacement(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -1003,7 +1003,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 200)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_reached_relocation_pause_without_displacement_settles_before_resume", maxTicks = 200)
     public void reachedRelocationPauseWithoutDisplacementSettlesBeforeResume(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -1086,7 +1086,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_displaced_search_retries_on_its_first_resume_tick", maxTicks = 80)
     public void displacedSearchRetriesOnItsFirstResumeTick(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSearchPauseCooldownGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -1130,7 +1130,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_surface_transition_cancels_paused_ascent_craft_and_motion", maxTicks = 40)
     public void surfaceTransitionCancelsPausedAscentCraftAndMotion(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(18, 4, 18));
@@ -1198,7 +1198,7 @@ public final class AcquireWaterTaskGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 1400)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_deep_mine_carves_restartable_stair_back_to_surface_water", maxTicks = 1400)
     public void deepMineCarvesRestartableStairBackToSurfaceWater(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(32, 4, 32));
@@ -1293,7 +1293,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_deep_mine_locally_crafts_a_stone_pick_when_ascent_tools_are_exhausted", maxTicks = 500)
     public void deepMineLocallyCraftsAStonePickWhenAscentToolsAreExhausted(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(32, 4, 20));
@@ -1370,7 +1370,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_deep_mine_fails_fast_without_stone_pick_materials_and_preserves_iron", maxTicks = 100)
     public void deepMineFailsFastWithoutStonePickMaterialsAndPreservesIron(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(48, 4, 20));
@@ -1441,7 +1441,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_sky_visible_exit_starts_search_without_reentering_the_mined_stair", maxTicks = 300)
     public void skyVisibleExitStartsSearchWithoutReenteringTheMinedStair(TestContext context) {
         var world = context.getWorld();
         BlockPos exit = context.getAbsolutePos(new BlockPos(32, 10, 32));
@@ -1543,7 +1543,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_dry_overhang_footing_uses_its_observable_sky_edge_as_surface_exit", maxTicks = 40)
     public void dryOverhangFootingUsesItsObservableSkyEdgeAsSurfaceExit(TestContext context) {
         var world = context.getWorld();
         // Keep every mutated cell inside the tiny EMPTY_STRUCTURE footprint. A far local offset
@@ -1612,7 +1612,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_oscillation_cannot_reset_waypoint_budget_across_restart", maxTicks = 100)
     public void oscillationCannotResetWaypointBudgetAcrossRestart(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterOscillationBudgetGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -1674,7 +1674,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_search_continues_past_hundred_and_physically_fills_after_restart", maxTicks = 600)
     public void searchContinuesPastHundredAndPhysicallyFillsAfterRestart(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(36, 4, 36));
@@ -1789,7 +1789,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_legacy_hundred_terminal_stays_terminal_across_schema_four_restore", maxTicks = 20)
     public void legacyHundredTerminalStaysTerminalAcrossSchemaFourRestore(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterLegacyHundredGT", false);
         Map<String, String> legacy = new LinkedHashMap<>(searchCheckpoint(
@@ -1828,7 +1828,7 @@ public final class AcquireWaterTaskGameTests {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_current_cursor_ends_after_complete_seventh_ring", maxTicks = 20)
     public void currentCursorEndsAfterCompleteSeventhRing(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSeventhRingGT", false);
         // Cursor 223 is grid=(6,-7). Rebase it onto the physical dry fixture so issuing point 224
@@ -1872,7 +1872,7 @@ public final class AcquireWaterTaskGameTests {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_restored_hard_budget_remains_typed_and_decoder_valid", maxTicks = 20)
     public void restoredHardBudgetRemainsTypedAndDecoderValid(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterHardBudgetGT", false);
         BlockPos waypoint = fixture.start().east(12);
@@ -1954,7 +1954,7 @@ public final class AcquireWaterTaskGameTests {
         cleanupDry(context, fixture);
     }
 
-    @GameTest(maxTicks = 240)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_sealed_surface_fails_typed_without_burning_cursor", maxTicks = 240)
     public void sealedSurfaceFailsTypedWithoutBurningCursor(TestContext context) {
         DryFixture fixture = spawnDryWaterSeeker(context, "WaterSealedRouteGT", true);
         BlockPos firstWaypoint = fixture.start().east(12);
@@ -2015,7 +2015,7 @@ public final class AcquireWaterTaskGameTests {
         });
     }
 
-    @GameTest(maxTicks = 120)
+    @GameTest(environment = "aibot-gametest:acquire_water_task_game_tests_blocked_surface_sector_clears_only_local_ledger_across_restart", maxTicks = 120)
     public void blockedSurfaceSectorClearsOnlyLocalLedgerAcrossRestart(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));

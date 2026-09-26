@@ -1438,7 +1438,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_rebuilds_protected_pickup_transaction", maxTicks = 40)
     public void airAtRestoredActiveBreakRebuildsProtectedPickupTransaction(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakAirGT", 1, true);
         BlockPos target = fixture.start().east();
@@ -1477,7 +1477,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_retains_live_source_for_fresh_protection_window", maxTicks = 40)
     public void airAtRestoredActiveBreakRetainsLiveSourceForFreshProtectionWindow(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakWaterGT", 0, false);
@@ -1517,7 +1517,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:create_obsidian_mission_recovery_game_tests_raw_two_pick_settles_final_break_and_physical_pickup_at_raw_one", maxTicks = 800)
     public void rawTwoPickSettlesFinalBreakAndPhysicalPickupAtRawOne(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianLastDurabilityGT", 0, true);
         BlockPos target = fixture.start().east();

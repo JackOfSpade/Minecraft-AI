@@ -1277,7 +1277,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_non_pocket_primary_service_replans_without_stale_replay", maxTicks = 220)
     public void failedNonPocketPrimaryServiceReplansWithoutStaleReplay(
             TestContext context) {
         String name = "FailedPrimaryServiceGT";
@@ -1448,7 +1448,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_service_guard_allows_slot_repair_and_remains_durable", maxTicks = 40)
     public void terminalServiceGuardAllowsSlotRepairAndRemainsDurable(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1483,7 +1483,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_service_guard_survives_craft_restart_and_blocks_without_mutation", maxTicks = 220)
     public void terminalServiceGuardSurvivesCraftRestartAndBlocksWithoutMutation(
             TestContext context) {
         String name = "TerminalGuardRepairRestartGT";
@@ -1605,7 +1605,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_foreign_service_is_blocked_but_rotated_axis_is_allowed", maxTicks = 30)
     public void foreignServiceIsBlockedButRotatedAxisIsAllowed(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1661,7 +1661,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_settled_service_guard_namespace_restores_fail_closed", maxTicks = 80)
     public void settledServiceGuardNamespaceRestoresFailClosed(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1771,7 +1771,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_settled_service_guard_restore_compatibility_is_strict", maxTicks = 80)
     public void settledServiceGuardRestoreCompatibilityIsStrict(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1926,7 +1926,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_receipt_keeps_original_reason_across_dimension_drift", maxTicks = 40)
     public void terminalReceiptKeepsOriginalReasonAcrossDimensionDrift(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1971,7 +1971,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_active_pocket_waits_for_its_persisted_dimension_before_restore", maxTicks = 60)
     public void activePocketWaitsForItsPersistedDimensionBeforeRestore(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2045,7 +2045,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_active_pocket_kind_is_inferred_and_semantic_failure_is_quarantined", maxTicks = 80)
     public void activePocketKindIsInferredAndSemanticFailureIsQuarantined(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2145,7 +2145,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_guard_only_restore_uses_typed_reason_only_when_causality_is_unique", maxTicks = 60)
     public void guardOnlyRestoreUsesTypedReasonOnlyWhenCausalityIsUnique(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2200,7 +2200,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 240)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_capacity_guard_survives_repair_restart_and_stops_generic_replan", maxTicks = 240)
     public void terminalCapacityGuardSurvivesRepairRestartAndStopsGenericReplan(
             TestContext context) {
         String name = "TerminalCapacityGuardGT";
@@ -2592,7 +2592,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_non_pocket_auxiliary_service_replans_without_stale_replay", maxTicks = 180)
     public void failedNonPocketAuxiliaryServiceReplansWithoutStaleReplay(
             TestContext context) {
         String name = "ProtectedRareFailedAuxGT";
@@ -2756,7 +2756,7 @@ public final class MiningCheckpointMissionGameTests {
      * miningCheckpoint 更新,下一个成功提交的稀有批次在成功那一刻死于
      * rare_batch_commit_checkpoint_invalid。
      */
-    @GameTest(maxTicks = 260)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 260)
     public void failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles(
             TestContext context) {
         String name = "CapacityOrphanRollbackGT";
@@ -2949,7 +2949,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_inter_batch_auxiliary_service_preserves_later_same_family_cursor", maxTicks = 220)
     public void failedInterBatchAuxiliaryServicePreservesLaterSameFamilyCursor(
             TestContext context) {
         String name = "ProtectedRareAuxContinueGT";
@@ -3072,7 +3072,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_completed_inter_batch_service_promotes_aux_cursor_to_next_batch", maxTicks = 220)
     public void completedInterBatchServicePromotesAuxCursorToNextBatch(
             TestContext context) {
         String name = "ProtectedRareAuxCompleteGT";
@@ -4686,7 +4686,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_completed_capacity_retry_defers_safety_and_restores_closed_commit", maxTicks = 180)
     public void completedCapacityRetryDefersSafetyAndRestoresClosedCommit(
             TestContext context) {
         String name = "CapacityCompletionSafetyGT";
@@ -4783,7 +4783,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(maxTicks = 650)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_satisfied_goal_restores_pocket_first_then_fails_with_original_typed_reason", maxTicks = 650)
     public void satisfiedGoalRestoresPocketFirstThenFailsWithOriginalTypedReason(
             TestContext context) {
         String name = "GoalPocketTypedFailureGT";
@@ -5367,7 +5367,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(maxTicks = 520)
+    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_service_restart_returns_to_saved_face_before_second_diamond_batch", maxTicks = 520)
     public void serviceRestartReturnsToSavedFaceBeforeSecondDiamondBatch(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context);
         AIPlayerEntity bot = fixture.bot();

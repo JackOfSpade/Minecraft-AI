@@ -36,7 +36,7 @@ import net.minecraft.text.Text;
  * ESCAPE, BUILD_WALL and HOLD_BARRIER; no test-only production hook is required.</p>
  */
 public final class CreeperDefenseGameTests {
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_late_fuse_assignment_starts_physical_defense_synchronously", maxTicks = 40)
     public void lateFuseAssignmentStartsPhysicalDefenseSynchronously(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateFuseGT", 200);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -83,7 +83,7 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperLateFuseGT", creeper);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_hidden_near_memory_is_not_overwritten_by_far_unarmed_creeper", maxTicks = 40)
     public void hiddenNearMemoryIsNotOverwrittenByFarUnarmedCreeper(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperMemoryGT", 206);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -121,7 +121,7 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperMemoryGT", near, far);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_older_occluded_risk_cannot_complete_while_second_risk_just_turned_hidden", maxTicks = 40)
     public void olderOccludedRiskCannotCompleteWhileSecondRiskJustTurnedHidden(
             TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperAllRiskGraceGT", 236);
@@ -182,7 +182,7 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperAllRiskGraceGT");
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_lateral_oscillation_cannot_reset_away_progress", maxTicks = 60)
     public void lateralOscillationCannotResetAwayProgress(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateralStallGT", 212);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -216,7 +216,7 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperLateralStallGT", creeper);
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_two_legal_blocks_complete_core_and_hold_without_side_material", maxTicks = 60)
     public void twoLegalBlocksCompleteCoreAndHoldWithoutSideMaterial(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperTwoBlockCoreGT", 218);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -252,7 +252,7 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperTwoBlockCoreGT");
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_hidden_creeper_memory_yields_to_non_creeper_low_hp_shelter", maxTicks = 60)
     public void hiddenCreeperMemoryYieldsToNonCreeperLowHpShelter(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperShelterHandoffGT", 224);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -307,7 +307,7 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperShelterHandoffGT", creeper, zombie);
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(environment = "aibot-gametest:creeper_defense_game_tests_non_safety_eat_is_paused_and_resumed_as_exact_instance", maxTicks = 180)
     public void nonSafetyEatIsPausedAndResumedAsExactInstance(TestContext context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperEatResumeGT", 230);
         BlockPos origin = bot.getBlockPos().toImmutable();

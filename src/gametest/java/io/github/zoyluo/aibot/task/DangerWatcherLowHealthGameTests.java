@@ -90,7 +90,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_create_obsidian_raw_one_settlement_is_not_preempted", maxTicks = 800)
     public void createObsidianRawOneSettlementIsNotPreempted(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CreateRawOneOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -147,7 +147,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_ore_dig_raw_one_pickup_and_active_break_remain_owned", maxTicks = 40)
     public void oreDigRawOnePickupAndActiveBreakRemainOwned(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "OreRawOneOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -183,7 +183,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_raw_one_pick_on_non_owner_still_triggers_generic_resupply", maxTicks = 40)
     public void rawOnePickOnNonOwnerStillTriggersGenericResupply(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "RawOneNonOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -207,7 +207,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_stone_pick_craft_ignores_nearly_broken_held_pick", maxTicks = 40)
     public void stonePickCraftIgnoresNearlyBrokenHeldPick(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CraftHeldPickOwnerGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -237,7 +237,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_paused_mining_owner_resupplies_in_place_without_base_travel", maxTicks = 80)
     public void pausedMiningOwnerResuppliesInPlaceWithoutBaseTravel(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PausedMineLocalSupplyGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -309,7 +309,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_paused_mining_owner_does_not_travel_for_damaged_combat_weapon", maxTicks = 40)
     public void pausedMiningOwnerDoesNotTravelForDamagedCombatWeapon(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PausedMineWeaponBoundaryGT", 2);
         bot.setHealth(bot.getMaxHealth());
@@ -358,7 +358,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_healthy_melee_combat_is_not_preempted_by_underground_entomb", maxTicks = 60)
     public void healthyMeleeCombatIsNotPreemptedByUndergroundEntomb(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatEntombGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -421,7 +421,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_equal_damage_weapon_selection_prefers_remaining_durability", maxTicks = 20)
     public void equalDamageWeaponSelectionPrefersRemainingDurability(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatDurabilityGT", 2);
         ItemStack nearlyBroken = new ItemStack(Items.WOODEN_SWORD);
@@ -441,7 +441,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_equal_damage_weapon_selection_prefers_sword_before_durability", maxTicks = 20)
     public void equalDamageWeaponSelectionPrefersSwordBeforeDurability(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatSwordPriorityGT", 2);
         ItemStack twoUseSword = new ItemStack(Items.STONE_SWORD);
@@ -462,7 +462,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_armor_equip_remains_independent_from_melee_weapon_filtering", maxTicks = 20)
     public void armorEquipRemainsIndependentFromMeleeWeaponFiltering(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "ArmorFilterIndependenceGT", 2);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
@@ -475,7 +475,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_axe_remains_qualified_while_pickaxe_cannot_displace_it", maxTicks = 20)
     public void axeRemainsQualifiedWhilePickaxeCannotDisplaceIt(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "AxeWeaponQualificationGT", 2);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
@@ -488,7 +488,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_pickaxe_only_inventory_cannot_authorize_combat", maxTicks = 40)
     public void pickaxeOnlyInventoryCannotAuthorizeCombat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "PickaxeOnlyNoCombatGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -526,7 +526,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_final_use_sword_cannot_authorize_combat", maxTicks = 40)
     public void finalUseSwordCannotAuthorizeCombat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseSwordNoCombatGT", 2);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -566,7 +566,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_final_use_axe_is_not_a_qualified_melee_weapon", maxTicks = 20)
     public void finalUseAxeIsNotAQualifiedMeleeWeapon(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "FinalUseAxeNoCombatGT", 2);
         ItemStack finalUseAxe = new ItemStack(Items.STONE_AXE);
@@ -578,7 +578,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_ranged_line_of_sight_blocks_combat_heal_beyond_melee_boundary", maxTicks = 30)
     public void rangedLineOfSightBlocksCombatHealBeyondMeleeBoundary(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatRangedHealGT", 2);
         int deathBaseline = deathCount(bot);
@@ -642,7 +642,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_night_creeper_with_shelter_materials_chooses_dedicated_defense", maxTicks = 80)
     public void nightCreeperWithShelterMaterialsChoosesDedicatedDefense(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "NightCreeperDefenseGT", 36);
         context.getWorld().setTimeOfDay(18000L);
@@ -676,7 +676,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_low_health_creeper_cannot_enter_emergency_entomb", maxTicks = 80)
     public void lowHealthCreeperCannotEnterEmergencyEntomb(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "LowCreeperDefenseGT", 52);
         context.getWorld().setTimeOfDay(18000L);
@@ -710,7 +710,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_observable_creeper_at_fifteen_blocks_triggers_dedicated_defense", maxTicks = 80)
     public void observableCreeperAtFifteenBlocksTriggersDedicatedDefense(
             TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(
@@ -739,7 +739,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 160)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_completed_creeper_defense_reacquires_without_mission_stack_gap", maxTicks = 160)
     public void completedCreeperDefenseReacquiresWithoutMissionStackGap(
             TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "CreeperReacquireGT", 108);
@@ -793,7 +793,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_closer_zombie_cannot_mask_observable_creeper", maxTicks = 80)
     public void closerZombieCannotMaskObservableCreeper(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "MixedCreeperDefenseGT", 76);
         context.getWorld().setTimeOfDay(18000L);
@@ -832,7 +832,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_evade_examines_fifth_direction_within_bounded_admission", maxTicks = 80)
     public void evadeExaminesFifthDirectionWithinBoundedAdmission(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "EvadeFifthDirectionGT", 92);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -862,7 +862,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_observed_creeper_defense_extends_beyond_first_waypoint", maxTicks = 500)
     public void observedCreeperDefenseExtendsBeyondFirstWaypoint(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(
                 context, "CreeperExtendDefenseGT", 68);
@@ -903,7 +903,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 340)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_point_blank_live_charged_creeper_during_stalled_evade_survives_and_resumes_mission", maxTicks = 340)
     public void pointBlankLiveChargedCreeperDuringStalledEvadeSurvivesAndResumesMission(
             TestContext context) {
         AIPlayerEntity bot = spawnOnReactiveEscapeArena(
@@ -1042,7 +1042,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_creeper_is_never_hit_from_strike_or_secondary_retreat", maxTicks = 80)
     public void creeperIsNeverHitFromStrikeOrSecondaryRetreat(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatCreeperRetreatGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1158,7 +1158,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_primary_death_during_heal_is_credited_exactly_once", maxTicks = 20)
     public void primaryDeathDuringHealIsCreditedExactlyOnce(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatHealPrimaryDeathGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1207,7 +1207,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_nearest_secondary_pressure_blocks_food_without_taking_primary_credit", maxTicks = 100)
     public void nearestSecondaryPressureBlocksFoodWithoutTakingPrimaryCredit(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatSecondaryPressureGT", 2);
@@ -1285,7 +1285,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_ranged_secondary_at_fourteen_blocks_blocks_primary_settlement_until_los_breaks", maxTicks = 40)
     public void rangedSecondaryAtFourteenBlocksBlocksPrimarySettlementUntilLosBreaks(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatRangedSecondaryGT", 2);
@@ -1371,7 +1371,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_combat_reequips_backup_in_the_same_attack_boundary", maxTicks = 100)
     public void combatReequipsBackupInTheSameAttackBoundary(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatBackupWeaponGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1441,7 +1441,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_contact_hostile_blocks_healing_and_forces_counterattack", maxTicks = 100)
     public void contactHostileBlocksHealingAndForcesCounterattack(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatContactHealGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1518,7 +1518,7 @@ public final class DangerWatcherLowHealthGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_leash_exit_cannot_complete_while_a_hostile_remains_in_contact", maxTicks = 30)
     public void leashExitCannotCompleteWhileAHostileRemainsInContact(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatLeashContactGT", 2);
         int deathBaseline = deathCount(bot);
@@ -1588,7 +1588,7 @@ public final class DangerWatcherLowHealthGameTests {
     // This fixture opens a fourteen-block hostile corridor, wider than GameTest's default
     // structure spacing. Keep it in an isolated batch so neighbouring mobs/walls cannot change
     // the admission fact between the two synchronous scans.
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_observed_hostile_inside_threat_cooldown_blocks_new_naked_healing_eat", maxTicks = 40)
     public void observedHostileInsideThreatCooldownBlocksNewNakedHealingEat(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "NakedEatAdmissionGT", 2);
@@ -1663,7 +1663,7 @@ public final class DangerWatcherLowHealthGameTests {
 
     // The terminal-episode decision counts every observable hostile. An isolated batch proves
     // the intended close zombie without inheriting ranged mobs from adjacent empty structures.
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_terminal_shelter_episode_uses_close_defensive_combat_until_relocation", maxTicks = 80)
     public void terminalShelterEpisodeUsesCloseDefensiveCombatUntilRelocation(
             TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "ShelterEpisodeFallbackGT", 2);
@@ -1863,7 +1863,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 60)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_failed_surface_path_evade_releases_sprint_and_allows_paused_work_resume", maxTicks = 60)
     public void failedSurfacePathEvadeReleasesSprintAndAllowsPausedWorkResume(
             TestContext context) {
         // Keep the fixture well above neighbouring templates: Evade deliberately searches about
@@ -1916,7 +1916,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 120)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_paused_dig_down_claims_observed_lava_and_pays_exact_return", maxTicks = 120)
     public void pausedDigDownClaimsObservedLavaAndPaysExactReturn(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "DigDownLavaReturnGT", 55);
         bot.setHealth(bot.getMaxHealth());
@@ -2080,7 +2080,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_enderman_angry_at_another_entity_does_not_interrupt_current_work", maxTicks = 40)
     public void endermanAngryAtAnotherEntityDoesNotInterruptCurrentWork(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "OtherAngerEndermanGT", 116);
         HoldingTask work = new HoldingTask();
@@ -2121,7 +2121,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_provoked_enderman_routes_to_evade", maxTicks = 80)
     public void provokedEndermanRoutesToEvade(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "ProvokedEndermanGT", 132);
         HoldingTask work = new HoldingTask();
@@ -2156,7 +2156,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_direct_combat_never_attacks_enderman", maxTicks = 80)
     public void directCombatNeverAttacksEnderman(TestContext context) {
         AIPlayerEntity bot = spawnOnEscapeCorridor(context, "CombatEndermanGuardGT", 164);
         BlockPos origin = bot.getBlockPos().toImmutable();
@@ -2186,7 +2186,7 @@ public final class DangerWatcherLowHealthGameTests {
         despawnAndComplete(context, bot);
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:danger_watcher_low_health_game_tests_combat_retreat_admits_lateral_surface_path", maxTicks = 80)
     public void combatRetreatAdmitsLateralSurfacePath(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "CombatLateralRetreatGT", 148);
         var world = context.getWorld();

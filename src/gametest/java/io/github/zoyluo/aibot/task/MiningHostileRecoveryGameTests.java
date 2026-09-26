@@ -89,7 +89,7 @@ public final class MiningHostileRecoveryGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_unmarked_straight_leg_rejects_wrong_side_and_owns_its_front_barricade", maxTicks = 40)
     public void unmarkedStraightLegRejectsWrongSideAndOwnsItsFrontBarricade(
             TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningUnmarkedBarricadeGT");
@@ -134,7 +134,7 @@ public final class MiningHostileRecoveryGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_marker_only_reroute_rejects_standable_geometric_reverse_without_mutation", maxTicks = 40)
     public void markerOnlyRerouteRejectsStandableGeometricReverseWithoutMutation(
             TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningMarkerOnlyBarricadeGT");
@@ -191,7 +191,7 @@ public final class MiningHostileRecoveryGameTests {
     // This long live-entity sequence builds beyond EMPTY_STRUCTURE's tiny template.
     // Keep it out of the short sibling batch so a neighbouring context cannot complete
     // and clear one of these deliberately retained hostiles before the final assertion.
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_ore_dig_retreats_and_permanently_barricades_four_hostiles", maxTicks = 500)
     public void oreDigRetreatsAndPermanentlyBarricadesFourHostiles(TestContext context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
@@ -366,7 +366,7 @@ public final class MiningHostileRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_one_block_cannot_commit_a_two_cell_mining_barricade", maxTicks = 40)
     public void oneBlockCannotCommitATwoCellMiningBarricade(TestContext context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeOneBlockGT");
         AIPlayerEntity bot = fixture.bot();

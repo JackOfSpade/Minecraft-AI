@@ -32,7 +32,7 @@ import net.minecraft.text.Text;
  * Live regressions for emergency-only wood material and safety-task replacement boundaries.
  */
 public final class EmergencyShelterMaterialSchedulingGameTests {
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_mixed_wood_fallback_builds_holds_and_physically_exits_with_dirt_first", maxTicks = 500)
     public void mixedWoodFallbackBuildsHoldsAndPhysicallyExitsWithDirtFirst(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -81,7 +81,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_emergency_wood_never_authorizes_permanent_mining_barricade", maxTicks = 30)
     public void emergencyWoodNeverAuthorizesPermanentMiningBarricade(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -113,7 +113,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         finish(context, bot, "BarricadeWoodGuardGT");
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_one_block_cannot_dispatch_doomed_shelter_or_grow_pause_stack", maxTicks = 80)
     public void oneBlockCannotDispatchDoomedShelterOrGrowPauseStack(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 180, 4));
         prepareEscapeCorridor(context, feet);
@@ -162,7 +162,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         finish(context, bot, "ShelterOneBlockGateGT");
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_emergency_shelter_supersedes_safety_evade_without_nesting_pause_frame", maxTicks = 80)
     public void emergencyShelterSupersedesSafetyEvadeWithoutNestingPauseFrame(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 220, 4));
@@ -222,7 +222,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         finish(context, bot, "ShelterSafetySwapGT");
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_generic_threat_supersedes_non_defense_safety_without_nesting_mission", maxTicks = 80)
     public void genericThreatSupersedesNonDefenseSafetyWithoutNestingMission(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 240, 4));
@@ -269,7 +269,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         finish(context, bot, "ThreatSafetySwapGT");
     }
 
-    @GameTest(maxTicks = 220)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_trapped_fight_back_replaces_non_defense_safety_without_nesting_mission", maxTicks = 220)
     public void trappedFightBackReplacesNonDefenseSafetyWithoutNestingMission(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 260, 4));
@@ -353,7 +353,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         });
     }
 
-    @GameTest(maxTicks = 260)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_material_scheduling_game_tests_critical_creeper_without_route_or_materials_retains_one_safety_owner", maxTicks = 260)
     public void criticalCreeperWithoutRouteOrMaterialsRetainsOneSafetyOwner(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 280, 4));

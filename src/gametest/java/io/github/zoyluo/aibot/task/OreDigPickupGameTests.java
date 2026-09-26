@@ -42,7 +42,7 @@ import net.minecraft.text.Text;
 
 /** Live strict-survival regression coverage for OreDig's physical target-drop ledger. */
 public final class OreDigPickupGameTests {
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_adjacent_coal_over_five_deep_shaft_is_caught_before_deep_fall", maxTicks = 500)
     public void adjacentCoalOverFiveDeepShaftIsCaughtBeforeDeepFall(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCatchGT");
         AIPlayerEntity bot = fixture.bot();
@@ -106,7 +106,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_diagonal_eye_height_ore_waits_for_cardinal_work_pose", maxTicks = 500)
     public void diagonalEyeHeightOreWaitsForCardinalWorkPose(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDiagonalBreakGT");
         AIPlayerEntity bot = fixture.bot();
@@ -158,7 +158,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_three_above_ore_requires_reachable_high_work_pose_for_natural_pickup", maxTicks = 700)
     public void threeAboveOreRequiresReachableHighWorkPoseForNaturalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupHighFaceGT");
         AIPlayerEntity bot = fixture.bot();
@@ -242,7 +242,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_two_above_cardinal_ore_uses_drop_shaft_work_pose_for_natural_pickup", maxTicks = 700)
     public void twoAboveCardinalOreUsesDropShaftWorkPoseForNaturalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupTwoAboveGT");
         AIPlayerEntity bot = fixture.bot();
@@ -329,7 +329,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_lower_floor_ore_clears_swept_pickup_egress_before_breaking", maxTicks = 400)
     public void lowerFloorOreClearsSweptPickupEgressBeforeBreaking(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupLowerLedgeGT");
         AIPlayerEntity bot = fixture.bot();
@@ -386,7 +386,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_lower_floor_coal_over_open_shaft_gets_physical_drop_support", maxTicks = 500)
     public void lowerFloorCoalOverOpenShaftGetsPhysicalDropSupport(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupLowerShaftGT");
         AIPlayerEntity bot = fixture.bot();
@@ -458,7 +458,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_exact_protected_reserve_rejects_open_shaft_ore_before_break_and_restart", maxTicks = 40)
     public void exactProtectedReserveRejectsOpenShaftOreBeforeBreakAndRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCommitReserveGT");
@@ -523,7 +523,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 50)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_active_break_cancels_when_its_only_surplus_support_disappears_before_restart", maxTicks = 50)
     public void activeBreakCancelsWhenItsOnlySurplusSupportDisappearsBeforeRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDropCommitRevokedGT");
@@ -585,7 +585,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_dense_bonus_ore_cannot_starve_active_channel_block", maxTicks = 500)
     public void denseBonusOreCannotStarveActiveChannelBlock(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBonusChannelGT");
         AIPlayerEntity bot = fixture.bot();
@@ -643,7 +643,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_bonus_ore_mines_side_wall_without_removing_current_support", maxTicks = 500)
     public void bonusOreMinesSideWallWithoutRemovingCurrentSupport(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBonusWallBandGT");
         AIPlayerEntity bot = fixture.bot();
@@ -700,7 +700,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_visible_lava_rotates_the_branch_instead_of_assigning_impossible_evade", maxTicks = 180)
     public void visibleLavaRotatesTheBranchInsteadOfAssigningImpossibleEvade(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreLavaRerouteGT");
         AIPlayerEntity bot = fixture.bot();
@@ -774,7 +774,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_watcher_does_not_mistake_a_visible_lava_pool_for_the_active_branch_cell", maxTicks = 20)
     public void watcherDoesNotMistakeAVisibleLavaPoolForTheActiveBranchCell(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreWatcherLavaClusterGT");
@@ -820,7 +820,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_direct_lava_boundary_and_restart_retain_ore_dig_ownership", maxTicks = 20)
     public void directLavaBoundaryAndRestartRetainOreDigOwnership(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDirectLavaRerouteGT");
         AIPlayerEntity bot = fixture.bot();
@@ -864,7 +864,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_factual_corner_lava_uses_untried_reverse_and_restarts_exactly", maxTicks = 40)
     public void factualCornerLavaUsesUntriedReverseAndRestartsExactly(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreFactualCornerLavaGT");
         AIPlayerEntity bot = fixture.bot();
@@ -999,7 +999,7 @@ public final class OreDigPickupGameTests {
         return remaining;
     }
 
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_exact_tunnel_step_and_queued_high_work_pose_are_physically_recovered", maxTicks = 700)
     public void exactTunnelStepAndQueuedHighWorkPoseArePhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCloseBreakGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1098,7 +1098,7 @@ public final class OreDigPickupGameTests {
      * raised 1x1 work-pose pedestal beside the shaft. The recovery loop must climb the two-step
      * ascent and physically collect it instead of idling into ore_dig_drop_unrecovered.
      */
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_pedestal_landed_drop_is_physically_recovered", maxTicks = 700)
     public void pedestalLandedDropIsPhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePedestalDropGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1157,7 +1157,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 900)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_restored_observed_high_work_pose_routes_without_digging", maxTicks = 900)
     public void restoredObservedHighWorkPoseRoutesWithoutDigging(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseRestartGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1242,7 +1242,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 180)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_remembered_high_work_pose_owner_lease_expires_across_successful_replans", maxTicks = 180)
     public void rememberedHighWorkPoseOwnerLeaseExpiresAcrossSuccessfulReplans(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseLeaseGT");
@@ -1338,7 +1338,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_remembered_high_work_pose_capacity_evicts_deterministic_farthest_unpinned_owner", maxTicks = 30)
     public void rememberedHighWorkPoseCapacityEvictsDeterministicFarthestUnpinnedOwner(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseCapacityGT");
@@ -1411,7 +1411,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 1000)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_queued_high_ore_without_work_pose_stays_intact_and_search_continues", maxTicks = 1000)
     public void queuedHighOreWithoutWorkPoseStaysIntactAndSearchContinues(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreQueuedHighReachGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1496,7 +1496,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 1200)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_queued_ore_beyond_vanilla_reach_is_released_without_cursor_livelock", maxTicks = 1200)
     public void queuedOreBeyondVanillaReachIsReleasedWithoutCursorLivelock(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreQueuedBeyondReachGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1571,7 +1571,7 @@ public final class OreDigPickupGameTests {
         return Math.max(Math.abs(from.getX() - to.getX()), Math.abs(from.getZ() - to.getZ()));
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_hidden_diagonal_drop_uses_exact_l_route_without_changing_corner_walls", maxTicks = 400)
     public void hiddenDiagonalDropUsesExactLRouteWithoutChangingCornerWalls(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupCornerGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1667,7 +1667,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_diagonal_physical_pickup_clears_debt_and_continues_mining", maxTicks = 700)
     public void diagonalPhysicalPickupClearsDebtAndContinuesMining(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupDiagonalGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1736,7 +1736,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 900)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_consecutive_eye_height_diamonds_wait_for_each_physical_pickup", maxTicks = 900)
     public void consecutiveEyeHeightDiamondsWaitForEachPhysicalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupPairGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1819,7 +1819,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_foot_level_diamond_drop_is_recovered_by_walking_into_its_cell", maxTicks = 700)
     public void footLevelDiamondDropIsRecoveredByWalkingIntoItsCell(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupFootGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1879,7 +1879,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 800)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_pending_pickup_checkpoint_resumes_before_any_new_mining", maxTicks = 800)
     public void pendingPickupCheckpointResumesBeforeAnyNewMining(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupRestartGT");
         AIPlayerEntity bot = fixture.bot();
@@ -1994,7 +1994,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_unreachable_visible_last_seen_falls_back_to_reachable_break_cell", maxTicks = 30)
     public void unreachableVisibleLastSeenFallsBackToReachableBreakCell(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupFallbackGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2046,7 +2046,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_same_column_drop_below_miner_uses_physical_descent", maxTicks = 400)
     public void sameColumnDropBelowMinerUsesPhysicalDescent(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupBelowGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2096,7 +2096,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_elevated_drop_uses_lower_adjacent_stand_without_pillar", maxTicks = 400)
     public void elevatedDropUsesLowerAdjacentStandWithoutPillar(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupElevatedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2152,7 +2152,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_airborne_drop_waits_for_landing_and_uses_natural_route_without_pillar", maxTicks = 600)
     public void airborneDropWaitsForLandingAndUsesNaturalRouteWithoutPillar(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupAirborneGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2239,7 +2239,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_rare_torch_epoch_stops_at_forty_before_extending_dark_branch", maxTicks = 20)
     public void rareTorchEpochStopsAtFortyBeforeExtendingDarkBranch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchEpochLimitGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2272,7 +2272,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_rare_dark_branch_without_torch_fails_with_its_exact_epoch", maxTicks = 20)
     public void rareDarkBranchWithoutTorchFailsWithItsExactEpoch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchStockEmptyGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2297,7 +2297,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_legacy_open_checkpoint_without_delivered_ledger_fails_closed", maxTicks = 20)
     public void legacyOpenCheckpointWithoutDeliveredLedgerFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchSchemaMigrationGT");
         Map<String, String> legacyRunning = new LinkedHashMap<>(
@@ -2355,7 +2355,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_remembered_high_work_pose_checkpoint_rejects_forged_entries", maxTicks = 20)
     public void rememberedHighWorkPoseCheckpointRejectsForgedEntries(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRememberedPoseCodecGT");
         BlockPos face = fixture.start();
@@ -2409,7 +2409,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_long_rare_tail_retains_mission_identity_across_restart_and_service_debits", maxTicks = 20)
     public void longRareTailRetainsMissionIdentityAcrossRestartAndServiceDebits(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreLongRareTailCheckpointGT");
@@ -2542,7 +2542,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_rare_full_inventory_fails_without_creating_open_rear_drops", maxTicks = 20)
     public void rareFullInventoryFailsWithoutCreatingOpenRearDrops(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreInventoryServiceRequiredGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2583,7 +2583,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_ordinary_full_inventory_fails_without_mutating_inventory_or_creating_drops", maxTicks = 20)
     public void ordinaryFullInventoryFailsWithoutMutatingInventoryOrCreatingDrops(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrdinaryInventoryServiceRequiredGT");
@@ -2624,7 +2624,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_malformed_checkpoint_fails_closed", maxTicks = 20)
     public void malformedCheckpointFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreMalformedCheckpointGT");
         Map<String, String> malformed = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
@@ -2652,7 +2652,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_restart_cannot_reset_hard_budget", maxTicks = 20)
     public void restartCannotResetHardBudget(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHardBudgetGT");
         Map<String, String> exhausted = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
@@ -2676,7 +2676,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_restart_cannot_reset_no_progress_budget", maxTicks = 20)
     public void restartCannotResetNoProgressBudget(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreNoProgressBudgetGT");
         Map<String, String> stalled = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
@@ -2696,7 +2696,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 280)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_partial_delivery_rebases_only_the_transient_stall_window", maxTicks = 280)
     public void partialDeliveryRebasesOnlyTheTransientStallWindow(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePartialRetryBudgetGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2774,7 +2774,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 280)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_rare_partial_delivery_restart_only_mines_the_logical_batch_remainder", maxTicks = 280)
     public void rarePartialDeliveryRestartOnlyMinesTheLogicalBatchRemainder(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRarePartialDeliveredGT");
@@ -2850,7 +2850,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_restart_at_fully_delivered_open_batch_settles_debt_without_breaking_another_ore", maxTicks = 30)
     public void restartAtFullyDeliveredOpenBatchSettlesDebtWithoutBreakingAnotherOre(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRareDeliveredGraceGT");
@@ -2887,7 +2887,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_completed_batch_publishes_zero_budget_successor", maxTicks = 20)
     public void completedBatchPublishesZeroBudgetSuccessor(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCommittedBudgetGT");
         OreDigTask task = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1);
@@ -2910,7 +2910,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_higher_tier_non_target_ore_closes_blind_branch_without_breaking_it", maxTicks = 20)
     public void higherTierNonTargetOreClosesBlindBranchWithoutBreakingIt(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierObstacleGT");
         AIPlayerEntity bot = fixture.bot();
@@ -2955,7 +2955,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 240)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_progressed_higher_tier_boundary_publishes_successor_and_survives_restart", maxTicks = 240)
     public void progressedHigherTierBoundaryPublishesSuccessorAndSurvivesRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierProgressedGT");
@@ -3076,7 +3076,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_zero_movement_higher_tier_boundary_still_fails_closed", maxTicks = 20)
     public void zeroMovementHigherTierBoundaryStillFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierZeroRearGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3121,7 +3121,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_strip_physically_retreats_when_gravity_reoccupies_its_head", maxTicks = 20)
     public void stripPhysicallyRetreatsWhenGravityReoccupiesItsHead(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravelGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3171,7 +3171,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_blocked_body_retreat_immediately_publishes_marker_free_restart", maxTicks = 20)
     public void blockedBodyRetreatImmediatelyPublishesMarkerFreeRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRetreatCheckpointGT");
@@ -3225,7 +3225,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_collapsed_lateral_detour_tries_remaining_fresh_side_without_closing_leg", maxTicks = 400)
     public void collapsedLateralDetourTriesRemainingFreshSideWithoutClosingLeg(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDetourCollapseGT");
@@ -3329,7 +3329,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_pending_pickup_gravity_retreat_does_not_become_blind_branch_terminal", maxTicks = 20)
     public void pendingPickupGravityRetreatDoesNotBecomeBlindBranchTerminal(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupGravityOwnerGT");
@@ -3392,7 +3392,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_stair_descent_immediately_publishes_marker_free_restart_without_reverse", maxTicks = 20)
     public void stairDescentImmediatelyPublishesMarkerFreeRestartWithoutReverse(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDescentCheckpointGT");
@@ -3469,7 +3469,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_stair_descent_skips_unsupported_preferred_direction", maxTicks = 20)
     public void stairDescentSkipsUnsupportedPreferredDirection(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreSupportedDescentGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3526,7 +3526,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_target_approach_uses_only_observed_supported_one_block_lower_step", maxTicks = 40)
     public void targetApproachUsesOnlyObservedSupportedOneBlockLowerStep(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetLowerStepGT");
@@ -3581,7 +3581,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_target_lower_step_rejects_observed_fluid_neighbour_in_strict_mode", maxTicks = 40)
     public void targetLowerStepRejectsObservedFluidNeighbourInStrictMode(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetLowerHazardGT");
@@ -3634,7 +3634,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_lower_step_fluid_gate_rejects_unobservable_neighbour_in_strict_mode", maxTicks = 20)
     public void lowerStepFluidGateRejectsUnobservableNeighbourInStrictMode(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetHiddenLowerHazardGT");
@@ -3654,7 +3654,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 240)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_target_approach_movement_does_not_spend_blind_branch_projection", maxTicks = 240)
     public void targetApproachMovementDoesNotSpendBlindBranchProjection(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTargetProjectionGT");
@@ -3716,7 +3716,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_aligned_rich_zone_path_does_not_spend_blind_cursor", maxTicks = 500)
     public void alignedRichZonePathDoesNotSpendBlindCursor(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRichCursorOwnerGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3784,7 +3784,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 160)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_real_blind_walker_consumes_exactly_one_cursor_step", maxTicks = 160)
     public void realBlindWalkerConsumesExactlyOneCursorStep(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBlindPendingOwnerGT");
         AIPlayerEntity bot = fixture.bot();
@@ -3859,7 +3859,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_fresh_strip_uses_upper_escape_before_mining_unsupported_lateral_support", maxTicks = 30)
     public void freshStripUsesUpperEscapeBeforeMiningUnsupportedLateralSupport(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRaisedLandingGT");
@@ -3979,7 +3979,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_blind_strip_persists_fresh_lateral_detour_across_checkpoint", maxTicks = 400)
     public void blindStripPersistsFreshLateralDetourAcrossCheckpoint(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravityGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4066,7 +4066,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_blind_strip_fails_finite_when_only_old_corridors_remain", maxTicks = 20)
     public void blindStripFailsFiniteWhenOnlyOldCorridorsRemain(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripBoundaryTrappedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4096,7 +4096,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_progressed_strip_closes_visible_gravity_leg_and_restarts_successor", maxTicks = 500)
     public void progressedStripClosesVisibleGravityLegAndRestartsSuccessor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravityProgressGT");
@@ -4248,7 +4248,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_gravity_closed_leg_retains_rear_across_immediate_gravity_successor_and_restart", maxTicks = 500)
     public void gravityClosedLegRetainsRearAcrossImmediateGravitySuccessorAndRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripGravitySuccessorGT");
@@ -4375,7 +4375,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_mined_open_drop_body_retains_factual_rear_across_ticks_and_restart", maxTicks = 500)
     public void minedOpenDropBodyRetainsFactualRearAcrossTicksAndRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripDelayedRearGT");
@@ -4566,7 +4566,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_progressed_open_drop_lip_retreats_one_factual_step_and_restarts_successor", maxTicks = 400)
     public void progressedOpenDropLipRetreatsOneFactualStepAndRestartsSuccessor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripRearRetreatGT");
@@ -4664,7 +4664,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_rear_retreat_keeps_turn_marker_for_immediate_successor_drop", maxTicks = 400)
     public void rearRetreatKeepsTurnMarkerForImmediateSuccessorDrop(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRetreatSuccessorDropGT");
@@ -4797,7 +4797,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_progressed_open_drop_with_unsafe_rear_fails_without_moving_or_resetting_budget", maxTicks = 80)
     public void progressedOpenDropWithUnsafeRearFailsWithoutMovingOrResettingBudget(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripUnsafeRearGT");
@@ -4902,7 +4902,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 240)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_scan_delay_checkpoint_restores_safe_rear_before_replaying_branch", maxTicks = 240)
     public void scanDelayCheckpointRestoresSafeRearBeforeReplayingBranch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripDelayRestartGT");
         AIPlayerEntity bot = fixture.bot();
@@ -4973,7 +4973,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 260)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_survival_guard_pause_displacement_restores_unpublished_rear_and_cursor", maxTicks = 260)
     public void survivalGuardPauseDisplacementRestoresUnpublishedRearAndCursor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripPauseResumeGT");
@@ -5063,7 +5063,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_same_origin_water_then_lava_tries_unvisited_reverse_and_survives_restart", maxTicks = 400)
     public void sameOriginWaterThenLavaTriesUnvisitedReverseAndSurvivesRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripBoundaryCascadeGT");
@@ -5159,7 +5159,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_same_origin_fluid_cascade_backtracks_one_observed_step_and_restarts", maxTicks = 400)
     public void sameOriginFluidCascadeBacktracksOneObservedStepAndRestarts(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripBoundaryBacktrackGT");
@@ -5306,7 +5306,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_hidden_lower_transition_remains_unknown_whether_blocked_or_open", maxTicks = 20)
     public void hiddenLowerTransitionRemainsUnknownWhetherBlockedOrOpen(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHiddenTransitionGT");
@@ -5327,7 +5327,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_hidden_side_fluid_and_hidden_stone_open_the_same_sealed_channel", maxTicks = 40)
     public void hiddenSideFluidAndHiddenStoneOpenTheSameSealedChannel(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHiddenFluidParityGT");
@@ -5384,7 +5384,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_restart_keeps_unknown_active_target_without_inventing_pickup_debt", maxTicks = 40)
     public void restartKeepsUnknownActiveTargetWithoutInventingPickupDebt(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreUnknownActiveRestartGT");
@@ -5420,7 +5420,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_restart_rejects_intact_high_active_break_but_preserves_gone_break_debt", maxTicks = 20)
     public void restartRejectsIntactHighActiveBreakButPreservesGoneBreakDebt(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighActiveRestartGT");
@@ -5465,7 +5465,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_blind_branch_seals_visible_side_fluid_and_keeps_its_exact_cursor", maxTicks = 500)
     public void blindBranchSealsVisibleSideFluidAndKeepsItsExactCursor(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripVisibleFluidSealGT");
@@ -5561,7 +5561,7 @@ public final class OreDigPickupGameTests {
         });
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_blind_branch_seals_one_head_side_fluid_per_tick_across_restart", maxTicks = 40)
     public void blindBranchSealsOneHeadSideFluidPerTickAcrossRestart(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripHeadFluidRestartGT");
@@ -5628,7 +5628,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_head_side_fluid_cannot_consume_exact_protected_reserve", maxTicks = 20)
     public void headSideFluidCannotConsumeExactProtectedReserve(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripHeadFluidReserveGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5675,7 +5675,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_blind_branch_does_not_seal_or_mine_its_direct_head_water", maxTicks = 20)
     public void blindBranchDoesNotSealOrMineItsDirectHeadWater(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripDirectHeadWaterGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5708,7 +5708,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_all_observed_dangerous_branches_fail_typed_and_restart_without_budget_reset", maxTicks = 40)
     public void allObservedDangerousBranchesFailTypedAndRestartWithoutBudgetReset(
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreStripAllDangerGT");
@@ -5788,7 +5788,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_support_ore_rejects_elevated_relocation_outside_break_envelope", maxTicks = 20)
     public void supportOreRejectsElevatedRelocationOutsideBreakEnvelope(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreSupportElevatedGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5833,7 +5833,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_channel_tool_failure_reports_the_blocked_ore_tier", maxTicks = 20)
     public void channelToolFailureReportsTheBlockedOreTier(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreChannelTierGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5858,7 +5858,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_channel_tool_exhaustion_fails_before_blacklisting_or_iron_use", maxTicks = 20)
     public void channelToolExhaustionFailsBeforeBlacklistingOrIronUse(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreChannelToolGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5891,7 +5891,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_nearby_restart_position_cannot_replace_the_exact_saved_face", maxTicks = 20)
     public void nearbyRestartPositionCannotReplaceTheExactSavedFace(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreExactFaceRestoreGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5916,7 +5916,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_distant_committed_cursor_rebases_to_the_current_physical_branch", maxTicks = 20)
     public void distantCommittedCursorRebasesToTheCurrentPhysicalBranch(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCommittedRebaseGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5943,7 +5943,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_distant_open_cursor_still_retains_the_exact_saved_face", maxTicks = 20)
     public void distantOpenCursorStillRetainsTheExactSavedFace(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreOpenFaceRestoreGT");
         AIPlayerEntity bot = fixture.bot();
@@ -5965,7 +5965,7 @@ public final class OreDigPickupGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_strip_lighting_does_not_consume_tool_service_sticks", maxTicks = 20)
     public void stripLightingDoesNotConsumeToolServiceSticks(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTorchReserveGT");
         AIPlayerEntity bot = fixture.bot();

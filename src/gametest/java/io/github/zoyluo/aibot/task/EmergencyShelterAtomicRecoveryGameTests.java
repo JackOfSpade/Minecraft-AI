@@ -29,7 +29,7 @@ import net.minecraft.text.Text;
 
 /** Physical regressions for the shelter's ordered build and sealed healing transaction. */
 public final class EmergencyShelterAtomicRecoveryGameTests {
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_moving_edge_anchor_settles_before_envelope_placement", maxTicks = 500)
     public void movingEdgeAnchorSettlesBeforeEnvelopePlacement(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -74,7 +74,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_build_time_edge_correction_places_wall_in_same_tick", maxTicks = 30)
     public void buildTimeEdgeCorrectionPlacesWallInSameTick(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -104,7 +104,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         finish(context, bot, "ShelterBuildSettleGT");
     }
 
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_persistent_hostile_gets_one_strike_then_forces_physical_exit", maxTicks = 600)
     public void persistentHostileGetsOneStrikeThenForcesPhysicalExit(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -151,7 +151,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_occupied_centered_aabb_rejects_same_cell_correction", maxTicks = 30)
     public void occupiedCenteredAabbRejectsSameCellCorrection(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -185,7 +185,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         finish(context, bot, "ShelterCenteredEntityGuardGT");
     }
 
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_ai_enabled_close_pressure_uses_one_strike_and_low_health_bot_survives", maxTicks = 600)
     public void aiEnabledClosePressureUsesOneStrikeAndLowHealthBotSurvives(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -253,7 +253,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_melee_forbidden_occupied_egress_uses_alternate_owned_exit", maxTicks = 300)
     public void meleeForbiddenOccupiedEgressUsesAlternateOwnedExit(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -314,7 +314,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_adjacent_second_shelter_reuses_residual_roof_without_blocked_support_jump", maxTicks = 700)
     public void adjacentSecondShelterReusesResidualRoofWithoutBlockedSupportJump(
             TestContext context) {
         BlockPos firstFeet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -392,7 +392,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 2000)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_low_health_shelter_consumes_backpack_food_and_heals_before_opening", maxTicks = 2000)
     public void lowHealthShelterConsumesBackpackFoodAndHealsBeforeOpening(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -463,7 +463,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 1600)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_food_nineteen_waits_for_natural_healing_without_eating", maxTicks = 1600)
     public void foodNineteenWaitsForNaturalHealingWithoutEating(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -517,7 +517,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 1200)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_surface_shelter_stays_sealed_until_daylight", maxTicks = 1200)
     public void surfaceShelterStaysSealedUntilDaylight(TestContext context) {
         BlockPos feet = highSurfaceFeet(context);
         preparePlatform(context, feet, 4);
@@ -593,21 +593,21 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_leaf_canopy_still_uses_surface_night_hold", maxTicks = 500)
     public void leafCanopyStillUsesSurfaceNightHold(TestContext context) {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.OAK_LEAVES, 4,
                 "ShelterCanopyNightGT", "leaf canopy");
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_shallow_overhang_still_uses_surface_night_hold", maxTicks = 500)
     public void shallowOverhangStillUsesSurfaceNightHold(TestContext context) {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.STONE, 5,
                 "ShelterOverhangNightGT", "shallow overhang");
     }
 
-    @GameTest(maxTicks = 1000)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_observed_hostile_at_head_port_is_resealed_before_foot_door_opens", maxTicks = 1000)
     public void observedHostileAtHeadPortIsResealedBeforeFootDoorOpens(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -671,7 +671,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 1400)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_four_sided_pressure_forces_physical_exit_only_after_global_deadline", maxTicks = 1400)
     public void fourSidedPressureForcesPhysicalExitOnlyAfterGlobalDeadline(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -746,7 +746,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 1400)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_missing_reseal_block_cannot_publish_terminal_inside_shelter", maxTicks = 1400)
     public void missingResealBlockCannotPublishTerminalInsideShelter(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -806,7 +806,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(maxTicks = 30)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_water_rescue_and_body_fluid_reject_fixed_shelter_admission", maxTicks = 30)
     public void waterRescueAndBodyFluidRejectFixedShelterAdmission(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -838,7 +838,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         finish(context, bot, "ShelterWaterAdmissionGT");
     }
 
-    @GameTest(maxTicks = 900)
+    @GameTest(environment = "aibot-gametest:emergency_shelter_atomic_recovery_game_tests_sealed_shelter_reopens_owned_door_before_environmental_failure", maxTicks = 900)
     public void sealedShelterReopensOwnedDoorBeforeEnvironmentalFailure(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));

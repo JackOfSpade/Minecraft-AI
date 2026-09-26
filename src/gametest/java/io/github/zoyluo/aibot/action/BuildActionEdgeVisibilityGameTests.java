@@ -28,7 +28,7 @@ import net.minecraft.text.Text;
 public final class BuildActionEdgeVisibilityGameTests {
     private static final String BATCH = "buildActionEdgeVisibilityStrict";
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_support_center_and_face_center_may_be_beyond_reach_when_inset_is_legal", maxTicks = 40)
     public void supportCenterAndFaceCenterMayBeBeyondReachWhenInsetIsLegal(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -66,7 +66,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildReachInset");
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_place_at_uses_exact_inset_when_all_target_face_centers_are_hidden", maxTicks = 40)
     public void placeAtUsesExactInsetWhenAllTargetFaceCentersAreHidden(TestContext context) {
         BlockPos base = context.getAbsolutePos(new BlockPos(3, 4, 4));
         clear(context, base);
@@ -113,17 +113,17 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildHiddenEdge");
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_water_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)
     public void waterSourceMayBeObservableOnlyThroughAnInsetRay(TestContext context) {
         assertFluidOnlyInsetObservable(context, "BuildInsetWater", Blocks.WATER);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_lava_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)
     public void lavaSourceMayBeObservableOnlyThroughAnInsetRay(TestContext context) {
         assertFluidOnlyInsetObservable(context, "BuildInsetLava", Blocks.LAVA);
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_low_perception_radius_rejects_otherwise_reachable_inset_placement", maxTicks = 40)
     public void lowPerceptionRadiusRejectsOtherwiseReachableInsetPlacement(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 4));
         clear(context, feet);
@@ -160,7 +160,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         context.complete();
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_strict_mode_never_uses_direct_hidden_placement_fallback", maxTicks = 40)
     public void strictModeNeverUsesDirectHiddenPlacementFallback(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         clear(context, feet);
@@ -184,7 +184,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildNoFallback");
     }
 
-    @GameTest(maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_ordinary_supported_placement_still_uses_vanilla_interaction", maxTicks = 40)
     public void ordinarySupportedPlacementStillUsesVanillaInteraction(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         clear(context, feet);
