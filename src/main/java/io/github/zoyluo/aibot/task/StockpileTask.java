@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.action.ContainerAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.pathfinding.Standability;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -193,15 +194,14 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private Item nextDepositItem(AIPlayerEntity bot) {
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty() && depositFilter().test(stack)) {
                 return stack.getItem();
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (!stack.isEmpty() && depositFilter().test(stack)) {
-                return stack.getItem();
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && depositFilter().test(offHandStack)) {
+            return offHandStack.getItem();
         }
         return null;
     }

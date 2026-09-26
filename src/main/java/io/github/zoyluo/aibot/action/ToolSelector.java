@@ -5,13 +5,14 @@ import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.mining.ToolTier;
 import net.minecraft.block.BlockState;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.item.SwordItem;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.tag.ItemTags;
 
 public final class ToolSelector {
     private ToolSelector() {
@@ -28,8 +29,8 @@ public final class ToolSelector {
 
     public static Selection equipBestTool(AIPlayerEntity player, BlockState state) {
         PlayerInventory inventory = player.getInventory();
-        int currentSlot = inventory.selectedSlot;
-        ItemStack currentStack = inventory.main.get(currentSlot);
+        int currentSlot = inventory.getSelectedSlot();
+        ItemStack currentStack = inventory.getMainStacks().get(currentSlot);
         float currentScore = score(currentStack, state);
         int bestSlot = currentSlot;
         int bestOffhandSlot = -1;
@@ -37,8 +38,8 @@ public final class ToolSelector {
         float bestScore = currentScore;
         int bestHandSafety = softBlockHandSafety(currentStack, state);
 
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             // Only an empty hotbar slot can be selected as an executable empty hand. Empty storage
             // slots are not candidates because equipFromSlot deliberately rejects them.
             if (stack.isEmpty() && !PlayerInventory.isValidHotbarIndex(slot)) {
@@ -55,20 +56,17 @@ public final class ToolSelector {
                 bestStack = stack;
             }
         }
-        for (int slot = 0; slot < inventory.offHand.size(); slot++) {
-            ItemStack stack = inventory.offHand.get(slot);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            float candidateScore = score(stack, state);
-            int candidateHandSafety = softBlockHandSafety(stack, state);
+        ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty()) {
+            float candidateScore = score(offHandStack, state);
+            int candidateHandSafety = softBlockHandSafety(offHandStack, state);
             if (isBetterCandidate(candidateScore, candidateHandSafety,
                     bestScore, bestHandSafety)) {
                 bestScore = candidateScore;
                 bestHandSafety = candidateHandSafety;
                 bestSlot = -1;
-                bestOffhandSlot = slot;
-                bestStack = stack;
+                bestOffhandSlot = 0;
+                bestStack = offHandStack;
             }
         }
 
@@ -77,7 +75,7 @@ public final class ToolSelector {
                     .orElse(-1);
             int hotbar = promoted < 0 ? -1 : InventoryAction.equipFromSlot(player, promoted);
             ItemStack equipped = hotbar >= 0
-                    ? player.getInventory().main.get(hotbar) : ItemStack.EMPTY;
+                    ? player.getInventory().getMainStacks().get(hotbar) : ItemStack.EMPTY;
             BotLog.action(player, "equip_best_tool", "slot", hotbar,
                     "tool", equipped.getItem(), "score", bestScore, "source", "offhand");
             return new Selection(hotbar >= 0, hotbar, equipped, bestScore);
@@ -91,7 +89,7 @@ public final class ToolSelector {
                 return new Selection(changed, bestSlot, ItemStack.EMPTY, bestScore);
             }
             int hotbar = InventoryAction.equipFromSlot(player, bestSlot);
-            ItemStack equipped = hotbar >= 0 ? player.getInventory().main.get(hotbar) : ItemStack.EMPTY;
+            ItemStack equipped = hotbar >= 0 ? player.getInventory().getMainStacks().get(hotbar) : ItemStack.EMPTY;
             BotLog.action(player, "equip_best_tool", "slot", hotbar, "tool", equipped.getItem(), "score", bestScore);
             return new Selection(true, hotbar, equipped, bestScore);
         }
@@ -109,15 +107,15 @@ public final class ToolSelector {
             return equipBestTool(player, state);
         }
         PlayerInventory inventory = player.getInventory();
-        int currentSlot = inventory.selectedSlot;
+        int currentSlot = inventory.getSelectedSlot();
         int minimumTier = channelMinimumTier(ToolTier.requiredPickaxeTier(state.getBlock()));
         int maximumTier = channelMaximumTier(minimumTier, OreScan.isOreBlock(state.getBlock()));
         int bestSlot = -1;
         int bestOffhandSlot = -1;
         int bestTier = Integer.MAX_VALUE;
         int bestRemaining = -1;
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             int tier = ToolTier.pickaxeTier(stack);
             if (tier < minimumTier || tier > maximumTier || !stack.isSuitableFor(state)
                     || (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1)) {
@@ -132,20 +130,17 @@ public final class ToolSelector {
                 bestOffhandSlot = -1;
             }
         }
-        for (int slot = 0; slot < inventory.offHand.size(); slot++) {
-            ItemStack stack = inventory.offHand.get(slot);
-            int tier = ToolTier.pickaxeTier(stack);
-            if (tier < minimumTier || tier > maximumTier || !stack.isSuitableFor(state)
-                    || (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1)) {
-                continue;
-            }
-            int remaining = stack.isDamageable()
-                    ? stack.getMaxDamage() - stack.getDamage() : Integer.MAX_VALUE;
-            if (tier < bestTier || (tier == bestTier && remaining > bestRemaining)) {
-                bestTier = tier;
+        ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
+        int offHandTier = ToolTier.pickaxeTier(offHandStack);
+        if (offHandTier >= minimumTier && offHandTier <= maximumTier && offHandStack.isSuitableFor(state)
+                && !(offHandStack.isDamageable() && offHandStack.getDamage() >= offHandStack.getMaxDamage() - 1)) {
+            int remaining = offHandStack.isDamageable()
+                    ? offHandStack.getMaxDamage() - offHandStack.getDamage() : Integer.MAX_VALUE;
+            if (offHandTier < bestTier || (offHandTier == bestTier && remaining > bestRemaining)) {
+                bestTier = offHandTier;
                 bestRemaining = remaining;
                 bestSlot = -1;
-                bestOffhandSlot = slot;
+                bestOffhandSlot = 0;
             }
         }
         if (bestSlot < 0 && bestOffhandSlot < 0) {
@@ -159,16 +154,16 @@ public final class ToolSelector {
             int promoted = InventoryAction.promoteOffhandSlot(player, bestOffhandSlot)
                     .orElse(-1);
             int hotbar = promoted < 0 ? -1 : InventoryAction.equipFromSlot(player, promoted);
-            ItemStack equipped = hotbar >= 0 ? inventory.main.get(hotbar) : ItemStack.EMPTY;
+            ItemStack equipped = hotbar >= 0 ? inventory.getMainStacks().get(hotbar) : ItemStack.EMPTY;
             BotLog.action(player, "equip_mining_channel_tool",
                     "slot", hotbar, "tool", equipped.getItem(), "tier", bestTier,
                     "source", "offhand");
             return new Selection(hotbar >= 0, hotbar, equipped, policyScore);
         }
-        ItemStack bestStack = inventory.main.get(bestSlot);
+        ItemStack bestStack = inventory.getMainStacks().get(bestSlot);
         if (bestSlot != currentSlot) {
             int hotbar = InventoryAction.equipFromSlot(player, bestSlot);
-            ItemStack equipped = hotbar >= 0 ? inventory.main.get(hotbar) : ItemStack.EMPTY;
+            ItemStack equipped = hotbar >= 0 ? inventory.getMainStacks().get(hotbar) : ItemStack.EMPTY;
             BotLog.action(player, "equip_mining_channel_tool",
                     "slot", hotbar, "tool", equipped.getItem(), "tier", bestTier);
             return new Selection(true, hotbar, equipped, policyScore);
@@ -221,7 +216,7 @@ public final class ToolSelector {
         if (!stack.isDamageable()) {
             return 2;
         }
-        return stack.getItem() instanceof SwordItem || stack.getItem() instanceof AxeItem ? 0 : 1;
+        return stack.isIn(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem ? 0 : 1;
     }
 
     private static float score(ItemStack stack, BlockState state) {

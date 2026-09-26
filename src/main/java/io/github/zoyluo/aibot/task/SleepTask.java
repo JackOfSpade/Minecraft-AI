@@ -217,8 +217,8 @@ public final class SleepTask extends AbstractTask {
 
     private static OptionalInt findBedItemSlot(AIPlayerEntity bot) {
         var inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof BedBlock) {
                 return OptionalInt.of(slot);
             }

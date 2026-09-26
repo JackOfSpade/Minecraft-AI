@@ -130,8 +130,8 @@ public final class PlaceStationsTask extends AbstractTask {
 
     private static int findSlot(AIPlayerEntity bot, Item item) {
         var inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            if (inventory.main.get(slot).isOf(item)) {
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            if (inventory.getMainStacks().get(slot).isOf(item)) {
                 return slot;
             }
         }

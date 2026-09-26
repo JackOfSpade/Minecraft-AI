@@ -231,10 +231,10 @@ public final class AIBotServerNetworking {
         if (payload.direction() == BotItemMoveC2S.TAKE) {
             // 从 AI main[slot] 拿到玩家背包
             int slot = payload.slot();
-            if (slot < 0 || slot >= botInv.main.size()) {
+            if (slot < 0 || slot >= botInv.getMainStacks().size()) {
                 return;
             }
-            ItemStack src = botInv.main.get(slot);
+            ItemStack src = botInv.getMainStacks().get(slot);
             if (src.isEmpty()) {
                 return;
             }
@@ -250,10 +250,10 @@ public final class AIBotServerNetworking {
         } else if (payload.direction() == BotItemMoveC2S.PUT) {
             // 把玩家 inventory.main[slot] 放进 AI 背包
             int slot = payload.slot();
-            if (slot < 0 || slot >= playerInv.main.size()) {
+            if (slot < 0 || slot >= playerInv.getMainStacks().size()) {
                 return;
             }
-            ItemStack src = playerInv.main.get(slot);
+            ItemStack src = playerInv.getMainStacks().get(slot);
             if (src.isEmpty()) {
                 return;
             }
@@ -279,8 +279,8 @@ public final class AIBotServerNetworking {
     private static int insertIntoBot(net.minecraft.entity.player.PlayerInventory botInv, ItemStack moving) {
         int want = moving.getCount();
         // 1) 堆叠到已有同类未满槽
-        for (int i = 0; i < botInv.main.size() && !moving.isEmpty(); i++) {
-            ItemStack dst = botInv.main.get(i);
+        for (int i = 0; i < botInv.getMainStacks().size() && !moving.isEmpty(); i++) {
+            ItemStack dst = botInv.getMainStacks().get(i);
             if (!dst.isEmpty() && ItemStack.areItemsAndComponentsEqual(dst, moving) && dst.getCount() < dst.getMaxCount()) {
                 int room = dst.getMaxCount() - dst.getCount();
                 int add = Math.min(room, moving.getCount());
@@ -289,9 +289,9 @@ public final class AIBotServerNetworking {
             }
         }
         // 2) 填空槽
-        for (int i = 0; i < botInv.main.size() && !moving.isEmpty(); i++) {
-            if (botInv.main.get(i).isEmpty()) {
-                botInv.main.set(i, moving.copy());
+        for (int i = 0; i < botInv.getMainStacks().size() && !moving.isEmpty(); i++) {
+            if (botInv.getMainStacks().get(i).isEmpty()) {
+                botInv.getMainStacks().set(i, moving.copy());
                 moving.setCount(0);
             }
         }
@@ -350,8 +350,8 @@ public final class AIBotServerNetworking {
         BrainCoordinator.BrainStatus brain = BrainCoordinator.INSTANCE.status(bot);
         BotMemory memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
         ArrayList<BotSnapshotS2C.ItemEntry> inventory = new ArrayList<>();
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            ItemStack stack = bot.getInventory().main.get(slot);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
             if (!stack.isEmpty()) {
                 inventory.add(new BotSnapshotS2C.ItemEntry(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), slot));
             }

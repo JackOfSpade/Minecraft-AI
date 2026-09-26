@@ -96,8 +96,8 @@ public final class MaterialPalette {
     }
 
     public static OptionalInt pickAnyBlockSlot(AIPlayerEntity bot) {
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            if (bot.getInventory().main.get(slot).getItem() instanceof BlockItem) {
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            if (bot.getInventory().getMainStacks().get(slot).getItem() instanceof BlockItem) {
                 return OptionalInt.of(slot);
             }
         }
@@ -276,7 +276,7 @@ public final class MaterialPalette {
             return false;
         }
         BlockState state = item.getBlock().getDefaultState();
-        for (var stack : bot.getInventory().main) {
+        for (var stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty() && stack.isSuitableFor(state)
                     && (!stack.isDamageable() || stack.getDamage() < stack.getMaxDamage() - 1)) {
                 return true;

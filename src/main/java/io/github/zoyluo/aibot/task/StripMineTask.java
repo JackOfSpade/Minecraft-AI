@@ -130,7 +130,7 @@ public final class StripMineTask extends AbstractTask {
                           Set<Block> targetOres,
                           boolean veinOnly,
                           boolean autoDescend) {
-        this.direction = direction.getHorizontal() == -1 ? Direction.NORTH : direction;
+        this.direction = direction.getAxis() == Direction.Axis.Y ? Direction.NORTH : direction;
         this.length = Math.max(0, length);
         this.branchSpacing = Math.max(0, branchSpacing);
         this.depotChest = depotChest == null ? null : depotChest.toImmutable();
@@ -500,7 +500,7 @@ public final class StripMineTask extends AbstractTask {
             note = "inventory_near_full";
             return true;
         }
-        ItemStack selected = bot.getInventory().getMainHandStack();
+        ItemStack selected = bot.getMainHandStack();
         if (selected.isDamageable()
                 && selected.getMaxDamage() > 0
                 && selected.getMaxDamage() - selected.getDamage() <= selected.getMaxDamage() * mining.toolDurabilityFloor()) {
@@ -661,7 +661,7 @@ public final class StripMineTask extends AbstractTask {
 
     private static int freeMainSlots(AIPlayerEntity bot) {
         int free = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (stack.isEmpty()) {
                 free++;
             }

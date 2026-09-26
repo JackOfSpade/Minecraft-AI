@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.item.BoatItem;
 import net.minecraft.item.Item;
@@ -52,17 +53,15 @@ final class BoatSupport {
     }
 
     static OptionalInt boatSlot(AIPlayerEntity bot) {
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            ItemStack stack = bot.getInventory().main.get(slot);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
             if (!stack.isEmpty() && isBoatItem(stack.getItem())) {
                 return OptionalInt.of(slot);
             }
         }
-        for (int slot = 0; slot < bot.getInventory().offHand.size(); slot++) {
-            ItemStack stack = bot.getInventory().offHand.get(slot);
-            if (!stack.isEmpty() && isBoatItem(stack.getItem())) {
-                return io.github.zoyluo.aibot.action.InventoryAction.promoteOffhandSlot(bot, slot);
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && isBoatItem(offHandStack.getItem())) {
+            return io.github.zoyluo.aibot.action.InventoryAction.promoteOffhandSlot(bot, 0);
         }
         return OptionalInt.empty();
     }

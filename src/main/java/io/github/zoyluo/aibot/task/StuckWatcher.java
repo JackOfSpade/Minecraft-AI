@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.math.BlockPos;
@@ -71,12 +72,10 @@ public final class StuckWatcher {
 
     private static int inventoryTotal(AIPlayerEntity bot) {
         int total = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             total += stack.getCount();
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            total += stack.getCount();
-        }
+        total += bot.getEquippedStack(EquipmentSlot.OFFHAND).getCount();
         return total;
     }
 

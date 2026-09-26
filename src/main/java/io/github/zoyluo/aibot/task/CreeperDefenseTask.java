@@ -677,7 +677,7 @@ public final class CreeperDefenseTask extends AbstractTask {
                 .stream()
                 .filter(CreeperEntity::isAlive)
                 .map(entity -> {
-                    float fuseProgress = entity.getClientFuseTime(1.0F);
+                    float fuseProgress = entity.getLerpedFuseTime(1.0F);
                     boolean fuseStarted = entity.isIgnited()
                             || entity.getFuseSpeed() > 0
                             || fuseProgress > 0.0F;

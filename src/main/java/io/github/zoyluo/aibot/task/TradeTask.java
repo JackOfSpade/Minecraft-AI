@@ -184,7 +184,7 @@ public final class TradeTask extends AbstractTask {
 
     private boolean canFit(AIPlayerEntity bot, ItemStack output) {
         PlayerInventory inventory = bot.getInventory();
-        for (ItemStack stack : inventory.main) {
+        for (ItemStack stack : inventory.getMainStacks()) {
             if (stack.isEmpty()) {
                 return true;
             }

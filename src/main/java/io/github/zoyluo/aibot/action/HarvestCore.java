@@ -10,6 +10,7 @@ import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -353,30 +354,28 @@ public final class HarvestCore {
 
     public static int totalInventoryCount(AIPlayerEntity bot) {
         int count = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty()) {
                 count += stack.getCount();
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (!stack.isEmpty()) {
-                count += stack.getCount();
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty()) {
+            count += offHandStack.getCount();
         }
         return count;
     }
 
     public static int countInventoryItems(AIPlayerEntity bot, Set<Item> items) {
         int count = 0;
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty() && matches(stack, items)) {
                 count += stack.getCount();
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (!stack.isEmpty() && matches(stack, items)) {
-                count += stack.getCount();
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && matches(offHandStack, items)) {
+            count += offHandStack.getCount();
         }
         return count;
     }
@@ -428,7 +427,7 @@ public final class HarvestCore {
     }
 
     public static boolean isInventoryFull(AIPlayerEntity bot) {
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (stack.isEmpty()) {
                 return false;
             }

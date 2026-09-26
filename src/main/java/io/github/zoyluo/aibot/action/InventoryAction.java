@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.action;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import net.minecraft.component.DataComponentTypes;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -22,22 +23,20 @@ public final class InventoryAction {
         if (!PlayerInventory.isValidHotbarIndex(slot)) {
             return ActionResult.failed("slot_out_of_range");
         }
-        player.getInventory().selectedSlot = slot;
+        player.getInventory().setSelectedSlot(slot);
         BotLog.action(player, "select_slot", "slot", slot);
         return ActionResult.SUCCESS;
     }
 
     public static OptionalInt findItem(AIPlayerEntity player, Item item) {
         var inventory = player.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            if (inventory.main.get(slot).isOf(item)) {
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            if (inventory.getMainStacks().get(slot).isOf(item)) {
                 return OptionalInt.of(slot);
             }
         }
-        for (int slot = 0; slot < inventory.offHand.size(); slot++) {
-            if (inventory.offHand.get(slot).isOf(item)) {
-                return promoteOffhandSlot(player, slot);
-            }
+        if (player.getEquippedStack(EquipmentSlot.OFFHAND).isOf(item)) {
+            return promoteOffhandSlot(player, 0);
         }
         return OptionalInt.empty();
     }
@@ -48,20 +47,20 @@ public final class InventoryAction {
      */
     public static OptionalInt promoteOffhandSlot(AIPlayerEntity player, int offhandSlot) {
         PlayerInventory inventory = player.getInventory();
-        if (offhandSlot < 0 || offhandSlot >= inventory.offHand.size()) {
+        if (offhandSlot != 0) {
             return OptionalInt.empty();
         }
-        ItemStack moving = inventory.offHand.get(offhandSlot);
+        ItemStack moving = player.getEquippedStack(EquipmentSlot.OFFHAND);
         if (moving.isEmpty()) {
             return OptionalInt.empty();
         }
         int destination = firstEmptyMain(inventory);
         if (destination < 0) {
-            destination = inventory.selectedSlot;
+            destination = inventory.getSelectedSlot();
         }
-        ItemStack displaced = inventory.main.get(destination);
-        inventory.main.set(destination, moving);
-        inventory.offHand.set(offhandSlot, displaced);
+        ItemStack displaced = inventory.getMainStacks().get(destination);
+        inventory.getMainStacks().set(destination, moving);
+        player.equipStack(EquipmentSlot.OFFHAND, displaced);
         inventory.markDirty();
         BotLog.action(player, "promote_offhand",
                 "offhand_slot", offhandSlot,
@@ -74,42 +73,41 @@ public final class InventoryAction {
     public static int countItem(AIPlayerEntity player, Item item) {
         int count = 0;
         var inventory = player.getInventory();
-        for (ItemStack stack : inventory.main) {
+        for (ItemStack stack : inventory.getMainStacks()) {
             if (stack.isOf(item)) {
                 count += stack.getCount();
             }
         }
-        for (ItemStack stack : inventory.offHand) {
-            if (stack.isOf(item)) {
-                count += stack.getCount();
-            }
+        ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (offHandStack.isOf(item)) {
+            count += offHandStack.getCount();
         }
         return count;
     }
 
     public static int equipFromSlot(AIPlayerEntity player, int sourceSlot) {
         PlayerInventory inventory = player.getInventory();
-        if (sourceSlot < 0 || sourceSlot >= inventory.main.size() || inventory.main.get(sourceSlot).isEmpty()) {
+        if (sourceSlot < 0 || sourceSlot >= inventory.getMainStacks().size() || inventory.getMainStacks().get(sourceSlot).isEmpty()) {
             return -1;
         }
         if (PlayerInventory.isValidHotbarIndex(sourceSlot)) {
-            if (inventory.selectedSlot == sourceSlot) {
+            if (inventory.getSelectedSlot() == sourceSlot) {
                 return sourceSlot;
             }
-            inventory.selectedSlot = sourceSlot;
+            inventory.setSelectedSlot(sourceSlot);
             inventory.markDirty();
             BotLog.action(player, "equip_slot", "source_slot", sourceSlot, "hotbar_slot", sourceSlot);
             return sourceSlot;
         }
         int hotbar = firstEmptyHotbar(inventory);
         if (hotbar < 0) {
-            hotbar = inventory.selectedSlot;
+            hotbar = inventory.getSelectedSlot();
         }
-        ItemStack moving = inventory.main.get(sourceSlot);
-        ItemStack inHotbar = inventory.main.get(hotbar);
-        inventory.main.set(hotbar, moving);
-        inventory.main.set(sourceSlot, inHotbar);
-        inventory.selectedSlot = hotbar;
+        ItemStack moving = inventory.getMainStacks().get(sourceSlot);
+        ItemStack inHotbar = inventory.getMainStacks().get(hotbar);
+        inventory.getMainStacks().set(hotbar, moving);
+        inventory.getMainStacks().set(sourceSlot, inHotbar);
+        inventory.setSelectedSlot(hotbar);
         inventory.markDirty();
         BotLog.action(player, "equip_slot", "source_slot", sourceSlot, "hotbar_slot", hotbar);
         return hotbar;
@@ -117,7 +115,7 @@ public final class InventoryAction {
 
     public static int firstEmptyHotbar(PlayerInventory inventory) {
         for (int slot = 0; slot <= 8; slot++) {
-            if (inventory.main.get(slot).isEmpty()) {
+            if (inventory.getMainStacks().get(slot).isEmpty()) {
                 return slot;
             }
         }
@@ -125,8 +123,8 @@ public final class InventoryAction {
     }
 
     private static int firstEmptyMain(PlayerInventory inventory) {
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            if (inventory.main.get(slot).isEmpty()) {
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            if (inventory.getMainStacks().get(slot).isEmpty()) {
                 return slot;
             }
         }
@@ -145,9 +143,14 @@ public final class InventoryAction {
             return false;
         }
         PlayerInventory inventory = player.getInventory();
-        int remaining = removeFromList(inventory.main, item, count);
+        int remaining = removeFromList(inventory.getMainStacks(), item, count);
         if (remaining > 0) {
-            remaining = removeFromList(inventory.offHand, item, remaining);
+            ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
+            if (offHandStack.isOf(item)) {
+                int take = Math.min(remaining, offHandStack.getCount());
+                offHandStack.decrement(take);
+                remaining -= take;
+            }
         }
         inventory.markDirty();
         BotLog.action(player, "remove_items", "item", item, "count", count);
@@ -174,8 +177,8 @@ public final class InventoryAction {
     public static int findFoodSlot(AIPlayerEntity player) {
         PlayerInventory inventory = player.getInventory();
         int harmfulSlot = -1;
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (stack.isEmpty() || !stack.contains(DataComponentTypes.FOOD)) {
                 continue;
             }
@@ -187,36 +190,28 @@ public final class InventoryAction {
             }
             return slot; // 优先安全食物(熟肉/面包/生牛猪羊)
         }
-        int harmfulOffhandSlot = -1;
-        for (int slot = 0; slot < inventory.offHand.size(); slot++) {
-            ItemStack stack = inventory.offHand.get(slot);
-            if (stack.isEmpty() || !stack.contains(DataComponentTypes.FOOD)) {
-                continue;
+        boolean harmfulOffhand = false;
+        ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && offHandStack.contains(DataComponentTypes.FOOD)) {
+            if (HARMFUL_FOODS.contains(offHandStack.getItem())) {
+                harmfulOffhand = true;
+            } else {
+                return promoteOffhandSlot(player, 0).orElse(-1);
             }
-            if (HARMFUL_FOODS.contains(stack.getItem())) {
-                if (harmfulOffhandSlot < 0) {
-                    harmfulOffhandSlot = slot;
-                }
-                continue;
-            }
-            return promoteOffhandSlot(player, slot).orElse(-1);
         }
         if (harmfulSlot >= 0) {
             return harmfulSlot;
         }
-        return harmfulOffhandSlot < 0
-                ? -1 : promoteOffhandSlot(player, harmfulOffhandSlot).orElse(-1);
+        return harmfulOffhand ? promoteOffhandSlot(player, 0).orElse(-1) : -1;
     }
 
     public static Map<String, Integer> summarize(AIPlayerEntity player) {
         Map<String, Integer> summary = new LinkedHashMap<>();
         var inventory = player.getInventory();
-        for (ItemStack stack : inventory.main) {
+        for (ItemStack stack : inventory.getMainStacks()) {
             addStack(summary, stack);
         }
-        for (ItemStack stack : inventory.offHand) {
-            addStack(summary, stack);
-        }
+        addStack(summary, player.getEquippedStack(EquipmentSlot.OFFHAND));
         return summary;
     }
 
@@ -313,7 +308,7 @@ public final class InventoryAction {
                                              int requiredFreeSlots,
                                              int emergencyStoneLikeReserve) {
         int required = Math.max(0,
-                Math.min(requiredFreeSlots, player.getInventory().main.size()));
+                Math.min(requiredFreeSlots, player.getInventory().getMainStacks().size()));
         if (freeMainSlots(player) >= required) {
             return 0;
         }
@@ -323,9 +318,9 @@ public final class InventoryAction {
         int droppedStacks = 0;
         for (int pass = 0; pass < 2 && freeMainSlots(player) < required; pass++) {
             for (int slot = 0;
-                 slot < player.getInventory().main.size() && freeMainSlots(player) < required;
+                 slot < player.getInventory().getMainStacks().size() && freeMainSlots(player) < required;
                  slot++) {
-                ItemStack stack = player.getInventory().main.get(slot);
+                ItemStack stack = player.getInventory().getMainStacks().get(slot);
                 if (stack.isEmpty() || !isJunk(stack.getItem())) {
                     continue;
                 }
@@ -382,7 +377,7 @@ public final class InventoryAction {
 
     private static int freeMainSlots(AIPlayerEntity player) {
         int free = 0;
-        for (ItemStack stack : player.getInventory().main) {
+        for (ItemStack stack : player.getInventory().getMainStacks()) {
             if (stack.isEmpty()) {
                 free++;
             }

@@ -16,9 +16,9 @@ import net.minecraft.item.ArrowItem;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.item.SwordItem;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.EntityTypeTags;
+import net.minecraft.registry.tag.ItemTags;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -45,8 +45,8 @@ public final class EquipAction {
     public static int equipBestArmor(AIPlayerEntity bot) {
         PlayerInventory inventory = bot.getInventory();
         Map<EquipmentSlot, Candidate> best = new EnumMap<>(EquipmentSlot.class);
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (stack.isEmpty()) {
                 continue;
             }
@@ -68,7 +68,7 @@ public final class EquipAction {
             EquipmentSlot slot = entry.getKey();
             Candidate candidate = entry.getValue();
             ItemStack old = bot.getEquippedStack(slot).copy();
-            inventory.main.set(candidate.sourceSlot(), old);
+            inventory.getMainStacks().set(candidate.sourceSlot(), old);
             bot.equipStack(slot, candidate.stack());
             inventory.markDirty();
             equipped++;
@@ -89,8 +89,8 @@ public final class EquipAction {
         double bestDamage = 1.0D;
         int bestSwordPriority = -1;
         int bestDurability = -1;
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (!isQualifiedMeleeWeapon(stack)) {
                 continue;
             }
@@ -115,12 +115,12 @@ public final class EquipAction {
     /** Only purpose-built melee tools may authorize a defensive Combat transaction. */
     public static boolean isQualifiedMeleeWeapon(ItemStack stack) {
         return !stack.isEmpty()
-                && (stack.getItem() instanceof SwordItem || stack.getItem() instanceof AxeItem)
+                && (stack.isIn(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem)
                 && remainingDurability(stack) >= MIN_MELEE_RAW_DURABILITY;
     }
 
     private static int swordPriority(ItemStack stack) {
-        return stack.getItem() instanceof SwordItem ? 1 : 0;
+        return stack.isIn(ItemTags.SWORDS) ? 1 : 0;
     }
 
     private static int remainingDurability(ItemStack stack) {
@@ -139,8 +139,8 @@ public final class EquipAction {
             return OptionalInt.empty();
         }
         PlayerInventory inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            if (inventory.main.get(slot).isOf(Items.BOW)) {
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            if (inventory.getMainStacks().get(slot).isOf(Items.BOW)) {
                 return OptionalInt.of(slot);
             }
         }
@@ -175,13 +175,13 @@ public final class EquipAction {
         }
 
         PlayerInventory inventory = bot.getInventory();
-        ItemStack ammunition = inventory.main.get(choice.mainSlot());
+        ItemStack ammunition = inventory.getMainStacks().get(choice.mainSlot());
         if (!isCompatibleBowArrow(ammunition)) {
             return Optional.empty();
         }
         ItemStack displacedOffhand = bot.getOffHandStack().copy();
         bot.equipStack(EquipmentSlot.OFFHAND, ammunition.copy());
-        inventory.main.set(choice.mainSlot(), displacedOffhand);
+        inventory.getMainStacks().set(choice.mainSlot(), displacedOffhand);
         inventory.markDirty();
         BotLog.action(bot, "equip_ranked_arrow_offhand",
                 "source_slot", choice.mainSlot(),
@@ -194,8 +194,8 @@ public final class EquipAction {
     private static Optional<ArrowChoice> bestArrowChoice(AIPlayerEntity bot, LivingEntity target) {
         PlayerInventory inventory = bot.getInventory();
         ArrowChoice best = null;
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (!isCompatibleBowArrow(stack)) {
                 continue;
             }
@@ -288,14 +288,14 @@ public final class EquipAction {
             return true;
         }
         PlayerInventory inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (!stack.isOf(Items.SHIELD)) {
                 continue;
             }
             ItemStack oldOffhand = bot.getOffHandStack().copy();
             bot.equipStack(EquipmentSlot.OFFHAND, stack.copy());
-            inventory.main.set(slot, oldOffhand);
+            inventory.getMainStacks().set(slot, oldOffhand);
             inventory.markDirty();
             BotLog.action(bot, "equip_shield_offhand", "source_slot", slot);
             return true;
@@ -327,17 +327,17 @@ public final class EquipAction {
                 return true;
             }
             PlayerInventory inventory = bot.getInventory();
-            if (restoreSlot >= inventory.main.size()) {
+            if (restoreSlot >= inventory.getMainStacks().size()) {
                 return false;
             }
             ItemStack currentOffhand = bot.getOffHandStack();
             boolean expectedAmmo = currentOffhand.isEmpty()
                     || ItemStack.areItemsAndComponentsEqual(currentOffhand, ammunition);
-            if (!expectedAmmo || !ItemStack.areEqual(inventory.main.get(restoreSlot), storedOffhand)) {
+            if (!expectedAmmo || !ItemStack.areEqual(inventory.getMainStacks().get(restoreSlot), storedOffhand)) {
                 return false;
             }
-            bot.equipStack(EquipmentSlot.OFFHAND, inventory.main.get(restoreSlot).copy());
-            inventory.main.set(restoreSlot, currentOffhand.copy());
+            bot.equipStack(EquipmentSlot.OFFHAND, inventory.getMainStacks().get(restoreSlot).copy());
+            inventory.getMainStacks().set(restoreSlot, currentOffhand.copy());
             inventory.markDirty();
             BotLog.action(bot, "restore_ranged_offhand", "source_slot", restoreSlot);
             return true;

@@ -104,7 +104,7 @@ public final class ChatCaptureListener {
 
     private static int freeMainSlots(AIPlayerEntity bot) {
         int free = 0;
-        for (var stack : bot.getInventory().main) {
+        for (var stack : bot.getInventory().getMainStacks()) {
             if (stack.isEmpty()) {
                 free++;
             }

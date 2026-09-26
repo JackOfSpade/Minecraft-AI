@@ -215,7 +215,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         return new Property() {
             @Override
             public int get() {
-                return clampHotbarSlot(bot.getInventory().selectedSlot);
+                return clampHotbarSlot(bot.getInventory().getSelectedSlot());
             }
 
             @Override

@@ -18,8 +18,8 @@ import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.PickaxeItem;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.math.BlockPos;
 
@@ -516,7 +516,7 @@ public final class DangerWatcher {
         // the sealed stick/stone inputs before the five-pick hand-off is complete.
         boolean taskDoesNotUseHeldTool = active.filter(CraftTask.class::isInstance).isPresent();
         if (isNearlyBroken(mainHand)
-                && mainHand.getItem() instanceof PickaxeItem
+                && mainHand.isIn(ItemTags.PICKAXES)
                 && pausedDigDownOwnsReturnDebt
                 && !taskDoesNotUseHeldTool) {
             // DigDown alone needs a generic tool to pay an exact physical RETURN debt after a

@@ -1199,7 +1199,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (blockSlot.isEmpty()) {
             return false;
         }
-        String item = String.valueOf(bot.getInventory().main
+        String item = String.valueOf(bot.getInventory().getMainStacks()
                 .get(blockSlot.getAsInt()).getItem());
         miner.cancel(bot);
         bot.getActionPack().stopAll();

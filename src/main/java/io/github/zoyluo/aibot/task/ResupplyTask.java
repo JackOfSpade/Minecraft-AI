@@ -384,8 +384,8 @@ public final class ResupplyTask extends AbstractTask {
         }
         int bestSlot = -1;
         int bestRemaining = -1;
-        for (int slot = 0; slot < bot.getInventory().main.size(); slot++) {
-            ItemStack stack = bot.getInventory().main.get(slot);
+        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
             if (!stack.isOf(requestedItem) || !isUsable(stack)) {
                 continue;
             }

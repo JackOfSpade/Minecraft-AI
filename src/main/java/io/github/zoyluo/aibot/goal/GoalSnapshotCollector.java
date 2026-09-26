@@ -9,6 +9,7 @@ import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.task.BlueprintSchema;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -78,9 +79,12 @@ public final class GoalSnapshotCollector {
     private static Map<String, Integer> inventoryCounts(AIPlayerEntity bot) {
         Map<String, Integer> counts = new HashMap<>();
         List<ItemStack> stacks = new ArrayList<>();
-        stacks.addAll(bot.getInventory().main);
-        stacks.addAll(bot.getInventory().offHand);
-        stacks.addAll(bot.getInventory().armor);
+        stacks.addAll(bot.getInventory().getMainStacks());
+        stacks.add(bot.getEquippedStack(EquipmentSlot.OFFHAND));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.HEAD));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.CHEST));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.LEGS));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.FEET));
         for (ItemStack stack : stacks) {
             if (!stack.isEmpty() && !nearlyBroken(stack)) {
                 counts.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
@@ -113,9 +117,12 @@ public final class GoalSnapshotCollector {
 
     private static List<ItemStack> allStacks(AIPlayerEntity bot) {
         List<ItemStack> stacks = new ArrayList<>();
-        stacks.addAll(bot.getInventory().main);
-        stacks.addAll(bot.getInventory().offHand);
-        stacks.addAll(bot.getInventory().armor);
+        stacks.addAll(bot.getInventory().getMainStacks());
+        stacks.add(bot.getEquippedStack(EquipmentSlot.OFFHAND));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.HEAD));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.CHEST));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.LEGS));
+        stacks.add(bot.getEquippedStack(EquipmentSlot.FEET));
         return stacks;
     }
 

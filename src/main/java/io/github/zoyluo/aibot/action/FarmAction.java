@@ -133,8 +133,8 @@ public final class FarmAction {
 
     private static OptionalInt findHoeSlot(AIPlayerEntity bot) {
         var inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.main.size(); slot++) {
-            ItemStack stack = inventory.main.get(slot);
+        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
+            ItemStack stack = inventory.getMainStacks().get(slot);
             if (stack.getItem() instanceof HoeItem) {
                 return OptionalInt.of(slot);
             }

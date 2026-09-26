@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -87,12 +88,10 @@ public final class ToolTier {
 
     public static int bestPickaxeTier(AIPlayerEntity bot) {
         int best = pickaxeTier(bot.getMainHandStack());
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             best = Math.max(best, pickaxeTier(stack));
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            best = Math.max(best, pickaxeTier(stack));
-        }
+        best = Math.max(best, pickaxeTier(bot.getEquippedStack(EquipmentSlot.OFFHAND)));
         return best;
     }
 
@@ -104,15 +103,14 @@ public final class ToolTier {
         if (!state.isToolRequired()) {
             return true;
         }
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             if (!stack.isEmpty() && stack.isSuitableFor(state) && !nearlyBroken(stack)) {
                 return true;
             }
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            if (!stack.isEmpty() && stack.isSuitableFor(state) && !nearlyBroken(stack)) {
-                return true;
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && offHandStack.isSuitableFor(state) && !nearlyBroken(offHandStack)) {
+            return true;
         }
         return false;
     }

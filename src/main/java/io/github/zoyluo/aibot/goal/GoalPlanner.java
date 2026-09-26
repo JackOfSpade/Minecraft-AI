@@ -308,12 +308,10 @@ public final class GoalPlanner {
 
     private static Map<Item, Integer> inventoryCounts(AIPlayerEntity bot) {
         Map<Item, Integer> counts = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             add(counts, stack);
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            add(counts, stack);
-        }
+        add(counts, bot.getEquippedStack(EquipmentSlot.OFFHAND));
         // 第3层:计入已穿装备槽,避免"已穿铁甲"被 ensureArmor 当成缺失而重复制作。
         for (EquipmentSlot slot : ARMOR_SLOTS) {
             add(counts, bot.getEquippedStack(slot));
@@ -337,12 +335,10 @@ public final class GoalPlanner {
 
     private static Map<Item, Integer> toolUsableDurability(AIPlayerEntity bot) {
         Map<Item, Integer> durability = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().main) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
             addToolUsableDurability(durability, stack);
         }
-        for (ItemStack stack : bot.getInventory().offHand) {
-            addToolUsableDurability(durability, stack);
-        }
+        addToolUsableDurability(durability, bot.getEquippedStack(EquipmentSlot.OFFHAND));
         return durability;
     }
 

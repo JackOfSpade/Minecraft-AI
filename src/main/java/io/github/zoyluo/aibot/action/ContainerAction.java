@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.log.BotLog;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.inventory.LootableInventory;
 import net.minecraft.item.Item;
@@ -93,18 +94,16 @@ public final class ContainerAction {
     }
 
     private static PlayerTransfer findPlayerStack(AIPlayerEntity bot, Predicate<ItemStack> filter) {
-        DefaultedList<ItemStack> main = bot.getInventory().main;
+        DefaultedList<ItemStack> main = bot.getInventory().getMainStacks();
         for (int slot = 0; slot < main.size(); slot++) {
             ItemStack stack = main.get(slot);
             if (!stack.isEmpty() && filter.test(stack)) {
                 return new PlayerTransfer(stack);
             }
         }
-        DefaultedList<ItemStack> offHand = bot.getInventory().offHand;
-        for (ItemStack stack : offHand) {
-            if (!stack.isEmpty() && filter.test(stack)) {
-                return new PlayerTransfer(stack);
-            }
+        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && filter.test(offHandStack)) {
+            return new PlayerTransfer(offHandStack);
         }
         return null;
     }

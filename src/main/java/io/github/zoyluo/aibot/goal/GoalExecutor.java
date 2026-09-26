@@ -41,6 +41,7 @@ import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
 import io.github.zoyluo.aibot.persist.MissionSpec;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
@@ -4336,7 +4337,8 @@ public final class GoalExecutor {
             return false;
         }
         return java.util.stream.Stream.concat(
-                        bot.getInventory().main.stream(), bot.getInventory().offHand.stream())
+                        bot.getInventory().getMainStacks().stream(),
+                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                 .anyMatch(stack -> !stack.isEmpty()
                         && requiredId.equals(Registries.ITEM.getId(stack.getItem()).toString())
                         && MiningServiceTask.usableDurability(stack) > 0);
