@@ -18,7 +18,7 @@ import java.util.Optional;
  */
 final class CombatRegroupGuard {
     static final int AGGRO_THRESHOLD = 3;
-    static final double INNER_RADIUS = 10.0D;
+    static final double INNER_RADIUS = 5.0D;
     static final double OUTER_RADIUS = 15.0D;
     private static final double AGGRO_SCAN_RANGE = 24.0D;
 
