@@ -49,10 +49,7 @@ public final class CraftTask extends AbstractTask {
     /**
      * Bounds RECLAIMING_TABLE. Must clear BlockMiner's own 200-tick mining ceiling with room to
      * spare for the pickup delay and walk-over that follow, so the miner's own cap always has a
-     * chance to resolve (DONE or FAILED) before this outer best-effort guard does. Kept generous
-     * (empirically, a chase across cluttered mission terrain can take a while) since a real
-     * caller (e.g. MiningServiceTask) may hard-fail if the table isn't back by the time this
-     * gives up, whereas an over-generous cap only costs a few extra idle ticks in the rare case.
+     * chance to resolve (DONE or FAILED) before this outer best-effort guard does.
      */
     private static final int RECLAIM_TIMEOUT_TICKS = 550;
 
@@ -196,8 +193,10 @@ public final class CraftTask extends AbstractTask {
     }
 
     /**
-     * Mines back down and re-collects a crafting table this task itself placed. Best-effort: a
-     * stuck reclaim must not turn an already-successful craft into a failure.
+     * Mines back down and re-collects a crafting table this task itself placed, through the same
+     * real, tool-and-hardness-paced survival mining as any other block -- no instant/creative-style
+     * shortcut, matching this mod's strict_survival design throughout. Best-effort: a stuck reclaim
+     * must not turn an already-successful craft into a failure.
      */
     private void reclaimTable(AIPlayerEntity bot) {
         if (selfPlacedTablePos == null || InventoryAction.countItem(bot, Items.CRAFTING_TABLE) > 0) {
