@@ -18,12 +18,12 @@ class ProfileResolverTest {
     }
 
     @Test
-    void existingLegacyConfigWithoutProfileUsesOperatorAndOneWarning() {
+    void existingLegacyConfigWithoutProfileFailsClosedToStrictSurvivalWithOneWarning() {
         JsonObject legacy = JsonParser.parseString("{\"brain\":{}} ").getAsJsonObject();
 
         ProfileResolver.Resolution resolution = ProfileResolver.resolve(true, legacy, null);
 
-        assertEquals(OperatingProfile.OPERATOR, resolution.profile());
+        assertEquals(OperatingProfile.STRICT_SURVIVAL, resolution.profile());
         assertEquals(ProfileResolver.Source.LEGACY_COMPATIBILITY, resolution.source());
         assertEquals(1L, resolution.warningCount(ProfileResolver.Warning.LEGACY_PROFILE_MISSING));
         assertEquals(1, resolution.warnings().size());

@@ -42,10 +42,11 @@ public final class ProfileResolver {
             return OperatingProfile.STRICT_SURVIVAL;
         }
         // Presence is checked on the raw object because Gson maps both a missing enum and an invalid
-        // enum value to null. Only a truly missing field receives legacy operator compatibility.
+        // enum value to null. A config predating the profile field fails closed to strict survival,
+        // exactly like a fresh install -- it never silently grants operator-only capabilities.
         if (!root.has("profile")) {
             warnings.add(Warning.LEGACY_PROFILE_MISSING);
-            return OperatingProfile.OPERATOR;
+            return OperatingProfile.STRICT_SURVIVAL;
         }
         JsonElement element = root.get("profile");
         if (element == null || element.isJsonNull() || !element.isJsonPrimitive()
