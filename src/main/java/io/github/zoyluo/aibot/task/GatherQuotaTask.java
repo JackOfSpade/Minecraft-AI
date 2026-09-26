@@ -991,7 +991,12 @@ public final class GatherQuotaTask extends AbstractTask {
             pickupStatNow = pickedUpAccepted(bot);
             if (confirmPickup(bot, pickupStatNow)) {
                 return;
-            } else if (probabilisticDrop) {
+            }
+            // A prior tick's approachDropPhysically nudge (or the sweep attempt above) can leave
+            // sneaking held; every branch below hands off to a different phase without going
+            // through confirmPickup's own cleanup, so clear it once here instead of in each one.
+            bot.getActionPack().stopAll();
+            if (probabilisticDrop) {
                 // 概率掉落(割草取种子/采浆果丛):这次破坏没掉是常态,不算"采不到",回 SURVEY 继续采下一个;
                 // 靠 survey 找不到方块(→roam)与 gather_timeout(6000t)兜底,避免被 pickup_miss 误判超时
                 //(实测:割草取种子 pickup_timeout、只采到 1 个就失败)。

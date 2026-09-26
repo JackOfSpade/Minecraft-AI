@@ -220,6 +220,10 @@ public final class FishTask extends AbstractTask {
             complete();
             return;
         }
+        // chaseDrop() above can leave the bot mid pickup-nudge (sneaking held true) on the very
+        // tick this phase ends; nothing else clears it once collect() stops being ticked, which
+        // would otherwise deadlock any paused task waiting on ActionPack.hasActiveActions().
+        bot.getActionPack().stopAll();
         transition(Phase.FIND_WATER);
     }
 

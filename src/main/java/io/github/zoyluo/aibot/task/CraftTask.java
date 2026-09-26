@@ -201,12 +201,12 @@ public final class CraftTask extends AbstractTask {
     private void reclaimTable(AIPlayerEntity bot) {
         if (selfPlacedTablePos == null || InventoryAction.countItem(bot, Items.CRAFTING_TABLE) > 0) {
             selfPlacedTablePos = null;
-            complete();
+            finishReclaim(bot);
             return;
         }
         if (++reclaimTicks > RECLAIM_TIMEOUT_TICKS) {
             selfPlacedTablePos = null;
-            complete();
+            finishReclaim(bot);
             return;
         }
         BlockState state = bot.getServerWorld().getBlockState(selfPlacedTablePos);
@@ -220,7 +220,7 @@ public final class CraftTask extends AbstractTask {
             }
             if (tableReclaimMiner.tick(bot) == BlockMiner.Status.FAILED) {
                 selfPlacedTablePos = null;
-                complete();
+                finishReclaim(bot);
             }
             return;
         }
@@ -228,7 +228,7 @@ public final class CraftTask extends AbstractTask {
             // Something else already claimed/replaced our placed block -- never chase a block
             // this task no longer owns.
             selfPlacedTablePos = null;
-            complete();
+            finishReclaim(bot);
             return;
         }
         // The table is down as a natural drop. strict_survival denies HarvestCore's forced
@@ -236,6 +236,21 @@ public final class CraftTask extends AbstractTask {
         // delay before the caller moves the bot elsewhere -- walk over it like any ordinary item
         // so vanilla's own proximity pickup collects it, then finish once it lands in inventory.
         HarvestCore.chaseDropAnyOf(bot, Set.of(Items.CRAFTING_TABLE), 4.0D);
+    }
+
+    /**
+     * Completes RECLAIMING_TABLE from every exit path. The final approach tick before a successful
+     * pickup can leave the bot mid pickup-nudge -- {@code FakePlayerMotion.nudgeWithinBlockToward}
+     * sets sneaking true to hold it on the ledge for that nudge -- and nothing else clears it once
+     * this task stops calling {@code HarvestCore.chaseDropAnyOf}. A dangling sneak (or any other
+     * leftover action-pack state) makes {@code ActionPack.hasActiveActions()} report true forever,
+     * which permanently blocks DangerWatcher's paused-task resume (it requires actions to be idle)
+     * and deadlocks the bot with its mission step stuck PAUSED. Stop the action pack before handing
+     * control back so a fresh task, or the resume path, always starts from a clean slate.
+     */
+    private void finishReclaim(AIPlayerEntity bot) {
+        bot.getActionPack().stopAll();
+        complete();
     }
 
     /**

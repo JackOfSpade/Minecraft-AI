@@ -130,6 +130,11 @@ public final class MineTask extends AbstractTask {
         HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops);
         int collected = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
         if (collected > 0) {
+            // A prior tick's chaseDropAnyOf -> approachDropPhysically nudge can leave the action
+            // pack mid pickup-nudge (sneaking held); nothing else clears it once this phase stops
+            // being ticked, which would otherwise deadlock any paused task waiting on
+            // ActionPack.hasActiveActions() to go idle before resuming.
+            bot.getActionPack().stopAll();
             BotLog.action(bot, "pickup_collected", "count", collected);
             countSoFar += collected;
             if (countSoFar >= countNeeded) {
@@ -149,6 +154,7 @@ public final class MineTask extends AbstractTask {
                 return;
             }
             int partial = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
+            bot.getActionPack().stopAll();
             if (partial > 0) {
                 BotLog.action(bot, "pickup_collected", "count", partial, "reason", "partial_pickup");
                 countSoFar += partial;

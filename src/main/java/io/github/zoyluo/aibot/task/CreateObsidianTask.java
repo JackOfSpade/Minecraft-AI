@@ -1840,6 +1840,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return;
         }
         if (pickupPos == null || pickupInventoryBaseline < 0) {
+            // A prior tick's approachDropPhysically/chaseDropAnyOf-style nudge can leave sneaking
+            // held; every exit from this method must clear it so a paused task beneath this one
+            // never deadlocks on ActionPack.hasActiveActions().
+            bot.getActionPack().stopAll();
             fail("create_obsidian_pickup_checkpoint_missing");
             return;
         }
