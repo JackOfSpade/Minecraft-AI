@@ -13,7 +13,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-64f5a0?style=flat-square"></a>
   <a href="https://github.com/JackOfSpade/Minecraft-AI/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/JackOfSpade/Minecraft-AI/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Minecraft 1.21.3" src="https://img.shields.io/badge/Minecraft-1.21.3-62B47A?style=flat-square">
+  <img alt="Minecraft 1.21.5" src="https://img.shields.io/badge/Minecraft-1.21.5-62B47A?style=flat-square">
   <img alt="Fabric Loader 0.18.4" src="https://img.shields.io/badge/Fabric-Loader%200.18.4-DBB69B?style=flat-square">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-E76F00?style=flat-square">
   <img alt="LLM: DeepSeek" src="https://img.shields.io/badge/LLM-DeepSeek-5A67F2?style=flat-square">
@@ -29,7 +29,7 @@
 
 ## AIBot 是什么
 
-AIBot 是一个面向 Minecraft 1.21.3 的开源服务端 [Fabric](https://fabricmc.net/) 模组。它会生成真实的服务端玩家，接收自然语言指令，并把指令映射到挖矿、合成、熔炼、建造、种田、战斗、钓鱼、交易、存储和生存等确定性逻辑。
+AIBot 是一个面向 Minecraft 1.21.5 的开源服务端 [Fabric](https://fabricmc.net/) 模组。它会生成真实的服务端玩家，接收自然语言指令，并把指令映射到挖矿、合成、熔炼、建造、种田、战斗、钓鱼、交易、存储和生存等确定性逻辑。
 
 大模型不能随意生成每 tick 动作，也不能绕过执行层直接改世界。它从 **63 个已注册工具**中选择意图，Goal 引擎与 **34 个具体 Task 状态机**负责执行。目前主代码包含 **9 类带类型的 Goal**、**197 个 Java 类**，约 **32K 行主 Java 代码**。
 
@@ -75,8 +75,8 @@ flowchart TB
 
 | 层级 | 当前规模或结果 | 含义 |
 |---|---|---|
-| JUnit | 19 个测试类、68 个测试 | 覆盖纯策略、codec、Goal predicate/result、权限和持久化边界。 |
-| Fabric GameTest | 3 个测试 | 在隔离 source set 中运行的确定性世界内 smoke test。 |
+| JUnit | 86 个测试类、415 个测试 | 覆盖纯策略、codec、Goal predicate/result、权限和持久化边界。 |
+| Fabric GameTest | 588 个场景;当前 42 个因 1.21.5 GameTest 框架重写引入的既有并发/时序问题而失败(已单独跟踪,并非近期功能改动引入的回归) | 在隔离 source set 中运行的确定性世界内 smoke test。 |
 | 运行时/profile harness | strict 与 operator 本地均为 `7/7` | 覆盖 capability policy 与 cancel/replace/pause-resume。当前留存的本地 run 来自 dirty worktree，因此被正确标为 `UNVERIFIED`。 |
 | 重启探针 | 两个 JVM，本地 `PASS` | 第一进程写入非默认 checkpoint、队列、pause 状态和已认领 Job；第二进程验证精确恢复、stale lease 重开、resume 及最终 `COMPLETED 4/4` 后置条件。 |
 | 真实地形能力报告 | 历史结果不一 | 只有显式 pin 的干净不可变 evidence bundle 才能作为发布证据；旧报告不能证明当前 HEAD。 |
@@ -91,10 +91,10 @@ flowchart TB
 
 | 组件 | 版本 |
 |---|---|
-| Minecraft | `1.21.3` |
+| Minecraft | `1.21.5` |
 | Fabric Loader | `0.18.4+` |
-| Fabric API | `0.114.1+1.21.3` |
-| Yarn Mappings | `1.21.3+build.2` |
+| Fabric API | `0.128.2+1.21.5` |
+| Yarn Mappings | `1.21.5+build.1` |
 | Java | `21` |
 
 ### 构建与运行

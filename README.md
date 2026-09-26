@@ -13,7 +13,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-64f5a0?style=flat-square"></a>
   <a href="https://github.com/JackOfSpade/Minecraft-AI/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/JackOfSpade/Minecraft-AI/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Minecraft 1.21.3" src="https://img.shields.io/badge/Minecraft-1.21.3-62B47A?style=flat-square">
+  <img alt="Minecraft 1.21.5" src="https://img.shields.io/badge/Minecraft-1.21.5-62B47A?style=flat-square">
   <img alt="Fabric Loader 0.18.4" src="https://img.shields.io/badge/Fabric-Loader%200.18.4-DBB69B?style=flat-square">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-E76F00?style=flat-square">
   <img alt="LLM: DeepSeek" src="https://img.shields.io/badge/LLM-DeepSeek-5A67F2?style=flat-square">
@@ -29,7 +29,7 @@
 
 ## What AIBot is
 
-AIBot is an open-source server-side [Fabric](https://fabricmc.net/) mod for Minecraft 1.21.3. It creates a real server-side player, accepts natural-language instructions, and maps them onto deterministic game logic for mining, crafting, smelting, building, farming, combat, fishing, trading, storage, and survival.
+AIBot is an open-source server-side [Fabric](https://fabricmc.net/) mod for Minecraft 1.21.5. It creates a real server-side player, accepts natural-language instructions, and maps them onto deterministic game logic for mining, crafting, smelting, building, farming, combat, fishing, trading, storage, and survival.
 
 The model is not allowed to improvise per-tick movement or edit the world directly. It chooses from a registry of **63 tools**; the goal engine and **34 concrete Task state machines** own execution. The codebase currently contains **9 typed Goal variants**, **197 main Java classes**, and about **32K lines of main Java**.
 
@@ -75,8 +75,8 @@ The repository separates source-level checks, world-backed tests, diagnostic evi
 
 | Layer | Current inventory / result | Meaning |
 |---|---|---|
-| JUnit | 19 test classes, 68 tests | Pure policy, codec, Goal predicate/result, authorization, and persistence boundaries. |
-| Fabric GameTest | 3 tests | Deterministic world-backed smoke coverage in an isolated source set. |
+| JUnit | 86 test classes, 415 tests | Pure policy, codec, Goal predicate/result, authorization, and persistence boundaries. |
+| Fabric GameTest | 588 scenarios; 42 currently failing under a known, pre-existing concurrency/timing issue in the 1.21.5 GameTest framework rewrite (tracked separately, not a regression from recent feature work) | Deterministic world-backed smoke coverage in an isolated source set. |
 | Runtime/profile harness | `7/7` in both strict and operator local runs | Covers capability policy plus cancel/replace/pause-resume. The currently recorded local runs came from a dirty worktree and are correctly labeled `UNVERIFIED`. |
 | Restart probe | Two JVMs, `PASS` locally | Persists a non-default checkpoint, queue, pause state, and claimed Job; the second JVM proves exact restoration, stale-lease reopening, resume, and the final `COMPLETED 4/4` postcondition. |
 | Real-terrain capability reports | Mixed legacy results | Historical diagnostics only unless a clean, immutable evidence bundle is explicitly pinned. They do not prove the current HEAD. |
@@ -91,10 +91,10 @@ See [Testing and evidence](docs/TESTING_AND_EVIDENCE.md) and the generated [capa
 
 | Component | Version |
 |---|---|
-| Minecraft | `1.21.3` |
+| Minecraft | `1.21.5` |
 | Fabric Loader | `0.18.4+` |
-| Fabric API | `0.114.1+1.21.3` |
-| Yarn mappings | `1.21.3+build.2` |
+| Fabric API | `0.128.2+1.21.5` |
+| Yarn mappings | `1.21.5+build.1` |
 | Java | `21` |
 
 ### Build and run

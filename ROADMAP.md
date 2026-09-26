@@ -50,10 +50,10 @@ LLM 理解意图
 
 ## 3. 当前基线
 
-- Minecraft `1.21.3`、Fabric Loader `0.18.4`、Java `21`。
+- Minecraft `1.21.5`、Fabric Loader `0.18.4`、Java `21`。
 - 9 类 Goal、63 个 Tool 注册点、34 个具体 Task 状态机。
 - testmod 的 `/aibot verify all` 含 100 个确定性场景；另有 5 个 opt-in 长跑/诊断场景和 4 个真实 LLM 场景；生产 jar 不包含 test/verify 命令。
-- `clean test runGameTest build` 成功；当前有 19 个 JUnit 类、68 个测试和 3 个 GameTest。`capability_profile + runtime_control_suite` 在 strict/operator 下均为 7/7；两 JVM restart-resume 精确恢复非默认 checkpoint，并以原 Mission `COMPLETED 4/4` 结束。
+- `clean test` 通过，当前有 86 个 JUnit 类、415 个测试；`runGameTest` 共 588 个场景，其中 42 个因 1.21.5 GameTest 框架重写引入的既有并发/时序问题而失败（已单独跟踪排查，并非近期功能改动引入的回归，其余场景通过）。`capability_profile + runtime_control_suite` 在 strict/operator 下均为 7/7；两 JVM restart-resume 精确恢复非默认 checkpoint，并以原 Mission `COMPLETED 4/4` 结束。
 - PR CI、nightly 双 profile/seed matrix 与手动计费 LLM workflow 已建立；evidence bundle 会绑定 revision/config/actual seed/runtime/profile 并做不可变封存。
 - 现有多 seed 报告能用于诊断，但缺少 commit SHA、配置摘要和 actual seed 回读，不能作为 HEAD 的发布证明。
 
