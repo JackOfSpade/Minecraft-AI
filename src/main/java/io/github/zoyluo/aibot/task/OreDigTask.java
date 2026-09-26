@@ -8,6 +8,7 @@ import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.MaterialPalette;
 import io.github.zoyluo.aibot.action.ToolSelector;
 import io.github.zoyluo.aibot.action.WalkToController;
+import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.MiningBudget;
@@ -4724,6 +4725,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (fluid == null) {
             return BranchFluidSealResult.CLEAR;
         }
+        String fluidName = observedFluidReason(world.getFluidState(fluid));
         var blockSlot = MaterialPalette.pickSacrificialBlockSlot(
                 bot, protectedStoneLikeReserve);
         if (blockSlot.isEmpty()) {
@@ -4751,6 +4753,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "reason", reason,
                 "direction", STRIP_DIRS[stripDirIndex].asString(),
                 "steps_left", stripStepsLeft);
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "Sealed off exposed " + fluidName + " while mining -- routing around it.");
         return BranchFluidSealResult.SEALED;
     }
 
