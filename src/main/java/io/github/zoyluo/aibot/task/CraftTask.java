@@ -10,6 +10,7 @@ import io.github.zoyluo.aibot.craft.RecipeRegistry;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
@@ -137,6 +138,15 @@ public final class CraftTask extends AbstractTask {
             return;
         }
         InventoryAction.equipFromSlot(bot, tableSlot.getAsInt());
+        // A real jump-arc/fall landing can leave the server-side onGround bit stale for one tick
+        // even though the bot's current cell is a genuine, collision-verified stand (the same
+        // clientless fake-player quirk AcquireWaterTask's ascent placements already account for).
+        // Publish that fact before this precise placement; never do this for a genuinely
+        // unsupported pose.
+        Standability.clearCache();
+        if (!bot.isOnGround() && Standability.isStandable(bot.getServerWorld(), bot.getBlockPos())) {
+            bot.setOnGround(true);
+        }
         ActionResult result = BuildAction.placeBlockAt(bot, placePos);
         if (result.isFailed()) {
             fail("place_crafting_table_failed: " + result.reason());

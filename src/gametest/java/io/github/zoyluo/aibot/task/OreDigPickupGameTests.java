@@ -1097,8 +1097,14 @@ public final class OreDigPickupGameTests {
      * Deterministic replay of the intermittent launch-RNG failure: a mined drop can land on the
      * raised 1x1 work-pose pedestal beside the shaft. The recovery loop must climb the two-step
      * ascent and physically collect it instead of idling into ore_dig_drop_unrecovered.
+     *
+     * <p>The two-step climb is real jump-arc physics, not an instant reposition; under heavy
+     * concurrent GameTest load (the full suite runs hundreds of bots' real per-tick physics at
+     * once) it can legitimately need more real ticks than an isolated single-test run does to
+     * finish the same climb. 900 matches this file's own budget for its closest sibling
+     * (restoredObservedHighWorkPoseRoutesWithoutDigging).</p>
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_pedestal_landed_drop_is_physically_recovered", maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_pickup_game_tests_pedestal_landed_drop_is_physically_recovered", maxTicks = 900)
     public void pedestalLandedDropIsPhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePedestalDropGT");
         AIPlayerEntity bot = fixture.bot();

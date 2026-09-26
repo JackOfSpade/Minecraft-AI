@@ -3089,7 +3089,13 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(maxTicks = 900)
+    // Four real service stages, each with its own real crafting/mining/tool-exhaustion cycle; under
+    // heavy full-suite concurrent load (hundreds of bots' real per-tick decisions/interactions
+    // sharing the same server) this legitimately needs materially more real ticks than an isolated
+    // single-test run to reach the same logical state -- 900 was tight enough to occasionally run
+    // out before the fourth stage's own terminal failure was ever reached, misreporting a
+    // crafting-table placement as broken when the run simply needed more time.
+    @GameTest(maxTicks = 1800)
     public void thirtyTwoObsidianServiceHorizonFundsAllFourWorstCaseRepairs(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianHorizonGT", false);
         AIPlayerEntity bot = fixture.bot();

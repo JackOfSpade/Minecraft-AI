@@ -3916,7 +3916,13 @@ public final class MiningCheckpointMissionGameTests {
                     exhaustStonePickaxes(bot);
                     equipHealthyIronPickaxe(context, bot);
                     forged.set(true);
-                } else if (context.getTick() > 100) {
+                } else if (context.getTick() > 300) {
+                    // spawnServiceMiner's PREPARE phase does real, multi-tick work (placing a
+                    // crafting table, crafting stone picks, mining its own tool-prep stone) before
+                    // OreDig is ever assigned -- 100 ticks was tighter than every sibling fixture
+                    // built on the same helper (which allow 250-300) and could run out under
+                    // ordinary real per-tick interaction timing alone, with nothing wrong in the
+                    // mining service itself. Match the sibling fixtures' own margin.
                     context.throwGameTestException(Text.of(
                             "same-batch epoch-one channel fixture never reached OreDig: "
                                     + checkpointSummary(checkpoint)));
