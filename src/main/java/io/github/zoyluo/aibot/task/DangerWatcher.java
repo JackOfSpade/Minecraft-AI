@@ -336,6 +336,14 @@ public final class DangerWatcher {
                 && threat.filter(DangerWatcher::isHostilePressure).isPresent()) {
             return true;
         }
+        // Swarmed: three or more hostiles simultaneously aggro'd on this one bot pull it back
+        // toward its owning player instead of letting it try to out-fight the whole crowd alone.
+        // Checked ahead of ordinary Combat so a live fight is paused/replaced the moment the
+        // threshold is crossed; CombatRegroupTask itself keeps striking anything adjacent while it
+        // falls back, so this is a fighting retreat rather than a flee.
+        if (maybeRegroup(bot, active)) {
+            return true;
+        }
         // Combat owns ordinary close contact.  The single exception is the narrowly proven
         // two-hit lethal boundary below: it replaces melee with a retreat-first shelter rather
         // than trying to place walls under the attacking mob's feet.
@@ -462,6 +470,39 @@ public final class DangerWatcher {
         return threat.isEmpty()
                 && bot.hurtTime == 0
                 && bot.getHealth() > AIBotConfig.get().combat().retreatHp();
+    }
+
+    private boolean maybeRegroup(AIPlayerEntity bot, Optional<Task> active) {
+        Task regroupCandidate = active.filter(CombatRegroupTask.class::isInstance)
+                .orElseGet(() -> active.isEmpty()
+                        ? TaskManager.INSTANCE.peekPaused(bot)
+                        .filter(CombatRegroupTask.class::isInstance)
+                        .orElse(null)
+                        : null);
+        boolean currentlyRegrouping = regroupCandidate != null;
+        if (!CombatRegroupGuard.shouldRegroup(bot, currentlyRegrouping)) {
+            return false;
+        }
+        if (active.isPresent() && active.get() instanceof CombatRegroupTask) {
+            return true; // already the live owner; its own onTick drives movement/strikes
+        }
+        if (TaskManager.INSTANCE.isUserPaused(bot)) {
+            return false;
+        }
+        if (currentlyRegrouping) {
+            // A paused CombatRegroupTask sits beneath something that already returned above (lava,
+            // creeper, shelter). Resume it directly instead of stacking a second regroup owner.
+            TaskManager.INSTANCE.resumeFromPause(bot);
+            return true;
+        }
+        if (active.isPresent()) {
+            TaskManager.INSTANCE.pauseFor(bot, "combat_regroup");
+        }
+        TaskManager.INSTANCE.assign(bot, new CombatRegroupTask(), TaskOrigin.safety("combat_regroup"));
+        BotLog.danger(bot, "combat_regroup_assigned",
+                "aggro_count", CombatRegroupGuard.countAggro(bot),
+                "paused", active.map(Task::name).orElse("none"));
+        return true;
     }
 
     private boolean maybeResupply(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
@@ -1238,11 +1279,19 @@ public final class DangerWatcher {
         // through twenty blocks only with factual LOS, matching naked-Eat admission and secondary
         // combat settlement. Sort the shared pressure set before choosing the top threat.
         List<LivingEntity> hostiles = observableActiveHostilePressure(bot);
+        // "melee mode, prioritize closest enemy; ranged mode, prioritize ranged enemies first":
+        // once something is already close enough to be a melee exchange, ranged-ness stops
+        // mattering and plain distance decides. Otherwise (nothing close yet -- the bot would be
+        // kiting/shooting rather than swinging) a mob that can hit back from range outranks one
+        // that cannot, before distance breaks the remaining ties.
+        boolean meleeModeActive = hostiles.stream()
+                .anyMatch(mob -> bot.distanceTo(mob) <= CombatCore.MELEE_ENGAGEMENT_RANGE);
         // Explosive pressure cannot be hidden behind a closer ordinary mob. A strict obsidian run
         // resumed its water mission while a Creeper was still visible at fifteen blocks; sorting
         // Creepers first keeps every shelter/combat branch below aligned with the no-melee policy.
         hostiles.sort(Comparator
                 .comparing((LivingEntity mob) -> !(mob instanceof CreeperEntity))
+                .thenComparing(mob -> meleeModeActive || CombatCore.isRangedThreat(mob) ? 0 : 1)
                 .thenComparingDouble(bot::distanceTo));
         for (LivingEntity mob : hostiles) {
             if (!canReachThreat(bot, mob)) {

@@ -5,23 +5,34 @@ import io.github.zoyluo.aibot.action.EquipAction;
 import io.github.zoyluo.aibot.action.InteractAction;
 import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.RangedAttackMob;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 
 public final class CombatCore {
     public static final float ATTACK_RANGE = 3.0F;
+    /**
+     * Shared "am I already in a melee exchange" boundary. Kept independent from
+     * {@code CombatTask.BOW_MELEE_SWITCH_DISTANCE} (same value) so target-priority decisions made
+     * outside CombatTask (e.g. DangerWatcher's top-threat ranking) do not require a dependency on
+     * CombatTask's private phase machinery.
+     */
+    public static final double MELEE_ENGAGEMENT_RANGE = ATTACK_RANGE * 1.5D;
     private static final double CLOSE_HOSTILE_PRESSURE_RANGE = 10.0D;
     /** Creepers can erase a zero-death mission before ordinary melee pressure is re-entered. */
     private static final double CREEPER_PRESSURE_RANGE = 16.0D;
@@ -48,6 +59,41 @@ public final class CombatCore {
     /** Shared combat policy: projectile-capable mobs keep pressure while line of sight remains. */
     static boolean isRangedThreat(LivingEntity entity) {
         return entity instanceof RangedAttackMob;
+    }
+
+    /** Observable, reachable ranged attackers around the bot -- used to decide when cover/peekaboo
+     *  tactics are warranted instead of plain kiting. */
+    public static List<LivingEntity> rangedThreatsAround(AIPlayerEntity bot, double range) {
+        return bot.getServerWorld()
+                .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(range),
+                        entity -> entity != bot
+                                && entity.isAlive()
+                                && isRangedThreat(entity)
+                                && ObservableWorldQuery.canObserveEntity(bot, entity)
+                                && hasLineOfSight(bot, entity));
+    }
+
+    /** Counts live hostiles whose current AI target is this bot -- the "aggro count" used to decide
+     *  when a swarmed bot should fall back toward its owning player. */
+    public static int countAggroedHostiles(AIPlayerEntity bot, double range) {
+        return bot.getServerWorld()
+                .getEntitiesByClass(MobEntity.class, bot.getBoundingBox().expand(range),
+                        mob -> mob.isAlive() && mob.getTarget() == bot)
+                .size();
+    }
+
+    /** Coarse 4-way compass direction from one block position toward another, ties broken toward
+     *  the larger axis. Used to orient a peekaboo cover column between the bot and its target. */
+    public static Direction dominantHorizontalDirection(BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (dx == 0 && dz == 0) {
+            return null;
+        }
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     static double hostilePressureScanRange() {

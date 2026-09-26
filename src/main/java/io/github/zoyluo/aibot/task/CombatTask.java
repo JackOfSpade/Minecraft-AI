@@ -2,21 +2,31 @@ package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.ActionResult;
+import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.EatAction;
 import io.github.zoyluo.aibot.action.EquipAction;
 import io.github.zoyluo.aibot.action.InteractAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
+import io.github.zoyluo.aibot.action.LookAction;
+import io.github.zoyluo.aibot.action.MaterialPalette;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.mode.FakePlayerMotion;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.OptionalInt;
 
 public final class CombatTask extends AbstractTask {
     private enum Phase {
@@ -27,7 +37,13 @@ public final class CombatTask extends AbstractTask {
         BLOCK,
         REPOSITION,
         RETREAT,
-        HEAL
+        HEAL,
+        /** Placing a one-wide, two-tall cover column between the bot and a ranged threat. */
+        COVER_BUILD,
+        /** Standing behind an already-built column, drawing the bow out of sight. */
+        COVER_HIDE,
+        /** Stepping clear of the column just long enough to release the drawn shot, then hiding. */
+        COVER_PEEK
     }
 
     private static final int SEARCH_RANGE = 20;
@@ -42,6 +58,15 @@ public final class CombatTask extends AbstractTask {
     private static final int LOST_SIGHT_LIMIT = 50; // 目标被墙挡住(无视线)持续 2.5s → 结束战斗,不傻打到 timeout
     private static final int DEFENSIVE_MAX_VERTICAL_DROP = 2;
     private static final double DEFENSIVE_MAX_HORIZONTAL_DISTANCE = 8.0D;
+    /** Raise the shield a little ahead of CreeperDefenseTask's own late-fuse wall threshold. */
+    private static final float SHIELD_CREEPER_FUSE_THRESHOLD = 0.35F;
+    private static final double SHIELD_CREEPER_FUSE_RANGE = 10.0D;
+    /** "there are other ranged enemies" -- at least one besides whichever one is currently targeted. */
+    private static final int PEEKABOO_MIN_RANGED_THREATS = 2;
+    private static final double PEEKABOO_SCAN_RANGE = 24.0D;
+    private static final int PEEKABOO_BUILD_RETRY_LIMIT = 3;
+    private static final int PEEKABOO_EXPOSE_TICKS = 2;
+    private static final int PEEKABOO_RETRY_COOLDOWN_TICKS = 100;
 
     private final EntityType<?> targetType;
     private final int targetKills;
@@ -62,6 +87,14 @@ public final class CombatTask extends AbstractTask {
     private LivingEntity retreatThreat;
     private BlockPos retreatDestination;
     private int lostSightTicks; // 目标连续无视线(被墙挡)的 tick 数
+    /** True while a reactive shield block (projectile/creeper fuse) is currently being held up. */
+    private boolean reactiveShieldRaised;
+    private BlockPos peekHideSpot;
+    private BlockPos peekCoverFeet;
+    private BlockPos peekExposeSpot;
+    private int peekBuildAttempts;
+    private int peekCycleTicks;
+    private int nextPeekabooAttemptElapsed;
 
     public CombatTask(EntityType<?> targetType, int targetKills, float retreatHpThreshold) {
         this(targetType, targetKills, retreatHpThreshold, null, null);
@@ -108,6 +141,13 @@ public final class CombatTask extends AbstractTask {
         CombatCore.equipMelee(bot);
         EquipAction.equipShieldOffhand(bot);
         phase = Phase.ACQUIRE;
+        reactiveShieldRaised = false;
+        peekHideSpot = null;
+        peekCoverFeet = null;
+        peekExposeSpot = null;
+        peekBuildAttempts = 0;
+        peekCycleTicks = 0;
+        nextPeekabooAttemptElapsed = 0;
     }
 
     @Override
@@ -144,6 +184,9 @@ public final class CombatTask extends AbstractTask {
                 && phase != Phase.RETREAT && phase != Phase.HEAL) {
             beginRetreat(bot);
         }
+        if (isMeleeOrientedPhase() && handleReactiveShield(bot)) {
+            return;
+        }
         switch (phase) {
             case ACQUIRE -> acquire(bot);
             case APPROACH -> approach(bot);
@@ -153,7 +196,67 @@ public final class CombatTask extends AbstractTask {
             case REPOSITION -> reposition(bot);
             case RETREAT -> retreat(bot);
             case HEAL -> heal(bot);
+            case COVER_BUILD -> buildPeekabooCover(bot);
+            case COVER_HIDE -> coverHide(bot);
+            case COVER_PEEK -> coverPeek(bot);
         }
+    }
+
+    /**
+     * "Melee mode" for the purposes of shield reactions: any phase where the bot is not already
+     * mid-draw on a bow (raising the offhand shield would cancel that single active-hand use) and
+     * is not already in a dedicated recovery phase.
+     */
+    private boolean isMeleeOrientedPhase() {
+        return phase == Phase.ACQUIRE || phase == Phase.APPROACH || phase == Phase.STRIKE
+                || phase == Phase.REPOSITION || phase == Phase.BLOCK;
+    }
+
+    /**
+     * Turns to face, and raises the offhand shield against, an imminent incoming projectile or a
+     * creeper whose fuse is far enough along to be a real risk. Returns true while the reaction is
+     * active (the caller should skip its normal phase logic that tick); lowers the shield and
+     * returns false once neither threat remains.
+     */
+    private boolean handleReactiveShield(AIPlayerEntity bot) {
+        if (!bot.getOffHandStack().isOf(Items.SHIELD) && !EquipAction.equipShieldOffhand(bot)) {
+            return false;
+        }
+        ProjectileThreat.Incoming incoming = ProjectileThreat.mostImminent(bot).orElse(null);
+        LivingEntity fusingCreeper = incoming == null ? nearbyImminentCreeper(bot) : null;
+        if (incoming == null && fusingCreeper == null) {
+            if (reactiveShieldRaised) {
+                lowerReactiveShield(bot);
+                BotLog.action(bot, "reactive_shield_lowered");
+            }
+            return false;
+        }
+        Vec3d faceTowards = incoming != null ? incoming.projectile().getPos() : fusingCreeper.getPos();
+        LookAction.lookAt(bot, faceTowards);
+        if (!bot.isUsingItem() || bot.getActiveHand() != Hand.OFF_HAND) {
+            InteractAction.useItemInAir(bot, Hand.OFF_HAND);
+        }
+        bot.getActionPack().stopMovement();
+        if (!reactiveShieldRaised) {
+            reactiveShieldRaised = true;
+            BotLog.action(bot, "reactive_shield_raised",
+                    "reason", incoming != null ? "incoming_projectile" : "creeper_fuse",
+                    "source", incoming != null
+                            ? Registries.ENTITY_TYPE.getId(incoming.projectile().getType()).toString()
+                            : "creeper");
+        }
+        return true;
+    }
+
+    private static LivingEntity nearbyImminentCreeper(AIPlayerEntity bot) {
+        return bot.getServerWorld().getEntitiesByClass(CreeperEntity.class,
+                        bot.getBoundingBox().expand(SHIELD_CREEPER_FUSE_RANGE),
+                        creeper -> creeper.isAlive()
+                                && ObservableWorldQuery.canObserveEntity(bot, creeper)
+                                && creeper.getLerpedFuseTime(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD)
+                .stream()
+                .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                .orElse(null);
     }
 
     private void acquire(AIPlayerEntity bot) {
@@ -602,7 +705,196 @@ public final class CombatTask extends AbstractTask {
         }
         bot.getActionPack().stopMovement();
         bowChargeTicks = 0;
+        if (shouldUsePeekaboo(bot)) {
+            beginPeekaboo(bot);
+        } else {
+            phase = Phase.RANGED;
+        }
+    }
+
+    /** "in ranged mode ... and there are other ranged enemies" -- build/use a cover column instead
+     *  of standing in the open while multiple attackers can hit the bot from range. */
+    private boolean shouldUsePeekaboo(AIPlayerEntity bot) {
+        return elapsed >= nextPeekabooAttemptElapsed
+                && target != null && target.isAlive()
+                && CombatCore.rangedThreatsAround(bot, PEEKABOO_SCAN_RANGE).size()
+                >= PEEKABOO_MIN_RANGED_THREATS;
+    }
+
+    private void beginPeekaboo(AIPlayerEntity bot) {
+        if (peekCoverFeet != null && peekHideSpot != null
+                && bot.getBlockPos().equals(peekHideSpot)
+                && isObservableSolid(bot, peekCoverFeet) && isObservableSolid(bot, peekCoverFeet.up())) {
+            // Cover from an earlier cycle is still standing right where the bot already is.
+            phase = Phase.COVER_HIDE;
+            peekCycleTicks = 0;
+            return;
+        }
+        peekBuildAttempts = 0;
+        phase = Phase.COVER_BUILD;
+        buildPeekabooCover(bot);
+    }
+
+    private void buildPeekabooCover(AIPlayerEntity bot) {
+        if (target == null || !target.isAlive()) {
+            kills++;
+            finishOrAcquire(bot);
+            return;
+        }
+        Direction towardTarget = CombatCore.dominantHorizontalDirection(
+                bot.getBlockPos(), target.getBlockPos());
+        if (towardTarget == null) {
+            abandonPeekaboo(bot, "peekaboo_missing_direction");
+            return;
+        }
+        BlockPos hideSpot = bot.getBlockPos().toImmutable();
+        BlockPos coverFeet = hideSpot.offset(towardTarget).toImmutable();
+        Direction sideStep = towardTarget.rotateYClockwise();
+        BlockPos exposeSpot = hideSpot.offset(sideStep).toImmutable();
+        if (!canStandAt(bot, exposeSpot)) {
+            exposeSpot = hideSpot.offset(sideStep.getOpposite()).toImmutable();
+            if (!canStandAt(bot, exposeSpot)) {
+                abandonPeekaboo(bot, "peekaboo_no_expose_spot");
+                return;
+            }
+        }
+        String failure = placePeekabooColumnBlock(bot, coverFeet);
+        if (failure == null) {
+            failure = placePeekabooColumnBlock(bot, coverFeet.up());
+        }
+        if (failure != null) {
+            peekBuildAttempts++;
+            if (peekBuildAttempts >= PEEKABOO_BUILD_RETRY_LIMIT) {
+                abandonPeekaboo(bot, "peekaboo_build_failed:" + failure);
+            }
+            return;
+        }
+        peekHideSpot = hideSpot;
+        peekCoverFeet = coverFeet;
+        peekExposeSpot = exposeSpot;
+        BotLog.action(bot, "peekaboo_cover_built",
+                "hide", peekHideSpot, "cover", peekCoverFeet, "expose", peekExposeSpot,
+                "ranged_threats", CombatCore.rangedThreatsAround(bot, PEEKABOO_SCAN_RANGE).size());
+        phase = Phase.COVER_HIDE;
+        peekCycleTicks = 0;
+    }
+
+    private String placePeekabooColumnBlock(AIPlayerEntity bot, BlockPos target) {
+        if (bot.getBoundingBox().intersects(new Box(target))) {
+            return "target_intersects_bot";
+        }
+        OptionalInt slot = MaterialPalette.pickSacrificialBlockSlot(bot);
+        if (slot.isEmpty()) {
+            return "missing_material";
+        }
+        if (InventoryAction.equipFromSlot(bot, slot.getAsInt()) < 0) {
+            return "equip_failed";
+        }
+        ActionResult result = BuildAction.placeBlockAt(bot, target);
+        if (!result.isSuccess()) {
+            return "place_failed:" + result.reason();
+        }
+        return null;
+    }
+
+    private static boolean canStandAt(AIPlayerEntity bot, BlockPos feet) {
+        return ObservableWorldQuery.canObserveCell(bot, feet)
+                && ObservableWorldQuery.canObserveCell(bot, feet.up())
+                && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, feet.down());
+    }
+
+    private static boolean isObservableSolid(AIPlayerEntity bot, BlockPos pos) {
+        if (!ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
+            return false;
+        }
+        return !bot.getServerWorld().getBlockState(pos)
+                .getCollisionShape(bot.getServerWorld(), pos).isEmpty();
+    }
+
+    private void abandonPeekaboo(AIPlayerEntity bot, String reason) {
+        BotLog.action(bot, "peekaboo_abandoned", "reason", reason);
+        peekHideSpot = null;
+        peekCoverFeet = null;
+        peekExposeSpot = null;
+        nextPeekabooAttemptElapsed = elapsed + PEEKABOO_RETRY_COOLDOWN_TICKS;
         phase = Phase.RANGED;
+    }
+
+    private void coverHide(AIPlayerEntity bot) {
+        if (target == null || !target.isAlive()) {
+            kills++;
+            finishOrAcquire(bot);
+            return;
+        }
+        if (!bot.getBlockPos().equals(peekHideSpot) && bot.getActionPack().isPathExecutorIdle()) {
+            FakePlayerMotion.stepToStandable(bot, peekHideSpot, "peekaboo_return_to_hide");
+        }
+        if (rangedLoadout == null) {
+            rangedLoadout = EquipAction.equipBestRangedLoadout(bot, target).orElse(null);
+            if (rangedLoadout == null) {
+                CombatCore.ensureMeleeWeapon(bot);
+                phase = Phase.APPROACH;
+                startApproach(bot);
+                return;
+            }
+        }
+        if (!bot.isUsingItem()) {
+            ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+            if (result.isFailed()) {
+                finishRangedLoadout(bot);
+                CombatCore.ensureMeleeWeapon(bot);
+                phase = Phase.APPROACH;
+                startApproach(bot);
+                return;
+            }
+        }
+        bowChargeTicks++;
+        if (bowChargeTicks >= BOW_CHARGE_TICKS) {
+            phase = Phase.COVER_PEEK;
+            peekCycleTicks = 0;
+        }
+    }
+
+    private void coverPeek(AIPlayerEntity bot) {
+        if (target == null || !target.isAlive()) {
+            bot.stopUsingItem();
+            kills++;
+            finishOrAcquire(bot);
+            return;
+        }
+        peekCycleTicks++;
+        if (peekCycleTicks == 1) {
+            if (!FakePlayerMotion.stepToStandable(bot, peekExposeSpot, "peekaboo_peek_out")) {
+                bot.stopUsingItem();
+                abandonPeekaboo(bot, "peekaboo_peek_step_failed");
+                return;
+            }
+            CombatCore.lookAt(bot, target);
+            return;
+        }
+        if (peekCycleTicks <= PEEKABOO_EXPOSE_TICKS) {
+            CombatCore.lookAt(bot, target);
+            return;
+        }
+        if (bot.isUsingItem()) {
+            bot.stopUsingItem();
+            BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
+        }
+        if (!FakePlayerMotion.stepToStandable(bot, peekHideSpot, "peekaboo_duck_back")) {
+            abandonPeekaboo(bot, "peekaboo_hide_step_failed");
+            return;
+        }
+        bowChargeTicks = 0;
+        if (!shouldUseBow(bot)) {
+            finishRangedLoadout(bot);
+            CombatCore.ensureMeleeWeapon(bot);
+            phase = Phase.APPROACH;
+            startApproach(bot);
+            return;
+        }
+        // Reuses the same single entry point every reload goes through: it restores/re-derives the
+        // ranged loadout and re-checks peekaboo eligibility, exactly like leaving RANGED normally.
+        beginRanged(bot);
     }
 
     private boolean shouldBlock(AIPlayerEntity bot) {
@@ -636,13 +928,22 @@ public final class CombatTask extends AbstractTask {
     @Override
     protected void onPause(AIPlayerEntity bot) {
         finishRangedLoadout(bot);
+        lowerReactiveShield(bot);
         super.onPause(bot);
     }
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         finishRangedLoadout(bot);
+        lowerReactiveShield(bot);
         super.onAbort(bot);
+    }
+
+    private void lowerReactiveShield(AIPlayerEntity bot) {
+        if (reactiveShieldRaised) {
+            bot.stopUsingItem();
+            reactiveShieldRaised = false;
+        }
     }
 
     private void finishOrAcquire(AIPlayerEntity bot) {
