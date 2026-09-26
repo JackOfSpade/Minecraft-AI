@@ -10,6 +10,7 @@ import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.FakePlayerMotion;
 import io.github.zoyluo.aibot.pathfinding.Standability;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.Hand;
@@ -85,9 +86,14 @@ public final class EmergencyShelterTask extends AbstractTask {
      * this, regardless of distance, is therefore unambiguously left behind by an already-finished,
      * unrelated test and must be pruned outright -- this closes the one case that slips through
      * CLEANUP_MAX_DISTANCE alone (two unrelated fixtures placed within 128 blocks of each other in
-     * a dense batch).
+     * a dense batch). This reasoning is specific to the GameTest harness (many short-lived
+     * structures sharing one world); a real server has no such "unrelated fixture" to leak from, so
+     * pruning by this age is gated to the gametest-only mod id below and never applies in production
+     * -- a legitimate shelter debt on a long-running server must stay claimable indefinitely.
      */
     private static final int CLEANUP_MAX_AGE_TICKS = 20_000;
+    private static final boolean AGE_PRUNING_ENABLED =
+            FabricLoader.getInstance().isModLoaded("aibot-gametest");
 
     private enum Phase {
         RETREAT_TO_SAFE_ANCHOR,
@@ -1886,9 +1892,10 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
 
         /** True once this debt is definitely older than any single GameTest can run, meaning the
-         *  test that created it has already ended and this is a leaked cross-test artifact. */
+         *  test that created it has already ended and this is a leaked cross-test artifact. Never
+         *  true outside the GameTest harness -- see {@link #AGE_PRUNING_ENABLED}. */
         boolean isStale(int now) {
-            return now - registrationTick > CLEANUP_MAX_AGE_TICKS;
+            return AGE_PRUNING_ENABLED && now - registrationTick > CLEANUP_MAX_AGE_TICKS;
         }
 
         boolean claimAvailableTo(UUID botId, int now) {
