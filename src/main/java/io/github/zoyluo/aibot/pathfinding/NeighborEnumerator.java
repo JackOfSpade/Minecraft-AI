@@ -149,8 +149,12 @@ public final class NeighborEnumerator {
     }
 
     // NAV-BRIDGE:目标格与其上方都是真开阔空气(collision 全空)才算"缺口",不是被实心墙挡住够不着顶。
+    // 水/岩浆也是 collision 全空,但绝不是"缺口"——同 Standability 的旱地契约,流体格一律排除,
+    // 否则会把湖面/岩浆池误判成可搭桥的开阔空气,直接把 bot 带下水或送进岩浆。
     private static boolean bridgeable(ServerWorld world, BlockPos target) {
-        return collisionEmpty(world, target) && collisionEmpty(world, target.up());
+        return collisionEmpty(world, target) && collisionEmpty(world, target.up())
+                && world.getBlockState(target).getFluidState().isEmpty()
+                && world.getBlockState(target.up()).getFluidState().isEmpty();
     }
 
     private static boolean collisionEmpty(ServerWorld world, BlockPos pos) {

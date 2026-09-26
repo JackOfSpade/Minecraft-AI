@@ -17,9 +17,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
-import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.world.LightType;
 
 import java.util.ArrayDeque;
@@ -344,7 +342,7 @@ public final class MineValuablesTask extends AbstractTask {
             phase = Phase.SELECTING;
             return;
         }
-        if (lavaAdjacent(bot, targetPos)) {
+        if (hazardFluidAdjacent(bot, targetPos)) {
             BotLog.warn(LogCategory.TASK, bot, "mine_valuables_hazard_skip", "pos", targetPos.toShortString());
             skippedUnreachableCount++;
             targetPos = null;
@@ -479,12 +477,14 @@ public final class MineValuablesTask extends AbstractTask {
         return HarvestCore.expectedDropsFor(block);
     }
 
-    private static boolean lavaAdjacent(AIPlayerEntity bot, BlockPos pos) {
-        for (Direction direction : Direction.values()) {
-            if (bot.getServerWorld().getFluidState(pos.offset(direction)).isIn(FluidTags.LAVA)) {
-                return true;
-            }
-        }
-        return false;
+    /**
+     * Strict-survival, observation-gated hazard check (mirrors OreDigTask's own pre-mine adjacency
+     * gate): only an ALREADY genuinely observable adjacent lava/water cell skips this target. A
+     * still-hidden neighbour is UNKNOWN, never treated as a hazard -- reading raw fluid state
+     * directly here (bypassing the observability gate) would be exactly the x-ray shortcut this
+     * project's mining tasks have deliberately closed everywhere else.
+     */
+    private static boolean hazardFluidAdjacent(AIPlayerEntity bot, BlockPos pos) {
+        return OreScan.adjacentHazard(bot, pos) == OreScan.Observation.OBSERVED_PRESENT;
     }
 }
