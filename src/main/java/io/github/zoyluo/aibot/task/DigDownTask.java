@@ -6,6 +6,7 @@ import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.MaterialPalette;
+import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.OreScan;
@@ -689,6 +690,13 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         BlockPos ahead = feet.offset(dir);   // 下一级头位 (x+d, y)
         BlockPos next = ahead.down();         // 下一级站位 (x+d, y-1)
         if (!isViableStairDirection(bot, feet, dir)) {
+            // The tread's own support may have turned out, once observable, to be an already-open
+            // cavity or natural cave rather than a hazard fluid (sealed elsewhere) or solid ground.
+            // Wall it off before rerouting, same as a real player would rather than leaving a hole
+            // into unknown open space behind them.
+            if (trySealOpenCavityLanding(bot, world, feet, next, stairDirIndex)) {
+                return;
+            }
             if (rotateStair(bot, world, feet)) {
                 return; // 换到既不挨流体、又能形成真实落脚面的斜下方向
             }
@@ -1274,7 +1282,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     //(同 OreDigTask 封浆教训)→ 先装方块再放。返回 true=封了一格(调用方收手下 tick 续,BlockMiner 自动换回镐);
     // 无水/无块可封→false(交后续逻辑/生存层兜底,命比这格值钱,不卡死)。
     private boolean trySealWater(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
-        if (!isWater(world, pos)) {
+        boolean lava = isLava(world, pos);
+        if (!lava && !isWater(world, pos)) {
             return false;
         }
         OptionalInt blockSlot = MaterialPalette.pickSacrificialBlockSlot(bot);
@@ -1285,13 +1294,16 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         if (BuildAction.placeBlockAt(bot, pos).isFailed()) {
             return false;
         }
-        // A BlockMiner started before this tick may still own exactly the water cell that has now
+        // A BlockMiner started before this tick may still own exactly the fluid cell that has now
         // become our safety wall. Cancel that stale break intent and reject its stair direction;
-        // otherwise the next miner tick removes the seal, water refills it and the task consumes
+        // otherwise the next miner tick removes the seal, the fluid refills it and the task consumes
         // every portable block in an endless seal/mine loop.
         miner.cancel(bot);
         rejectSealedStairDirection(bot.getBlockPos(), pos);
-        BotLog.action(bot, "dig_down_seal_water", "at", pos.toShortString());
+        String fluidName = lava ? "lava" : "water";
+        BotLog.action(bot, "dig_down_seal_water", "fluid", fluidName, "at", pos.toShortString());
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "Sealed off exposed " + fluidName + " while digging -- routing around it.");
         noteWorkProgress(); // 封堵=进展,别被 NO_PROGRESS 看门狗误杀
         return true;
     }
@@ -1308,6 +1320,50 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     private static boolean isWater(ServerWorld world, BlockPos pos) {
         return world.getBlockState(pos).getFluidState().isIn(FluidTags.WATER);
+    }
+
+    private static boolean isLava(ServerWorld world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().isIn(FluidTags.LAVA);
+    }
+
+    /**
+     * Walls off an unexpectedly opened void beneath the next stair tread: its own support turned
+     * out, once observable, to be neither hazard fluid (sealed by trySealWater) nor solid ground
+     * but genuine open space -- a pre-existing cavity or cave the tread just broke into. Never
+     * called on a still-hidden support (isViableStairDirection would not have rejected the
+     * direction for one). Rejects the direction on success so the next tick's rotateStair routes
+     * around it rather than walking onto the freshly placed patch.
+     */
+    private boolean trySealOpenCavityLanding(AIPlayerEntity bot, ServerWorld world,
+                                              BlockPos feet, BlockPos next, int directionIndex) {
+        BlockPos hole = next.down();
+        if (!ObservableWorldQuery.canObserveCell(bot, hole)) {
+            return false;
+        }
+        var holeState = world.getBlockState(hole);
+        if (!holeState.getFluidState().isEmpty()
+                || !holeState.getCollisionShape(world, hole).isEmpty()) {
+            return false; // fluid (sealed elsewhere) or already-solid: not an open cavity to wall off
+        }
+        OptionalInt blockSlot = MaterialPalette.pickSacrificialBlockSlot(bot);
+        if (blockSlot.isEmpty()) {
+            return false;
+        }
+        InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
+        if (BuildAction.placeBlockAt(bot, hole).isFailed()) {
+            return false;
+        }
+        var sealState = world.getBlockState(hole);
+        if (sealState.isAir() || !sealState.getFluidState().isEmpty()) {
+            return false;
+        }
+        miner.cancel(bot);
+        rejectLandingDirection(feet, directionIndex);
+        BotLog.action(bot, "dig_down_seal_open_cavity", "at", hole.toShortString());
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "Sealed off an open cavity found while digging -- routing around it.");
+        noteWorkProgress();
+        return true;
     }
 
     // 台阶斜下:换到下一个既不挨流体、又有真实踏面支撑的方向。天然坡面接悬崖时 ahead/next

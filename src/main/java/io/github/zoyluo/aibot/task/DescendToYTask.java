@@ -6,6 +6,7 @@ import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.MaterialPalette;
 import io.github.zoyluo.aibot.action.ToolSelector;
+import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.MiningBudget;
@@ -523,6 +524,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         BlockPos next = ahead.down();         // 下一级站位 (x+d, y-1)
         if (containsOwnedWaterSeal(world, ahead, ahead.up(), next)
                 || !isViableDescentDirection(bot, world, feet, stairDirIndex)) {
+            // Mining next's tread can reveal that its own support is an already-mined cavity or a
+            // natural cave rather than solid ground -- an unexpectedly opened void, not a hazard
+            // fluid (those are sealed above). Wall it off before rerouting, same as a real player
+            // would rather than leaving a hole into unknown open space behind them.
+            if (trySealOpenCavityLanding(bot, world, feet, next, stairDirIndex)) {
+                return;
+            }
             rejectLandingDirection(feet, stairDirIndex);
             if (rotateStair(bot, world, feet)) {
                 return; // 换了个不挨水/岩浆的斜下方向
@@ -1398,7 +1406,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         return world.getBlockState(pos).getFluidState().isIn(FluidTags.WATER);
     }
 
-    /** Seals one observable water ingress cell and yields until the next tick. */
+    /** Seals one observable water/lava ingress cell and yields until the next tick. */
     private boolean sealLateralWater(AIPlayerEntity bot, ServerWorld world) {
         BlockPos feet = bot.getBlockPos();
         for (BlockPos level : new BlockPos[]{feet, feet.up()}) {
@@ -1412,7 +1420,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     private boolean trySealWater(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
-        if (!isWater(world, pos)) {
+        boolean lava = isLava(world, pos);
+        if (!lava && !isWater(world, pos)) {
             return false;
         }
         if (ownedWaterSeals.size() >= MAX_CHECKPOINTED_WATER_SEALS) {
@@ -1441,7 +1450,50 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         markStarted(bot, bot.getBlockPos());
         rejectSealedStairDirection(bot.getBlockPos(), pos);
         lastProgressTick = totalBudget();
-        BotLog.action(bot, "descend_seal_water", "at", pos.toShortString());
+        String fluidName = lava ? "lava" : "water";
+        BotLog.action(bot, "descend_seal_water", "fluid", fluidName, "at", pos.toShortString());
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "Sealed off exposed " + fluidName + " while digging down -- routing around it.");
+        return true;
+    }
+
+    /**
+     * Walls off an unexpectedly opened void beneath the next stair tread: {@code next}'s own
+     * support turned out, once observable, to be neither fluid (handled by trySealWater) nor solid
+     * ground but genuine open space -- a pre-existing cavity or cave the tread just broke into.
+     * Never called on a still-hidden support (isViableDescentDirection would not have rejected the
+     * direction for one). Returns true only after an actual seal, so the caller can yield the tick
+     * and let the already-issued rejectLandingDirection route around it next tick.
+     */
+    private boolean trySealOpenCavityLanding(AIPlayerEntity bot, ServerWorld world,
+                                              BlockPos feet, BlockPos next, int directionIndex) {
+        BlockPos hole = next.down();
+        if (!canObservePosition(bot, hole)) {
+            return false;
+        }
+        BlockState holeState = world.getBlockState(hole);
+        if (!holeState.getFluidState().isEmpty()
+                || !holeState.getCollisionShape(world, hole).isEmpty()) {
+            return false; // fluid (sealed elsewhere) or already-solid: not an open cavity to wall off
+        }
+        OptionalInt blockSlot = MaterialPalette.pickSacrificialBlockSlot(bot);
+        if (blockSlot.isEmpty()) {
+            return false;
+        }
+        InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
+        if (BuildAction.placeBlockAt(bot, hole).isFailed()) {
+            return false;
+        }
+        BlockState sealState = world.getBlockState(hole);
+        if (sealState.isAir() || !sealState.getFluidState().isEmpty()) {
+            return false;
+        }
+        miner.cancel(bot);
+        rejectLandingDirection(feet, directionIndex);
+        lastProgressTick = totalBudget();
+        BotLog.action(bot, "descend_seal_open_cavity", "at", hole.toShortString());
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "Sealed off an open cavity found while digging down -- routing around it.");
         return true;
     }
 
