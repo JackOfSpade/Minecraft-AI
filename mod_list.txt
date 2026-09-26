@@ -1,0 +1,212 @@
+MINECRAFT-AI MODPACK MANIFEST
+=============================
+Target Minecraft version: 1.21.5 (Fabric)
+Purpose: record of every mod/datapack to install when the actual game profile
+is created later (launcher instance, server pack, etc.), plus ready-to-drop-in
+config files for the two mods that need pre-baked settings. This file is a
+plan/reference, not something the "aibot" mod reads at runtime.
+
+Verified against the Modrinth API on 2026-09-26. Versions on Modrinth move
+forward over time -- if you're setting the profile up much later, re-check
+each project page for a newer 1.21.5 build before assuming this list is
+still the latest (Minecraft's own newer releases like 1.21.6+ will have
+different builds; make sure you grab the file listed for 1.21.5 specifically,
+not just "latest").
+
+--------------------------------------------------------------------------
+MODS (Fabric, install into the profile's "mods" folder)
+--------------------------------------------------------------------------
+
+1. Fabric API
+   Version: 0.128.2+1.21.5
+   https://modrinth.com/mod/fabric-api
+   Required by nearly everything else on this list.
+
+2. Sodium
+   Version: mc1.21.5-0.6.13-fabric
+   https://modrinth.com/mod/sodium
+   Rendering/performance.
+
+3. Iris
+   Version: 1.8.11+1.21.5-fabric
+   https://modrinth.com/mod/iris
+   Shader support; install alongside Sodium (Iris ships its own Sodium
+   compatibility, use the Iris+Sodium combo build if the vanilla Sodium jar
+   above ever refuses to load next to it).
+
+4. Cloth Config API
+   Version: 18.0.145+fabric
+   https://modrinth.com/mod/cloth-config
+   Library dependency (required by RoadArchitect and YACL-based config
+   screens).
+
+5. YetAnotherConfigLib (YACL)
+   Version: 3.8.2+1.21.5-fabric
+   https://modrinth.com/mod/yacl
+
+6. FabricTailor
+   Version: 2.6.6
+   https://modrinth.com/mod/fabrictailor
+   Needs a Mojang-API-compatible skin service configured to actually change
+   skins server-side; see the mod's own README at setup time.
+
+7. Death Marker
+   Version: v1.0.0-1.21-fabric (this single build spans 1.21-1.21.11)
+   https://modrinth.com/mod/deathmarker
+
+8. Proper Graves
+   Version: 1.2
+   https://modrinth.com/mod/proper-graves
+   Server-side. No build newer than 1.21.5 exists under this slug yet, so
+   1.2 is the current/correct one for this game version.
+
+9. Custom Time Cycle
+   Version: 0.1.4-1.21.5
+   https://modrinth.com/mod/customtimecycle
+   Config-only default: see "CUSTOM TIME CYCLE DEFAULT" section below --
+   there is an important limitation on 1.21.5 you should read before
+   assuming this "just works" out of the box.
+
+10. Name Visibility (published on Modrinth as "Better Name Visibility")
+    Version: 2.0.3 (supports 1.21.2-1.21.5)
+    https://modrinth.com/mod/better-name-visibility
+
+11. RoadArchitect  <-- newly added to the list
+    Version: 1.6.6-fabric
+    https://modrinth.com/mod/roadarchitect
+    https://github.com/0xCoDSnet/RoadArchitect
+    Requires Cloth Config (already on this list, #4). Auto-builds roads
+    between structures. By default it only recognizes vanilla villages; see
+    "ROADARCHITECT + NON-VANILLA STRUCTURES" below for the config that makes
+    it also connect to buildings from our datapacks.
+    NOTE: there is an unrelated non-Minecraft tool with the same name (a
+    Unity/game-dev road-building asset at github.com/FritzsHero/RoadArchitect
+    and github.com/MicroGSD/RoadArchitect) -- make sure you grab the Fabric
+    mod from Modrinth/CurseForge/0xCoDSnet's repo, not that unrelated project.
+
+--------------------------------------------------------------------------
+DATAPACKS (install into each world's "datapacks" folder, or the profile's
+default-datapacks folder if the launcher supports one)
+--------------------------------------------------------------------------
+
+1. Dungeons and Taverns
+   Version: v4.7.3 (supports 1.21.5-1.21.8)
+   https://modrinth.com/datapack/dungeons-and-taverns
+   Adds non-vanilla structures under the "nova_structures" namespace
+   (taverns, ruined towns, illager camps/hideouts, witch villas, etc).
+
+2. Explorify
+   Version: v1.6.5 (grab the datapack build, "Explorify v1.6.5.dp.zip" --
+   there's a separate "mod" build of the same version that also exists and
+   needs Fabric API; we want the plain datapack one)
+   https://modrinth.com/datapack/explorify
+   Adds structures under the "explorify" namespace (badlands pyramids,
+   campsites, watchtowers, farmsteads, mangrove huts, desert shrines, etc).
+
+3. Incendium (Stardust Labs)
+   Version: 1.21.5 v5.4.9
+   https://modrinth.com/datapack/incendium
+   The "_UNSUPPORTED" suffix in this build's own filename is Stardust Labs'
+   convention for "not on our active troubleshooting list", NOT a real
+   compatibility failure -- Modrinth's own metadata explicitly lists 1.21.5
+   as a supported game_version for this build, and the same suffix appears
+   on several other recent point releases. It is safe to use.
+   Adds Nether structures under the "incendium" namespace (sanctum,
+   forbidden castle, nether reactor, piglin village, etc). Nether-only, so
+   RoadArchitect's config below also enables the_nether dimension.
+
+4. Mine Treasure
+   Version: 1.5.5
+   https://modrinth.com/datapack/mine-treasure
+   IMPORTANT: this one does NOT add worldgen structures/buildings. It's a
+   loot/treasure-table pack (100+ items, 80+ loot tables layered onto
+   existing loot) plus a single on-demand-placed NBT structure (a portal
+   room, spawned via a "hack" item, not natural worldgen). It is not
+   applicable to the RoadArchitect setup below -- there's nothing for
+   RoadArchitect to build roads to from this pack.
+
+5. Subsurface
+   Version: v1.0.4 (the "1-21-x" build; supports 1.21-1.21.8)
+   https://modrinth.com/datapack/subsurface
+   Adds 11 new cave biomes with small decorative jigsaw structures under
+   the "subsurface" namespace (icicle clusters, coral patches, underground
+   forest/taiga dressing, etc). These are cave-interior decoration, not
+   player-scale buildings/towns, so they are intentionally left out of the
+   RoadArchitect structure list below (nothing sensible for a road to
+   connect to underground).
+
+6. Terralith
+   Version: 1.21.5 v2.5.13
+   https://modrinth.com/datapack/terralith
+   Adds surface structures under the "terralith" namespace (fortified
+   villages, mage towers, glacial huts, spires, witch huts, desert
+   outposts) plus new biomes/terrain. Confirmed by Stardust Labs' own wiki
+   to work with RoadArchitect "out of the box" even without the extra
+   config below (which adds it explicitly anyway for completeness).
+
+--------------------------------------------------------------------------
+ROADARCHITECT + NON-VANILLA STRUCTURES
+--------------------------------------------------------------------------
+Drop-in config file: modpack/config/roadarchitect.json in this repo
+                  -> goes to <profile>/config/roadarchitect.json
+
+RoadArchitect only ever looks at whatever structure IDs/tags are listed in
+its "structureSelectors" config array (default: just "#minecraft:village").
+It matches these against Minecraft's own structure registry using the same
+syntax as the vanilla "/locate structure" command, so any datapack structure
+that's registered the normal way (a data/<namespace>/worldgen/structure/*.json
+file) is automatically eligible -- you just need its ID in the list.
+
+The provided modpack/config/roadarchitect.json already includes:
+  - the vanilla default (#minecraft:village)
+  - real structure IDs collected from Dungeons and Taverns, Explorify,
+    Incendium, and Terralith (see each datapack's section above)
+  - "minecraft:the_nether" added to dimensionSelectors, so it also builds
+    roads to Incendium's Nether structures, not just the Overworld
+
+Caveat: these structure IDs were collected by reading each datapack's own
+worldgen data files, but a few (e.g. some of Dungeons and Taverns' names)
+could not be double-checked against the live game registry. After the
+profile is set up and the world has generated some terrain, it's worth
+running "/locate structure <id>" in-game for a couple of entries per
+datapack to confirm they resolve; add any additional structure IDs you find
+missing (e.g. Explorify's supply caches/guide posts, which weren't included
+here because their exact registered ID wasn't confirmed) the same way.
+
+After changing this config, RoadArchitect needs the world/server restarted
+once to rescan and rebuild its road network -- this is a one-time setup
+step, not something you redo per session.
+
+--------------------------------------------------------------------------
+CUSTOM TIME CYCLE DEFAULT
+--------------------------------------------------------------------------
+Drop-in config file: modpack/config/customtimecyle.json in this repo
+                  -> goes to <profile>/config/customtimecyle.json
+                     (yes, "customtimecyle" -- that's the mod's own actual,
+                     misspelled filename; don't "fix" the spelling)
+
+Requested: Daytime 30 min / Sunset 5 min / Nighttime 10 min / Sunrise 5 min,
+fully automatic with no repeated command.
+
+WHAT'S ACTUALLY ACHIEVABLE ON 1.21.5: the mod's config file on this version
+only exposes two keys, "daytime" and "nighttime", both in ticks (20
+ticks = 1 second). There is no separate sunset/sunrise key in the 1.21.5
+build -- per the mod's own README, independent control of every phase
+(which is what would be needed to set sunset/sunrise durations on their
+own) was only added starting with the mod's build for Minecraft 26.1, a
+newer game version than the 1.21.5 this modpack is pinned to.
+
+The shipped config sets:
+  "daytime":   36000   (30 minutes)
+  "nighttime": 24000   (20 minutes total = the requested 5+10+5)
+This gets the two totals you asked for exactly right (30 min of day, 20 min
+of "night bucket"), fully via config with no command needed. What it can't
+guarantee is the internal 5:10:5 split of that 20-minute bucket into
+sunset/true-night/sunrise -- the mod uses its own internal proportions for
+that on this version, not a user-configurable ratio.
+
+If the exact 5/10/5 sub-split matters more than staying on 1.21.5, the real
+fix is upgrading this modpack's target Minecraft version to whatever ships
+with the mod's 26.1+ build later (once the rest of the mod list also moves
+forward) -- that's a bigger, separate decision than a config drop-in, so it
+isn't done here.
