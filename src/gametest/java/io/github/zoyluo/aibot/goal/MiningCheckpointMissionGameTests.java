@@ -5702,6 +5702,12 @@ public final class MiningCheckpointMissionGameTests {
         }
         world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
         world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+        // One extra cell of open headroom above the bot's own two-tall body. Vanilla block
+        // placement rejects any destination that intersects a live entity's own hitbox (no
+        // self-exemption), so a mission step that needs to place a crafting table mid-mission
+        // (e.g. an on-the-spot tool craft) needs at least one genuinely external cell to target;
+        // origin.up() is always self-occupied and can never be a legal placement destination.
+        world.setBlockState(cell.up().up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         world.getServer(), name, world, Vec3d.ofBottomCenter(cell),
                         0.0F, 0.0F, GameMode.SURVIVAL)

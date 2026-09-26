@@ -295,7 +295,11 @@ public final class CraftTask extends AbstractTask {
                 return candidate.toImmutable();
             }
         }
-        BlockPos above = origin.up();
+        // origin.up() is the bot's own head cell -- always intersects its own hitbox, so vanilla
+        // placement there is never actually admissible (World/CollisionView#canPlace rejects any
+        // destination whose collision shape intersects a live entity, the placer included, with
+        // no self-exemption). The one block above that is genuinely external, open headroom.
+        BlockPos above = origin.up().up();
         return ObservableWorldQuery.canObserveCell(bot, above)
                         && bot.getServerWorld().getBlockState(above).isAir()
                 ? above.toImmutable() : null;
