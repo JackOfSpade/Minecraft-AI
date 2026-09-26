@@ -84,9 +84,21 @@ MODS (Fabric, install into the profile's "mods" folder)
     and github.com/MicroGSD/RoadArchitect) -- make sure you grab the Fabric
     mod from Modrinth/CurseForge/0xCoDSnet's repo, not that unrelated project.
 
+12. Data Loader  <-- helper mod, added so datapacks apply to every world
+    Version: 1.1.6+1.21 (Fabric; Modrinth lists support for 1.21-1.21.5)
+    https://modrinth.com/mod/dataloader
+    https://github.com/Commander07/data-loader
+    Adds a "datapacks" folder in the game directory whose packs are enabled
+    by default in every world, including brand-new ones -- see the DATAPACKS
+    section below. Requires Fabric API (#1). Vanilla has no such folder, and
+    Paxi / Global Packs (the usual alternatives) have no 1.21.5 Fabric build.
+    Its log shows harmless "Missing data pack file/..." warnings while a
+    world is being created; the packs are applied right after.
+
 --------------------------------------------------------------------------
-DATAPACKS (install into each world's "datapacks" folder, or the profile's
-default-datapacks folder if the launcher supports one)
+DATAPACKS (drop the zips into <profile>/datapacks -- the Data Loader mod
+(#12 above) enables them in every world, including on world creation, so
+nothing has to be added by hand on the Create World screen)
 --------------------------------------------------------------------------
 
 1. Dungeons and Taverns
@@ -115,17 +127,7 @@ default-datapacks folder if the launcher supports one)
    forbidden castle, nether reactor, piglin village, etc). Nether-only, so
    RoadArchitect's config below also enables the_nether dimension.
 
-4. Mine Treasure
-   Version: 1.5.5
-   https://modrinth.com/datapack/mine-treasure
-   IMPORTANT: this one does NOT add worldgen structures/buildings. It's a
-   loot/treasure-table pack (100+ items, 80+ loot tables layered onto
-   existing loot) plus a single on-demand-placed NBT structure (a portal
-   room, spawned via a "hack" item, not natural worldgen). It is not
-   applicable to the RoadArchitect setup below -- there's nothing for
-   RoadArchitect to build roads to from this pack.
-
-5. Subsurface
+4. Subsurface
    Version: v1.0.4 (the "1-21-x" build; supports 1.21-1.21.8)
    https://modrinth.com/datapack/subsurface
    Adds 11 new cave biomes with small decorative jigsaw structures under
@@ -135,7 +137,7 @@ default-datapacks folder if the launcher supports one)
    RoadArchitect structure list below (nothing sensible for a road to
    connect to underground).
 
-6. Terralith
+5. Terralith
    Version: 1.21.5 v2.5.13
    https://modrinth.com/datapack/terralith
    Adds surface structures under the "terralith" namespace (fortified
@@ -143,6 +145,11 @@ default-datapacks folder if the launcher supports one)
    outposts) plus new biomes/terrain. Confirmed by Stardust Labs' own wiki
    to work with RoadArchitect "out of the box" even without the extra
    config below (which adds it explicitly anyway for completeness).
+
+Removed from the pack: Mine Treasure (modrinth.com/datapack/mine-treasure,
+v1.5.5). It rewrites vanilla block loot tables so breaking ores/stone/etc.
+spawns bonus treasure out of thin air, which breaks immersion. Do not
+re-add it.
 
 --------------------------------------------------------------------------
 ROADARCHITECT + NON-VANILLA STRUCTURES
@@ -164,14 +171,29 @@ The provided modpack/config/roadarchitect.json already includes:
   - "minecraft:the_nether" added to dimensionSelectors, so it also builds
     roads to Incendium's Nether structures, not just the Overworld
 
-Caveat: these structure IDs were collected by reading each datapack's own
-worldgen data files, but a few (e.g. some of Dungeons and Taverns' names)
-could not be double-checked against the live game registry. After the
-profile is set up and the world has generated some terrain, it's worth
-running "/locate structure <id>" in-game for a couple of entries per
-datapack to confirm they resolve; add any additional structure IDs you find
-missing (e.g. Explorify's supply caches/guide posts, which weren't included
-here because their exact registered ID wasn't confirmed) the same way.
+Verified 2026-09-26 in the live game (1.21.5, all datapacks below enabled at
+world creation, fresh world): RoadArchitect accepted every selector in the
+drop-in file, and its road graph contained nodes from Dungeons and Taverns,
+Explorify and Terralith alongside the vanilla/D&T villages. Three names in the
+first draft of this file were not real structure IDs and were corrected:
+  nova_structures:taverns          -> #nova_structures:taverns
+                                      (a tag; the real IDs are tavern_oak, ...)
+  nova_structures:firewatch_towers -> #nova_structures:firewatch_tower (a tag)
+  explorify:watchtower             -> explorify:watchtower/plains, /savanna,
+                                      /taiga
+RoadArchitect logs "Structure selector '<id>' is invalid" at startup for any
+selector that doesn't resolve, so after editing this list, launch once and
+check the log for that line. Explorify's supply caches
+(explorify:supply_cache/*) and guide posts (explorify:guide_post_cold/warm)
+exist but are tiny roadside props, so they are left out on purpose.
+
+When roads get planned: RoadArchitect scans a radius of chunks when a world
+first loads ("initScanRadius", default 125 chunks) and keeps scanning around
+newly generated chunks as you explore ("chunkGenerateScanRadius", default
+20). The datapacks are active from world creation (Data Loader, #12), so
+both passes see their structures. The first scan of a brand-new world is
+slow -- about 4.5 minutes on the dev machine, during the loading screen --
+so lower "initScanRadius" in config/roadarchitect.json if that is too long.
 
 After changing this config, RoadArchitect needs the world/server restarted
 once to rescan and rebuild its road network -- this is a one-time setup
