@@ -24,9 +24,11 @@ import java.util.Objects;
 public final class PathExecutor {
     private static final int STUCK_TICKS_LIMIT = 60;
     private static final int REPLAN_COOLDOWN_TICKS = 40;
-    // A real vanilla 1-block step-up arcs in ~6-10 ticks. Grace gives it room to actually land
-    // before treating a still-grounded-at-the-base pose as the documented clientless stale-onGround
-    // quirk; the hard cap is a fail-safe ceiling so a genuinely wedged jump never spins forever.
+    // A real vanilla 1-block step-up (or PILLAR_UP's identical 1-block rise) arcs in ~6-10 ticks.
+    // Grace gives it room to actually land before treating a still-grounded-at-the-base pose as
+    // the documented clientless stale-onGround quirk; the hard cap is a fail-safe ceiling so a
+    // genuinely wedged jump never spins forever. Shared by tickJumpUp and tickPillar since both
+    // ride the same underlying vanilla jump physics for the same 1-block vertical rise.
     private static final int JUMP_UP_ARC_GRACE_TICKS = 20;
     private static final int JUMP_UP_HARD_TIMEOUT_TICKS = 30;
     private static final int CONSTRAINED_ROUTE_MAX_NODES = 10_000;
@@ -56,6 +58,9 @@ public final class PathExecutor {
     // Real-physics JUMP_UP: ticks spent on the current node's genuine vanilla jump attempt before
     // the bounded FakePlayerMotion.jumpTo teleport is used as a rescue.
     private int jumpAttemptTicks;
+    // Real-physics PILLAR_UP: same idea as jumpAttemptTicks, tracked separately since the two move
+    // types can never share a node but do reset independently in cleanup()/advanceTo().
+    private int pillarAttemptTicks;
 
     public PathExecutor(List<Node> path, BlockPos originalGoal) {
         this(path, originalGoal, false, false, 0);
@@ -364,6 +369,17 @@ public final class PathExecutor {
     }
 
     // NAV-9:垫方块上升一格。看向脚下→起跳→升空瞬间在原脚位放支撑方块→落到其上。
+    /**
+     * Real vanilla jump input first (matching {@link #tickJumpUp}'s pattern for the same 1-block
+     * vertical rise), spread over the genuine ~6-10 tick jump arc a real player's jump takes,
+     * placing the support block underneath the instant the bot's real rise passes through the
+     * placement window. The bounded {@link FakePlayerMotion#jumpTo} teleport is used only as a
+     * rescue once real progress has had a fair chance and stalled -- never as the routine
+     * mechanism. (An earlier version checked the stall condition in the same tick it queued the
+     * jump input, which is always true before vanilla's travel() has had a later tick to consume
+     * that input, so it rescued via instant teleport on literally every attempt; empirically
+     * confirmed via a throwaway diagnostic before this fix.)
+     */
     private ActionResult tickPillar(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
         BlockPos placeSlot = next.pos().down(); // 当前脚位,支撑方块放这里
@@ -379,33 +395,42 @@ public final class PathExecutor {
         pack.setForward(0.0F);
         pack.setJumping(true);
         pack.jumpOnce();
+        pillarAttemptTicks++;
         double rise = player.getY() - placeSlot.getY();
         if (rise > 0.5D && rise < 1.2D && player.getServerWorld().getBlockState(placeSlot).isAir()) {
             BuildAction.placeBlockAt(player, placeSlot);
             return ActionResult.IN_PROGRESS;
         }
+        // "Stalled" = still standing at the original (lower) footing with no vertical progress at
+        // all -- the same clientless stale-isOnGround quirk FakePlayerMotion.jumpTo itself already
+        // accounts for, not the ordinary mid-arc state of a real jump still developing.
+        boolean stalledAtBase = player.isOnGround() && player.getBlockPos().equals(placeSlot);
+        boolean arcGraceExpired = pillarAttemptTicks > JUMP_UP_ARC_GRACE_TICKS && stalledAtBase;
+        boolean hardTimeout = pillarAttemptTicks > JUMP_UP_HARD_TIMEOUT_TICKS;
+        if (!arcGraceExpired && !hardTimeout) {
+            return ActionResult.IN_PROGRESS;
+        }
+        pack.setJumping(false);
 
         // ServerPlayerEntity normally receives its jump displacement from client movement packets.
-        // Our fake player has no client, so setJumping alone can leave it bouncing at the same block
-        // forever (the obsidian pool pickup path is a deterministic two-block-deep reproduction).
-        // Model exactly one adjacent jump cell through the reviewed fake-client adapter, then place
-        // the support with the normal visible vanilla interaction. If placement fails, return to the
-        // factual old feet cell so a replan never leaves the bot suspended in an invented pose.
-        if (player.isOnGround() && player.getBlockPos().equals(placeSlot)) {
-            if (!FakePlayerMotion.jumpTo(player, next.pos(), "path_pillar_jump")) {
-                return handleStuck(pack, "pillar_jump_blocked");
-            }
-            ActionResult placed = BuildAction.placeBlockAt(player, placeSlot);
-            if (placed.isSuccess()) {
-                BotLog.path(player, "path_pillar_complete",
-                        "from", LogFields.pos(placeSlot),
-                        "to", LogFields.pos(next.pos()));
-                return commitAdvance(pack, index + 1);
-            }
-            FakePlayerMotion.stepTo(player, placeSlot, "path_pillar_rollback");
-            return handleStuck(pack, "pillar_place_failed: " + placed.reason());
+        // Our fake player has no client, so setJumping alone can (rarely) leave it bouncing at the
+        // same block forever (the obsidian pool pickup path is a deterministic two-block-deep
+        // reproduction). Model exactly one adjacent jump cell through the reviewed fake-client
+        // adapter, then place the support with the normal visible vanilla interaction. If placement
+        // fails, return to the factual old feet cell so a replan never leaves the bot suspended in
+        // an invented pose.
+        if (!FakePlayerMotion.jumpTo(player, next.pos(), "path_pillar_jump_rescue")) {
+            return handleStuck(pack, "pillar_jump_blocked");
         }
-        return ActionResult.IN_PROGRESS;
+        ActionResult placed = BuildAction.placeBlockAt(player, placeSlot);
+        if (placed.isSuccess()) {
+            BotLog.path(player, "path_pillar_complete_rescue",
+                    "from", LogFields.pos(placeSlot),
+                    "to", LogFields.pos(next.pos()));
+            return commitAdvance(pack, index + 1);
+        }
+        FakePlayerMotion.stepTo(player, placeSlot, "path_pillar_rollback");
+        return handleStuck(pack, "pillar_place_failed: " + placed.reason());
     }
 
     private static int findPlaceableBlock(AIPlayerEntity player,
@@ -457,6 +482,7 @@ public final class PathExecutor {
         lastRuntimeContractPosition = null;
         dropOriginY = null;
         jumpAttemptTicks = 0;
+        pillarAttemptTicks = 0;
     }
 
     private int chooseWalkTargetIndex(ActionPack pack) {
@@ -610,6 +636,7 @@ public final class PathExecutor {
                 lastRuntimeContractPosition = null;
                 dropOriginY = null;
                 jumpAttemptTicks = 0;
+                pillarAttemptTicks = 0;
                 return ActionResult.IN_PROGRESS;
             }
             reason = reason + "; replan_failed: "
@@ -858,6 +885,7 @@ public final class PathExecutor {
         digWalking = false;
         dropOriginY = null;
         jumpAttemptTicks = 0;
+        pillarAttemptTicks = 0;
         pack.stopMovement();
     }
 
