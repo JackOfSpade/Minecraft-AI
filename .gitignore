@@ -1,0 +1,86 @@
+.gradle/
+build/
+run/
+out/
+classes/
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets and local environment overrides. API keys belong in env vars, never in the repo.
+.env
+.env.*
+*.env
+secrets.properties
+secrets.*.properties
+local.properties
+*.pem
+*.p12
+*.jks
+*.keystore
+
+# JVM crash dumps and editor backup/swap files.
+hs_err_pid*.log
+replay_pid*.log
+*.log
+*.bak
+*.orig
+*~
+*.swp
+
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.eclipse/
+*.launch
+.settings/
+.project
+.classpath
+bin/
+
+# Keep legacy planning and work logs local. Track the active roadmap and docs.
+*.md
+!README.md
+!README.zh-CN.md
+!ROADMAP.md
+!docs/
+!docs/*.md
+!docs/**/*.md
+
+# Local reference source used during implementation.
+references/
+
+# headless production test server (installer-generated, 含 56MB server.jar)
+run-prod/
+
+# Local promotional workspaces and generated dependency trees.
+/aibot-tiktok-promo/
+/promo/tiktok/
+node_modules/
+
+# Runtime logs and disposable server snapshots.
+/logs/
+/tmp/
+
+# Ad-hoc reliability run output stays local. Keep the repository's existing
+# runner state file tracked for backward compatibility.
+/reports/reliability_*.tsv
+!/reports/reliability_state.tsv
+
+# Immutable harness output is local until a VERIFIED run is explicitly pinned.
+artifacts/evidence/
+artifacts/evidence-batches/
+artifacts/mining-shards/
+
+# Transient files used while atomically pinning committed baseline evidence.
+# Override broad repository-level ignores such as build/, run/, bin/, and *.md
+# so a safe capability id cannot silently make explicitly pinned evidence local.
+!reports/baselines/
+!reports/baselines/**
+reports/baselines/.pin.lock/
+reports/baselines/.pin.lock.stale.*
+reports/baselines/.staging.*
+reports/baselines/.index.*

@@ -1,0 +1,646 @@
+package io.github.zoyluo.aibot.action;
+
+import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
+import io.github.zoyluo.aibot.mode.FakePlayerMotion;
+import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
+import io.github.zoyluo.aibot.pathfinding.FailureReason;
+import io.github.zoyluo.aibot.pathfinding.PathExecutor;
+import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
+import io.github.zoyluo.aibot.pathfinding.Standability;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+
+import java.util.Collections;
+import java.util.Optional;
+
+public final class ActionPack {
+    private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
+    private static final int PATHFIND_FAILURE_COOLDOWN_TICKS = 20;
+    // NAV-OPT 两阶段寻路预算:纯步行只搜空气格(空间小,给足额度);挖穿限额更小,压住被困/地下时的 3D 体积爆搜。
+    private static final int WALK_MAX_NODES = 10_000;
+    private static final int DIG_MAX_NODES = 4_000;
+    // 接近原语专用大预算:接近被包裹的矿必然要挖,直接 DIG 且预算放大(挖掘邻居分支因子小,
+    // 24k 节点覆盖 ~40 格穿山直达;普通 startPathTo 的小预算 DIG 仅作走路兜底,语义不变)。
+    private static final int DIG_APPROACH_MAX_NODES = 24_000;
+    private static final long PATHFIND_MAX_MILLIS = 50L;
+
+    private final AIPlayerEntity player;
+
+    private float forward;
+    private float strafing;
+    private boolean sneaking;
+    private boolean sprinting;
+    private boolean jumping;
+    private int jumpTicks;
+
+    private WalkToController walkTo;
+    private MiningController mining;
+    private PathExecutor pathExecutor;
+    private int itemUseCooldown;
+    private int blockHitDelay;
+    private PathRequestIdentity lastPathRequest;
+    private PathRequestIdentity activePathRequest;
+    private BlockPos activePathGoal;
+    private int nextPathfindTick;
+
+    public ActionPack(AIPlayerEntity player) {
+        this.player = player;
+    }
+
+    public AIPlayerEntity player() {
+        return player;
+    }
+
+    public void setForward(float value) {
+        this.forward = clampInput(value);
+    }
+
+    public void setStrafing(float value) {
+        this.strafing = clampInput(value);
+    }
+
+    public void setSneaking(boolean sneaking) {
+        this.sneaking = sneaking;
+        player.setSneaking(sneaking);
+        if (sneaking && sprinting) {
+            setSprinting(false);
+        }
+    }
+
+    public void setSprinting(boolean sprinting) {
+        this.sprinting = sprinting;
+        player.setSprinting(sprinting);
+        if (sprinting && sneaking) {
+            setSneaking(false);
+        }
+    }
+
+    public void setJumping(boolean jumping) {
+        this.jumping = jumping;
+    }
+
+    public void jumpOnce() {
+        this.jumpTicks = 2;
+    }
+
+    public ActionResult startWalkTo(Vec3d target) {
+        return startWalkTo(target, 0.6D);
+    }
+
+    /** Starts a direct walk with a caller-defined horizontal arrival tolerance. */
+    public ActionResult startWalkTo(Vec3d target, double arrivalThreshold) {
+        clearActivePathExecutor();
+        this.walkTo = new WalkToController(target, arrivalThreshold);
+        this.mining = null;
+        return ActionResult.IN_PROGRESS;
+    }
+
+    // 统一接近原语入口:挖掘感知寻路(大预算 DIG 直达,目标可为"挖开即站"的实心格——见
+    // AStarPathfinder.resolveEndpoint 的挖掘终点豁免)。接近被包裹的矿/穿山直达用这个;
+    // 普通走路仍用 startPathTo(先 WALK 后小预算 DIG)。
+    public ActionResult startDigPathTo(BlockPos goal) {
+        return startDigPathTo(goal, 0);
+    }
+
+    /**
+     * Starts a digging approach while preserving a caller-scoped mining-stone reserve.
+     * The same reserve gates initial pillar planning, physical pillar execution and replanning.
+     */
+    public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {
+        int reserve = Math.max(0, protectedStoneLikeReserve);
+        int now = player.getServer().getTicks();
+        BlockPos immutableGoal = goal.toImmutable();
+        boolean canPillar = PathExecutor.hasPlaceableBlock(player, reserve);
+        PathRequestIdentity request = new PathRequestIdentity(
+                immutableGoal, canPillar, true, reserve,
+                PathExecutor.RouteContract.unrestricted());
+        if (preparePathRequest(request, now)) {
+            return ActionResult.failed("pathfinding_throttled");
+        }
+        if (!snapPlayerToNearestStandable("path_start_invalid")) {
+            lastPathRequest = request;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("pathfinding_failed: NO_START");
+        }
+        PathfindingResult result = new AStarPathfinder(player.getServerWorld(), player.getBlockPos(), goal,
+                DIG_APPROACH_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true, 10.0D).findPath();
+        if (!result.success()) {
+            lastPathRequest = request;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("pathfinding_failed: " + result.reason());
+        }
+        lastPathRequest = request;
+        nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
+        BlockPos resolvedGoal = result.resolvedGoal() == null ? immutableGoal : result.resolvedGoal();
+        activePathGoal = resolvedGoal;
+        activePathRequest = request;
+        this.pathExecutor = new PathExecutor(
+                result.path(), resolvedGoal, canPillar, true, reserve);
+        this.walkTo = null;
+        this.mining = null;
+        return ActionResult.IN_PROGRESS;
+    }
+
+    public ActionResult startPathTo(BlockPos goal) {
+        return startPathTo(goal, 0);
+    }
+
+    /**
+     * Starts an ordinary route while preserving a caller-scoped mining-stone reserve.
+     * Non-reserve path supports remain eligible; protected stone is exposed only above the
+     * requested floor.
+     */
+    public ActionResult startPathTo(BlockPos goal, int protectedStoneLikeReserve) {
+        int reserve = Math.max(0, protectedStoneLikeReserve);
+        return startPathTo(
+                goal, PathExecutor.hasPlaceableBlock(player, reserve), true, reserve);
+    }
+
+    /**
+     * Starts a surface-exploration path without digging or disposable pillar shortcuts.
+     * Hunt/Gather roaming must be able to keep moving after it reaches a waypoint; a path that
+     * spends the last few dirt blocks pillaring out of a depression is not a reusable surface route.
+     */
+    public ActionResult startSurfacePathTo(BlockPos goal) {
+        return startPathTo(goal, false, false, 0);
+    }
+
+    /**
+     * Starts a no-dig/no-pillar surface route that must remain at or above {@code minimumY}.
+     * This overload does not require a round-trip proof.
+     */
+    public ActionResult startSurfacePathTo(BlockPos goal, int minimumY) {
+        return startSurfacePathTo(goal, minimumY, null);
+    }
+
+    /**
+     * Starts a contract-bound surface route. A non-null {@code returnAnchor} additionally requires
+     * an exact no-dig/no-pillar route from the requested goal back to that anchor under the same
+     * Y floor and search budget.
+     */
+    public ActionResult startSurfacePathTo(
+            BlockPos goal, int minimumY, BlockPos returnAnchor) {
+        return startPathTo(goal, false, false, 0,
+                PathExecutor.RouteContract.constrainedSurface(minimumY, returnAnchor));
+    }
+
+    /**
+     * Contract-bound surface route whose outbound leg may dig through obstacles once the
+     * walk-only phase has no solution (a hunter digs a stair through a hill instead of
+     * rejecting the whole herd). The dig fallback stays above the same Y floor, and the
+     * return proof from the goal remains strictly walk-only: a dug stair is itself
+     * walk-only returnable, while a goal whose return needs fresh digging is still rejected.
+     */
+    public ActionResult startSurfaceDigFallbackPathTo(
+            BlockPos goal, int minimumY, BlockPos returnAnchor) {
+        return startPathTo(goal, false, true, 0,
+                PathExecutor.RouteContract.constrainedSurface(minimumY, returnAnchor));
+    }
+
+    private ActionResult startPathTo(BlockPos goal, boolean canPillar,
+                                     boolean allowDigFallback,
+                                     int protectedStoneLikeReserve) {
+        return startPathTo(goal, canPillar, allowDigFallback, protectedStoneLikeReserve,
+                PathExecutor.RouteContract.unrestricted());
+    }
+
+    private ActionResult startPathTo(BlockPos goal, boolean canPillar,
+                                     boolean allowDigFallback,
+                                     int protectedStoneLikeReserve,
+                                     PathExecutor.RouteContract routeContract) {
+        int reserve = Math.max(0, protectedStoneLikeReserve);
+        int now = player.getServer().getTicks();
+        BlockPos immutableGoal = goal.toImmutable();
+        PathRequestIdentity request = new PathRequestIdentity(
+                immutableGoal, canPillar, allowDigFallback, reserve, routeContract);
+        if (preparePathRequest(request, now)) {
+            return ActionResult.failed("pathfinding_throttled");
+        }
+        if (routeContract.constrained()
+                && player.getBlockPos().getY() < routeContract.minimumY()) {
+            lastPathRequest = request;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("path_contract_failed: start_below_minimum_y");
+        }
+        boolean startReady = routeContract.constrained()
+                ? recenterPlayerInCurrentStandableCell("path_start_invalid")
+                : snapPlayerToNearestStandable("path_start_invalid");
+        if (!startReady) {
+            lastPathRequest = request;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("pathfinding_failed: NO_START");
+        }
+        ServerWorld world = player.getServerWorld();
+        BlockPos from = player.getBlockPos();
+        // NAV-OPT 两阶段寻路:先纯步行(禁挖,搜索空间=空气格,收敛快、不会被挖穿邻居撑爆到 SEARCH_LIMIT);
+        // 纯步行无解再允许挖穿兜底(隧道/破障),挖穿预算更小以限制被困/地下时的 3D 体积爆搜。
+        AStarPathfinder walkFinder =
+                new AStarPathfinder(
+                        world, from, goal, WALK_MAX_NODES, PATHFIND_MAX_MILLIS,
+                        canPillar, false);
+        PathfindingResult result = routeContract.constrained()
+                ? walkFinder.findPathUncachedAtOrAbove(routeContract.minimumY())
+                : walkFinder.findPath();
+        boolean dugOutbound = false;
+        if (!result.success() && allowDigFallback) {
+            AStarPathfinder digFinder = new AStarPathfinder(
+                    world, from, goal, DIG_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true);
+            PathfindingResult dig = routeContract.constrained()
+                    ? digFinder.findPathUncachedAtOrAbove(routeContract.minimumY())
+                    : digFinder.findPath();
+            if (dig.success()) {
+                result = dig;
+                dugOutbound = true;
+            }
+        }
+        if (!result.success()) {
+            lastPathRequest = request;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("pathfinding_failed: " + result.reason());
+        }
+        PathfindingResult returnProof = null;
+        if (routeContract.requiresReturnProof()) {
+            if (dugOutbound && PathExecutor.isReversibleStair(result)) {
+                // The pre-dig world cannot prove the walk-only return yet; the dug stair is
+                // itself that return, so derive the proof from the reversed outbound nodes.
+                java.util.List<io.github.zoyluo.aibot.pathfinding.Node> reversed =
+                        new java.util.ArrayList<>(result.path());
+                java.util.Collections.reverse(reversed);
+                returnProof = new PathfindingResult(
+                        reversed, true, FailureReason.NONE,
+                        result.nodesExplored(), result.elapsedMs(),
+                        result.resolvedGoal(), result.resolvedStart());
+            } else {
+                returnProof = new AStarPathfinder(
+                        world, immutableGoal, routeContract.returnAnchor(),
+                        WALK_MAX_NODES, PATHFIND_MAX_MILLIS, false, false)
+                        .findPathUncachedAtOrAbove(routeContract.minimumY());
+            }
+        }
+        PathExecutor.RouteValidation validation = PathExecutor.validateRouteContract(
+                result, immutableGoal, routeContract, returnProof);
+        if (!validation.accepted()) {
+            lastPathRequest = request;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("path_contract_failed: " + validation.reason());
+        }
+        lastPathRequest = request;
+        nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
+        BlockPos resolvedGoal = result.resolvedGoal() == null ? immutableGoal : result.resolvedGoal();
+        activePathGoal = resolvedGoal;
+        activePathRequest = request;
+        this.pathExecutor = routeContract.constrained()
+                ? new PathExecutor(
+                result.path(), resolvedGoal, canPillar, allowDigFallback, reserve, routeContract)
+                : new PathExecutor(
+                result.path(), resolvedGoal, canPillar, allowDigFallback, reserve);
+        this.walkTo = null;
+        this.mining = null;
+        return ActionResult.IN_PROGRESS;
+    }
+
+    public BlockPos activePathGoal() {
+        return activePathGoal;
+    }
+
+    /**
+     * Repairs only fractional body overlap inside the current supported cell.
+     * Constrained routes must never relocate to another block before their full contract is proven.
+     */
+    public boolean recenterPlayerInCurrentStandableCell(String reason) {
+        ServerWorld world = player.getServerWorld();
+        BlockPos current = player.getBlockPos();
+        Standability.clearCache();
+        if (!Standability.isStandable(world, current)) {
+            return false;
+        }
+        if (FakePlayerMotion.isBlockCollisionFree(player)) {
+            return true;
+        }
+        if (!FakePlayerMotion.returnToBlockCenter(
+                player, current, "path_start_body_collision:" + reason)) {
+            return false;
+        }
+        Standability.clearCache();
+        return player.getBlockPos().equals(current)
+                && Standability.isStandable(world, current)
+                && FakePlayerMotion.isBlockCollisionFree(player);
+    }
+
+    public boolean snapPlayerToNearestStandable(String reason) {
+        ServerWorld world = player.getServerWorld();
+        BlockPos current = player.getBlockPos();
+        Standability.clearCache();
+        boolean currentCellStandable = Standability.isStandable(world, current);
+        if (currentCellStandable && FakePlayerMotion.isBlockCollisionFree(player)) {
+            return true;
+        }
+        // A floored air column can be standable while an off-centre 0.6-wide player body overlaps
+        // raised terrain in a neighbouring column. Dedicated-server console commands spawn at the
+        // lower corner of the world-spawn BlockPos, which reproduced this exact condition on seed
+        // 3000. Re-centre only the collided pose; collision-free fractional positions are valid
+        // physical state and must be preserved for edge/pickup transactions.
+        if (currentCellStandable
+                && FakePlayerMotion.returnToBlockCenter(
+                        player, current, "path_start_body_collision:" + reason)) {
+            Standability.clearCache();
+            if (FakePlayerMotion.isBlockCollisionFree(player)) {
+                return true;
+            }
+        }
+        // A fake player can end a jump/drop fractionally inside the neighbouring cell even though
+        // an adjacent legal landing exists. Recover that one-cell movement physically before asking
+        // for the privileged long-distance snap. In strict_survival this is the difference between
+        // continuing a hunt and every subsequent path request failing NO_START in one tick.
+        if (tryPhysicalSnap(world, current, reason)) {
+            return true;
+        }
+        // A valid current start is ordinary pathfinding and must not require an emergency
+        // capability. Only the fallback relocation to a different cell is privileged.
+        if (!io.github.zoyluo.aibot.mode.CapabilityRuntime.decide(
+                player, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                "action_pack_snap:" + reason).allowed()) {
+            return false;
+        }
+        Optional<BlockPos> snapped = Standability.findNearestStandable(world, current, 8, 128, 32);
+        if (snapped.isEmpty()) {
+            BotLog.warn(LogCategory.PATH, player, "path_start_snap_failed", "reason", reason, "from", io.github.zoyluo.aibot.log.LogFields.pos(current));
+            return false;
+        }
+        BlockPos safe = snapped.get();
+        stopMovement();
+        player.teleport(world,
+                safe.getX() + 0.5D,
+                safe.getY(),
+                safe.getZ() + 0.5D,
+                Collections.emptySet(),
+                player.getYaw(),
+                player.getPitch(),
+                true);
+        Standability.clearCache();
+        BotLog.path(player, "path_start_snapped",
+                "reason", reason,
+                "from", io.github.zoyluo.aibot.log.LogFields.pos(current),
+                "to", io.github.zoyluo.aibot.log.LogFields.pos(safe));
+        return true;
+    }
+
+    private boolean tryPhysicalSnap(ServerWorld world, BlockPos current, String reason) {
+        // Same-level steps first, then a one-block drop, finally a vanilla-style jump. A vertical
+        // move may include one horizontal axis; three-axis corner jumps are never legitimate.
+        int[][] horizontalOffsets = {
+                {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}, {0, 0}
+        };
+        for (int dy : new int[]{0, -1, 1}) {
+            for (int[] offset : horizontalOffsets) {
+                int dx = offset[0];
+                int dz = offset[1];
+                if ((dx == 0 && dz == 0 && dy == 0)
+                        || (dy != 0 && Math.abs(dx) + Math.abs(dz) > 1)) {
+                    continue;
+                }
+                BlockPos candidate = current.add(dx, dy, dz);
+                if (!Standability.isStandable(world, candidate)) {
+                    continue;
+                }
+                boolean moved = dy > 0
+                        ? FakePlayerMotion.jumpTo(player, candidate, "path_start_physical_snap:" + reason)
+                        : FakePlayerMotion.stepTo(player, candidate, "path_start_physical_snap:" + reason);
+                if (!moved) {
+                    continue;
+                }
+                Standability.clearCache();
+                BotLog.path(player, "path_start_physical_snap",
+                        "reason", reason,
+                        "from", io.github.zoyluo.aibot.log.LogFields.pos(current),
+                        "to", io.github.zoyluo.aibot.log.LogFields.pos(candidate));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 主动把 bot 下沉一格到指定(已为空气的)格子。
+     * 关键:bot 是 ServerPlayerEntity,服务端**不跑 travel()**(真实玩家的移动/重力由客户端驱动,
+     * fake player 没有客户端),因此**没有被动重力**——挖空脚下不会自动下落。竖井下挖类任务
+     *(DigDownTask / OreDigTask.digDownOneLayer)必须靠本方法主动驱动下沉,否则会站着空转直到看门狗失败
+     *(实测:dig_down 全程 y 恒定、200t no_progress 卡死的共享根因)。
+     * 幂等:bot 已在该层或更低则不动。teleport 会清零 fallDistance,不会摔伤。
+     */
+    public boolean descendInto(BlockPos target) {
+        if (player.getBlockPos().getY() <= target.getY()) {
+            return player.getBlockPos().equals(target);
+        }
+        return io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+                player, target, "descend_into");
+    }
+
+    public ActionResult startMining(BlockPos pos, Direction face) {
+        this.mining = new MiningController(pos, face);
+        clearActivePathExecutor();
+        this.forward = 0.0F;
+        this.strafing = 0.0F;
+        return ActionResult.IN_PROGRESS;
+    }
+
+    public void stopMining() {
+        if (this.mining != null) {
+            this.mining.abort(player);
+            this.mining = null;
+        }
+    }
+
+    public void stopMovement() {
+        setSneaking(false);
+        setSprinting(false);
+        this.forward = 0.0F;
+        this.strafing = 0.0F;
+        this.jumping = false;
+        this.jumpTicks = 0;
+        player.setJumping(false);
+    }
+
+    public void stopAll() {
+        clearActivePathExecutor();
+        stopMining();
+        this.walkTo = null;
+        stopMovement();
+        player.stopUsingItem();
+    }
+
+    public boolean hasActiveActions() {
+        return pathExecutor != null
+                || walkTo != null
+                || mining != null
+                || forward != 0.0F
+                || strafing != 0.0F
+                || sneaking
+                || sprinting
+                || jumping
+                || jumpTicks > 0
+                || player.isUsingItem();
+    }
+
+    public boolean isPathExecutorIdle() {
+        return pathExecutor == null;
+    }
+
+    public boolean isWalkToIdle() {
+        return walkTo == null;
+    }
+
+    public boolean isMiningIdle() {
+        return mining == null;
+    }
+
+    public void onUpdate() {
+        tickPathExecutor();
+        tickWalkTo();
+        tickMining();
+
+        if (itemUseCooldown > 0) {
+            itemUseCooldown--;
+        }
+        if (blockHitDelay > 0) {
+            blockHitDelay--;
+        }
+
+        float velocity = sneaking ? 0.3F : 1.0F;
+        player.forwardSpeed = forward * velocity;
+        player.sidewaysSpeed = strafing * velocity;
+        boolean jumpNow = jumping || jumpTicks > 0;
+        player.setJumping(jumpNow);
+        if (jumpTicks > 0) {
+            jumpTicks--;
+        }
+    }
+
+    public int itemUseCooldown() {
+        return itemUseCooldown;
+    }
+
+    public void setItemUseCooldown(int itemUseCooldown) {
+        this.itemUseCooldown = Math.max(0, itemUseCooldown);
+    }
+
+    public int blockHitDelay() {
+        return blockHitDelay;
+    }
+
+    public void setBlockHitDelay(int blockHitDelay) {
+        this.blockHitDelay = Math.max(0, blockHitDelay);
+    }
+
+    private void tickWalkTo() {
+        if (walkTo == null) {
+            return;
+        }
+
+        ActionResult result = walkTo.tick(this);
+        if (result.isInProgress()) {
+            return;
+        }
+
+        if (result.isSuccess()) {
+            BotLog.action(player, "walk_complete");
+        } else {
+            BotLog.warn(LogCategory.ERROR, player, "walk_failed", "reason", result.reason());
+        }
+        walkTo = null;
+        forward = 0.0F;
+        strafing = 0.0F;
+        jumping = false;
+        player.setJumping(false);
+    }
+
+    private void tickPathExecutor() {
+        if (pathExecutor == null) {
+            return;
+        }
+
+        ActionResult result = pathExecutor.tick(this);
+        if (result.isInProgress()) {
+            return;
+        }
+
+        if (result.isSuccess()) {
+            BotLog.path(player, "path_complete", "ticks", pathExecutor.totalTicks());
+        } else {
+            BotLog.warn(LogCategory.ERROR, player, "path_failed", "reason", result.reason());
+        }
+        pathExecutor = null;
+        activePathGoal = null;
+        activePathRequest = null;
+        forward = 0.0F;
+        strafing = 0.0F;
+        jumping = false;
+        player.setJumping(false);
+    }
+
+    private void tickMining() {
+        if (mining == null) {
+            return;
+        }
+
+        ActionResult result = mining.tick(this);
+        if (result.isInProgress()) {
+            return;
+        }
+
+        if (result.isSuccess()) {
+            BotLog.action(player, "mine_complete");
+        } else {
+            BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
+        }
+        mining = null;
+    }
+
+    /**
+     * Returns true when an identical request is still inside its cooldown.
+     * A different active identity is stopped before cooldown evaluation so an old, weaker route
+     * can never keep moving merely because the replacement happens to share the same goal.
+     */
+    private boolean preparePathRequest(PathRequestIdentity request, int now) {
+        if (pathExecutor != null && !request.equals(activePathRequest)) {
+            clearActivePathExecutor();
+        }
+        if (request.equals(lastPathRequest) && now < nextPathfindTick) {
+            return true;
+        }
+        // An explicit restart after cooldown owns the controller from this point onward.
+        clearActivePathExecutor();
+        return false;
+    }
+
+    private void clearActivePathExecutor() {
+        if (pathExecutor != null) {
+            pathExecutor.abort(this);
+            pathExecutor = null;
+        }
+        activePathGoal = null;
+        activePathRequest = null;
+    }
+
+    private record PathRequestIdentity(
+            BlockPos goal,
+            boolean canPillar,
+            boolean allowDig,
+            int protectedStoneLikeReserve,
+            PathExecutor.RouteContract routeContract) {
+        private PathRequestIdentity {
+            goal = goal.toImmutable();
+            protectedStoneLikeReserve = Math.max(0, protectedStoneLikeReserve);
+            routeContract = java.util.Objects.requireNonNull(routeContract, "routeContract");
+        }
+    }
+
+    private static float clampInput(float value) {
+        return Math.max(-1.0F, Math.min(1.0F, value));
+    }
+}

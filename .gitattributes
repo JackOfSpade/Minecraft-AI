@@ -1,0 +1,13 @@
+# Force LF everywhere, regardless of platform or local core.autocrlf. Several tests read
+# source files as raw text and assert on exact multi-line substrings; CRLF breaks them.
+* text=auto eol=lf
+
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.ttf binary
+*.otf binary

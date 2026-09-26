@@ -1,0 +1,350 @@
+package io.github.zoyluo.aibot.brain;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+
+public final class DeepSeekApiClient {
+    private final AIBotConfig.DeepSeek config;
+    private final HttpClient httpClient;
+
+    public DeepSeekApiClient(AIBotConfig.DeepSeek config) {
+        this.config = config;
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
+    }
+
+    public ChatResponse chat(List<ChatMessage> history, List<ToolDefinition> tools) throws DeepSeekApiException {
+        return chat(history, tools, false);
+    }
+
+    /**
+     * Runs a function-only turn.  This is used by small control-plane decisions such as
+     * recipient selection, where accepting a prose reply would make the result ambiguous.
+     */
+    public ChatResponse chatRequiringToolCall(List<ChatMessage> history, List<ToolDefinition> tools) throws DeepSeekApiException {
+        if (tools == null || tools.isEmpty()) {
+            throw new IllegalArgumentException("required_tool_call_needs_a_tool");
+        }
+        return chat(history, tools, true);
+    }
+
+    private ChatResponse chat(List<ChatMessage> history,
+                              List<ToolDefinition> tools,
+                              boolean requireToolCall) throws DeepSeekApiException {
+        if (config.apiKey() == null || config.apiKey().isBlank()) {
+            throw new DeepSeekApiException("deepseek_api_key_missing");
+        }
+
+        DeepSeekApiException lastFailure = null;
+        List<String> models = modelsForRequest();
+        for (int index = 0; index < models.size(); index++) {
+            String model = models.get(index);
+            HttpRequest request = requestFor(model, history, tools, requireToolCall);
+            HttpResponse<String> response = sendWithRetry(request);
+            if (response.statusCode() == 200) {
+                if (response.body() == null || response.body().isBlank()) {
+                    throw new DeepSeekApiException("empty_response");
+                }
+                return parseResponse(response.body());
+            }
+
+            String reason = classifyStatus(response.statusCode(), response.body());
+            lastFailure = new DeepSeekApiException(reason);
+            if (!shouldTryNextModel(response.statusCode(), models, index)) {
+                throw lastFailure;
+            }
+            BotLog.warn(LogCategory.API, null, "api_model_fallback",
+                    "from_model", model,
+                    "to_model", models.get(index + 1),
+                    "status", response.statusCode());
+        }
+        throw lastFailure == null ? new DeepSeekApiException("no_models_configured") : lastFailure;
+    }
+
+    private HttpRequest requestFor(String model,
+                                   List<ChatMessage> history,
+                                   List<ToolDefinition> tools,
+                                   boolean requireToolCall) {
+        JsonObject body = new JsonObject();
+        body.addProperty("model", model);
+        body.add("messages", serializeMessages(history));
+        if (tools != null && !tools.isEmpty()) {
+            body.add("tools", serializeTools(tools));
+            // Gemini's function calls carry validated JSON arguments.  Requiring a tool call
+            // prevents an otherwise silent text-only turn from leaving a companion idle.
+            body.addProperty("tool_choice", requireToolCall || usesGoogleOpenAiEndpoint() ? "required" : "auto");
+        }
+        body.addProperty("max_tokens", config.maxTokens());
+        body.addProperty("temperature", config.temperature());
+        body.addProperty("stream", false);
+        // Google's OpenAI-compatible endpoint does not accept DeepSeek's proprietary
+        // thinking block.  Keep the block for DeepSeek-compatible endpoints, where it
+        // controls an important token-budget behavior.
+        if (!usesGoogleOpenAiEndpoint()) {
+            body.add("thinking", serializeThinking(config));
+        }
+        BotLog.api(null, "api_request",
+                "model", model,
+                "msg_count", history.size(),
+                "tools_count", tools == null ? 0 : tools.size(),
+                "max_tokens", config.maxTokens(),
+                "thinking", Boolean.TRUE.equals(config.thinking()) ? config.reasoningEffort() : "disabled");
+
+        return HttpRequest.newBuilder()
+                .uri(URI.create(chatCompletionsUrl()))
+                .timeout(Duration.ofSeconds(config.timeoutSeconds()))
+                .header("Authorization", "Bearer " + config.apiKey())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+                .build();
+    }
+
+    private List<String> modelsForRequest() {
+        LinkedHashSet<String> models = new LinkedHashSet<>();
+        models.add(config.model());
+        if (usesGoogleOpenAiEndpoint() && "gemini-3.5-flash-lite".equals(config.model())) {
+            models.add("gemini-3.1-flash-lite");
+            models.add("gemini-3.5-flash");
+        }
+        return List.copyOf(models);
+    }
+
+    private static boolean shouldTryNextModel(int status, List<String> models, int index) {
+        return index + 1 < models.size() && (status == 429 || status == 404);
+    }
+
+    private HttpResponse<String> sendWithRetry(HttpRequest request) throws DeepSeekApiException {
+        int attempts = Math.max(0, config.retryCount()) + 1;
+        long backoffMs = Math.max(1, config.retryBackoffMs());
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                int status = response.statusCode();
+                if ((status == 429 || status >= 500) && attempt < attempts) {
+                    BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", status, "backoff_ms", backoffMs);
+                    sleep(backoffMs);
+                    backoffMs *= 2;
+                    continue;
+                }
+                return response;
+            } catch (HttpTimeoutException exception) {
+                if (attempt >= attempts) {
+                    BotLog.error("api_timeout", exception, "attempt", attempt);
+                    throw new DeepSeekApiException("api_timeout: " + exception.getMessage(), exception);
+                }
+                BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "api_timeout", "backoff_ms", backoffMs);
+                sleep(backoffMs);
+                backoffMs *= 2;
+            } catch (IOException exception) {
+                if (attempt >= attempts) {
+                    BotLog.error("api_io_error", exception, "attempt", attempt);
+                    throw new DeepSeekApiException("io_error: " + exception.getMessage(), exception);
+                }
+                BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "io_error", "backoff_ms", backoffMs);
+                sleep(backoffMs);
+                backoffMs *= 2;
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new DeepSeekApiException("interrupted", exception);
+            }
+        }
+        throw new DeepSeekApiException("retry_exhausted");
+    }
+
+    private static void sleep(long millis) throws DeepSeekApiException {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new DeepSeekApiException("interrupted", exception);
+        }
+    }
+
+    private String normalizedBaseUrl() {
+        String base = config.baseUrl();
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        if (base.endsWith("/v1")) {
+            base = base.substring(0, base.length() - 3);
+        }
+        return base;
+    }
+
+    private String chatCompletionsUrl() {
+        String base = normalizedBaseUrl();
+        // Google documents its OpenAI-compatible base as .../v1beta/openai.  Unlike
+        // conventional OpenAI hosts, that base already contains the API version.
+        return base.endsWith("/openai")
+                ? base + "/chat/completions"
+                : base + "/v1/chat/completions";
+    }
+
+    private boolean usesGoogleOpenAiEndpoint() {
+        return normalizedBaseUrl().contains("generativelanguage.googleapis.com/");
+    }
+
+    private static String classifyStatus(int status, String body) {
+        String excerpt = body == null ? "" : body.substring(0, Math.min(200, body.length()));
+        if (status == 429) {
+            return "rate_limited: status=429 body=" + excerpt;
+        }
+        if (status == 408) {
+            return "api_timeout: status=408 body=" + excerpt;
+        }
+        if (status >= 500) {
+            return "server_error: status=" + status + " body=" + excerpt;
+        }
+        if (status == 401 || status == 403) {
+            return "auth_error: status=" + status + " body=" + excerpt;
+        }
+        return "http_error: status=" + status + " body=" + excerpt;
+    }
+
+    /**
+     * Always sends an explicit thinking block. V4 defaults to {@code enabled} at {@code high}
+     * effort, and reasoning shares the {@code max_tokens} budget, so relying on the server
+     * default would let a long chain of thought truncate the tool call the bot is waiting on.
+     */
+    private static JsonObject serializeThinking(AIBotConfig.DeepSeek config) {
+        JsonObject thinking = new JsonObject();
+        boolean enabled = Boolean.TRUE.equals(config.thinking());
+        thinking.addProperty("type", enabled ? "enabled" : "disabled");
+        if (enabled) {
+            thinking.addProperty("reasoning_effort", config.reasoningEffort());
+        }
+        return thinking;
+    }
+
+    private static JsonArray serializeMessages(List<ChatMessage> history) {
+        JsonArray messages = new JsonArray();
+        for (ChatMessage message : history) {
+            JsonObject object = new JsonObject();
+            object.addProperty("role", message.role());
+            if (message.content() != null) {
+                object.addProperty("content", message.content());
+            } else {
+                object.add("content", null);
+            }
+            if (message.toolCalls() != null && !message.toolCalls().isEmpty()) {
+                JsonArray toolCalls = new JsonArray();
+                for (ChatToolCall call : message.toolCalls()) {
+                    JsonObject callObject = new JsonObject();
+                    callObject.addProperty("id", call.id());
+                    callObject.addProperty("type", "function");
+                    JsonObject function = new JsonObject();
+                    function.addProperty("name", call.name());
+                    function.addProperty("arguments", call.arguments() == null ? "{}" : call.arguments());
+                    callObject.add("function", function);
+                    toolCalls.add(callObject);
+                }
+                object.add("tool_calls", toolCalls);
+            }
+            if (message.toolCallId() != null) {
+                object.addProperty("tool_call_id", message.toolCallId());
+            }
+            if (message.name() != null) {
+                object.addProperty("name", message.name());
+            }
+            messages.add(object);
+        }
+        return messages;
+    }
+
+    private static JsonArray serializeTools(List<ToolDefinition> tools) {
+        JsonArray array = new JsonArray();
+        for (ToolDefinition tool : tools) {
+            JsonObject wrapper = new JsonObject();
+            wrapper.addProperty("type", "function");
+            JsonObject function = new JsonObject();
+            function.addProperty("name", tool.name());
+            function.addProperty("description", tool.description());
+            function.add("parameters", tool.parametersSchema());
+            wrapper.add("function", function);
+            array.add(wrapper);
+        }
+        return array;
+    }
+
+    static ChatResponse parseResponse(String body) throws DeepSeekApiException {
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonArray choices = root.has("choices") && root.get("choices").isJsonArray()
+                    ? root.getAsJsonArray("choices")
+                    : null;
+            if (choices == null || choices.isEmpty()) {
+                throw new DeepSeekApiException("empty_choices");
+            }
+            JsonObject choice = choices.get(0).getAsJsonObject();
+            JsonObject message = choice.getAsJsonObject("message");
+            String content = nullableString(message.get("content"));
+            String finishReason = nullableString(choice.get("finish_reason"));
+            List<ChatToolCall> toolCalls = new ArrayList<>();
+            if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
+                for (JsonElement element : message.getAsJsonArray("tool_calls")) {
+                    JsonObject call = element.getAsJsonObject();
+                    JsonObject function = call.getAsJsonObject("function");
+                    toolCalls.add(new ChatToolCall(
+                            nullableString(call.get("id")),
+                            nullableString(function.get("name")),
+                            nullableString(function.get("arguments"))));
+                }
+            }
+            JsonObject usage = root.has("usage") && root.get("usage").isJsonObject() ? root.getAsJsonObject("usage") : new JsonObject();
+            int promptTokens = intField(usage, "prompt_tokens");
+            int completionTokens = intField(usage, "completion_tokens");
+            int cacheHitTokens = intField(usage, "prompt_cache_hit_tokens");
+            int reasoningTokens = usage.has("completion_tokens_details")
+                    && usage.get("completion_tokens_details").isJsonObject()
+                    ? intField(usage.getAsJsonObject("completion_tokens_details"), "reasoning_tokens")
+                    : 0;
+            BotLog.api(null, "api_response_received",
+                    "tokens_in", promptTokens,
+                    "tokens_out", completionTokens,
+                    "reasoning_tokens", reasoningTokens,
+                    "cache_hit", cacheHitTokens,
+                    "finish_reason", finishReason);
+            // 思考与正文共享额度:被 length 截断且没拿到任何可执行输出时必须显式告警,
+            // 否则调用方只会看到一次“无动作”的空决策。
+            if ("length".equals(finishReason) && toolCalls.isEmpty()
+                    && (content == null || content.isBlank())) {
+                BotLog.warn(LogCategory.API, null, "api_truncated_before_output",
+                        "reasoning_tokens", reasoningTokens,
+                        "completion_tokens", completionTokens);
+            }
+            return new ChatResponse(content, toolCalls, finishReason, promptTokens, completionTokens, cacheHitTokens);
+        } catch (DeepSeekApiException exception) {
+            BotLog.warn(LogCategory.API, null, "api_parse_error", "reason", exception.getMessage(), "body_excerpt", body.substring(0, Math.min(200, body.length())));
+            throw exception;
+        } catch (RuntimeException exception) {
+            BotLog.error("api_parse_error", exception, "body_excerpt", body.substring(0, Math.min(200, body.length())));
+            throw new DeepSeekApiException("bad_response: " + exception.getMessage(), exception);
+        }
+    }
+
+    private static String nullableString(JsonElement element) {
+        return element == null || element.isJsonNull() ? null : element.getAsString();
+    }
+
+    private static int intField(JsonObject object, String name) {
+        return object.has(name) && !object.get(name).isJsonNull() ? object.get(name).getAsInt() : 0;
+    }
+}

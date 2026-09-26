@@ -1,0 +1,544 @@
+package io.github.zoyluo.aibot.task;
+
+import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.mode.FakePlayerMotion;
+import io.github.zoyluo.aibot.pathfinding.Standability;
+import net.minecraft.block.BlockState;
+import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * SAFE-1 / NAV-12:执行期环境安全网。每 tick 在所有其它检查之前运行,只在"真正致命地形"
+ * (溺水 / 站在岩浆里或将陷入 / 高坠落即将砸地)时即时接管 ActionPack 自救,脱险后让出控制。
+ *
+ * 设计要点:
+ * - 在 BotTickCoordinator 的每 bot 循环最前面调用;返回 true 表示本 tick 已接管,后续 watcher 跳过。
+ * - 它在 TaskManager.tickAll(任务驱动 ActionPack)之后运行(见 AIBotMod tick 顺序),
+ *   因此可以在危险 tick 覆盖任务设置的移动输入,危险解除后任务输入照常生效。
+ * - 不杀任务；fake player 无客户端 travel,水中返岸必须用逐格、可验证的物理移动。
+ */
+public final class NavSafetyNet {
+    public static final NavSafetyNet INSTANCE = new NavSafetyNet();
+
+    private static final int AIR_SURFACE_THRESHOLD = 120; // 满 300;低于此且在水下→上浮换气
+    private static final int EMERGENCY_AIR = 60;           // 低于此且上浮无望→紧急传送到可呼吸落点
+    // FollowTask renews this tiny lease only while it is physically swimming toward a waterborne
+    // player and still has a generous oxygen margin.  It is deliberately not a general "ignore
+    // water" switch: expiry, target transitions, and low air immediately restore normal rescue.
+    private static final int FOLLOW_SWIM_LEASE_TICKS = 6;
+    private static final int BREATHE_SCAN_UP = 5;          // 头顶向上找空气的格数
+    private static final int RESCUE_RADIUS_H = 16;
+    private static final int RESCUE_RADIUS_V = 16;
+    private static final int SUFFOCATION_CLIMB_UP = 24;   // 窒息脱困优先垂直向上钻出的最大格数(地表方向)
+    private final Map<UUID, Integer> nextLogTick = new ConcurrentHashMap<>();
+    // SAFE-DROWN2:水危机接管标志。旧逻辑只在 submerged&&air<阈值 的 tick 接管(jump 一口气),
+    // bot 露头 air 回升就放手 → 任务的移动输入又把它怼回水里 → 反复半淹、hp 被溺水伤害磨光
+    //(实测 hunt roam 路过湖:30s 内 navsafe 触发 12 次仍 drowned)。改:一旦触发即置危机态,
+    // 持续接管(jump+朝最近可呼吸岸点游)直到脚踩实地才释放——自救的目标是"上岸",不是"换口气"。
+    private final Map<UUID, BlockPos> waterRescueShore = new ConcurrentHashMap<>();
+    // SAFE-DROWN3:水危机开始 tick。游向岸点可能永远到不了(岸壁 2 格高跳不上去/被流推回,
+    // 实测平原湖远征 hp 2.2 仍 drowned)——危机持续超时就放弃体面,直接紧急传送上岸保命。
+    private final Map<UUID, Integer> waterRescueSince = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
+    private static final int WATER_RESCUE_TELEPORT_AFTER = 200; // 10s 还没脱水 → 强制传送
+
+    private NavSafetyNet() {
+    }
+
+    public void clear(AIPlayerEntity bot) {
+        UUID id = bot.getUuid();
+        nextLogTick.remove(id);
+        waterRescueShore.remove(id);
+        waterRescueSince.remove(id);
+        followSwimLeaseUntil.remove(id);
+    }
+
+    public void clearAll() {
+        nextLogTick.clear();
+        waterRescueShore.clear();
+        waterRescueSince.clear();
+        followSwimLeaseUntil.clear();
+    }
+
+    /**
+     * Lets a task hand water recovery to the shared physical safety controller before air is low.
+     * The placeholder is replaced with the nearest dry shore in {@link #tickBot}; no teleport or
+     * inventory mutation is performed here.
+     */
+    public void requestWaterRescue(AIPlayerEntity bot) {
+        waterRescueShore.putIfAbsent(bot.getUuid(), bot.getBlockPos().toImmutable());
+    }
+
+    public boolean isWaterRescueActive(AIPlayerEntity bot) {
+        return waterRescueShore.containsKey(bot.getUuid());
+    }
+
+    /**
+     * Authorizes one short, high-air continuation of FollowTask's verified swim movement.
+     * Package-private on purpose: no arbitrary task may opt out of the drowning safety net.
+     */
+    void renewFollowSwim(AIPlayerEntity bot) {
+        if (bot.getAir() <= AIR_SURFACE_THRESHOLD) {
+            clearFollowSwim(bot);
+            return;
+        }
+        followSwimLeaseUntil.put(bot.getUuid(), bot.getServer().getTicks() + FOLLOW_SWIM_LEASE_TICKS);
+        // A prior rescue is for an accidental water entry.  An actively renewed, high-air swim
+        // follow is a different, short-lived intent and must not inherit that old controller.
+        waterRescueShore.remove(bot.getUuid());
+        waterRescueSince.remove(bot.getUuid());
+    }
+
+    /** Clears the narrow FollowTask swim lease on cancellation or any non-swim transition. */
+    void clearFollowSwim(AIPlayerEntity bot) {
+        followSwimLeaseUntil.remove(bot.getUuid());
+    }
+
+    private boolean hasFollowSwimLease(AIPlayerEntity bot, int currentTick) {
+        Integer until = followSwimLeaseUntil.get(bot.getUuid());
+        if (until == null || until < currentTick || bot.getAir() <= AIR_SURFACE_THRESHOLD) {
+            followSwimLeaseUntil.remove(bot.getUuid());
+            return false;
+        }
+        return true;
+    }
+
+    public boolean tickBot(MinecraftServer server, AIPlayerEntity bot) {
+        if (!bot.isAlive()) {
+            return false;
+        }
+        ServerWorld world = bot.getServerWorld();
+        BlockPos feet = bot.getBlockPos();
+
+        // 0) 窒息/卡方块:玩家身体盒真实侵入实体碰撞体时,优先**向上**钻出地表。
+        // 不能只看 getBlockPos() 所在整格：dirt_path/slab 等低矮支撑会让正常站立玩家的
+        // floored BlockPos 落在支撑格内，但实体 AABB 仅与其顶面接触，并没有被活埋。
+        if (!FakePlayerMotion.isBlockCollisionFree(bot)
+                && escapeSuffocation(bot, world, feet)) {
+            throttledLog(server, bot, "navsafe_suffocation_snap", feet);
+            return true;
+        }
+
+        // 1) 岩浆:站在岩浆里 / 脚下是岩浆 → 立即逃离(最高优先级)
+        if (inLava(world, feet) || inLava(world, feet.down())) {
+            escapeLava(bot, world, feet);
+            throttledLog(server, bot, "navsafe_lava_escape", feet);
+            return true;
+        }
+
+        // 2) 溺水/水危机:触发后持续接管到上岸(见 waterRescueShore 注释)。
+        if (hasFollowSwimLease(bot, server.getTicks())) {
+            // The lease is renewed only by an active FollowTask and only above the safety oxygen
+            // threshold.  Once air falls, the normal branch below immediately resumes rescue.
+            return false;
+        }
+        boolean inCrisis = waterRescueShore.containsKey(bot.getUuid());
+        if (!inCrisis && bot.isSubmergedInWater()) {
+            inCrisis = true; // 新触发
+        }
+        if (inCrisis) {
+            // Fluid blocks can disappear/spread from vanilla scheduled ticks without going
+            // through our block actions, so the global standability cache may describe the
+            // previous water shape. Rescue decisions must use the current shape every tick.
+            Standability.clearCache();
+            // 释放条件:到达经服务端方块状态验证的干燥可站位 → 危机解除,交还控制。
+            // Fake player 的逐格物理移动没有客户端落地包，isOnGround() 可能在已经站到
+            // 实体地面后仍为 false；继续依赖它会把 bot 在两个干地格之间来回搬运。
+            if (isDryStandable(bot, world, feet)) {
+                waterRescueShore.remove(bot.getUuid());
+                waterRescueSince.remove(bot.getUuid());
+                // The old navigator may still contain the DROP_DOWN edge that caused the rescue.
+                // Cancel the complete action stack before returning control or it will execute the
+                // same wet edge again on the next tick.
+                bot.getActionPack().stopAll();
+                return false;
+            }
+            int now = server.getTicks();
+            Integer since = waterRescueSince.putIfAbsent(bot.getUuid(), now);
+            // SAFE-DROWN:空气危急且头顶无空气可上浮(被石头封顶的水兜)→ 紧急传送到最近可呼吸落点。
+            // SAFE-DROWN3:或者危机拖太久(游向岸点到不了:岸壁高/水流推)→ 同样强制传送保命。
+            boolean rescueTimedOut = since != null && now - since > WATER_RESCUE_TELEPORT_AFTER;
+            if (rescueTimedOut || (bot.getAir() <= EMERGENCY_AIR && !breathableAbove(world, feet))) {
+                if (emergencyTeleportToAir(bot, world, feet)) {
+                    waterRescueShore.remove(bot.getUuid());
+                    waterRescueSince.remove(bot.getUuid());
+                    throttledLog(server, bot, "navsafe_drown_teleport", feet);
+                    return true;
+                }
+            }
+            // First prove a physically connected water route. The old Euclidean-only shore
+            // choice could select a dry cell directly behind a wall and then reject every first
+            // step because it temporarily increased straight-line distance. In a flooded cave
+            // that left the bot motionless until strict-survival denied the teleport fallback.
+            WaterEscapeStep escape = findPhysicalWaterEscape(world, feet);
+            if (escape != null) {
+                waterRescueShore.put(bot.getUuid(), escape.shore().toImmutable());
+                boolean dryLanding = isDryStandableCell(world, escape.next());
+                boolean moved = dryLanding
+                        ? FakePlayerMotion.stepToStandable(
+                                bot, escape.next(), "navsafe_water_rescue")
+                        : FakePlayerMotion.swimStepTo(bot, escape.next(), "navsafe_water_rescue");
+                if (moved) {
+                    throttledLog(server, bot, "navsafe_water_step", feet);
+                    return true;
+                }
+            }
+            // Surface only when oxygen is actually low. At full air this used to pre-empt the
+            // cached shore route from a lower water cell, then the shore controller deliberately
+            // stepped back down from the top cell on the next tick. The two correct local actions
+            // therefore formed an endless Y/Y+1 policy oscillation. Connected shore movement
+            // remains the first choice; emergency breathing is a bounded fallback.
+            if (bot.getAir() <= AIR_SURFACE_THRESHOLD
+                    && physicalStepTowardAir(bot, world, feet)) {
+                throttledLog(server, bot, "navsafe_surface_for_air", feet);
+                return true;
+            }
+            // Legacy local fallback:缓存的还有效就用,否则重找(最近"可站+脚头都是空气"的落点)。
+            BlockPos shore = waterRescueShore.get(bot.getUuid());
+            if (shore == null || shore.equals(feet) || !Standability.isStandable(world, shore)) {
+                shore = findNearestBreathableStandable(world, feet).orElse(null);
+            }
+            if (shore != null) {
+                waterRescueShore.put(bot.getUuid(), shore.toImmutable());
+                // Server-side fake players do not execute client-authored travel, so merely setting
+                // forward/jump leaves them motionless. Advance one validated adjacent swim/shore
+                // cell per tick; this is ordinary local movement, not privileged teleportation.
+                if (physicalStepTowardShore(bot, world, feet, shore)) {
+                    throttledLog(server, bot, "navsafe_water_step", feet);
+                    return true;
+                }
+                double yaw = Math.toDegrees(Math.atan2(
+                        -(shore.getX() + 0.5D - bot.getX()), shore.getZ() + 0.5D - bot.getZ()));
+                bot.setYaw((float) yaw);
+                bot.setHeadYaw((float) yaw);
+                bot.setBodyYaw((float) yaw);
+                bot.getActionPack().setForward(1.0F); // 朝岸游
+            } else {
+                waterRescueShore.put(bot.getUuid(), feet.toImmutable()); // 无岸点(开阔深水):占位保持危机态,先上浮
+                bot.getActionPack().setForward(0.0F);
+            }
+            bot.getActionPack().setSprinting(false);
+            bot.getActionPack().setJumping(true); // 水中持续 jump = 上浮/游泳
+            throttledLog(server, bot, "navsafe_surface_for_air", feet);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static WaterEscapeStep findPhysicalWaterEscape(ServerWorld world, BlockPos start) {
+        Standability.clearCache();
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+        Map<BlockPos, BlockPos> previous = new HashMap<>();
+        HashSet<BlockPos> visited = new HashSet<>();
+        BlockPos origin = start.toImmutable();
+        queue.add(origin);
+        visited.add(origin);
+
+        while (!queue.isEmpty()) {
+            BlockPos current = queue.removeFirst();
+            for (BlockPos candidate : waterEscapeNeighbors(current)) {
+                if (Math.abs(candidate.getX() - origin.getX()) > RESCUE_RADIUS_H
+                        || Math.abs(candidate.getZ() - origin.getZ()) > RESCUE_RADIUS_H
+                        || Math.abs(candidate.getY() - origin.getY()) > RESCUE_RADIUS_V
+                        || !visited.add(candidate)) {
+                    continue;
+                }
+                if (!passableWaterColumn(world, candidate)) {
+                    continue;
+                }
+                previous.put(candidate, current);
+                if (isDryStandableCell(world, candidate)) {
+                    BlockPos first = candidate;
+                    while (previous.containsKey(first)
+                            && !previous.get(first).equals(origin)) {
+                        first = previous.get(first);
+                    }
+                    return new WaterEscapeStep(first.toImmutable(), candidate.toImmutable());
+                }
+                if (isWaterSwimCell(world, candidate)) {
+                    queue.addLast(candidate);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static List<BlockPos> waterEscapeNeighbors(BlockPos current) {
+        java.util.ArrayList<BlockPos> result = new java.util.ArrayList<>(14);
+        result.add(current.up());
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            result.add(current.offset(direction));
+            result.add(current.offset(direction).up());
+            result.add(current.offset(direction).down());
+        }
+        result.add(current.down());
+        return result;
+    }
+
+    private static boolean passableWaterColumn(ServerWorld world, BlockPos candidate) {
+        BlockState feet = world.getBlockState(candidate);
+        BlockState head = world.getBlockState(candidate.up());
+        return feet.getCollisionShape(world, candidate).isEmpty()
+                && head.getCollisionShape(world, candidate.up()).isEmpty()
+                && !Standability.isDangerous(feet)
+                && !Standability.isDangerous(head)
+                && (isWaterSwimCell(world, candidate) || isDryStandableCell(world, candidate));
+    }
+
+    private static boolean isWaterSwimCell(ServerWorld world, BlockPos candidate) {
+        return world.getFluidState(candidate).isIn(FluidTags.WATER)
+                || world.getFluidState(candidate.up()).isIn(FluidTags.WATER);
+    }
+
+    private static boolean isDryStandableCell(ServerWorld world, BlockPos candidate) {
+        return world.getFluidState(candidate).isEmpty()
+                && world.getFluidState(candidate.up()).isEmpty()
+                && Standability.isStandable(world, candidate);
+    }
+
+    private static boolean physicalStepTowardAir(AIPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  BlockPos feet) {
+        if (!isWaterSwimCell(world, feet)) {
+            return false;
+        }
+        BlockPos above = feet.up();
+        if (!world.getBlockState(above).getCollisionShape(world, above).isEmpty()
+                || !world.getBlockState(above.up()).getCollisionShape(world, above.up()).isEmpty()) {
+            return false;
+        }
+        if (!isWaterSwimCell(world, above)) {
+            return false;
+        }
+        return FakePlayerMotion.swimStepTo(bot, above, "navsafe_water_surface");
+    }
+
+    private record WaterEscapeStep(BlockPos next, BlockPos shore) {
+    }
+
+    /**
+     * 窒息脱困:优先**垂直向上**找第一个可站点(地表方向)并传送上去。
+     * 修"越救越深"——旧实现用 snapPlayerToNearestStandable 找欧氏最近可站点,bot 被埋时最近点
+     * 往往在下方/侧下方,反复 snap 把 bot 一格格往坑里拽(实测 994 列 64→63→62→61 困死)。
+     * 向上钻出是被埋的正解(Standability.isStandable 已保证落点脚位+头位空气、脚下有支撑=能站能呼吸);
+     * 向上 SUFFOCATION_CLIMB_UP 格内无解(深埋封顶)才回退到全向最近可站点,至少脱离当前窒息格。
+     */
+    private boolean escapeSuffocation(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+        // 缓存必脏:走到"被埋"这一步说明方块刚变过(塌方/活埋场景 setBlockState),Standability 缓存
+        // 还是变更前的世界——拿旧值判"向上无可站点"会走 fallback 全向 snap,把 bot 拽进远处洞里
+        //(实测平原活埋:向上 2 格明明可站,却被 snap 到 y20 黑洞再触发保命传送,场景 aborted)。
+        Standability.clearCache();
+        int top = world.getBottomY() + world.getHeight();
+        for (int dy = 1; dy <= SUFFOCATION_CLIMB_UP && feet.getY() + dy < top - 1; dy++) {
+            BlockPos candidate = feet.up(dy);
+            if (Standability.isStandable(world, candidate)) {
+                boolean moved = io.github.zoyluo.aibot.mode.CapabilityRuntime.run(
+                        bot, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                        "navsafe_suffocation", () -> {
+                            bot.getActionPack().stopAll();
+                            bot.teleport(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
+                                    Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+                        });
+                if (moved) {
+                    Standability.clearCache();
+                    return true;
+                }
+                // strict_survival deliberately denies the long-range upward teleport.  That denial
+                // must not suppress the ordinary adjacent escape below: a freshly collapsed gravel
+                // column commonly leaves the previous tunnel cell one physical step away.  The old
+                // early return left OreDig driving forward while the bot suffocated in place.
+                break;
+            }
+        }
+        // 向上无解(深埋/封顶)→ 回退原逻辑:全向最近可站点。
+        boolean escaped = bot.getActionPack().snapPlayerToNearestStandable("navsafe_suffocation");
+        if (escaped) {
+            // The path that entered the collision is no longer valid after an emergency side-step.
+            // Keeping its executor alive lets it replay the same blocked edge on the next entity
+            // tick. In strict survival that produced an endless two-cell jump oscillation: the
+            // safety net escaped onto a standable neighbour, then the stale hunt route drove the
+            // clientless player straight back into the obstruction. Retire every old controller;
+            // the owning task will observe an idle route and choose a fresh waypoint.
+            bot.getActionPack().stopAll();
+        }
+        return escaped;
+    }
+
+    // 头顶 BREATHE_SCAN_UP 格内是否能露头呼吸(遇到非水的可通过格=能呼吸;遇到实体方块顶盖=封死)
+    private static boolean breathableAbove(ServerWorld world, BlockPos feet) {
+        for (int dy = 1; dy <= BREATHE_SCAN_UP; dy++) {
+            BlockPos p = feet.up(dy);
+            BlockState s = world.getBlockState(p);
+            boolean water = s.getFluidState().isIn(FluidTags.WATER);
+            boolean solid = !s.getCollisionShape(world, p).isEmpty();
+            if (!water && !solid) {
+                return true;   // 非水的空气格 → 上浮能呼吸
+            }
+            if (solid) {
+                return false;  // 撞到实体方块顶盖,上浮无望
+            }
+        }
+        return false;
+    }
+
+    private boolean emergencyTeleportToAir(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+        Optional<BlockPos> safe = findNearestBreathableStandable(world, feet);
+        if (safe.isEmpty()) {
+            return false;
+        }
+        BlockPos to = safe.get();
+        boolean moved = io.github.zoyluo.aibot.mode.CapabilityRuntime.run(
+                bot, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                "navsafe_drowning", () -> {
+                    bot.getActionPack().stopAll();
+                    bot.teleport(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
+                            Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+                });
+        if (moved) {
+            Standability.clearCache();
+        }
+        return moved;
+    }
+
+    // 最近的"可站 + 脚位与头位都是空气(可呼吸,不是水)"落点
+    private static Optional<BlockPos> findNearestBreathableStandable(ServerWorld world, BlockPos origin) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -RESCUE_RADIUS_H; dx <= RESCUE_RADIUS_H; dx++) {
+            for (int dz = -RESCUE_RADIUS_H; dz <= RESCUE_RADIUS_H; dz++) {
+                for (int dy = -RESCUE_RADIUS_V; dy <= RESCUE_RADIUS_V; dy++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    if (cursor.equals(origin)) {
+                        continue; // proactive recovery must actually leave the wet edge/origin
+                    }
+                    if (!Standability.isStandable(world, cursor)) {
+                        continue;
+                    }
+                    if (!world.getBlockState(cursor).isAir() || !world.getBlockState(cursor.up()).isAir()) {
+                        continue;   // 脚位或头位是水/方块 → 不可呼吸
+                    }
+                    double distance = cursor.getSquaredDistance(origin);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        best = cursor.toImmutable();
+                    }
+                }
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    private static boolean physicalStepTowardShore(AIPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   BlockPos feet,
+                                                   BlockPos shore) {
+        double currentDistance = feet.getSquaredDistance(shore);
+        java.util.List<BlockPos> candidates = new java.util.ArrayList<>();
+        for (int dy : new int[]{1, 0, -1}) {
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    int changedAxes = (dx == 0 ? 0 : 1) + (dy == 0 ? 0 : 1) + (dz == 0 ? 0 : 1);
+                    if (changedAxes == 0 || changedAxes > 2) {
+                        continue;
+                    }
+                    BlockPos candidate = feet.add(dx, dy, dz);
+                    if (candidate.getSquaredDistance(shore) >= currentDistance) {
+                        continue;
+                    }
+                    BlockState at = world.getBlockState(candidate);
+                    BlockState head = world.getBlockState(candidate.up());
+                    if (!at.getCollisionShape(world, candidate).isEmpty()
+                            || !head.getCollisionShape(world, candidate.up()).isEmpty()
+                            || Standability.isDangerous(at)
+                            || Standability.isDangerous(head)) {
+                        continue;
+                    }
+                    boolean waterCell = world.getFluidState(candidate).isIn(FluidTags.WATER);
+                    // Air immediately above water is breathable but not a landing. Treating it as
+                    // a swim cell made the fake player step out of the water for one tick, fall
+                    // back, and repeat forever between the same two Y levels. Water cells may be
+                    // traversed explicitly; dry cells still need real footing.
+                    if (!waterCell && !Standability.isStandable(world, candidate)) {
+                        continue;
+                    }
+                    candidates.add(candidate.toImmutable());
+                }
+            }
+        }
+        candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.getSquaredDistance(shore)));
+        for (BlockPos candidate : candidates) {
+            boolean waterCell = world.getFluidState(candidate).isIn(FluidTags.WATER)
+                    || world.getFluidState(candidate.up()).isIn(FluidTags.WATER);
+            boolean moved = waterCell
+                    ? FakePlayerMotion.swimStepTo(bot, candidate, "navsafe_water_rescue")
+                    : FakePlayerMotion.stepToStandable(bot, candidate, "navsafe_water_rescue");
+            if (moved) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDryStandable(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+        return !bot.isTouchingWater()
+                && !world.getFluidState(feet).isIn(FluidTags.WATER)
+                && !world.getFluidState(feet.up()).isIn(FluidTags.WATER)
+                && Standability.isStandable(world, feet);
+    }
+
+    private static void escapeLava(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+        // 朝最近的"安全可站"水平方向冲出 + 起跳
+        Direction best = null;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos side = feet.offset(dir);
+            if (!inLava(world, side) && !inLava(world, side.down())
+                    && io.github.zoyluo.aibot.pathfinding.Standability.isStandable(world, side)) {
+                best = dir;
+                break;
+            }
+        }
+        if (best != null) {
+            double yaw = Math.toDegrees(Math.atan2(-best.getOffsetX(), best.getOffsetZ()));
+            bot.setYaw((float) yaw);
+            bot.setHeadYaw((float) yaw);
+            bot.setBodyYaw((float) yaw);
+            bot.getActionPack().setForward(1.0F);
+        }
+        // 无论是否找到方向,起跳脱离岩浆体
+        bot.getActionPack().setJumping(true);
+        bot.getActionPack().jumpOnce();
+    }
+
+    private static boolean inLava(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        return state.getFluidState().isIn(FluidTags.LAVA);
+    }
+
+    private void throttledLog(MinecraftServer server, AIPlayerEntity bot, String event, BlockPos pos) {
+        int now = server.getTicks();
+        if (now < nextLogTick.getOrDefault(bot.getUuid(), 0)) {
+            return;
+        }
+        nextLogTick.put(bot.getUuid(), now + 40);
+        BotLog.danger(bot, event,
+                "pos", pos.getX() + "," + pos.getY() + "," + pos.getZ(),
+                "air", bot.getAir(),
+                "hp", String.format(java.util.Locale.ROOT, "%.1f", bot.getHealth()));
+    }
+}
