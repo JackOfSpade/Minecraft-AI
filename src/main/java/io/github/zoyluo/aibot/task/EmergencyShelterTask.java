@@ -62,6 +62,13 @@ public final class EmergencyShelterTask extends AbstractTask {
      */
     private static final Map<UUID, ShelterCleanupDebt> PENDING_CLEANUPS = new ConcurrentHashMap<>();
     private static final int CLEANUP_CLAIM_LEASE_TICKS = 100;
+    /**
+     * A cleanup debt is world-global (any idle bot in the same dimension may eventually claim it),
+     * but with no distance bound a bot on the far side of a large world would be scheduled a
+     * background chore for a shelter it has no practical reason to travel to. Bounding this also
+     * keeps unrelated, far-apart concurrent test fixtures from cross-contaminating each other.
+     */
+    private static final double CLEANUP_MAX_DISTANCE = 128.0D;
 
     private enum Phase {
         RETREAT_TO_SAFE_ANCHOR,
@@ -1474,24 +1481,27 @@ public final class EmergencyShelterTask extends AbstractTask {
         registerCleanupDebt(bot, debt.anchor(), debt.ownedPlacements);
     }
 
-    /** True when this world has at least one exact-state bot-owned shelter artifact to remove. */
+    /** True when this world has at least one exact-state bot-owned shelter artifact to remove
+     *  within a reasonable travel distance of this bot. */
     static boolean hasPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
-            return PENDING_CLEANUPS.values().stream().anyMatch(debt -> debt.matchesDimension(bot));
+            return PENDING_CLEANUPS.values().stream()
+                    .anyMatch(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot));
         }
     }
 
     /**
-     * Claims the nearest eligible artifact in this dimension.  Claims are leased, not permanent,
-     * so an interrupted owner does not prevent a nearby idle bot from helping later.
+     * Claims the nearest eligible artifact in this dimension, within a reasonable travel distance.
+     * Claims are leased, not permanent, so an interrupted owner does not prevent a nearby idle bot
+     * from helping later.
      */
     static Optional<ShelterCleanupDebt> claimPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
             int now = bot.getServer().getTicks();
             ShelterCleanupDebt selected = PENDING_CLEANUPS.values().stream()
-                    .filter(debt -> debt.matchesDimension(bot))
+                    .filter(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot))
                     .filter(debt -> debt.claimAvailableTo(bot.getUuid(), now))
                     .min(Comparator.comparingDouble(debt ->
                             debt.anchor().getSquaredDistance(bot.getBlockPos())))
@@ -1820,6 +1830,11 @@ public final class EmergencyShelterTask extends AbstractTask {
 
         boolean matchesDimension(AIPlayerEntity bot) {
             return dimension.equals(bot.getServerWorld().getRegistryKey().getValue().toString());
+        }
+
+        boolean isWithinReasonableRange(AIPlayerEntity bot) {
+            return anchor.getSquaredDistance(bot.getBlockPos())
+                    <= CLEANUP_MAX_DISTANCE * CLEANUP_MAX_DISTANCE;
         }
 
         boolean claimAvailableTo(UUID botId, int now) {
