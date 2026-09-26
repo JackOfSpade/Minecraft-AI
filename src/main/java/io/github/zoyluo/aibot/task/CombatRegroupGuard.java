@@ -7,10 +7,13 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import java.util.Optional;
 
 /**
- * Decides the per-bot squad-regroup hysteresis: three or more simultaneously aggro'd hostiles pull
- * a bot back toward its owning player to within {@link #INNER_RADIUS} blocks. Once there, ordinary
- * combat resumes and the bot is free to roam/fight until it drifts past {@link #OUTER_RADIUS}
- * blocks from the player while still that heavily aggro'd, at which point it falls back again.
+ * Decides the per-bot squad-regroup policy, purely in terms of the bot's current distance from its
+ * owning player: within {@link #NO_RETREAT_DISTANCE} blocks of the player, never retreat. Beyond
+ * that, three or more hostiles aggro'd within {@link #AGGRO_SCAN_DISTANCE} blocks of the bot pull it
+ * back toward the player until it reaches {@link #RETREAT_TARGET_DISTANCE} blocks away. Once a
+ * retreat has started it keeps going all the way to {@link #RETREAT_TARGET_DISTANCE} regardless of
+ * the aggro count fluctuating mid-flight, so a bot hovering near the trigger boundary does not
+ * flicker in and out of a forced regroup every tick.
  *
  * <p>This class holds no per-bot state of its own -- {@code currentlyRegrouping} is derived by the
  * caller from whether a {@link CombatRegroupTask} already owns (or is paused for) the bot, so there
@@ -18,15 +21,18 @@ import java.util.Optional;
  */
 final class CombatRegroupGuard {
     static final int AGGRO_THRESHOLD = 3;
-    static final double INNER_RADIUS = 5.0D;
-    static final double OUTER_RADIUS = 15.0D;
-    private static final double AGGRO_SCAN_RANGE = 24.0D;
+    /** At or below this distance from the owning player, retreat never triggers. */
+    static final double NO_RETREAT_DISTANCE = 10.0D;
+    /** Once triggered, a retreat continues until the bot is this close to the owning player. */
+    static final double RETREAT_TARGET_DISTANCE = 5.0D;
+    /** How far around the bot itself (not the player) hostiles are counted for the aggro check. */
+    private static final double AGGRO_SCAN_DISTANCE = 10.0D;
 
     private CombatRegroupGuard() {
     }
 
     static int countAggro(AIPlayerEntity bot) {
-        return CombatCore.countAggroedHostiles(bot, AGGRO_SCAN_RANGE);
+        return CombatCore.countAggroedHostiles(bot, AGGRO_SCAN_DISTANCE);
     }
 
     static Optional<ServerPlayerEntity> resolveOwner(AIPlayerEntity bot) {
@@ -44,15 +50,15 @@ final class CombatRegroupGuard {
     }
 
     /**
-     * The single hysteresis decision point, isolated from world/entity state so it is directly
-     * unit-testable. The two thresholds are intentionally different (start at {@link
-     * #OUTER_RADIUS}, release at {@link #INNER_RADIUS}) so a bot hovering near the boundary does
-     * not flicker in and out of a forced regroup every tick.
+     * The single decision point, isolated from world/entity state so it is directly unit-testable.
+     * A retreat already in progress keeps going until {@link #RETREAT_TARGET_DISTANCE}, even while
+     * passing back through {@link #NO_RETREAT_DISTANCE} -- that threshold only gates whether a NEW
+     * retreat starts, not whether one already under way is allowed to finish.
      */
     static boolean shouldRegroup(double distanceToOwner, int aggroCount, boolean currentlyRegrouping) {
         if (currentlyRegrouping) {
-            return distanceToOwner > INNER_RADIUS;
+            return distanceToOwner > RETREAT_TARGET_DISTANCE;
         }
-        return distanceToOwner > OUTER_RADIUS && aggroCount >= AGGRO_THRESHOLD;
+        return distanceToOwner > NO_RETREAT_DISTANCE && aggroCount >= AGGRO_THRESHOLD;
     }
 }

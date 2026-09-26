@@ -61,12 +61,15 @@ public final class CombatRegroupTask extends AbstractTask {
         ServerPlayerEntity player = owner.get();
         strikeAnyAdjacentHostile(bot);
         double distance = bot.distanceTo(player);
-        if (distance <= CombatRegroupGuard.INNER_RADIUS) {
+        if (distance <= CombatRegroupGuard.RETREAT_TARGET_DISTANCE) {
             bot.getActionPack().stopAll();
             BotLog.danger(bot, "combat_regroup_reached_owner", "distance", (int) distance);
             complete();
             return;
         }
+        // shouldSprint()'s own distance heuristic resets this every tick otherwise -- a swarmed
+        // fighting retreat should always sprint, the same as a real player fleeing a mob crowd.
+        bot.getActionPack().setSprinting(true);
         if (elapsed >= nextRepathElapsed && bot.getActionPack().isPathExecutorIdle()) {
             nextRepathElapsed = elapsed + REPATH_INTERVAL_TICKS;
             CombatCore.startApproach(bot, player);
