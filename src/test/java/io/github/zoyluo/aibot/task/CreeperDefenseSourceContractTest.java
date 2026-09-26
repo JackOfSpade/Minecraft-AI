@@ -24,7 +24,7 @@ class CreeperDefenseSourceContractTest {
                 + " observableCreeperSnapshots");
         int observable = source.indexOf(
                 "entity -> ObservableWorldQuery.canObserveEntity(bot, entity)", scan);
-        int fuse = source.indexOf("entity.getClientFuseTime(1.0F)", observable);
+        int fuse = source.indexOf("entity.getLerpedFuseTime(1.0F)", observable);
         int charged = source.indexOf("entity.isCharged()", fuse);
         assertTrue(scan >= 0 && observable > scan && fuse > observable && charged > fuse,
                 "fuse/charged facts must be read only after exact entity observation");

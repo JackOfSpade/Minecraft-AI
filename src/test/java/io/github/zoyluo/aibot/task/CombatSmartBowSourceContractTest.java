@@ -52,8 +52,8 @@ final class CombatSmartBowSourceContractTest {
     void rangedOffhandSwapNeverDropsOrOverwritesAnUnverifiedStack() throws IOException {
         String equip = read("action/EquipAction.java");
 
-        assertTrue(equip.contains("inventory.main.set(choice.mainSlot(), displacedOffhand)"));
-        assertTrue(equip.contains("ItemStack.areEqual(inventory.main.get(restoreSlot), storedOffhand)"));
+        assertTrue(equip.contains("inventory.getMainStacks().set(choice.mainSlot(), displacedOffhand)"));
+        assertTrue(equip.contains("ItemStack.areEqual(inventory.getMainStacks().get(restoreSlot), storedOffhand)"));
         assertTrue(equip.contains("ItemStack.areItemsAndComponentsEqual(currentOffhand, ammunition)"));
         assertFalse(equip.contains("dropItem"),
                 "ranged preparation/restoration must be an inventory swap, never a drop");

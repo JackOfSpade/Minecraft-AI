@@ -33,7 +33,7 @@ final class BotInventoryScreenSourceContractTest {
         assertTrue(handler.contains("return HOTBAR_SIZE + slot"));
         assertTrue(handler.contains("return slot - BOT_HOTBAR_START"));
         assertTrue(handler.contains("EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET"));
-        assertTrue(handler.contains("bot.getInventory().selectedSlot"));
+        assertTrue(handler.contains("bot.getInventory().getSelectedSlot()"));
         assertTrue(handler.contains("insertIntoPreferredEquipment"));
         assertTrue(handler.contains("class BotEquipmentSlot extends BotInventorySlot"));
         assertTrue(handler.contains("bot.equipStack(EquipmentSlot.OFFHAND, value)"));
