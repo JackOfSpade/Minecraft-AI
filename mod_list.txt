@@ -185,28 +185,20 @@ Drop-in config file: modpack/config/customtimecyle.json in this repo
                      (yes, "customtimecyle" -- that's the mod's own actual,
                      misspelled filename; don't "fix" the spelling)
 
-Requested: Daytime 30 min / Sunset 5 min / Nighttime 10 min / Sunrise 5 min,
-fully automatic with no repeated command.
+Requested (final): Daytime 30 min / Nighttime 10 min, fully automatic with
+no repeated command.
 
-WHAT'S ACTUALLY ACHIEVABLE ON 1.21.5: the mod's config file on this version
-only exposes two keys, "daytime" and "nighttime", both in ticks (20
-ticks = 1 second). There is no separate sunset/sunrise key in the 1.21.5
-build -- per the mod's own README, independent control of every phase
-(which is what would be needed to set sunset/sunrise durations on their
-own) was only added starting with the mod's build for Minecraft 26.1, a
-newer game version than the 1.21.5 this modpack is pinned to.
+(Earlier draft asked for a four-phase 30/5/10/5 day/sunset/night/sunrise
+split, but on 1.21.5 this mod's config file only exposes two keys --
+"daytime" and "nighttime", both in ticks (20 ticks = 1 second) -- with no
+separate sunset/sunrise key; per the mod's own README, independent control
+of every phase was only added starting with its build for Minecraft 26.1, a
+newer game version than the 1.21.5 this modpack is pinned to. Rather than
+fight that limitation, the request was simplified to a plain two-phase
+30/10 split, which this version's config handles natively and exactly.)
 
 The shipped config sets:
   "daytime":   36000   (30 minutes)
-  "nighttime": 24000   (20 minutes total = the requested 5+10+5)
-This gets the two totals you asked for exactly right (30 min of day, 20 min
-of "night bucket"), fully via config with no command needed. What it can't
-guarantee is the internal 5:10:5 split of that 20-minute bucket into
-sunset/true-night/sunrise -- the mod uses its own internal proportions for
-that on this version, not a user-configurable ratio.
-
-If the exact 5/10/5 sub-split matters more than staying on 1.21.5, the real
-fix is upgrading this modpack's target Minecraft version to whatever ships
-with the mod's 26.1+ build later (once the rest of the mod list also moves
-forward) -- that's a bigger, separate decision than a config drop-in, so it
-isn't done here.
+  "nighttime": 12000   (10 minutes)
+Fully via config, no command needed, and no internal-proportion caveat --
+with only two phases requested, both keys map directly and exactly.
