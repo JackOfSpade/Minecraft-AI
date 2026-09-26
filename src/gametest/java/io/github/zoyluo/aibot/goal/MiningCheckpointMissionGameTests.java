@@ -3781,7 +3781,7 @@ public final class MiningCheckpointMissionGameTests {
                     exhaustStonePickaxes(bot);
                     equipHealthyIronPickaxe(context, bot);
                     exhausted.set(true);
-                } else if (context.getTick() > 100) {
+                } else if (context.getTick() > 300) {
                     context.throwGameTestException(Text.of(
                             "rare channel fixture never reached OreDig: "
                                     + checkpointSummary(checkpoint)));

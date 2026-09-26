@@ -284,10 +284,12 @@ public final class MiningServiceResourceGameTests {
         for (Direction direction : new Direction[]{Direction.EAST, Direction.WEST}) {
             BlockPos entry = face.offset(direction);
             BlockPos sink = face.offset(direction, 2);
+            // GLASS, not DIRT: fast/no-tool to mine, and (unlike DIRT) breaking it produces no
+            // drop, so it cannot pollute the DIRT==60 seal-consumption assertion below.
             world.setBlockState(entry,
-                    Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
+                    Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(entry.up(),
-                    Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
+                    Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(sink,
                     Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(sink.up(),
@@ -2445,9 +2447,11 @@ public final class MiningServiceResourceGameTests {
         BlockPos sink = face.east(2);
         // Use a non-disposable opening material so its delayed baseline entity cannot merge with
         // a later tracked junk UUID and turn this spoil-capacity test into an identity-merge race.
+        // GLASS, not CLAY: fast/no-tool to mine and produces no drop of its own, so opening the
+        // pocket cannot add extra clay_ball to the synthetic spoil this test tracks below.
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
             bot.getServerWorld().setBlockState(
-                    cell, Blocks.OAK_PLANKS.getDefaultState(), Block.NOTIFY_ALL);
+                    cell, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
@@ -3085,7 +3089,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(maxTicks = 20)
+    @GameTest(maxTicks = 900)
     public void thirtyTwoObsidianServiceHorizonFundsAllFourWorstCaseRepairs(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceObsidianHorizonGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -3093,29 +3097,57 @@ public final class MiningServiceResourceGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 32));
         giveExhaustedStonePicks(bot, 4);
 
-        runServiceToTerminal(new MiningServiceTask(
-                Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32)), bot);
-        assertServiceResources(context, bot, 52, 24, "preflight");
-
-        exhaustAllStonePicks(bot);
-        runServiceToTerminal(new MiningServiceTask(
-                Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8), bot);
-        assertServiceResources(context, bot, 40, 16, "boundary_8");
-
-        exhaustAllStonePicks(bot);
-        runServiceToTerminal(new MiningServiceTask(
-                Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 16), 16), bot);
-        assertServiceResources(context, bot, 28, 8, "boundary_16");
-
-        exhaustAllStonePicks(bot);
-        runServiceToTerminal(new MiningServiceTask(
-                Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24), bot);
-        assertServiceResources(context, bot, 16, 0, "boundary_24");
-        cleanup(context, fixture);
+        record Stage(java.util.function.Supplier<MiningServiceTask> newTask,
+                     int stoneLike, int sticks, String name) {
+        }
+        java.util.List<Stage> stages = java.util.List.of(
+                new Stage(() -> new MiningServiceTask(
+                        Set.of(Blocks.OBSIDIAN), Map.of(),
+                        MiningServiceTask.ServicePolicy.obsidianPreflight(32)),
+                        52, 24, "preflight"),
+                new Stage(() -> new MiningServiceTask(
+                        Set.of(Blocks.OBSIDIAN), Map.of(),
+                        MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8),
+                        40, 16, "boundary_8"),
+                new Stage(() -> new MiningServiceTask(
+                        Set.of(Blocks.OBSIDIAN), Map.of(),
+                        MiningServiceTask.ServicePolicy.obsidian8(32, 16), 16),
+                        28, 8, "boundary_16"),
+                new Stage(() -> new MiningServiceTask(
+                        Set.of(Blocks.OBSIDIAN), Map.of(),
+                        MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24),
+                        16, 0, "boundary_24"));
+        int[] stageIndex = {0};
+        MiningServiceTask[] current = {null};
+        // Only the first (preflight) stage ever places/reclaims a crafting table; that reclaim's
+        // real BlockMiner/ActionPack mining only advances on genuine per-tick AIPlayerEntity.tick()
+        // calls, so this must poll across real GameTest ticks instead of the single synchronous
+        // task.tick(bot) burst runServiceToTerminal used to run each stage in.
+        context.runAtEveryTick(() -> {
+            if (current[0] == null) {
+                if (stageIndex[0] > 0) {
+                    exhaustAllStonePicks(bot);
+                }
+                current[0] = stages.get(stageIndex[0]).newTask().get();
+                current[0].start(bot);
+                return;
+            }
+            current[0].tick(bot);
+            if (current[0].state() == TaskState.RUNNING) {
+                return;
+            }
+            if (current[0].state() != TaskState.COMPLETED) {
+                throw new IllegalStateException("service horizon stage ended as "
+                        + current[0].state() + ":" + current[0].failureReason());
+            }
+            Stage stage = stages.get(stageIndex[0]);
+            assertServiceResources(context, bot, stage.stoneLike(), stage.sticks(), stage.name());
+            current[0] = null;
+            stageIndex[0]++;
+            if (stageIndex[0] >= stages.size()) {
+                cleanup(context, fixture);
+            }
+        });
     }
 
     @GameTest(maxTicks = 80)

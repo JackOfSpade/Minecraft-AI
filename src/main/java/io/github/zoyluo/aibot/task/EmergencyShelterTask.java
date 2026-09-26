@@ -44,6 +44,13 @@ public final class EmergencyShelterTask extends AbstractTask {
     private static final int PREBUILD_RETREAT_LIMIT = 260;
     private static final int EXIT_LIMIT = 500;
     private static final int DAYLIGHT_GRACE_TICKS = 100;
+    /**
+     * A non-surface shelter's HOLD phase must wait out a real minimum window before treating the
+     * bot as recovered enough to leave -- otherwise a bot that spawns already at full health/food
+     * (the common case) exits the instant the envelope seals, defeating the point of a recovery
+     * shelter. Surface shelters use the pre-existing daylight counter for the same purpose.
+     */
+    private static final int MIN_HOLD_TICKS = 100;
     private static final String ENVIRONMENTAL_ESCAPE_REQUIRED =
             "shelter_environmental_escape_required";
     private static final Direction[] HORIZONTAL = {
@@ -69,6 +76,18 @@ public final class EmergencyShelterTask extends AbstractTask {
      * keeps unrelated, far-apart concurrent test fixtures from cross-contaminating each other.
      */
     private static final double CLEANUP_MAX_DISTANCE = 128.0D;
+    /**
+     * The largest @GameTest(maxTicks=...) value anywhere in src/gametest bounds how long a single
+     * GameTest structure can remain alive. registerCleanupDebt() is only ever called once per
+     * shelter, inside that structure's own lifetime, using the JVM-global server tick counter that
+     * every concurrently-scheduled GameTest batch shares. So while the registering test is still
+     * running, the age of its debt can never exceed that test's own maxTicks. A debt older than
+     * this, regardless of distance, is therefore unambiguously left behind by an already-finished,
+     * unrelated test and must be pruned outright -- this closes the one case that slips through
+     * CLEANUP_MAX_DISTANCE alone (two unrelated fixtures placed within 128 blocks of each other in
+     * a dense batch).
+     */
+    private static final int CLEANUP_MAX_AGE_TICKS = 20_000;
 
     private enum Phase {
         RETREAT_TO_SAFE_ANCHOR,
@@ -99,6 +118,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     private BlockPos roofSupportBase;
     private BlockPos egressFeet;
     private BlockPos exitMiningTarget;
+    private Direction lastDeferredForcedDirection;
     private boolean elevatedForRoofSupport;
     private boolean surfaceShelter;
     private boolean forcePressureExit;
@@ -184,6 +204,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         pendingFailure = null;
         terminalRecorded = false;
         exitMiningTarget = null;
+        lastDeferredForcedDirection = null;
         surfaceShelter = false;
         forcePressureExit = false;
         consecutiveDaylightTicks = 0;
@@ -626,6 +647,11 @@ public final class EmergencyShelterTask extends AbstractTask {
             } else if (consecutiveDaylightTicks < DAYLIGHT_GRACE_TICKS) {
                 consecutiveDaylightTicks++;
             }
+            if (consecutiveDaylightTicks < DAYLIGHT_GRACE_TICKS) {
+                return;
+            }
+        } else if (phaseAge() < MIN_HOLD_TICKS) {
+            return;
         }
         // Healing belongs inside the sealed safety transaction. Scheduling EatTask only after the
         // door opens exposes a critical-health bot to the exact hostile the shelter was built for.
@@ -1133,6 +1159,16 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private void deferForcedEgress(AIPlayerEntity bot, String reason) {
+        Direction direction = directionTo(egressFeet);
+        if (direction != null && direction == lastDeferredForcedDirection) {
+            // The exact same forced candidate came back unusable two ticks in a row with nothing
+            // in the world able to change that (e.g. its landing support is gone for good).
+            // Further retries cannot converge, so fail closed instead of spinning until the
+            // GameTest/production watchdog timeout.
+            failShelter(bot, reason);
+            return;
+        }
+        lastDeferredForcedDirection = direction;
         exitMiner.cancel(bot);
         exitMiningTarget = null;
         egressFeet = null;
@@ -1605,8 +1641,16 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static void pruneInvalidCleanupDebts(AIPlayerEntity bot) {
+        int now = bot.getServer().getTicks();
         for (Map.Entry<UUID, ShelterCleanupDebt> entry : PENDING_CLEANUPS.entrySet()) {
             ShelterCleanupDebt debt = entry.getValue();
+            if (debt.isStale(now)) {
+                // Older than any single GameTest's own maxTicks budget: definitely a leaked
+                // artifact from an already-finished, unrelated test. Prune regardless of distance
+                // or dimension -- this is what the 128-block gate alone could not catch.
+                PENDING_CLEANUPS.remove(entry.getKey(), debt);
+                continue;
+            }
             if (!debt.matchesDimension(bot)) {
                 continue;
             }
@@ -1648,7 +1692,8 @@ public final class EmergencyShelterTask extends AbstractTask {
                 bot.getUuid(),
                 bot.getServerWorld().getRegistryKey().getValue().toString(),
                 anchor,
-                exactOwned);
+                exactOwned,
+                bot.getServer().getTicks());
         PENDING_CLEANUPS.put(debt.id(), debt);
         BotLog.action(bot, "shelter_cleanup_registered",
                 "anchor", anchor,
@@ -1805,6 +1850,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         private final String dimension;
         private final BlockPos anchor;
         private final Map<BlockPos, BlockState> remaining;
+        private final int registrationTick;
         private UUID claimant;
         private int claimTick;
 
@@ -1812,12 +1858,14 @@ public final class EmergencyShelterTask extends AbstractTask {
                                    UUID owner,
                                    String dimension,
                                    BlockPos anchor,
-                                   Map<BlockPos, BlockState> placements) {
+                                   Map<BlockPos, BlockState> placements,
+                                   int registrationTick) {
             this.id = id;
             this.owner = owner;
             this.dimension = dimension;
             this.anchor = anchor.toImmutable();
             this.remaining = new LinkedHashMap<>(placements);
+            this.registrationTick = registrationTick;
         }
 
         UUID id() {
@@ -1835,6 +1883,12 @@ public final class EmergencyShelterTask extends AbstractTask {
         boolean isWithinReasonableRange(AIPlayerEntity bot) {
             return anchor.getSquaredDistance(bot.getBlockPos())
                     <= CLEANUP_MAX_DISTANCE * CLEANUP_MAX_DISTANCE;
+        }
+
+        /** True once this debt is definitely older than any single GameTest can run, meaning the
+         *  test that created it has already ended and this is a leaked cross-test artifact. */
+        boolean isStale(int now) {
+            return now - registrationTick > CLEANUP_MAX_AGE_TICKS;
         }
 
         boolean claimAvailableTo(UUID botId, int now) {

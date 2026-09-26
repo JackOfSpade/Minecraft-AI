@@ -1,13 +1,17 @@
 package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.action.ActionResult;
+import io.github.zoyluo.aibot.action.BlockMiner;
 import io.github.zoyluo.aibot.action.BuildAction;
+import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.craft.CraftingHelper;
 import io.github.zoyluo.aibot.craft.RecipeRegistry;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -19,12 +23,14 @@ import net.minecraft.util.math.Direction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.Set;
 
 public final class CraftTask extends AbstractTask {
     private enum Phase {
         PLANNING,
         ENSURING_TABLE,
-        CRAFTING
+        CRAFTING,
+        RECLAIMING_TABLE
     }
 
     private final Item target;
@@ -33,6 +39,22 @@ public final class CraftTask extends AbstractTask {
     private CraftingHelper.CraftPlan plan;
     private int nextStep;
     private int craftedCount;
+    // Set only when THIS task itself placed a carried crafting table to satisfy a 3x3 recipe --
+    // never for a pre-existing/borrowed table -- so it knows to mine it back afterward instead of
+    // permanently donating it to the world.
+    private BlockPos selfPlacedTablePos;
+    private final BlockMiner tableReclaimMiner = new BlockMiner();
+    private int reclaimTicks;
+
+    /**
+     * Bounds RECLAIMING_TABLE. Must clear BlockMiner's own 200-tick mining ceiling with room to
+     * spare for the pickup delay and walk-over that follow, so the miner's own cap always has a
+     * chance to resolve (DONE or FAILED) before this outer best-effort guard does. Kept generous
+     * (empirically, a chase across cluttered mission terrain can take a while) since a real
+     * caller (e.g. MiningServiceTask) may hard-fail if the table isn't back by the time this
+     * gives up, whereas an over-generous cap only costs a few extra idle ticks in the rare case.
+     */
+    private static final int RECLAIM_TIMEOUT_TICKS = 550;
 
     public CraftTask(Item target, int targetCount) {
         this.target = target;
@@ -63,11 +85,13 @@ public final class CraftTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.PLANNING;
+        selfPlacedTablePos = null;
+        reclaimTicks = 0;
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (elapsed > 400) {
+        if (elapsed > 900) {
             fail("craft_timeout");
             return;
         }
@@ -75,6 +99,7 @@ public final class CraftTask extends AbstractTask {
             case PLANNING -> plan(bot);
             case ENSURING_TABLE -> ensureTable(bot);
             case CRAFTING -> craftNext(bot);
+            case RECLAIMING_TABLE -> reclaimTable(bot);
         }
     }
 
@@ -118,23 +143,29 @@ public final class CraftTask extends AbstractTask {
         ActionResult result = BuildAction.placeBlockAt(bot, placePos);
         if (result.isFailed()) {
             fail("place_crafting_table_failed: " + result.reason());
+            return;
         }
+        // This table was borrowed from inventory, not an existing station -- reclaim it once the
+        // whole plan finishes instead of permanently donating it to the world.
+        selfPlacedTablePos = placePos;
+        phase = Phase.CRAFTING;
     }
 
     private void craftNext(AIPlayerEntity bot) {
         if (nextStep >= plan.steps().size()) {
+            if (selfPlacedTablePos != null) {
+                phase = Phase.RECLAIMING_TABLE;
+                reclaimTicks = 0;
+                return;
+            }
             complete();
             return;
         }
         CraftingHelper.CraftStep step = plan.steps().get(nextStep);
         RecipeRegistry.Recipe recipe = step.recipe();
-        // A 3x3 recipe needs a real local table.  A carried table is intentionally not enough:
-        // ENSURING_TABLE reuses an existing table first, otherwise places the carried one.
-        if (recipe.needsCraftingTable()
-                && !WorkshopLocator.hasNearbyCraftingTable(bot)) {
-            phase = Phase.ENSURING_TABLE;
-            return;
-        }
+        // Preflight against the inventory as it stands right now (table still carried, if any) so
+        // a craft that can never fit is caught before placing/consuming a carried table only to
+        // silently free just enough room to mask a genuinely full inventory from the caller.
         PreparedCraft prepared = prepareCraft(bot, step);
         if (prepared.missingIngredient() != null) {
             fail("need: " + describeIngredient(
@@ -147,6 +178,13 @@ public final class CraftTask extends AbstractTask {
                     + ":available=" + prepared.availableOutput());
             return;
         }
+        // A 3x3 recipe needs a real local table.  A carried table is intentionally not enough:
+        // ENSURING_TABLE reuses an existing table first, otherwise places the carried one.
+        if (recipe.needsCraftingTable()
+                && !WorkshopLocator.hasNearbyCraftingTable(bot)) {
+            phase = Phase.ENSURING_TABLE;
+            return;
+        }
         commitPreparedCraft(bot, prepared);
         BotLog.action(bot, "craft_atomic",
                 "item", Registries.ITEM.getId(recipe.output()).toString(),
@@ -155,6 +193,50 @@ public final class CraftTask extends AbstractTask {
             craftedCount += step.outputCount();
         }
         nextStep++;
+    }
+
+    /**
+     * Mines back down and re-collects a crafting table this task itself placed. Best-effort: a
+     * stuck reclaim must not turn an already-successful craft into a failure.
+     */
+    private void reclaimTable(AIPlayerEntity bot) {
+        if (selfPlacedTablePos == null || InventoryAction.countItem(bot, Items.CRAFTING_TABLE) > 0) {
+            selfPlacedTablePos = null;
+            complete();
+            return;
+        }
+        if (++reclaimTicks > RECLAIM_TIMEOUT_TICKS) {
+            selfPlacedTablePos = null;
+            complete();
+            return;
+        }
+        BlockState state = bot.getServerWorld().getBlockState(selfPlacedTablePos);
+        if (state.isOf(Blocks.CRAFTING_TABLE)) {
+            if (tableReclaimMiner.target() == null) {
+                // The table only has somewhere to land if a slot is free; the craft that just
+                // finished can leave zero free slots (its output filled the slot the table
+                // vacated).
+                InventoryAction.dropJunkUntilFreeSlots(bot, 1, 16);
+                tableReclaimMiner.begin(bot, selfPlacedTablePos);
+            }
+            if (tableReclaimMiner.tick(bot) == BlockMiner.Status.FAILED) {
+                selfPlacedTablePos = null;
+                complete();
+            }
+            return;
+        }
+        if (!state.isAir()) {
+            // Something else already claimed/replaced our placed block -- never chase a block
+            // this task no longer owns.
+            selfPlacedTablePos = null;
+            complete();
+            return;
+        }
+        // The table is down as a natural drop. strict_survival denies HarvestCore's forced
+        // pickup, and completing the instant the block breaks can race the item's vanilla pickup
+        // delay before the caller moves the bot elsewhere -- walk over it like any ordinary item
+        // so vanilla's own proximity pickup collects it, then finish once it lands in inventory.
+        HarvestCore.chaseDropAnyOf(bot, Set.of(Items.CRAFTING_TABLE), 4.0D);
     }
 
     /**
@@ -290,8 +372,7 @@ public final class CraftTask extends AbstractTask {
         BlockPos origin = bot.getBlockPos();
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = origin.offset(direction);
-            if (ObservableWorldQuery.canObserveCell(bot, candidate)
-                    && bot.getServerWorld().getBlockState(candidate).isAir()) {
+            if (isOpenPlacementCell(bot, candidate)) {
                 return candidate.toImmutable();
             }
         }
@@ -300,9 +381,20 @@ public final class CraftTask extends AbstractTask {
         // destination whose collision shape intersects a live entity, the placer included, with
         // no self-exemption). The one block above that is genuinely external, open headroom.
         BlockPos above = origin.up().up();
-        return ObservableWorldQuery.canObserveCell(bot, above)
-                        && bot.getServerWorld().getBlockState(above).isAir()
-                ? above.toImmutable() : null;
+        return isOpenPlacementCell(bot, above) ? above.toImmutable() : null;
+    }
+
+    /**
+     * A cell is only a genuinely open placement target if it is air AND free of any entity
+     * (including an ordinary item drop). A leftover, uncollected drop from an earlier reclaim
+     * attempt has a real bounding box, and vanilla 1.21.5 rejects any placement whose collision
+     * shape intersects a live entity -- so without this check, a stale drop at this exact cell
+     * would keep failing every future placement attempt here, not just the reclaim that left it.
+     */
+    private static boolean isOpenPlacementCell(AIPlayerEntity bot, BlockPos candidate) {
+        return ObservableWorldQuery.canObserveCell(bot, candidate)
+                && bot.getServerWorld().getBlockState(candidate).isAir()
+                && bot.getServerWorld().isSpaceEmpty(bot, new net.minecraft.util.math.Box(candidate));
     }
 
     private static String describeIngredient(RecipeRegistry.Ingredient ingredient, int count) {

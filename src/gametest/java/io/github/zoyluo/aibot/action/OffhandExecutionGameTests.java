@@ -2,8 +2,10 @@ package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.runtime.TaskOrigin;
 import io.github.zoyluo.aibot.task.CraftTask;
 import io.github.zoyluo.aibot.task.ResupplyTask;
+import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskState;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -20,6 +22,7 @@ import net.minecraft.world.GameMode;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.text.Text;
 
 /** Strict-survival proofs that executable inventory paths honor offhand resources. */
@@ -170,7 +173,7 @@ public final class OffhandExecutionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_offhand_only_crafting_table_completes_three_by_three_recipe", maxTicks = 40)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_offhand_only_crafting_table_completes_three_by_three_recipe", maxTicks = 350)
     public void offhandOnlyCraftingTableCompletesThreeByThreeRecipe(TestContext context) {
         Fixture fixture = spawn(context, "OffhandCraftingTableGT", new BlockPos(9, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -181,22 +184,28 @@ public final class OffhandExecutionGameTests {
 
         CraftTask task = new CraftTask(Items.IRON_PICKAXE, 1);
         task.start(bot);
-        for (int tick = 0; tick < 20 && task.state() == TaskState.RUNNING; tick++) {
-            task.tick(bot);
-        }
-
-        require(context, task.state() == TaskState.COMPLETED,
-                "offhand-only table could not complete 3x3 craft: " + task.failureReason());
-        require(context, InventoryAction.countItem(bot, Items.IRON_PICKAXE) == 1,
-                "3x3 craft did not produce the iron pickaxe");
-        require(context, bot.getInventory().getMainStacks().stream()
-                        .anyMatch(stack -> stack.isOf(Items.CRAFTING_TABLE)),
-                "CraftTask did not promote the offhand-only table into executable inventory");
-        require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1
-                        && InventoryAction.countItem(bot, Items.IRON_INGOT) == 0
-                        && InventoryAction.countItem(bot, Items.STICK) == 0,
-                "3x3 craft duplicated or lost table/ingredients");
-        cleanup(context, fixture);
+        // A crafting table has no required tool, so this bot breaks it bare-handed in
+        // RECLAIMING_TABLE via the real BlockMiner/ActionPack mining loop, which only advances on
+        // genuine per-tick AIPlayerEntity.tick() calls -- so this must poll across real GameTest
+        // ticks (runAtEveryTick), not a single synchronous burst of task.tick(bot) calls.
+        context.runAtEveryTick(() -> {
+            if (task.state() == TaskState.RUNNING) {
+                task.tick(bot);
+                return;
+            }
+            require(context, task.state() == TaskState.COMPLETED,
+                    "offhand-only table could not complete 3x3 craft: " + task.failureReason());
+            require(context, InventoryAction.countItem(bot, Items.IRON_PICKAXE) == 1,
+                    "3x3 craft did not produce the iron pickaxe");
+            require(context, bot.getInventory().getMainStacks().stream()
+                            .anyMatch(stack -> stack.isOf(Items.CRAFTING_TABLE)),
+                    "CraftTask did not promote the offhand-only table into executable inventory");
+            require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1
+                            && InventoryAction.countItem(bot, Items.IRON_INGOT) == 0
+                            && InventoryAction.countItem(bot, Items.STICK) == 0,
+                    "3x3 craft duplicated or lost table/ingredients");
+            cleanup(context, fixture);
+        });
     }
 
     @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_mixed_oak_and_birch_logs_complete_one_atomic_stick_plan", maxTicks = 40)
@@ -291,7 +300,7 @@ public final class OffhandExecutionGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_full_inventory_tool_resupply_drops_junk_and_crafts_usable_pickaxe", maxTicks = 80)
+    @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_full_inventory_tool_resupply_drops_junk_and_crafts_usable_pickaxe", maxTicks = 350)
     public void fullInventoryToolResupplyDropsJunkAndCraftsUsablePickaxe(TestContext context) {
         Fixture fixture = spawn(context, "ResupplyCapacityGT", new BlockPos(17, 4, 4));
         AIPlayerEntity bot = fixture.bot();
@@ -313,32 +322,48 @@ public final class OffhandExecutionGameTests {
                 "fixture did not start with a full main inventory");
 
         ResupplyTask task = ResupplyTask.tool(Items.STONE_PICKAXE);
-        task.start(bot);
-        for (int tick = 0; tick < 30 && task.state() == TaskState.RUNNING; tick++) {
-            task.tick(bot);
-        }
-
-        require(context, task.state() == TaskState.COMPLETED,
-                "full-inventory tool resupply failed: " + task.failureReason());
-        require(context, InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 6
-                        && bot.getMainHandStack().isOf(Items.STONE_PICKAXE)
-                        && bot.getMainHandStack().getDamage() == 0,
-                "resupply did not craft and equip one usable stone pickaxe");
-        require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 8
-                        && InventoryAction.countItem(bot, Items.STICK) == 40
-                        && InventoryAction.countItem(bot, Items.DIRT) == 0,
-                "capacity recovery spent or retained the wrong inventory stacks");
-        int droppedDirt = context.getWorld().getEntitiesByClass(
-                        ItemEntity.class,
-                        new Box(fixture.feet()).expand(4.0D),
-                        entity -> entity.getStack().isOf(Items.DIRT))
-                .stream()
-                .mapToInt(entity -> entity.getStack().getCount())
-                .sum();
-        require(context, droppedDirt == 8,
-                "capacity recovery did not create the exact ordinary dirt ItemEntity: "
-                        + droppedDirt);
-        cleanup(context, fixture);
+        // Assign through TaskManager (rather than a bare task.start/tick) so DangerWatcher's own
+        // background scan (BotTickCoordinator runs it for every spawned bot every real tick) sees
+        // this bot as already busy with a ResupplyTask and does not race it with a second,
+        // independently-assigned one -- which otherwise duplicates the crafted pickaxe once the
+        // capacity-recovery retry below makes this task take long enough for that scan to fire.
+        // TaskManager.tickAll() (invoked automatically once per real server tick) then drives
+        // task.tick(bot) itself; this must poll across real GameTest ticks (runAtEveryTick), not a
+        // single synchronous burst of manual tick() calls, since the table-reclaim mining this
+        // retry can reach only advances on genuine per-tick AIPlayerEntity.tick() calls.
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_full_inventory_tool_resupply"));
+        // A dropped stack lands with real throw velocity and can roll/fall well past a few blocks
+        // before settling (it is not pinned to the drop point), so watch for it continuously with a
+        // generous radius instead of a single narrow check once the task finishes -- mirroring
+        // SmeltFurnacePlacementGameTests' identical capacity-recovery-drop observation.
+        AtomicBoolean observedDroppedDirt = new AtomicBoolean();
+        context.runAtEveryTick(() -> {
+            if (!observedDroppedDirt.get()
+                    && context.getWorld().getEntitiesByClass(ItemEntity.class,
+                                    new Box(fixture.feet()).expand(16.0D),
+                                    entity -> entity.getStack().isOf(Items.DIRT)
+                                            && entity.getStack().getCount() == 8)
+                            .stream().findAny().isPresent()) {
+                observedDroppedDirt.set(true);
+            }
+            if (task.state() == TaskState.RUNNING) {
+                return;
+            }
+            require(context, task.state() == TaskState.COMPLETED,
+                    "full-inventory tool resupply failed: " + task.failureReason());
+            require(context, InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 6
+                            && bot.getMainHandStack().isOf(Items.STONE_PICKAXE)
+                            && bot.getMainHandStack().getDamage() == 0,
+                    "resupply did not craft and equip one usable stone pickaxe");
+            require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 8
+                            && InventoryAction.countItem(bot, Items.STICK) == 40
+                            && InventoryAction.countItem(bot, Items.DIRT) == 0,
+                    "capacity recovery spent or retained the wrong inventory stacks");
+            require(context, observedDroppedDirt.get(),
+                    "capacity recovery did not create the exact ordinary dirt ItemEntity");
+            cleanup(context, fixture);
+        });
     }
 
     @GameTest(environment = "aibot-gametest:offhand_execution_game_tests_offhand_food_promotion_preserves_a_full_selected_slot", maxTicks = 20)
