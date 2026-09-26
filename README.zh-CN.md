@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-64f5a0?style=flat-square"></a>
+  <a href="https://github.com/JackOfSpade/Minecraft-AI/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/JackOfSpade/Minecraft-AI/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Minecraft 1.21.3" src="https://img.shields.io/badge/Minecraft-1.21.3-62B47A?style=flat-square">
   <img alt="Fabric Loader 0.18.4" src="https://img.shields.io/badge/Fabric-Loader%200.18.4-DBB69B?style=flat-square">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-E76F00?style=flat-square">
