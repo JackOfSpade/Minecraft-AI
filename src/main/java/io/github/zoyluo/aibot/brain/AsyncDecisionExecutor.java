@@ -9,15 +9,15 @@ import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 
 public final class AsyncDecisionExecutor {
-    private final DeepSeekApiClient apiClient;
+    private final OpenAiCompatibleApiClient apiClient;
     private final GeminiInteractionsApiClient geminiInteractionsClient;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
-    public AsyncDecisionExecutor(DeepSeekApiClient apiClient) {
+    public AsyncDecisionExecutor(OpenAiCompatibleApiClient apiClient) {
         this(apiClient, null);
     }
 
-    public AsyncDecisionExecutor(DeepSeekApiClient apiClient,
+    public AsyncDecisionExecutor(OpenAiCompatibleApiClient apiClient,
                                  GeminiInteractionsApiClient geminiInteractionsClient) {
         this.apiClient = apiClient;
         this.geminiInteractionsClient = geminiInteractionsClient;

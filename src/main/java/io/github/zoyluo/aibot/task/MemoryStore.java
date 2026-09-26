@@ -43,7 +43,7 @@ public final class MemoryStore {
     }
 
     /**
-     * 发送前兜底:保证 OpenAI/DeepSeek 的消息配对合法,杜绝 400
+     * 发送前兜底:保证 OpenAI 兼容接口的消息配对合法,杜绝 400
      * "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
      * 任何 trim/截断/注入把 assistant(tool_calls) 与其后的 tool 回应切断后,这里统一修正:
      * - 丢弃"孤儿 tool"(前一条不是带 tool_calls 的 assistant、也不是另一条 tool)。

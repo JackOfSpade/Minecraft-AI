@@ -89,7 +89,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **验收**:`/aibot verify all` 全 PASS 或对豁免项明确标注。
 
 ## WO-RL-6 · 异常与超时统一治理  (PLAN §RL-6) ✅ done: 工具/网络异常捕获、失败分类和任务超时边界已补齐, compileJava/compileClientJava 通过。
-**文件**:`brain/ActionDispatcher`、`network/AIBotServerNetworking.handleCommand`、各 `Task`、`brain/DeepSeekApiClient`、容器/世界访问点
+**文件**:`brain/ActionDispatcher`、`network/AIBotServerNetworking.handleCommand`、各 `Task`、`brain/OpenAiCompatibleApiClient`、容器/世界访问点
 **改动**:dispatch/C2S handler catch 范围扩到 `RuntimeException`(修 `Identifier.of(乱码)` 抛 `InvalidIdentifierException` 逃逸的坑)且必 `BotLog.error` 留痕;审计补齐所有任务超时(`*_timeout`);API 429/超时/空响应分类;BlockEntity/世界访问前置判空。
 **验收**:坏 id / 卸载 chunk / 断网 → 捕获给 reason 不崩;无超时任务消除。
 

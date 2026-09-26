@@ -36,15 +36,15 @@ public final class GeminiInteractionsApiClient {
     /** Never execute more than this many model calls in one interaction response. */
     public static final int DEFAULT_MAX_FUNCTION_CALLS_PER_RESPONSE = 3;
 
-    private final AIBotConfig.DeepSeek config;
+    private final AIBotConfig.Llm config;
     private final HttpClient httpClient;
     private final int maxFunctionCallsPerResponse;
 
-    public GeminiInteractionsApiClient(AIBotConfig.DeepSeek config) {
+    public GeminiInteractionsApiClient(AIBotConfig.Llm config) {
         this(config, DEFAULT_MAX_FUNCTION_CALLS_PER_RESPONSE);
     }
 
-    public GeminiInteractionsApiClient(AIBotConfig.DeepSeek config, int maxFunctionCallsPerResponse) {
+    public GeminiInteractionsApiClient(AIBotConfig.Llm config, int maxFunctionCallsPerResponse) {
         this.config = Objects.requireNonNull(config, "config");
         if (!isGoogleInteractionsEndpoint(config)) {
             throw new IllegalArgumentException("gemini_interactions_requires_google_endpoint");
@@ -59,7 +59,7 @@ public final class GeminiInteractionsApiClient {
     }
 
     /** True when a configured OpenAI-compatible Gemini URL can be converted to /interactions. */
-    public static boolean isGoogleInteractionsEndpoint(AIBotConfig.DeepSeek config) {
+    public static boolean isGoogleInteractionsEndpoint(AIBotConfig.Llm config) {
         if (config == null || config.baseUrl() == null) {
             return false;
         }

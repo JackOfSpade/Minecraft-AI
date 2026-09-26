@@ -1,18 +1,18 @@
 #!/bin/bash
-# 真实故事 harness:把"产品本身"当测试——真实种子世界 + 真实对话层(中文指令→DeepSeek→工具→执行),
+# 真实故事 harness:把"产品本身"当测试——真实种子世界 + 真实对话层(中文指令→LLM→工具→执行),
 # 只看一个指标:说一句话 → 活着办成 → 耗时合理。这是离用户愿景("对话让他帮我采矿/觅食/挖钻")
 # 最近的度量,补上实验室套件测不到的"真实地形 × 真实大脑"那一层。
 #
-#   ⚠ 计费:走真实 DeepSeek API,本脚本强制 WITH_LLM=1。**会产生 API 费用**,故不默认、不进 gate。
-#   用法: DEEPSEEK_API_KEY=sk-xxx bash scripts/story.sh            (跑全部故事 × 多 seed)
-#          DEEPSEEK_API_KEY=sk-xxx bash scripts/story.sh llm_diamond  (单故事最省钱)
+#   ⚠ 计费:走真实 LLM API,本脚本强制 WITH_LLM=1。**会产生 API 费用**,故不默认、不进 gate。
+#   用法: AIBOT_LLM_API_KEY=xxx bash scripts/story.sh            (跑全部故事 × 多 seed)
+#          AIBOT_LLM_API_KEY=xxx bash scripts/story.sh llm_diamond  (单故事最省钱)
 #   产出: reports/story_state.tsv(每行: 故事 seed 结果 summary);可续跑(被杀重启跳过已完成)。
 #   分离跑: nohup bash scripts/story.sh >/tmp/story.out 2>&1 &     (聊天侧只读 state)
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-  echo "[story] 需要 DEEPSEEK_API_KEY(真实对话层走 API,会计费)。用法见脚本头。"
+if [ -z "${AIBOT_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
+  echo "[story] 需要 AIBOT_LLM_API_KEY(或旧名 DEEPSEEK_API_KEY;真实对话层走 API,会计费)。用法见脚本头。"
   exit 2
 fi
 export WITH_LLM=1

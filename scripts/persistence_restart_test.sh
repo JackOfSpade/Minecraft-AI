@@ -49,7 +49,7 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt"
 {
   printf '{\n  "profile": "strict_survival",\n'
   printf '  "operatorCapabilities": { "hiddenBlockScan": false, "emergencyTeleport": false, "forcedPickup": false, "manualTeleport": false },\n'
-  printf '  "deepseek": { "apiKey": "" }\n}\n'
+  printf '  "llm": { "apiKey": "" }\n}\n'
 } > "$SERVER_RUN_DIR/config/aibot.json"
 
 start_server() {
@@ -59,7 +59,7 @@ start_server() {
   mkfifo "$FIFO"
   exec 9<> "$FIFO"
   FD_OPEN=1
-  env -u DEEPSEEK_API_KEY AIBOT_PROFILE=strict_survival AIBOT_TEST_PORT="$PORT" \
+  env -u AIBOT_LLM_API_KEY -u DEEPSEEK_API_KEY AIBOT_PROFILE=strict_survival AIBOT_TEST_PORT="$PORT" \
     "$ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
     -p "$ROOT" -PaibotHarnessRunDir="$RELATIVE_RUN_DIR" runHarnessServer \
     <&9 >> "$log_file" 2>&1 &

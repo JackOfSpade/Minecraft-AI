@@ -34,7 +34,7 @@ public final class ChatRecipientRouter {
     private static final String TOOL_NAME = "select_chat_recipient";
     private static final Gson GSON = new Gson();
     private final Object lifecycleLock = new Object();
-    private DeepSeekApiClient apiClient;
+    private OpenAiCompatibleApiClient apiClient;
     private ExecutorService executor;
     private long generation;
 
@@ -48,7 +48,7 @@ public final class ChatRecipientRouter {
             if (executor != null) {
                 executor.shutdownNow();
             }
-            apiClient = new DeepSeekApiClient(config.deepseek());
+            apiClient = new OpenAiCompatibleApiClient(config.llm());
             executor = Executors.newFixedThreadPool(2);
         }
     }
@@ -94,7 +94,7 @@ public final class ChatRecipientRouter {
             return;
         }
 
-        DeepSeekApiClient client;
+        OpenAiCompatibleApiClient client;
         ExecutorService worker;
         long requestGeneration;
         synchronized (lifecycleLock) {

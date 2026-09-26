@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.annotations.SerializedName;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
@@ -22,11 +23,14 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
 
 public record AIBotConfig(
         OperatingProfile profile,
         OperatorCapabilities operatorCapabilities,
-        DeepSeek deepseek,
+        // The JSON section is "llm". "deepseek" is the pre-rename name and is still accepted so an
+        // existing aibot.json keeps working.
+        @SerializedName(value = "llm", alternate = {"deepseek"}) Llm llm,
         Perception perception,
         Brain brain,
         Watchdog watchdog,
@@ -40,10 +44,42 @@ public record AIBotConfig(
         Pickup pickup
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    /** Environment variable that overrides the API key from the config file (any provider). */
+    public static final String ENV_API_KEY = "AIBOT_LLM_API_KEY";
+    /** Pre-rename environment variable; still honoured, but {@link #ENV_API_KEY} wins. */
+    public static final String LEGACY_ENV_API_KEY = "DEEPSEEK_API_KEY";
+
     private static AIBotConfig instance = defaults();
 
     public static AIBotConfig get() {
         return instance;
+    }
+
+    /**
+     * Parses an already-read {@code aibot.json} root and fills every missing value from the
+     * defaults. Both the {@code llm} section and the legacy {@code deepseek} section are read.
+     * Returns null when the JSON maps to nothing.
+     */
+    static AIBotConfig parse(JsonObject root, OperatingProfile profile) {
+        if (root.has("llm") && root.has("deepseek")) {
+            // Both spellings present: the new name wins deterministically instead of depending on
+            // which key Gson happens to read last.
+            root = root.deepCopy();
+            root.remove("deepseek");
+        }
+        AIBotConfig parsed = GSON.fromJson(root, AIBotConfig.class);
+        return parsed == null ? null : parsed.withProfile(profile).withDefaults();
+    }
+
+    /** API-key override from the environment: {@link #ENV_API_KEY} first, then the legacy name. */
+    static String apiKeyFromEnv(Function<String, String> env) {
+        for (String name : List.of(ENV_API_KEY, LEGACY_ENV_API_KEY)) {
+            String value = env.apply(name);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     public static AIBotConfig load() {
@@ -59,9 +95,13 @@ public record AIBotConfig(
                 JsonObject root = element.getAsJsonObject();
                 profileResolution = ProfileResolver.resolve(
                         true, root, System.getenv(ProfileResolver.ENVIRONMENT_KEY));
-                AIBotConfig parsed = GSON.fromJson(root, AIBotConfig.class);
+                if (root.has("deepseek") && !root.has("llm")) {
+                    BotLog.warn(LogCategory.CONFIG, null, "config_legacy_key",
+                            "key", "deepseek", "use", "llm");
+                }
+                AIBotConfig parsed = parse(root, profileResolution.profile());
                 if (parsed != null) {
-                    loaded = parsed.withProfile(profileResolution.profile()).withDefaults();
+                    loaded = parsed;
                 }
             } catch (IOException | RuntimeException exception) {
                 BotLog.error("config_read_failed", exception, "path", path);
@@ -86,23 +126,23 @@ public record AIBotConfig(
 
         logProfileResolution(profileResolution, path, loaded.operatorCapabilities());
 
-        String envKey = System.getenv("DEEPSEEK_API_KEY");
-        if (envKey != null && !envKey.isBlank()) {
-            loaded = loaded.withDeepSeek(loaded.deepseek().withApiKey(envKey));
+        String envKey = apiKeyFromEnv(System::getenv);
+        if (envKey != null) {
+            loaded = loaded.withLlm(loaded.llm().withApiKey(envKey));
         }
-        if (loaded.deepseek().apiKey().isBlank()) {
-            BotLog.warn(LogCategory.CONFIG, null, "deepseek_key_missing");
+        if (loaded.llm().apiKey().isBlank()) {
+            BotLog.warn(LogCategory.CONFIG, null, "llm_key_missing");
         }
         instance = loaded;
         return loaded;
     }
 
-    public AIBotConfig withDeepSeek(DeepSeek deepseek) {
-        return new AIBotConfig(profile(), operatorCapabilities(), deepseek, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
+    public AIBotConfig withLlm(Llm llm) {
+        return new AIBotConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
     }
 
     private AIBotConfig withProfile(OperatingProfile profile) {
-        return new AIBotConfig(profile, operatorCapabilities(), deepseek(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
+        return new AIBotConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
     }
 
     private AIBotConfig withDefaults() {
@@ -112,7 +152,7 @@ public record AIBotConfig(
                 operatorCapabilities == null
                         ? defaults.operatorCapabilities
                         : operatorCapabilities.withDefaults(defaults.operatorCapabilities),
-                deepseek == null ? defaults.deepseek : deepseek.withDefaults(defaults.deepseek),
+                llm == null ? defaults.llm : llm.withDefaults(defaults.llm),
                 perception == null ? defaults.perception : perception.withDefaults(defaults.perception),
                 brain == null ? defaults.brain : brain.withDefaults(defaults.brain),
                 watchdog == null ? defaults.watchdog : watchdog.withDefaults(defaults.watchdog),
@@ -132,7 +172,9 @@ public record AIBotConfig(
                 OperatorCapabilities.defaults(),
                 // V4 的 reasoning 与正文共享 max_tokens,故显式降低 effort 并放宽预算,
                 // 避免思考过程吃光额度、让本该发出的 tool_call 被截断。
-                new DeepSeek("", "https://api.deepseek.com", "deepseek-v4-flash", 8192, 0.3D, 60, 3, 500,
+                // The shipped defaults point at DeepSeek's public API; set llm.baseUrl / llm.model /
+                // llm.apiKey to use any other OpenAI-compatible or Gemini endpoint.
+                new Llm("", "https://api.deepseek.com", "deepseek-v4-flash", 8192, 0.3D, 60, 3, 500,
                         Boolean.TRUE, "low"),
                 new Perception(16, 20, 10, 10, false),
                 new Brain(36, 6, 3, false, true, false, 3, true),
@@ -194,14 +236,16 @@ public record AIBotConfig(
     }
 
     /**
-     * DeepSeek chat settings.
+     * LLM API settings (the {@code "llm"} section of {@code aibot.json}; the legacy name
+     * {@code "deepseek"} is still read). Any OpenAI-compatible chat-completions endpoint works, and
+     * a {@code baseUrl} on Google's generativelanguage host selects the Gemini Interactions client.
      *
      * <p>{@code thinking} and {@code reasoningEffort} are sent explicitly rather than left to the
-     * server default. V4 enables thinking at {@code high} effort by default, and reasoning output
-     * shares the {@code maxTokens} budget — an implicit default would let reasoning starve the
-     * tool call the bot actually needs.</p>
+     * server default. DeepSeek V4 enables thinking at {@code high} effort by default, and reasoning
+     * output shares the {@code maxTokens} budget — an implicit default would let reasoning starve
+     * the tool call the bot actually needs.</p>
      */
-    public record DeepSeek(
+    public record Llm(
             String apiKey,
             String baseUrl,
             String model,
@@ -215,13 +259,13 @@ public record AIBotConfig(
     ) {
         public static final List<String> REASONING_EFFORTS = List.of("low", "high", "max");
 
-        DeepSeek withApiKey(String apiKey) {
-            return new DeepSeek(apiKey, baseUrl, model, maxTokens, temperature, timeoutSeconds,
+        Llm withApiKey(String apiKey) {
+            return new Llm(apiKey, baseUrl, model, maxTokens, temperature, timeoutSeconds,
                     retryCount, retryBackoffMs, thinking, reasoningEffort);
         }
 
-        DeepSeek withDefaults(DeepSeek defaults) {
-            return new DeepSeek(
+        Llm withDefaults(Llm defaults) {
+            return new Llm(
                     apiKey == null ? defaults.apiKey : apiKey,
                     blankToDefault(baseUrl, defaults.baseUrl),
                     blankToDefault(model, defaults.model),

@@ -85,7 +85,7 @@ done
 
 for workflow in .github/workflows/ci.yml .github/workflows/nightly.yml; do
   grep -Fq 'runGameTest' "$workflow" || fail "$workflow does not execute runGameTest"
-  if grep -Fq 'DEEPSEEK_API_KEY' "$workflow"; then
+  if grep -Eq '(DEEPSEEK|AIBOT_LLM)_API_KEY' "$workflow"; then
     fail "$workflow must not have access to the billed LLM secret"
   fi
 done
@@ -139,6 +139,8 @@ if grep -Eq '^[[:space:]]+(push|pull_request|schedule):' "$manual"; then
 fi
 grep -Fq 'secrets.DEEPSEEK_API_KEY' "$manual" \
   || fail 'manual LLM workflow does not receive its secret through GitHub Secrets'
+grep -Fq 'AIBOT_LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}' "$manual" \
+  || fail 'manual LLM workflow must expose its secret to the run as AIBOT_LLM_API_KEY'
 grep -Fq 'confirm_billing:' "$manual" \
   || fail 'manual LLM workflow does not require explicit billing confirmation'
 grep -Fq -- '--mode llm_story' "$manual" \

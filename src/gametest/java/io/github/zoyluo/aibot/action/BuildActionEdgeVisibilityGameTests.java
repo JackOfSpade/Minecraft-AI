@@ -249,7 +249,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         return new AIBotConfig(
                 config.profile(),
                 config.operatorCapabilities(),
-                config.deepseek(),
+                config.llm(),
                 new AIBotConfig.Perception(
                         radius,
                         perception.maxBlocks(),

@@ -61,14 +61,14 @@ jobs:
 
       - name: Validate explicit billed-run inputs
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AIBOT_LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TEST_SEED: ${{ inputs.seed }}
           MAXWAIT_SECONDS: ${{ inputs.maxwait_seconds }}
           CONFIRM_BILLING: ${{ inputs.confirm_billing }}
         run: |
           set -euo pipefail
           [[ "$CONFIRM_BILLING" == true ]] || { echo 'confirm_billing must be checked' >&2; exit 2; }
-          [[ -n "$DEEPSEEK_API_KEY" ]] || { echo 'Missing DEEPSEEK_API_KEY GitHub secret' >&2; exit 2; }
+          [[ -n "$AIBOT_LLM_API_KEY" ]] || { echo 'Missing DEEPSEEK_API_KEY GitHub secret (exposed to the run as AIBOT_LLM_API_KEY)' >&2; exit 2; }
           [[ "$TEST_SEED" =~ ^-?[0-9]+$ ]] || { echo 'seed must be an integer' >&2; exit 2; }
           [[ "$MAXWAIT_SECONDS" =~ ^[0-9]+$ ]] || { echo 'maxwait_seconds must be a positive integer' >&2; exit 2; }
           (( MAXWAIT_SECONDS >= 60 && MAXWAIT_SECONDS <= 4800 )) \
@@ -79,7 +79,7 @@ jobs:
 
       - name: Run selected billed story in isolated evidence harness
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AIBOT_LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           STORY: ${{ inputs.story }}
           PROFILE: ${{ inputs.profile }}
           TEST_SEED: ${{ inputs.seed }}

@@ -11,8 +11,8 @@ public final class BrainValidation {
     }
 
     public static ValidationResult apiFailure(AIPlayerEntity bot) {
-        AIBotConfig.DeepSeek current = AIBotConfig.get().deepseek();
-        AIBotConfig.DeepSeek invalid = new AIBotConfig.DeepSeek(
+        AIBotConfig.Llm current = AIBotConfig.get().llm();
+        AIBotConfig.Llm invalid = new AIBotConfig.Llm(
                 "",
                 current.baseUrl(),
                 current.model(),
@@ -24,9 +24,9 @@ public final class BrainValidation {
                 current.thinking(),
                 current.reasoningEffort());
         try {
-            new DeepSeekApiClient(invalid).chat(List.of(ChatMessage.user("validation ping")), List.of());
+            new OpenAiCompatibleApiClient(invalid).chat(List.of(ChatMessage.user("validation ping")), List.of());
             return unexpected(bot, "api_failure", "request unexpectedly succeeded");
-        } catch (DeepSeekApiException exception) {
+        } catch (LlmApiException exception) {
             return expected(bot, "api_failure", exception.getMessage());
         } catch (Exception exception) {
             return unexpected(bot, "api_failure", exception.getClass().getSimpleName() + ": " + exception.getMessage());
@@ -49,9 +49,9 @@ public final class BrainValidation {
 
     public static ValidationResult badResponse(AIPlayerEntity bot) {
         try {
-            DeepSeekApiClient.parseResponse("{\"choices\":[]}");
+            OpenAiCompatibleApiClient.parseResponse("{\"choices\":[]}");
             return unexpected(bot, "bad_response", "parse unexpectedly succeeded");
-        } catch (DeepSeekApiException exception) {
+        } catch (LlmApiException exception) {
             return expected(bot, "bad_response", exception.getMessage());
         } catch (Exception exception) {
             return unexpected(bot, "bad_response", exception.getClass().getSimpleName() + ": " + exception.getMessage());

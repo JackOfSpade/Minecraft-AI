@@ -92,10 +92,10 @@ public final class BrainCoordinator {
         toolRegistry = new ToolRegistry();
         dispatcher = new ActionDispatcher(toolRegistry);
         GeminiInteractionsApiClient geminiInteractions = GeminiInteractionsApiClient
-                .isGoogleInteractionsEndpoint(config.deepseek())
-                ? new GeminiInteractionsApiClient(config.deepseek())
+                .isGoogleInteractionsEndpoint(config.llm())
+                ? new GeminiInteractionsApiClient(config.llm())
                 : null;
-        executor = new AsyncDecisionExecutor(new DeepSeekApiClient(config.deepseek()), geminiInteractions);
+        executor = new AsyncDecisionExecutor(new OpenAiCompatibleApiClient(config.llm()), geminiInteractions);
     }
 
     /** Preserves the speaker's real current view for ordinary/player-panel chat. */

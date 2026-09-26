@@ -293,10 +293,10 @@ public final class AIBotVerifySubcommand {
             "nav_buried_escape",
             "nav_unreachable");
 
-    // R2 LLM 全链层套件:中文口语指令走真实 DeepSeek 大脑(意图解析→选工具→参数化→执行),
+    // R2 LLM 全链层套件:中文口语指令走真实 LLM 大脑(意图解析→选工具→参数化→执行),
     // 与玩家聊天 @bot 完全同一代码路径(BrainCoordinator.handleMessage)。烧真 API 钱:
     // 故意不进 ALL_FEATURES(verify all 不应偷偷计费),必须显式 /aibot verify llm_suite(或单点名),
-    // 且 WITH_LLM=1 跑(test 脚本默认 unset DEEPSEEK_API_KEY 隔离大脑)。
+    // 且 WITH_LLM=1 跑(test 脚本默认 unset AIBOT_LLM_API_KEY 隔离大脑)。
     private static final List<String> LLM_SUITE = List.of(
             "llm_move",
             "llm_food",
@@ -471,7 +471,7 @@ public final class AIBotVerifySubcommand {
             } else if ("nav_suite".equals(feature)) {
                 features.addAll(NAV_SUITE); // 寻路容错专项套件别名
             } else if ("llm_suite".equals(feature)) {
-                features.addAll(LLM_SUITE); // R2 LLM 全链层套件别名(真实 DeepSeek,计费,需 WITH_LLM=1)
+                features.addAll(LLM_SUITE); // R2 LLM 全链层套件别名(真实 LLM,计费,需 WITH_LLM=1)
             } else if ("assistant_suite".equals(feature)) {
                 features.addAll(ASSISTANT_SUITE); // 对话式助手层套件别名(P0 队列/P1 自动备料/P3 参数化/P2 打断保留)
             } else if ("runtime_control_suite".equals(feature)) {
@@ -2012,10 +2012,10 @@ public final class AIBotVerifySubcommand {
     }
 
     // ==================== R2 LLM 全链层(llm_*) ====================
-    // 这层测"中文口语指令 → DeepSeek 意图解析 → 工具选择 → 参数化 → 执行"的完整实操链路:
+    // 这层测"中文口语指令 → LLM 意图解析 → 工具选择 → 参数化 → 执行"的完整实操链路:
     // 入口与玩家在聊天里 @bot 说话完全相同(BrainCoordinator.handleMessage,server 线程进、
-    // 异步调 DeepSeek、响应回 server 线程执行工具)。必须 WITH_LLM=1 跑——test 脚本默认
-    // unset DEEPSEEK_API_KEY 隔离大脑,防确定性套件偷偷计费;这也是 llm_* 不进 ALL_FEATURES 的原因。
+    // 异步调 LLM、响应回 server 线程执行工具)。必须 WITH_LLM=1 跑——test 脚本默认
+    // unset AIBOT_LLM_API_KEY 隔离大脑,防确定性套件偷偷计费;这也是 llm_* 不进 ALL_FEATURES 的原因。
     // 判定一律用 patient 模式(见 pollActive):大脑是会话式驱动,会连续派发多个任务、失败换法重试、
     // 任务间空闲思考——单任务 COMPLETED/FAILED 都不是场景终局,只认"世界状态断言达成"或超时。
     // 开局与 real_* 同一标准:prepareRealistic 自然世界零给予 + deathBase 零死亡红线。
@@ -2026,7 +2026,7 @@ public final class AIBotVerifySubcommand {
      * 复位原因:上一个 llm 场景断言达成时大脑往往仍在续航思考(busy),busy 下 handleMessage
      * 拒收新消息返回 false,不复位会套件串台误判;resetToIdle 顺带清掉遗留失败记录,
      * 防新会话开局就被注入上一场景的"上一个任务失败"。
-     * 前置查 key:key 缺失时 handleMessage 照样返回 true(异步请求才报 deepseek_api_key_missing),
+     * 前置查 key:key 缺失时 handleMessage 照样返回 true(异步请求才报 llm_api_key_missing),
      * 不查就得干等满 timeout 才 FAIL。返回 null=指令已提交;非 null=应立即记录的 FAIL。
      */
     private static Result startLlmScenario(AIPlayerEntity bot, String feature, String instruction) {
@@ -2034,7 +2034,7 @@ public final class AIBotVerifySubcommand {
         GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.resetToIdle(bot);
         prepareRealistic(bot);
-        if (AIBotConfig.get().deepseek().apiKey().isBlank()
+        if (AIBotConfig.get().llm().apiKey().isBlank()
                 || !BrainCoordinator.INSTANCE.handleMessage(bot, "Tester", instruction)) {
             return Result.fail(feature, "brain_rejected_or_not_configured (run WITH_LLM=1)");
         }
@@ -2572,7 +2572,7 @@ public final class AIBotVerifySubcommand {
      * 几百 tick),趁执行中用 BrainCoordinator.handleMessage 模拟玩家闲聊——与玩家聊天 @bot 完全同一入口。
      * P2 语义:有活跃 plan 时新消息**不清目标**只解 busy(旧行为"新消息=重定向,清目标"会把正在挖的
      * 目标直接杀掉)。消息后立即断言 hasActivePlan 仍为 true(false=P2 回归);再以"目标照常完成"
-     * (圆石≥6 且零死亡)收尾——保留语义不只是没清,还得真的继续干完。无 DEEPSEEK key 时 handleMessage
+     * (圆石≥6 且零死亡)收尾——保留语义不只是没清,还得真的继续干完。无 LLM key 时 handleMessage
      * 异步才报 key 缺失,同步路径照走,不影响本验证。
      */
     // ==================== 地形矩阵(②):同一挖矿任务 × 多种几何 ====================
@@ -3043,7 +3043,7 @@ public final class AIBotVerifySubcommand {
 
     // L1 接线回归(不烧 key):直接喂工具调用给各高层工具 handler,断言"选对工具+传对参 → 映射到对的 Goal 且提交成功
     // (goal_assigned)"。只测接线/参数/映射,不实际执行(每个提交完即 clear)。把这条链锁成确定性回归,防以后改坏。
-    // 不替代 llm_*(那验真 DeepSeek 选不选得对、烧 key);本测验的是【选对之后接线对不对】。
+    // 不替代 llm_*(那验真 LLM 选不选得对、烧 key);本测验的是【选对之后接线对不对】。
     private static Result assignToolDispatch(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);

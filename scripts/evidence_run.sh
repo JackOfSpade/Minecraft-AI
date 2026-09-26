@@ -20,7 +20,7 @@ Options:
   --profile <name>              strict_survival (default) or operator
   --operator-capabilities <csv> operator-only enabled flags, or all/none
   --mode <name>                 deterministic (default) or llm_story
-  --with-llm                    pass DEEPSEEK_API_KEY to the isolated server
+  --with-llm                    pass AIBOT_LLM_API_KEY (or legacy DEEPSEEK_API_KEY) to the isolated server
   --assist <mode>               mining assist mode for the run: off (default), sense,
                                 detour, poi or all; certifying Mining First scenarios
                                 accept only off
@@ -80,8 +80,8 @@ case "$ASSIST_MODE" in
   off|sense|detour|poi|all) ;;
   *) printf 'evidence-run: invalid --assist mode: %s\n' "$ASSIST_MODE" >&2; exit 2 ;;
 esac
-if [[ $WITH_LLM -eq 1 && -z "${DEEPSEEK_API_KEY:-}" ]]; then
-  printf 'evidence-run: --with-llm requires DEEPSEEK_API_KEY\n' >&2
+if [[ $WITH_LLM -eq 1 && -z "${AIBOT_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]]; then
+  printf 'evidence-run: --with-llm requires AIBOT_LLM_API_KEY (or the legacy DEEPSEEK_API_KEY)\n' >&2
   exit 2
 fi
 if [[ -n "$FIXTURE_LOG" ]]; then
@@ -318,7 +318,7 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt" || exit 3
   printf '    "forcedPickup": %s,\n' "$FORCED_PICKUP"
   printf '    "manualTeleport": %s\n' "$MANUAL_TELEPORT"
   printf '  },\n'
-  printf '  "deepseek": { "apiKey": "" },\n'
+  printf '  "llm": { "apiKey": "" },\n'
   printf '  "miningAssist": { "mode": "%s" }\n' "$ASSIST_MODE"
   printf '}\n'
 } > "$SERVER_RUN_DIR/config/aibot.json" || exit 3
@@ -335,7 +335,7 @@ KEY_MARKER='<redacted:unset>'
   printf '    "forcedPickup": %s,\n' "$FORCED_PICKUP"
   printf '    "manualTeleport": %s\n' "$MANUAL_TELEPORT"
   printf '  },\n'
-  printf '  "deepseek": { "enabled": %s, "apiKey": "%s" },\n' "$([[ $WITH_LLM -eq 1 ]] && printf true || printf false)" "$KEY_MARKER"
+  printf '  "llm": { "enabled": %s, "apiKey": "%s" },\n' "$([[ $WITH_LLM -eq 1 ]] && printf true || printf false)" "$KEY_MARKER"
   printf '  "server": { "onlineMode": false, "gamemode": "survival", "difficulty": "easy", "viewDistance": 10, "simulationDistance": 10 },\n'
   printf '  "miningAssist": { "mode": "%s" }\n' "$ASSIST_MODE"
   printf '}\n'
@@ -378,7 +378,7 @@ else
       -p "$EXEC_ROOT" -PaibotHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
       -I "$RUN_DIR/evidence.init.gradle" runHarnessServer <&9 >> "$STAGING/server.log" 2>&1 &
   else
-    env -u DEEPSEEK_API_KEY AIBOT_PROFILE="$PROFILE" AIBOT_MINING_ASSIST="$ASSIST_MODE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
+    env -u AIBOT_LLM_API_KEY -u DEEPSEEK_API_KEY AIBOT_PROFILE="$PROFILE" AIBOT_MINING_ASSIST="$ASSIST_MODE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
       "$EXEC_ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
       -p "$EXEC_ROOT" -PaibotHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
       -I "$RUN_DIR/evidence.init.gradle" runHarnessServer <&9 >> "$STAGING/server.log" 2>&1 &
@@ -462,22 +462,26 @@ path = sys.argv[1]
 with open(path, "rb") as handle:
     data = handle.read()
 count = 0
-secret = os.environ.get("DEEPSEEK_API_KEY", "").encode()
-if secret:
-    occurrences = data.count(secret)
-    if occurrences:
-        data = data.replace(secret, b"<redacted:deepseek_api_key>")
-        count += occurrences
+for name in ("AIBOT_LLM_API_KEY", "DEEPSEEK_API_KEY"):
+    secret = os.environ.get(name, "").encode()
+    if secret:
+        occurrences = data.count(secret)
+        if occurrences:
+            data = data.replace(secret, b"<redacted:llm_api_key>")
+            count += occurrences
 patterns = (
-    re.compile(rb"(?i)(DEEPSEEK_API_KEY\s*[=:]\s*)([^\s]+)"),
+    re.compile(rb"(?i)((?:AIBOT_LLM|DEEPSEEK)_API_KEY\s*[=:]\s*)([^\s]+)"),
     re.compile(rb"(?i)(api[_-]?key\s*[=:]\s*)([\"']?)(sk-[A-Za-z0-9_-]{8,})([\"']?)"),
     re.compile(rb"sk-[A-Za-z0-9_-]{12,}"),
+    re.compile(rb"AIza[A-Za-z0-9_-]{20,}"),
 )
-data, replacements = patterns[0].subn(rb"\1<redacted:deepseek_api_key>", data)
+data, replacements = patterns[0].subn(rb"\1<redacted:llm_api_key>", data)
 count += replacements
 data, replacements = patterns[1].subn(rb"\1\2<redacted:api_key>\4", data)
 count += replacements
 data, replacements = patterns[2].subn(b"<redacted:api_key>", data)
+count += replacements
+data, replacements = patterns[3].subn(b"<redacted:api_key>", data)
 count += replacements
 temporary = path + ".redacted"
 with open(temporary, "wb") as handle:
@@ -487,11 +491,14 @@ print(count)
 PY
 )" || exit 3
 [[ "$LOG_SECRET_REDACTIONS" =~ ^[0-9]+$ ]] || exit 3
-if [[ -n "${DEEPSEEK_API_KEY:-}" ]] && grep -aFq -- "$DEEPSEEK_API_KEY" "$STAGING/server.log"; then
-  printf 'evidence-run: refusing to seal a log containing DEEPSEEK_API_KEY\n' >&2
-  exit 3
-fi
-if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|DEEPSEEK_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$STAGING/server.log"; then
+for llm_key_var in AIBOT_LLM_API_KEY DEEPSEEK_API_KEY; do
+  llm_key_value="${!llm_key_var:-}"
+  if [[ -n "$llm_key_value" ]] && grep -aFq -- "$llm_key_value" "$STAGING/server.log"; then
+    printf 'evidence-run: refusing to seal a log containing %s\n' "$llm_key_var" >&2
+    exit 3
+  fi
+done
+if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(AIBOT_LLM|DEEPSEEK)_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$STAGING/server.log"; then
   printf 'evidence-run: refusing to seal a log containing credential-like data\n' >&2
   exit 3
 fi

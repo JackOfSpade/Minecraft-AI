@@ -254,7 +254,8 @@ try:
         return result
     with open(sys.argv[1], "r", encoding="utf-8") as handle:
         data = json.load(handle, object_pairs_hook=unique_object)
-    base_keys = {"schemaVersion", "profile", "operatorCapabilities", "deepseek", "server"}
+    llm_key = "llm" if "llm" in data else "deepseek"  # "deepseek" = pre-rename bundles
+    base_keys = {"schemaVersion", "profile", "operatorCapabilities", llm_key, "server"}
     if set(data) != base_keys and set(data) != base_keys | {"miningAssist"}:
         raise ValueError("top-level schema")
     # Bundles sealed before the mining assist existed carry no miningAssist section ("-").
@@ -271,11 +272,11 @@ try:
         raise ValueError("schema")
     if not all(isinstance(caps[name], bool) for name in ordered):
         raise ValueError("capability type")
-    deepseek = data["deepseek"]
-    if set(deepseek) != {"enabled", "apiKey"}:
-        raise ValueError("deepseek schema")
-    enabled = deepseek["enabled"]
-    marker = deepseek["apiKey"]
+    llm = data[llm_key]
+    if set(llm) != {"enabled", "apiKey"}:
+        raise ValueError("llm schema")
+    enabled = llm["enabled"]
+    marker = llm["apiKey"]
     if not isinstance(enabled, bool) or marker not in ("<redacted:env>", "<redacted:unset>"):
         raise ValueError("secret redaction")
     if enabled != (marker == "<redacted:env>"):
@@ -362,7 +363,7 @@ PY
   redactions="$(harness_manifest_get "$manifest" log_secret_redactions)"
   [[ "$redactions" =~ ^[0-9]+$ ]] || { validation_fail invalid_log_secret_redactions; return 1; }
   [[ "$state" != VERIFIED || "$redactions" -eq 0 ]] || { validation_fail verified_log_required_secret_redaction; return 1; }
-  if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|DEEPSEEK_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$canonical/server.log"; then
+  if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(AIBOT_LLM|DEEPSEEK)_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$canonical/server.log"; then
     validation_fail server_log_contains_credential_like_data
     return 1
   fi

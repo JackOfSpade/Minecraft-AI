@@ -20,18 +20,18 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 
-public final class DeepSeekApiClient {
-    private final AIBotConfig.DeepSeek config;
+public final class OpenAiCompatibleApiClient {
+    private final AIBotConfig.Llm config;
     private final HttpClient httpClient;
 
-    public DeepSeekApiClient(AIBotConfig.DeepSeek config) {
+    public OpenAiCompatibleApiClient(AIBotConfig.Llm config) {
         this.config = config;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
     }
 
-    public ChatResponse chat(List<ChatMessage> history, List<ToolDefinition> tools) throws DeepSeekApiException {
+    public ChatResponse chat(List<ChatMessage> history, List<ToolDefinition> tools) throws LlmApiException {
         return chat(history, tools, false);
     }
 
@@ -39,7 +39,7 @@ public final class DeepSeekApiClient {
      * Runs a function-only turn.  This is used by small control-plane decisions such as
      * recipient selection, where accepting a prose reply would make the result ambiguous.
      */
-    public ChatResponse chatRequiringToolCall(List<ChatMessage> history, List<ToolDefinition> tools) throws DeepSeekApiException {
+    public ChatResponse chatRequiringToolCall(List<ChatMessage> history, List<ToolDefinition> tools) throws LlmApiException {
         if (tools == null || tools.isEmpty()) {
             throw new IllegalArgumentException("required_tool_call_needs_a_tool");
         }
@@ -48,12 +48,12 @@ public final class DeepSeekApiClient {
 
     private ChatResponse chat(List<ChatMessage> history,
                               List<ToolDefinition> tools,
-                              boolean requireToolCall) throws DeepSeekApiException {
+                              boolean requireToolCall) throws LlmApiException {
         if (config.apiKey() == null || config.apiKey().isBlank()) {
-            throw new DeepSeekApiException("deepseek_api_key_missing");
+            throw new LlmApiException("llm_api_key_missing");
         }
 
-        DeepSeekApiException lastFailure = null;
+        LlmApiException lastFailure = null;
         List<String> models = modelsForRequest();
         for (int index = 0; index < models.size(); index++) {
             String model = models.get(index);
@@ -61,13 +61,13 @@ public final class DeepSeekApiClient {
             HttpResponse<String> response = sendWithRetry(request);
             if (response.statusCode() == 200) {
                 if (response.body() == null || response.body().isBlank()) {
-                    throw new DeepSeekApiException("empty_response");
+                    throw new LlmApiException("empty_response");
                 }
                 return parseResponse(response.body());
             }
 
             String reason = classifyStatus(response.statusCode(), response.body());
-            lastFailure = new DeepSeekApiException(reason);
+            lastFailure = new LlmApiException(reason);
             if (!shouldTryNextModel(response.statusCode(), models, index)) {
                 throw lastFailure;
             }
@@ -76,7 +76,7 @@ public final class DeepSeekApiClient {
                     "to_model", models.get(index + 1),
                     "status", response.statusCode());
         }
-        throw lastFailure == null ? new DeepSeekApiException("no_models_configured") : lastFailure;
+        throw lastFailure == null ? new LlmApiException("no_models_configured") : lastFailure;
     }
 
     private HttpRequest requestFor(String model,
@@ -131,7 +131,7 @@ public final class DeepSeekApiClient {
         return index + 1 < models.size() && (status == 429 || status == 404);
     }
 
-    private HttpResponse<String> sendWithRetry(HttpRequest request) throws DeepSeekApiException {
+    private HttpResponse<String> sendWithRetry(HttpRequest request) throws LlmApiException {
         int attempts = Math.max(0, config.retryCount()) + 1;
         long backoffMs = Math.max(1, config.retryBackoffMs());
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -148,7 +148,7 @@ public final class DeepSeekApiClient {
             } catch (HttpTimeoutException exception) {
                 if (attempt >= attempts) {
                     BotLog.error("api_timeout", exception, "attempt", attempt);
-                    throw new DeepSeekApiException("api_timeout: " + exception.getMessage(), exception);
+                    throw new LlmApiException("api_timeout: " + exception.getMessage(), exception);
                 }
                 BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "api_timeout", "backoff_ms", backoffMs);
                 sleep(backoffMs);
@@ -156,25 +156,25 @@ public final class DeepSeekApiClient {
             } catch (IOException exception) {
                 if (attempt >= attempts) {
                     BotLog.error("api_io_error", exception, "attempt", attempt);
-                    throw new DeepSeekApiException("io_error: " + exception.getMessage(), exception);
+                    throw new LlmApiException("io_error: " + exception.getMessage(), exception);
                 }
                 BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "io_error", "backoff_ms", backoffMs);
                 sleep(backoffMs);
                 backoffMs *= 2;
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new DeepSeekApiException("interrupted", exception);
+                throw new LlmApiException("interrupted", exception);
             }
         }
-        throw new DeepSeekApiException("retry_exhausted");
+        throw new LlmApiException("retry_exhausted");
     }
 
-    private static void sleep(long millis) throws DeepSeekApiException {
+    private static void sleep(long millis) throws LlmApiException {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new DeepSeekApiException("interrupted", exception);
+            throw new LlmApiException("interrupted", exception);
         }
     }
 
@@ -224,7 +224,7 @@ public final class DeepSeekApiClient {
      * effort, and reasoning shares the {@code max_tokens} budget, so relying on the server
      * default would let a long chain of thought truncate the tool call the bot is waiting on.
      */
-    private static JsonObject serializeThinking(AIBotConfig.DeepSeek config) {
+    private static JsonObject serializeThinking(AIBotConfig.Llm config) {
         JsonObject thinking = new JsonObject();
         boolean enabled = Boolean.TRUE.equals(config.thinking());
         thinking.addProperty("type", enabled ? "enabled" : "disabled");
@@ -284,14 +284,14 @@ public final class DeepSeekApiClient {
         return array;
     }
 
-    static ChatResponse parseResponse(String body) throws DeepSeekApiException {
+    static ChatResponse parseResponse(String body) throws LlmApiException {
         try {
             JsonObject root = JsonParser.parseString(body).getAsJsonObject();
             JsonArray choices = root.has("choices") && root.get("choices").isJsonArray()
                     ? root.getAsJsonArray("choices")
                     : null;
             if (choices == null || choices.isEmpty()) {
-                throw new DeepSeekApiException("empty_choices");
+                throw new LlmApiException("empty_choices");
             }
             JsonObject choice = choices.get(0).getAsJsonObject();
             JsonObject message = choice.getAsJsonObject("message");
@@ -331,12 +331,12 @@ public final class DeepSeekApiClient {
                         "completion_tokens", completionTokens);
             }
             return new ChatResponse(content, toolCalls, finishReason, promptTokens, completionTokens, cacheHitTokens);
-        } catch (DeepSeekApiException exception) {
+        } catch (LlmApiException exception) {
             BotLog.warn(LogCategory.API, null, "api_parse_error", "reason", exception.getMessage(), "body_excerpt", body.substring(0, Math.min(200, body.length())));
             throw exception;
         } catch (RuntimeException exception) {
             BotLog.error("api_parse_error", exception, "body_excerpt", body.substring(0, Math.min(200, body.length())));
-            throw new DeepSeekApiException("bad_response: " + exception.getMessage(), exception);
+            throw new LlmApiException("bad_response: " + exception.getMessage(), exception);
         }
     }
 

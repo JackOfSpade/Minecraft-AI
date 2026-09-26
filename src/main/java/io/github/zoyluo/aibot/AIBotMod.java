@@ -47,7 +47,7 @@ public class AIBotMod implements ModInitializer {
                                 config.profile(), config.operatorCapabilities(), capability).allowed())
                         .map(Enum::name)
                         .toList(),
-                "deepseek_model", config.deepseek().model(),
+                "llm_model", config.llm().model(),
                 "perception_radius", config.perception().radius(),
                 "nav_lookahead", config.nav().lookahead(),
                 "pickup_force_radius", config.pickup().forceRadiusH(),

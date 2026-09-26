@@ -46,7 +46,7 @@ bash scripts/evidence_run.sh \
 - `--seed <integer>`：请求的 world seed；
 - `--timeout` 与 `--startup-timeout`：scenario 与启动超时；
 - `--mode deterministic`：默认，无 LLM 费用；
-- `--mode llm_story --with-llm`：显式启用 LLM，要求 `DEEPSEEK_API_KEY`；
+- `--mode llm_story --with-llm`：显式启用 LLM，要求 `AIBOT_LLM_API_KEY`（旧名 `DEEPSEEK_API_KEY` 仍可用）；
 - `--assist off|sense|detour|poi|all`：Mining Assist 模式，默认且证据要求为 `off`，见下文“Mining Assist 模式钉死”；
 - `--fixture-log <file>`：只测试封存/解析结构，永远不能成为 `VERIFIED`。
 
@@ -163,7 +163,7 @@ Mining Assist（见 [MINING_ASSIST.md](MINING_ASSIST.md)）在真实任务里默
 
 ## CI 约束
 
-- PR CI 与 nightly deterministic workflow 不接收 `DEEPSEEK_API_KEY`；
+- PR CI 与 nightly deterministic workflow 不接收 `AIBOT_LLM_API_KEY` / `DEEPSEEK_API_KEY`；
 - nightly 覆盖 `strict_survival` 与 `operator` profile；
 - LLM story evidence 只能通过手动 workflow 触发，并要求明确确认计费；
 - workflow 在失败时仍上传诊断 artifact；
