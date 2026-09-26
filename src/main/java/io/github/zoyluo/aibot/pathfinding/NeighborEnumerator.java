@@ -80,6 +80,14 @@ public final class NeighborEnumerator {
                 continue;
             }
 
+            // NAV-BRIDGE:水平搭桥跨缺口。target 走不了(非可站)、findDrop 也没找到安全落点(缺口太深/
+            // 悬空太远)、但 target 与其上方确实是真开阔空气(不是墙,只是没有地板)——在 target 正下方
+            // 垫一块再走过去。与 addPillar 共用同一个 canPillar 闸门(两者都要消耗背包里的方块)。
+            if (canPillar && bridgeable(world, target)) {
+                result.add(new NeighborCandidate(target, MoveType.BRIDGE, 0));
+                continue;
+            }
+
             if (allowDig && digEnterable(world, target)) {
                 result.add(new NeighborCandidate(target, MoveType.DIG_THROUGH, 0));
             }
@@ -138,6 +146,11 @@ public final class NeighborEnumerator {
         if (collisionEmpty(world, up1) && collisionEmpty(world, up2) && !Standability.isDangerous(world.getBlockState(up1))) {
             result.add(new NeighborCandidate(up1, MoveType.PILLAR_UP, 0));
         }
+    }
+
+    // NAV-BRIDGE:目标格与其上方都是真开阔空气(collision 全空)才算"缺口",不是被实心墙挡住够不着顶。
+    private static boolean bridgeable(ServerWorld world, BlockPos target) {
+        return collisionEmpty(world, target) && collisionEmpty(world, target.up());
     }
 
     private static boolean collisionEmpty(ServerWorld world, BlockPos pos) {

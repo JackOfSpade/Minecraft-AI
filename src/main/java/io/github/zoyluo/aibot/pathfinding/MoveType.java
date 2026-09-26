@@ -6,5 +6,7 @@ public enum MoveType {
     JUMP_UP,
     DROP_DOWN,
     DIG_THROUGH,
-    PILLAR_UP
+    PILLAR_UP,
+    /** Horizontal bridging: places a support block one step ahead to cross an open-air gap. */
+    BRIDGE
 }

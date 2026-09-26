@@ -35,7 +35,14 @@ public final class ReasonText {
             Map.entry("no_supply", "There are no usable supplies at the base and not enough materials to make them."),
             Map.entry("no_food", "There is no edible food in my inventory."),
             Map.entry("resupply_timeout", "Resupplying took too long, so I will stop and reassess."),
-            Map.entry("out_of_fuel", "There is not enough fuel in my inventory or the base chest.")
+            Map.entry("out_of_fuel", "There is not enough fuel in my inventory or the base chest."),
+            Map.entry("no_valuables_in_radius", "I could not see any valuable blocks nearby."),
+            Map.entry("mine_valuables_scan_timeout", "Scanning the area took too long, so I will stop and reassess."),
+            Map.entry("mine_valuables_timeout", "Mining the valuables I found took too long, so I will stop and reassess."),
+            Map.entry("mine_valuables_timeout_partial", "I mined some valuables, but ran out of time before finishing the rest."),
+            Map.entry("mine_valuables_need_better_tool", "I need a better tool to mine the valuables I could see."),
+            Map.entry("mine_valuables_all_gone", "The valuables I saw were gone by the time I got there."),
+            Map.entry("mine_valuables_none_reachable", "I could not reach any of the valuables I saw.")
     );
 
     private ReasonText() {
@@ -96,6 +103,7 @@ public final class ReasonText {
             case "dig_down" -> "digging downward";
             case "descend_to_y" -> "descending to the mining layer";
             case "ore_dig" -> "mining ore";
+            case "mine_valuables" -> "mining valuables";
             default -> itemText(name);
         };
     }

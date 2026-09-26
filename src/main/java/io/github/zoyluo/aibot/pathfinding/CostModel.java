@@ -25,6 +25,8 @@ public final class CostModel {
             case DIG_THROUGH -> 8.0D;
             // 垫方块上升:代价高(消耗方块 + 慢),仅在地形无法翻越时 A* 才会选它。
             case PILLAR_UP -> 6.0D;
+            // 水平搭桥跨越缺口:同 PILLAR_UP 同一档代价——都要消耗一个方块,仅在没有天然落脚点时才选它。
+            case BRIDGE -> 6.0D;
         };
     }
 

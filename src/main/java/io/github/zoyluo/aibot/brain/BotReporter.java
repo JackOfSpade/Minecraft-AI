@@ -151,6 +151,7 @@ public final class BotReporter {
             case "build" -> "building " + objectAfter(description, "Building ");
             case "forage" -> "foraging " + objectAfter(description, "Foraging ");
             case "gather" -> "gathering " + objectAfter(description, "Gathering ");
+            case "mine_valuables" -> "mining nearby valuables";
             case "hunt" -> "hunting for food";
             case "dig_down" -> "digging downward";
             default -> ReasonText.taskName(status.name());

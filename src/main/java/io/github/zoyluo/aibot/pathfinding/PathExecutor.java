@@ -142,6 +142,7 @@ public final class PathExecutor {
             case DROP_DOWN -> tickDrop(pack, next);
             case DIG_THROUGH -> tickDigThrough(pack, next);
             case PILLAR_UP -> tickPillar(pack, next);
+            case BRIDGE -> tickBridge(pack, next);
         };
         if (!result.isInProgress()) {
             return result;
@@ -431,6 +432,52 @@ public final class PathExecutor {
         }
         FakePlayerMotion.stepTo(player, placeSlot, "path_pillar_rollback");
         return handleStuck(pack, "pillar_place_failed: " + placed.reason());
+    }
+
+    /**
+     * Horizontal bridging across an open-air gap: an ordinary straight walk forward, guarded by
+     * placing a support block at the destination's floor level before stepping onto it -- unlike
+     * {@link #tickPillar}, there is no vertical rise or jump arc here (the destination is at the
+     * bot's current eye height), so this is closer in shape to {@link #tickWalk}'s sub-walker with
+     * one placement precondition in front of it.
+     */
+    private ActionResult tickBridge(ActionPack pack, Node next) {
+        AIPlayerEntity player = pack.player();
+        BlockPos target = next.pos();
+        if (arrivedAt(player.getBlockPos(), target)) {
+            return commitAdvance(pack, index + 1);
+        }
+        BlockPos placeSlot = target.down();
+        if (player.getServerWorld().getBlockState(placeSlot)
+                .getCollisionShape(player.getServerWorld(), placeSlot).isEmpty()) {
+            int slot = findPlaceableBlock(player, protectedStoneLikeReserve);
+            if (slot < 0) {
+                return handleStuck(pack, "bridge_no_block");
+            }
+            InventoryAction.equipFromSlot(player, slot);
+            ActionResult placed = BuildAction.placeBlockAt(player, placeSlot);
+            if (placed.isFailed()) {
+                return handleStuck(pack, "bridge_place_failed: " + placed.reason());
+            }
+            return ActionResult.IN_PROGRESS;
+        }
+        if (subWalker == null) {
+            subWalker = new WalkToController(
+                    Vec3d.ofCenter(target), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
+        }
+        BlockPos beforeControllerTick = player.getBlockPos().toImmutable();
+        ActionResult result = subWalker.tick(pack);
+        ActionResult movedContract = ensureRuntimeContractAfterControllerMove(pack, beforeControllerTick);
+        if (movedContract.isFailed()) {
+            return movedContract;
+        }
+        if (result.isSuccess()) {
+            return commitAdvance(pack, index + 1);
+        }
+        if (result.isFailed()) {
+            return handleWalkFailure(pack, "bridge_walk_failed: " + result.reason());
+        }
+        return ActionResult.IN_PROGRESS;
     }
 
     private static int findPlaceableBlock(AIPlayerEntity player,

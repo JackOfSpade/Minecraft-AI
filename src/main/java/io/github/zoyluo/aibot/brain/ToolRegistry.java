@@ -50,6 +50,7 @@ import io.github.zoyluo.aibot.task.GuardTask;
 import io.github.zoyluo.aibot.task.HoldTask;
 import io.github.zoyluo.aibot.task.LightAreaTask;
 import io.github.zoyluo.aibot.task.MineTask;
+import io.github.zoyluo.aibot.task.MineValuablesTask;
 import io.github.zoyluo.aibot.task.MoveTask;
 import io.github.zoyluo.aibot.task.SleepTask;
 import io.github.zoyluo.aibot.task.SmeltTask;
@@ -328,6 +329,14 @@ public final class ToolRegistry {
             boolean started = GoalExecutor.INSTANCE.submit(bot,
                     new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
+        });
+
+        register("mine_valuables_in_radius", "Mine every valuable block (any common ore, ancient debris, nether gold ore, gilded blackstone, raw metal blocks, amethyst clusters) that is actually visible from the bot's current position right now, within radius blocks. Takes exactly one honest snapshot of what is visible at the moment this is called and only ever works that fixed list -- it never chases anything that only becomes visible later while walking. Pillars/bridges to reach a target when it is carrying a placeable block, and lights its own feet with a torch when mining somewhere dark. Use this for 'mine everything valuable nearby' style requests; for one specific ore type prefer mine_ore instead.", objectSchema()
+                .property("radius", integerSchema("scan radius in blocks, default " + MineValuablesTask.DEFAULT_RADIUS + ", max " + MineValuablesTask.MAX_RADIUS, 1, MineValuablesTask.MAX_RADIUS))
+                .build(), (bot, args) -> {
+            Task task = new MineValuablesTask(optionalInt(args, "radius", MineValuablesTask.DEFAULT_RADIUS));
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
         });
 
         register("achieve_goal", "Achieve an item/tool inventory goal with deterministic planning. Use this for requests like make an iron pickaxe or obtain 10 iron ingots; do not manually decompose the steps.", objectSchema()
@@ -833,7 +842,7 @@ public final class ToolRegistry {
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
         register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, water travel, and container work. Use dedicated craft, eat, and smelt tools for those actions. For task_type=gather, count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly. Legacy strip_mine and mine_vein routes are operator-only and are rejected in strict_survival. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw; legacy operator-only: strip_mine, mine_vein"))
+                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw; legacy operator-only: strip_mine, mine_vein"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -910,6 +919,7 @@ public final class ToolRegistry {
                 yield OreScan.isOreBlock(block) ? new OreDigTask(OreScan.oreFamily(block), count) : new MineTask(block, count);
             }
             case "mine_ore" -> new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
+            case "mine_valuables" -> new MineValuablesTask(optionalInt(params, "radius", MineValuablesTask.DEFAULT_RADIUS));
             case "gather" -> GatherQuotaTask.collectAdditional(
                     requiredItem(params, "item"), optionalInt(params, "count", 1));
             case "clear_grass" -> GatherQuotaTask.clearGrass(requiredPositiveInt(params, "count"));

@@ -45,7 +45,7 @@ public final class BrainCoordinator {
     private static final Set<String> GENUINE_ACTION_TOOLS = Set.of(
             "look_at", "move_to", "mine_block", "place_block", "select_hotbar", "equip_best_tool",
             "craft", "eat", "smelt", "gather", "clear_grass", "break_blocks", "fish", "trade", "set_base",
-            "deposit_all", "strip_mine", "mine_vein", "mine_ore", "achieve_goal", "harvest_crop",
+            "deposit_all", "strip_mine", "mine_vein", "mine_ore", "mine_valuables_in_radius", "achieve_goal", "harvest_crop",
             "provision_food", "forage", "achieve_armor", "achieve_workstation", "build_house",
             "stockpile", "deposit", "withdraw", "equip_armor", "attack", "sleep", "light_area",
             "follow", "hold", "guard", "farm", "harvest", "breed", "attack_entity", "post_job",
@@ -58,7 +58,7 @@ public final class BrainCoordinator {
     private static final Set<String> WORK_START_TOOLS = Set.of(
             "move_to", "mine_block", "place_block", "craft", "eat", "smelt", "gather",
             "clear_grass", "break_blocks", "fish", "trade", "deposit_all", "strip_mine", "mine_vein",
-            "mine_ore", "achieve_goal", "harvest_crop", "provision_food", "forage",
+            "mine_ore", "mine_valuables_in_radius", "achieve_goal", "harvest_crop", "provision_food", "forage",
             "achieve_armor", "achieve_workstation", "build_house", "stockpile", "deposit",
             "withdraw", "attack", "sleep", "light_area", "follow", "hold", "guard", "farm",
             "harvest", "breed", "attack_entity", "goto_place", "resume_mining",
