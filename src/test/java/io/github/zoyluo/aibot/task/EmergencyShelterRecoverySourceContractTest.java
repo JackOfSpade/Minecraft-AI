@@ -24,7 +24,7 @@ final class EmergencyShelterRecoverySourceContractTest {
     }
 
     @Test
-    void shelterRetreatsGetsDryRecoversAndThenRegistersExactCleanup() throws IOException {
+    void shelterRetreatsGetsDryRecoversAndRegistersCleanupWithoutAutoDispatch() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
         String watcher = read("task/DangerWatcher.java");
         String cleanup = read("task/ShelterCleanupTask.java");
@@ -40,7 +40,12 @@ final class EmergencyShelterRecoverySourceContractTest {
                 "cleanup proof must use exact placed block state, not a material/shape guess");
         assertTrue(watcher.contains("shouldStartLastResortShelter(bot, threat)"));
         assertTrue(watcher.contains("isTwoHitLethalHealth"));
-        assertTrue(watcher.contains("new ShelterCleanupTask()"));
+        // Per an explicit product decision, bots must never travel back to tear down a shelter or
+        // combat structure on their own -- the player cleans those up manually. DangerWatcher still
+        // registers the cleanup debt (recorded above), it just never auto-assigns ShelterCleanupTask
+        // to act on it; ShelterCleanupTask itself remains available for a manual/panel assignment.
+        assertFalse(watcher.contains("new ShelterCleanupTask()"),
+                "DangerWatcher must not auto-dispatch bots to travel back and clean up shelters");
         assertTrue(cleanup.contains("DangerWatcher.hasObservableHostilePressure(bot)"));
         assertTrue(cleanup.contains("EmergencyShelterTask.ownsCleanupBlock(bot, debt, target)"));
         assertTrue(cleanup.contains("bot.getHungerManager().getFoodLevel() < 20"));

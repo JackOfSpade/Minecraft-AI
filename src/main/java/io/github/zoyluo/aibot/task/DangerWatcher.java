@@ -42,7 +42,6 @@ public final class DangerWatcher {
     private final Map<UUID, PosRecord> darkStuckRecords = new ConcurrentHashMap<>(); // 规避:困死陷阱检测
     private final Map<UUID, Integer> nextEscapeHelpTick = new ConcurrentHashMap<>();  // 撤离求助节流
     private final Map<UUID, Integer> nextShelterAttemptTick = new ConcurrentHashMap<>();
-    private final Map<UUID, Integer> nextShelterCleanupAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, ShelterEpisode> shelterEpisodes = new ConcurrentHashMap<>();
 
     // 第1层 困死退避:逃避类任务(evade/shelter)在同一格反复触发却没脱身,即判"被困",
@@ -75,7 +74,6 @@ public final class DangerWatcher {
         darkStuckRecords.remove(id);
         nextEscapeHelpTick.remove(id);
         nextShelterAttemptTick.remove(id);
-        nextShelterCleanupAttemptTick.remove(id);
         shelterEpisodes.remove(id);
     }
 
@@ -90,7 +88,6 @@ public final class DangerWatcher {
         darkStuckRecords.clear();
         nextEscapeHelpTick.clear();
         nextShelterAttemptTick.clear();
-        nextShelterCleanupAttemptTick.clear();
         shelterEpisodes.clear();
     }
 
@@ -441,9 +438,6 @@ public final class DangerWatcher {
         if (maybeEat(server, bot, active)) {
             return true;
         }
-        if (maybeCleanupShelters(server, bot, active, threat)) {
-            return true;
-        }
         if (maybeStartNightTask(server, bot, active)) {
             return true;
         }
@@ -673,38 +667,6 @@ public final class DangerWatcher {
         BotLog.danger(bot, "hunger_eat_started", "food", foodLevel, "critical", critical,
                 "healing", healingEmergency, "cleanup_recovery", shelterCleanupRecovery,
                 "hp", (int) bot.getHealth());
-        return true;
-    }
-
-    /**
-     * Housekeeping has deliberately lower authority than every threat, heal and food transaction.
-     * Any idle bot in the same dimension can claim exact-state debt from another bot, which keeps
-     * a wounded shelter owner from being the sole person responsible for tearing down its walls.
-     */
-    private boolean maybeCleanupShelters(MinecraftServer server,
-                                         AIPlayerEntity bot,
-                                         Optional<Task> active,
-                                         Optional<Threat> threat) {
-        if (threat.isPresent()
-                || hasObservableHostilePressure(bot)
-                || bot.hurtTime > 0
-                || bot.getHungerManager().getFoodLevel() < 20
-                || active.isPresent()
-                || TaskManager.INSTANCE.isUserPaused(bot)
-                || bot.getActionPack().hasActiveActions()
-                || !EmergencyShelterTask.hasPendingCleanup(bot)) {
-            return false;
-        }
-        int now = server.getTicks();
-        if (now < nextShelterCleanupAttemptTick.getOrDefault(bot.getUuid(), 0)) {
-            return false;
-        }
-        TaskManager.INSTANCE.assign(bot, new ShelterCleanupTask(),
-                TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "shelter_cleanup"));
-        nextShelterCleanupAttemptTick.put(bot.getUuid(), now + 20);
-        BotLog.action(bot, "shelter_cleanup_scheduled",
-                "food", bot.getHungerManager().getFoodLevel(),
-                "health", bot.getHealth());
         return true;
     }
 
