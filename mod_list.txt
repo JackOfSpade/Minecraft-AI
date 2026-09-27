@@ -121,12 +121,19 @@ GAMEPLAY / COMBAT / HUD
 | AttributeFix          | 21.11.1                   |
 | Easy Anvils           | 21.11.1                   |
 | Fiw Graves            | v1.1.0 (fabric-1.21.11)   |
+| DeathCompass          | 1.1.0 (fabric-1.21.11)   |
 
 Fiw Graves (by Fi3w0) replaces DeathMarker (below): server-side/singleplayer
 grave system, packet-only marker+hologram at your death spot (nothing written
 to the world, so it can't leak or crash-corrupt), 10-minute despawn with
 quick-collect, and an admin loot-backup safety net (`/graves rollback`,
 `/graves restore`) beyond vanilla's normal item despawn. No client jar
+
+DeathCompass (by Nikrecs) stacks with Fiw Graves: on respawn it puts a
+lodestone-targeted compass pointing at your last death spot straight into
+your inventory (drops at your feet if the inventory is full). Zero config,
+server-side/singleplayer, requires Architectury API (below, added alongside
+it) plus Fabric API (already installed).
 involved, so it isn't exposed to the client-rendering API break that killed
 DeathMarker. https://modrinth.com/mod/fiw-graves
 
@@ -175,6 +182,7 @@ REQUIRED LIBRARIES / DEPENDENCIES
 | Puzzles Lib              | 21.11.11                         |
 | Forge Config API Port    | 21.11.1                          |
 | Text Placeholder API     | 2.8.2+1.21.10 (compatible with 1.21.11) |
+| Architectury API         | 19.0.1+fabric-1.21.11             |
 
 HeroBot is a required dependency of PvP BOT (and, transitively, of this
 project's own PvP BOT Inhabitants addon above) -- it is a third-party
