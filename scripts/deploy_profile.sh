@@ -81,7 +81,9 @@ if [ "$DO_BUILD" = 1 ]; then
   fi
   export PATH="$(cygpath -u "$JAVA_HOME")/bin:$PATH"
   printf 'deploy: building...\n'
-  cmd.exe //c "gradlew.bat --no-daemon --console=plain clean build -x test -x runGameTest" >/dev/null \
+  # full Windows path: cmd.exe launched from Git Bash does not search the current directory
+  GRADLEW_WIN="$(cygpath -w "$ROOT/gradlew.bat")"
+  cmd.exe //c "$GRADLEW_WIN --no-daemon --console=plain clean build -x test -x runGameTest" >/dev/null \
     || die "build failed (run: cmd /c gradlew.bat build -x test -x runGameTest to see why)"
 fi
 
