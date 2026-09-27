@@ -231,7 +231,9 @@ public final class PopulationEngine implements EngineControl {
         long structureSeed = deterministic
                 ? StableHash.of(ctx.world.worldSeed(), StableHash.ofString(EngineContext.salt(cfg)), key.stableHash())
                 : seedSource.getAsLong();
-        StructureRoll roll = StructureRoll.of(rule, structureSeed, mode, deterministic ? "DETERMINISTIC" : "RANDOM");
+        int pieceCount = snapshot.pieces().isEmpty() ? 1 : snapshot.pieces().size();
+        StructureRoll roll = StructureRoll.of(rule, structureSeed, pieceCount, mode,
+                deterministic ? "DETERMINISTIC" : "RANDOM");
 
         StructureRecord rec = roll.occupied() ? new StructureRecord() : StructureRecord.abandoned();
         rec.source = roll.source();
@@ -251,9 +253,10 @@ public final class PopulationEngine implements EngineControl {
         if (roll.occupied()) {
             driver.enqueue(snapshot, immediate, ctx.now());
         }
-        ctx.debug(cfg, "Rolled {}: {} (roll {} vs chance {} [{}], {} bot(s), source {})", key,
-                roll.occupied() ? "occupied" : "abandoned", roll.roll(), roll.chance(), rule.occupiedChanceFrom(),
-                roll.occupied() ? roll.botCount() : 0, roll.source());
+        ctx.debug(cfg, "Rolled {}: {} (roll {} vs chance {} [{}], {} bot(s) of a size-capped max {} from {} piece(s)"
+                        + " [{} per bot, {}], source {})", key, roll.occupied() ? "occupied" : "abandoned",
+                roll.roll(), roll.chance(), rule.occupiedChanceFrom(), roll.occupied() ? roll.botCount() : 0,
+                roll.sizeCappedMax(), roll.pieceCount(), rule.piecesPerBot(), rule.piecesPerBotFrom(), roll.source());
         return rec;
     }
 

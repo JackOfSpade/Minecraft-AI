@@ -22,9 +22,15 @@ import dev.spawnbotswrapper.inhabitants.util.StableHash;
  * @param occupied      the verdict
  * @param botCount      how many bots an occupied structure gets (drawn even for abandoned rolls so that
  *                      forcing a structure occupied later stays consistent with the deterministic count)
+ * @param sizeCappedMax the ceiling {@code botCount} was actually drawn against (min(rule.maxBots(),
+ *                      size-suggested max); recorded for diagnostics even though it is a pure function
+ *                      of {@code pieceCount} and the rule, since a debug log reading it should not have
+ *                      to replay the arithmetic)
+ * @param pieceCount    the structure's own piece count this roll was scaled against
  * @param source        {@code RANDOM}, {@code DETERMINISTIC} or {@code ADMIN_FORCED}
  */
-record StructureRoll(long structureSeed, double chance, double roll, boolean occupied, int botCount, String source) {
+record StructureRoll(long structureSeed, double chance, double roll, boolean occupied, int botCount,
+                      int sizeCappedMax, int pieceCount, String source) {
 
     static final String SOURCE_FORCED = "ADMIN_FORCED";
 
@@ -33,19 +39,30 @@ record StructureRoll(long structureSeed, double chance, double roll, boolean occ
     private static final long BOT_STREAM_BASE = 0x100L;
 
     /**
+     * @param pieceCount    the structure's piece count (a structure with no piece data counts as one,
+     *                      matching {@link dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot#sampleBoxes()})
      * @param naturalSource what to record when the verdict comes from the roll itself
      */
-    static StructureRoll of(EffectiveRule rule, long structureSeed, ForceMode mode, String naturalSource) {
+    static StructureRoll of(EffectiveRule rule, long structureSeed, int pieceCount, ForceMode mode, String naturalSource) {
         SplitMix64 rng = new SplitMix64(StableHash.combine(structureSeed, ROLL_STREAM));
         double u = rng.nextDouble();
-        int count = rng.nextIntInclusive(rule.minBots(), rule.maxBots());
+        int effectivePieces = Math.max(1, pieceCount);
+        // A structure smaller than the configured range pulls the ceiling DOWN, never up: maxBots stays
+        // the absolute cap an operator set, and piecesPerBot only makes a small structure draw from a
+        // narrower range than a big one sharing the same tag, without needing a separate override per size.
+        int sizeSuggestedMax = (int) Math.min(Integer.MAX_VALUE,
+                Math.max(1, Math.ceil(effectivePieces / rule.piecesPerBot())));
+        int effectiveMax = Math.min(rule.maxBots(), sizeSuggestedMax);
+        int effectiveMin = Math.min(rule.minBots(), effectiveMax);
+        int count = rng.nextIntInclusive(effectiveMin, effectiveMax);
         boolean occupied = switch (mode) {
             case ROLL -> u < rule.occupiedChance();
             case OCCUPIED -> true;
             case ABANDONED -> false;
         };
         String source = mode == ForceMode.ROLL ? naturalSource : SOURCE_FORCED;
-        return new StructureRoll(structureSeed, rule.occupiedChance(), u, occupied, count, source);
+        return new StructureRoll(structureSeed, rule.occupiedChance(), u, occupied, count, effectiveMax,
+                effectivePieces, source);
     }
 
     static long botSeed(long structureSeed, int index) {

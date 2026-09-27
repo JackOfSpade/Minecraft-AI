@@ -557,6 +557,89 @@ class FindPositionsTest {
         assertEquals(2, find(p, s, probe, 5, 1).positions().size());
     }
 
+    // ---------------------------------------------------------------- spreading across pieces
+
+    @Test
+    void everyPieceGetsABotBeforeAnyPieceGetsASecondOne() {
+        FakeProbe probe = new FakeProbe()
+                .floor(0, 0, 4, 4).floor(20, 0, 24, 4).floor(40, 0, 44, 4).floor(60, 0, 64, 4);
+        StructureSnapshot village = snapshot(box(0, FLOOR, 0, 64, FLOOR + 4, 4),
+                box(0, FLOOR, 0, 4, FLOOR + 4, 4), box(20, FLOOR, 0, 24, FLOOR + 4, 4),
+                box(40, FLOOR, 0, 44, FLOOR + 4, 4), box(60, FLOOR, 0, 64, FLOOR + 4, 4));
+        for (long seed = 0; seed < 40; seed++) {
+            PositionResult r = find(planner(o -> o.minBotSeparation = 0.0), village, probe, 4, seed);
+            assertEquals(4, r.positions().size(), "seed " + seed);
+            Set<Integer> pieceStarts = new TreeSet<>();
+            for (Position p : r.positions()) {
+                pieceStarts.add(((int) Math.floor(p.x()) / 20) * 20);
+            }
+            assertEquals(4, pieceStarts.size(), "seed " + seed + ": every piece must hold exactly one of the 4 bots, got " + pieceStarts);
+        }
+    }
+
+    @Test
+    void oncePiecesAreAllUsedFurtherBotsMayShareOne() {
+        FakeProbe probe = new FakeProbe().floor(0, 0, 4, 4).floor(20, 0, 24, 4);
+        StructureSnapshot s = snapshot(box(0, FLOOR, 0, 24, FLOOR + 4, 4),
+                box(0, FLOOR, 0, 4, FLOOR + 4, 4), box(20, FLOOR, 0, 24, FLOOR + 4, 4));
+        PositionResult r = find(planner(o -> o.minBotSeparation = 0.0), s, probe, 6, 1);
+        assertEquals(6, r.positions().size(), "2 pieces of 25 columns each hold 6 bots easily once sharing is allowed");
+        boolean sawFirst = false;
+        boolean sawSecond = false;
+        for (Position p : r.positions()) {
+            if (Math.floor(p.x()) < 20) {
+                sawFirst = true;
+            } else {
+                sawSecond = true;
+            }
+        }
+        assertTrue(sawFirst && sawSecond, "both pieces must be used, not just one");
+    }
+
+    @Test
+    void aSingleHugePieceSpreadsFarBeyondTheFlatConfiguredSeparation() {
+        FakeProbe probe = new FakeProbe().floor(0, 0, 59, 59);
+        StructureSnapshot hall = single(box(0, FLOOR, 0, 59, FLOOR + 4, 59));
+        // A flat 1-block separation would let bots huddle in one corner; the adaptive floor for 4 bots over
+        // a 60x60 room (sqrt(3600/4) * 0.6 = 18.0) must force them apart far more than that.
+        for (long seed = 0; seed < 15; seed++) {
+            PositionResult r = find(planner(o -> o.minBotSeparation = 1.0), hall, probe, 4, seed);
+            assertEquals(4, r.positions().size(), "seed " + seed);
+            assertPairwiseAtLeast(r.positions(), 10.0);
+        }
+    }
+
+    @Test
+    void aSingleHugePieceWithOnlyOneBotNeedsNoAdaptiveSeparation() {
+        FakeProbe probe = new FakeProbe().floor(0, 0, 59, 59);
+        StructureSnapshot hall = single(box(0, FLOOR, 0, 59, FLOOR + 4, 59));
+        // count == 1 never has a second bot to separate from; this must not somehow reject every column.
+        PositionResult r = find(planner(o -> o.minBotSeparation = 1.0), hall, probe, 1, 1);
+        assertEquals(1, r.positions().size());
+    }
+
+    @Test
+    void anOperatorsWiderSeparationThanTheAdaptiveFloorIsNeverShrunk() {
+        FakeProbe probe = new FakeProbe().floor(0, 0, 39, 39);
+        StructureSnapshot hall = single(box(0, FLOOR, 0, 39, FLOOR + 4, 39));
+        // The adaptive floor for 2 bots here is small (sqrt(1600/2)*0.6 = 17.0); an operator asking for
+        // more than that must still get at least what they configured.
+        PositionResult r = find(planner(o -> o.minBotSeparation = 25.0), hall, probe, 2, 1);
+        assertEquals(2, r.positions().size());
+        assertPairwiseAtLeast(r.positions(), 25.0);
+    }
+
+    @Test
+    void multiplePiecesAreNeverGivenTheSingleBoxSpreadTreatment() {
+        // Two separate small pieces, far apart, each too small on its own to satisfy a large single-box
+        // adaptive separation: proves the adaptive floor only applies when sampleBoxes() has exactly one box.
+        FakeProbe probe = new FakeProbe().floor(0, 0, 2, 2).floor(100, 100, 102, 102);
+        StructureSnapshot s = snapshot(box(0, FLOOR, 0, 102, FLOOR + 4, 102),
+                box(0, FLOOR, 0, 2, FLOOR + 4, 2), box(100, FLOOR, 100, 102, FLOOR + 4, 102));
+        PositionResult r = find(planner(o -> o.minBotSeparation = 1.0), s, probe, 2, 1);
+        assertEquals(2, r.positions().size(), "two small, separate pieces must not be starved by single-box spread math");
+    }
+
     // ---------------------------------------------------------------- property: random worlds
 
     @Test

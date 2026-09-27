@@ -28,6 +28,16 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
     /** Tolerance for a stored feet Y that is a hair below its block after float round trips. */
     private static final double LEVEL_EPSILON = 1e-6;
 
+    /**
+     * When a structure is a single piece (or has no piece data), the flat {@code minBotSeparation} default
+     * is tuned for "don't stand on each other", not for "use the whole room". This fraction of the
+     * even-packing spacing (sqrt(footprint / botCount), the classic average nearest-neighbour distance for
+     * points spread uniformly over an area) is used as a floor on separation instead, so a handful of bots
+     * in one big hall spread across it rather than cluster whenever the configured separation is smaller
+     * than that. Kept well under 1.0 so an irregular room (furniture, pillars) still has slack to succeed.
+     */
+    private static final double SINGLE_BOX_SPREAD_FACTOR = 0.6;
+
     private final Supplier<InhabitantsConfig.Spawning> options;
 
     public DefaultSpawnPlanner(Supplier<InhabitantsConfig.Spawning> options) {
@@ -53,12 +63,16 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
         }
         InhabitantsConfig.Spawning opt = options.get();
         boolean allowSubmerged = opt.allowSubmerged;
-        double separation = Double.isNaN(opt.minBotSeparation) ? 0.0 : Math.max(0.0, opt.minBotSeparation);
+        double configuredSeparation = Double.isNaN(opt.minBotSeparation) ? 0.0 : Math.max(0.0, opt.minBotSeparation);
+        List<IntBox> boxes = structure.sampleBoxes();
+        final double separation = boxes.size() == 1
+                ? Math.max(configuredSeparation, singleBoxSpreadSeparation(boxes.get(0), count))
+                : configuredSeparation;
         long budget = (long) count * Math.max(1, opt.positionAttemptsPerBot);
         List<Position> taken = alreadyTaken == null ? List.of() : alreadyTaken;
 
         ProbeView view = new ProbeView(probe);
-        ColumnSampler sampler = new ColumnSampler(structure.sampleBoxes());
+        ColumnSampler sampler = new ColumnSampler(boxes);
         List<Position> found = new ArrayList<>();
         List<Spot> spare = new ArrayList<>();
         int tried = 0;
@@ -78,6 +92,7 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
             }
             int y = levels.remove(rng.nextInt(levels.size()));
             found.add(new Position(column.x() + 0.5, y, column.z() + 0.5, yaw(rng)));
+            sampler.markUsed(column.box()); // prefer the structure's other pieces before revisiting this one
             for (int other : levels) {
                 spare.add(new Spot(column.x(), other, column.z()));
             }
@@ -94,6 +109,22 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
 
     /** A standing level of an already-read column that was not the one picked; no further probing needed. */
     private record Spot(int x, int y, int z) {
+    }
+
+    /**
+     * The even-packing spacing for {@code count} points over the box's own XZ footprint, scaled down by
+     * {@link #SINGLE_BOX_SPREAD_FACTOR} and capped at half the box's shorter side (a long, narrow room
+     * should not demand a separation wider than it is). Meaningless (and skipped by the caller) for
+     * {@code count <= 1}, where there is no second bot to separate from yet.
+     */
+    private static double singleBoxSpreadSeparation(IntBox box, int count) {
+        if (count <= 1) {
+            return 0.0;
+        }
+        double footprint = (double) box.sizeX() * (double) box.sizeZ();
+        double target = Math.sqrt(footprint / count) * SINGLE_BOX_SPREAD_FACTOR;
+        double cap = Math.min(box.sizeX(), box.sizeZ()) / 2.0;
+        return Math.min(target, cap);
     }
 
     /**

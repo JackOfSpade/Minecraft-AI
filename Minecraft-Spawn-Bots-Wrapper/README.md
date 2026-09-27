@@ -43,7 +43,7 @@ runs on defaults until you fix it.
 ```jsonc
 {
   "enabled": true,
-  "default": { "occupiedChance": 0.65, "minBots": 1, "maxBots": 4 },
+  "default": { "occupiedChance": 0.65, "minBots": 1, "maxBots": 4, "piecesPerBot": 0.5 },
 
   "structures": {
     "minecraft:pillager_outpost": { "occupiedChance": 0.85, "minBots": 2, "maxBots": 6 },
@@ -98,10 +98,30 @@ Structure identifiers accept:
 | `*` | everything |
 
 `structures` beats `tags` beats a namespace wildcard beats `default`, field by field — an override can set
-only `occupiedChance` and still inherit `minBots`/`maxBots`. `exclude` always wins over `include`.
+only `occupiedChance` and still inherit `minBots`/`maxBots`/`piecesPerBot`. `exclude` always wins over `include`.
 
 Full field reference: every key above, its valid range, and what it does is in
 [`InhabitantsConfig`](src/main/java/dev/spawnbotswrapper/inhabitants/config/InhabitantsConfig.java).
+
+### Bot count scales with structure size
+
+`minBots`/`maxBots` set the range a structure can roll from, but a one-piece well and a fifty-house village
+sharing the same tag shouldn't roll from the same range. `piecesPerBot` pulls the ceiling *down* for a
+structure smaller than that range assumes: the effective maximum is
+`min(maxBots, ceil(structurePieceCount / piecesPerBot))`, where a "piece" is one of the structure's
+individual buildings/rooms (a structure with no piece data counts as one piece). It never raises the
+ceiling above `maxBots`, and `minBots` is clamped down to match if the size cap falls below it. The default
+(`0.5`, i.e. roughly two bots per piece) means a handful of pieces already reaches a typical `maxBots`, so
+only a genuinely small structure draws from a visibly narrower range.
+
+### Placement spreads across the structure
+
+When placing an occupied structure's bots, positions are drawn from the structure's individual pieces
+(buildings/rooms) rather than treated as one bounding box: every piece gets a bot before any piece gets a
+second one, so a village's population lands in different houses instead of piling into whichever one was
+sampled first. A structure with only one piece (or one that fits in a single box) instead spreads its bots
+out within that box — the minimum separation between bots adapts to the box's footprint and the bot count,
+never shrinking below whatever `spawning.minBotSeparation` already requires.
 
 ### Deterministic mode
 

@@ -50,6 +50,7 @@ public final class RuleResolver {
         Resolved<Double> chance = pick(cfg, structureId, tagIds, o -> o.occupiedChance, base.occupiedChance);
         Resolved<Integer> min = pick(cfg, structureId, tagIds, o -> o.minBots, base.minBots);
         Resolved<Integer> max = pick(cfg, structureId, tagIds, o -> o.maxBots, base.maxBots);
+        Resolved<Double> piecesPerBot = pick(cfg, structureId, tagIds, o -> o.piecesPerBot, base.piecesPerBot);
 
         double p = chance.value;
         if (Double.isNaN(p)) {
@@ -58,7 +59,11 @@ public final class RuleResolver {
         p = Math.max(0.0, Math.min(1.0, p));
         int lo = Math.max(1, Math.min(EffectiveRule.MAX_BOTS_PER_STRUCTURE, min.value));
         int hi = Math.max(lo, Math.min(EffectiveRule.MAX_BOTS_PER_STRUCTURE, max.value));
-        return new EffectiveRule(p, lo, hi, chance.from, min.from, max.from);
+        double ppb = piecesPerBot.value;
+        if (Double.isNaN(ppb) || Double.isInfinite(ppb) || ppb <= 0.0) {
+            ppb = 0.1; // never let a bad config value divide by zero or invert the scaling
+        }
+        return new EffectiveRule(p, lo, hi, ppb, chance.from, min.from, max.from, piecesPerBot.from);
     }
 
     private record Resolved<T>(T value, String from) {

@@ -5,9 +5,11 @@ import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Draws (x, z) columns from a set of boxes WITHOUT replacement.
@@ -17,6 +19,12 @@ import java.util.Map;
  * repeating a column means a small structure is searched exhaustively once the attempt budget exceeds its
  * area, and no attempt is wasted re-reading a column that already failed. Each box keeps a sparse
  * Fisher-Yates permutation, so a 200x200 box costs memory only for the columns actually drawn.
+ * <p>
+ * Boxes that have not yet had a bot placed in them (see {@link #markUsed}) are preferred over ones that
+ * already have: while any box remains unused, {@link #choose} only ever draws from the unused ones (with
+ * the same uniform/area split among that subset), so bots spread across as many pieces/buildings as
+ * possible before a piece is ever asked to hold a second one. Once every box has at least one bot, the
+ * bias lifts and drawing returns to the plain area/uniform mix over all of them.
  * <p>
  * Identical boxes are collapsed (overlapping village pieces are common, exact duplicates would only double
  * a box's weight). Deterministic for a given generator state: iteration order is fixed and the only
@@ -32,6 +40,7 @@ final class ColumnSampler {
     static final double UNIFORM_BOX_SHARE = 0.25;
 
     private final List<BoxDeck> active = new ArrayList<>();
+    private final Set<IntBox> usedBoxes = new HashSet<>();
     private long totalRemaining;
 
     ColumnSampler(List<IntBox> boxes) {
@@ -59,21 +68,54 @@ final class ColumnSampler {
         return column;
     }
 
+    /** Records that a bot was actually placed in {@code box}, so later draws favour the boxes still without one. */
+    void markUsed(IntBox box) {
+        usedBoxes.add(box);
+    }
+
     private BoxDeck choose(SplitMix64 rng) {
         if (active.size() == 1) {
             return active.get(0);
         }
-        if (rng.nextDouble() < UNIFORM_BOX_SHARE) {
-            return active.get(rng.nextInt(active.size()));
+        List<BoxDeck> pool = active;
+        long poolRemaining = totalRemaining;
+        List<BoxDeck> unused = unusedDecks();
+        if (!unused.isEmpty()) {
+            pool = unused;
+            poolRemaining = sumRemaining(unused);
         }
-        long ticket = Math.min(totalRemaining - 1, (long) (rng.nextDouble() * totalRemaining));
-        for (BoxDeck deck : active) {
+        if (pool.size() == 1) {
+            return pool.get(0);
+        }
+        if (rng.nextDouble() < UNIFORM_BOX_SHARE) {
+            return pool.get(rng.nextInt(pool.size()));
+        }
+        long ticket = Math.min(poolRemaining - 1, (long) (rng.nextDouble() * poolRemaining));
+        for (BoxDeck deck : pool) {
             if (ticket < deck.remaining) {
                 return deck;
             }
             ticket -= deck.remaining;
         }
-        return active.get(active.size() - 1);
+        return pool.get(pool.size() - 1);
+    }
+
+    private List<BoxDeck> unusedDecks() {
+        List<BoxDeck> out = new ArrayList<>(active.size());
+        for (BoxDeck d : active) {
+            if (!usedBoxes.contains(d.box)) {
+                out.add(d);
+            }
+        }
+        return out;
+    }
+
+    private static long sumRemaining(List<BoxDeck> decks) {
+        long sum = 0;
+        for (BoxDeck d : decks) {
+            sum += d.remaining;
+        }
+        return sum;
     }
 
     private static final class BoxDeck {

@@ -9,6 +9,7 @@ import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
 import dev.spawnbotswrapper.inhabitants.store.StructureRecord;
 import dev.spawnbotswrapper.inhabitants.store.StructureStatus;
+import dev.spawnbotswrapper.inhabitants.structure.IntBox;
 import dev.spawnbotswrapper.inhabitants.structure.StructureKey;
 import dev.spawnbotswrapper.inhabitants.structure.StructureSnapshot;
 import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
@@ -16,6 +17,7 @@ import dev.spawnbotswrapper.inhabitants.util.StableHash;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -641,7 +643,34 @@ final class PopulationDriver {
             rec.note = truncate(reasons.isEmpty() ? "no inhabitant could be placed" : "no inhabitant could be placed: " + reasons);
         }
         ctx.store.markDirty();
+        InhabitantsConfig cfg = ctx.config();
+        if (cfg != null) {
+            String spread = spawned > 0 ? spreadSummary(p.snapshot, rec.bots) : "no pieces occupied";
+            ctx.debug(cfg, "Structure {} settled: {} ({}; {})", p.key, rec.status,
+                    rec.note != null ? rec.note : "no issues", spread);
+        }
         finish(p);
+    }
+
+    /** How many of the structure's own pieces ended up with at least one living or requested inhabitant. */
+    private static String spreadSummary(StructureSnapshot snapshot, List<BotRecord> bots) {
+        List<IntBox> boxes = snapshot.sampleBoxes();
+        int total = boxes.size();
+        Set<IntBox> occupiedBoxes = new HashSet<>();
+        for (BotRecord b : bots) {
+            if (b.state != BotState.SPAWNED && b.state != BotState.REQUESTED) {
+                continue;
+            }
+            int x = (int) Math.floor(b.x);
+            int y = (int) Math.floor(b.y);
+            int z = (int) Math.floor(b.z);
+            for (IntBox box : boxes) {
+                if (box.contains(x, y, z)) {
+                    occupiedBoxes.add(box);
+                }
+            }
+        }
+        return occupiedBoxes.size() + " of " + total + " piece(s) occupied";
     }
 
     private static String failureReasons(StructureRecord rec) {

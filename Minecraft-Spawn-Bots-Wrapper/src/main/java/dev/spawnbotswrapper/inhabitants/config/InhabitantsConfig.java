@@ -68,6 +68,16 @@ public final class InhabitantsConfig {
         /** Inclusive bot count range for an occupied structure. */
         public int minBots = 1;
         public int maxBots = 4;
+        /**
+         * How many of the structure's pieces (buildings) roughly justify one more bot. The roll never
+         * exceeds {@code maxBots}; this only pulls the ceiling DOWN for a structure smaller than that
+         * range assumes, so a one-piece well and a fifty-house village never draw from the same effective
+         * range even though they share a {@code maxBots}. A structure with no piece data (bounds only)
+         * counts as one piece. Must stay positive; the default asks for roughly two bots per piece, so a
+         * handful of pieces already reaches a typical {@code maxBots} and only a genuinely small structure
+         * (one or two pieces) draws from a visibly narrower range than a large one sharing the same tag.
+         */
+        public double piecesPerBot = 0.5;
 
         public Rule() {
         }
@@ -77,6 +87,13 @@ public final class InhabitantsConfig {
             this.minBots = minBots;
             this.maxBots = maxBots;
         }
+
+        public Rule(double occupiedChance, int minBots, int maxBots, double piecesPerBot) {
+            this.occupiedChance = occupiedChance;
+            this.minBots = minBots;
+            this.maxBots = maxBots;
+            this.piecesPerBot = piecesPerBot;
+        }
     }
 
     /** A partial rule; null fields inherit. */
@@ -84,6 +101,7 @@ public final class InhabitantsConfig {
         public Double occupiedChance;
         public Integer minBots;
         public Integer maxBots;
+        public Double piecesPerBot;
 
         public RuleOverride() {
         }
@@ -92,6 +110,13 @@ public final class InhabitantsConfig {
             this.occupiedChance = occupiedChance;
             this.minBots = minBots;
             this.maxBots = maxBots;
+        }
+
+        public RuleOverride(Double occupiedChance, Integer minBots, Integer maxBots, Double piecesPerBot) {
+            this.occupiedChance = occupiedChance;
+            this.minBots = minBots;
+            this.maxBots = maxBots;
+            this.piecesPerBot = piecesPerBot;
         }
     }
 
