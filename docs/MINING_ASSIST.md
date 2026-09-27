@@ -157,6 +157,24 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
   the design text spells the same call `setHarnessDefault(false)`, which reads inverted, so a harness entry
   point written from the design must use `setHarnessDefaultOff(true)`. A source-contract test pins it as the
   first statement of `AIBotHarnessTestMod.onInitialize`.
+- `MiningAssistSenseGameTests` (GameTest, `src/gametest/java/io/github/zoyluo/aibot/mining/assist`) runs the
+  sensor in a real Minecraft world, through the real coordinator, with strict-survival capabilities. Every test
+  builds its own sealed stone fixture, waits until the bot is underground by the world's own sky test, opts the
+  bot in with `forceEnable` and gives it a real mining-class task (`MISSION`, `PLAYER_COMMAND`); the tests that
+  need a stationary bot pause that task object in place, so it stays the bot's active task and the ray sequence
+  is deterministic. It checks: ores in plain view are sighted within two sweeps and the recall over 48
+  single-face ores between 2 and 8 blocks away is at least 90 percent; an ore behind one stone layer (and an
+  ore behind another ore) never enters the ledger over 20 sweeps and stays UNKNOWN in the occupancy window
+  (the x-ray canary, with a positive control); an un-forced bot, and a bot whose task has a `VERIFY`, `SAFETY`
+  or `SYSTEM_BACKGROUND` origin, never gets state, profiler sections or log lines; an open audit session and a
+  degraded TPS verdict close the gate at once; every one of the five mining classes is sensed and a non-mining
+  task is not; a mineshaft palette placed by the test scores `STRUCTURE_CERTAIN` (rails and cobweb through the
+  outline pass, torches counted as weak evidence, a chest minecart as entity evidence) while the same kind of
+  blocks placed by the bot through `BuildAction.placeBlockAt` are recorded in the placed ledger and never score;
+  a real `OreDigTask` mission's break is peeked and reveals the ore behind it; a real strip mine is peeked and
+  its own torches never score; four bots sensing at once stay cheap; a pause, an abort, a re-assignment and a
+  despawn leave no state behind; the per-minute cost line and the release of an idle bot's state follow the
+  documented clocks. Measured numbers are written to the server log with the tag `[assist-gametest]`.
 - The gate wiring (which origin, whether an audit session is open, TPS) is unit-tested through the pure
   resolver with fakes and pinned by a source contract on the live lookups, so an edit that ignored the audit
   session or treated a missing origin as real would fail a test.
@@ -171,14 +189,25 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
 
 ## Honest limits
 
-- Nothing here has been measured in a live server yet. The estimates of cost (about 40 collider plus 20
-  outline rays per tick) come from the design. The P0 cost gate (four bots, assist on against off, with the
-  `assist_sweep`, `assist_fold` and `assist_poi` maxima) and the `assist_recall_probe` verify scenario have
-  not been run. The shipped default is `sense`, so until the gate has run, a server that sees a tick-time
-  effect should set `miningAssist.mode` to `off` (the only cost of a wrong guess is that sensing logs
-  disappear). Off-line, the sweep's recall is covered by a synthetic-cavern unit test: 240 of 240 single-face
-  ores between 2 and 8 blocks away were sighted after two sweeps (the design asks for at least 90 percent).
-  That test proves the ray geometry, not the live world.
+- The sensor has run in a real Minecraft world only through the GameTests above, not yet on a live modded
+  server. There, with strict survival: 48 of 48 single-face ores between 2 and 8 blocks away were sighted
+  after two sweeps (4120 rays; the design asks for at least 90 percent), no ray was "unknown" (the chunk ring
+  around the bot was loaded), and an ore in plain view about 5 blocks away was first sighted after 120 to 400
+  rays. Steady state per bot per tick (a sweep step of 40 collider rays plus the decor re-casts) averaged
+  about 0.1 to 0.2 ms with a 0.3 ms 95th percentile, the POI evaluation (every 20 ticks) about 0.2 to 0.5 ms;
+  four bots together cost about 0.4 to 0.85 ms per tick, and no steady-state assist section exceeded 3 ms.
+  The first sweep step of a cold JVM cost 23 to 32 ms and the first POI evaluation 17 to 90 ms (class loading
+  and JIT, once per server start, so the first mining session after a start can show one slow tick). The
+  design's ON against OFF cost lane on a running server (`TickHeadroom` p99) and the `assist_recall_probe`
+  verify scenario have still not been run. The shipped default is `sense`, so until they have, a server that
+  sees a tick-time effect should set `miningAssist.mode` to `off` (the only cost of a wrong guess is that
+  sensing logs disappear). The synthetic-cavern unit test covers the ray geometry (240 of 240 ores).
+- The break peek observes the broken cell through the ordinary cell observation (a ray from the eye to the
+  centre of the cell). A hole at foot level in a wall, mined from the cave while the block above it is still
+  solid, is not observable that way: the break is counted in `breaks_unconfirmed`, the cell does not enter the
+  bot's dug ring, and the occupancy window learns the cell is open from the next rays instead. The six
+  neighbours are still peeked (the ore behind such a block is still found). An eye-level break, and the
+  breaks of a real strip-mining tunnel (14 of 14 in the GameTest), are confirmed.
 - A collider ray passes through pressure plates and tripwire (they have no collision shape), so trap recall
   is limited to blocks such as TNT and dispensers. Plates only show up in the outline decor pass, which feeds
   the POI window, not the hazard field.

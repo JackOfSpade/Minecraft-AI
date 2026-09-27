@@ -37,7 +37,8 @@
       "io.github.zoyluo.aibot.task.OreDigPickupGameTests",
       "io.github.zoyluo.aibot.task.GatherPickupGameTests",
       "io.github.zoyluo.aibot.task.MinePickupGameTests",
-      "io.github.zoyluo.aibot.task.MineValuablesGameTests"
+      "io.github.zoyluo.aibot.task.MineValuablesGameTests",
+      "io.github.zoyluo.aibot.mining.assist.MiningAssistSenseGameTests"
     ]
   },
   "depends": {
