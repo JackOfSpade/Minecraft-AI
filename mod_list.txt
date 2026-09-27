@@ -106,9 +106,18 @@ old, 5 point-releases behind) failed to compile its final.fsh shader
 ("undefined variable") on this profile's exact combo -- the very next
 upstream release's changelog fixes the same class of bug ("X not declared
 compile error"), so this was an upstream bug, not a broken install. Old
-shaderpack folder and old Euphoria jar removed; the new shaderpack is kept
-as the .zip Modrinth ships (Iris loads shaderpack zips directly, no need to
-extract) and config/iris.properties' shaderPack pointer was updated to match.
+shaderpack folder and old Euphoria jar removed.
+
+The shaderpack is kept as an EXTRACTED FOLDER, not the .zip Modrinth ships:
+on first launch after installing the zip, Iris auto-extracts it (Euphoria
+Patcher has to inject its own additional files into individual shader
+sources, which it can't do inside a zip) into a same-named folder -- so a
+zip left sitting alongside its own auto-extracted folder shows up as two
+separate entries in Iris's shaderpack list, which is confusing and the
+extracted copy has more files than the zip anyway (634 vs 468: Euphoria adds
+its own properties/lang files on top of Complementary's). Delete the zip
+after that first launch and point config/iris.properties' shaderPack at the
+folder name instead, so only one entry ever shows up.
 
 --------------------------------------------------------------------------
 AUDIO
