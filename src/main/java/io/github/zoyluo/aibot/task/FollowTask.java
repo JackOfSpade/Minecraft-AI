@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.action.BoatAction;
 import io.github.zoyluo.aibot.action.BlockMiner;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.FakePlayerMotion;
 import io.github.zoyluo.aibot.pathfinding.Standability;
@@ -93,6 +94,7 @@ public final class FollowTask extends AbstractTask {
             stopBoatAndActions(bot);
             waiting = true;
             if (elapsed % 200 == 1) {
+                BotLog.action(bot, "follow_target_offline", "target", targetName.isBlank() ? "owner" : targetName);
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot", "The player I am following is offline or in another dimension, so I will wait here.");
             }
             return;
@@ -141,6 +143,7 @@ public final class FollowTask extends AbstractTask {
             // boat first, then craft/launch one.  When both are unavailable, keep following by
             // swimming instead of standing still or attempting a second arbitrary boat route.
             boatFollow = null;
+            BotLog.action(bot, "follow_boat_fallback_swim");
             followSwimming(bot, target);
         }
     }
@@ -172,6 +175,9 @@ public final class FollowTask extends AbstractTask {
         // same collision-validated primitive used by the safety net, not an invented teleport.
         BoatSupport.LaunchSite site = BoatSupport.findLaunchSite(bot).orElse(null);
         if (site == null) {
+            if (elapsed % 200 == 1) {
+                BotLog.action(bot, "follow_swim_no_launch_site");
+            }
             waiting = true;
             return;
         }
@@ -283,6 +289,9 @@ public final class FollowTask extends AbstractTask {
                 ? selectShelterEgress(bot, target)
                 : activeShelterEgress;
         if (egress == null) {
+            if (elapsed % 200 == 1) {
+                BotLog.action(bot, "follow_shelter_egress_unavailable", "anchor", shelterExitDebt.anchor().toShortString());
+            }
             bot.getActionPack().stopMovement();
             waiting = true;
             return true;

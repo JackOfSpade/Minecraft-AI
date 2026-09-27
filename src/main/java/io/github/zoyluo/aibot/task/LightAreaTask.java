@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -61,7 +62,9 @@ public final class LightAreaTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 1800) {
-            fail("light_area_timeout");
+            // phase+placed 一起带上:超时在 SCAN/WALK/PLACE 任一阶段都可能触发,光看
+            // "light_area_timeout" 分不清是扫不到目标、走不到某个火把点,还是放置反复失败。
+            fail("light_area_timeout phase=" + phase + " placed=" + placed + "/" + maxTorches);
             return;
         }
         if (InventoryAction.countItem(bot, Items.TORCH) <= 0) {
@@ -112,6 +115,9 @@ public final class LightAreaTask extends AbstractTask {
             standPos = adjacentStandPos(bot, target);
         }
         if (standPos == null) {
+            // 放弃这个火把点、下 tick 换下一个:如果最终超时在 WALK,单看
+            // "light_area_timeout phase=WALK" 分不清是一直走不到同一个点,还是接连跳过了好几个够不到的点。
+            BotLog.action(bot, "light_area_target_unreachable", "pos", target.toShortString());
             target = null;
             return;
         }

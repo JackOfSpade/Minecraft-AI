@@ -199,6 +199,13 @@ public final class BuildTask extends AbstractTask {
         // path_idle 0 进度 build_timeout)→ 50t 内没搞定就跳过,best-effort 继续整地/盖房,站不到的格不强求。
         if (elapsed - flattenTargetTick > 50) {
             note = "flatten_skip=" + compact(currentFlattenTarget.pos()); // 够不到的整地格跳过(防原地死循环)
+            // Unlike a skipped build block (build_block_skipped below), a skipped flatten cell
+            // leaves no BotLog trace at all otherwise: the site may still finish the structure and
+            // "complete" while a hole/bump was silently left under it, and only StructureVerifier's
+            // eventual mismatch (if any) would hint at why -- with nothing pointing back to this cell.
+            BotLog.action(bot, "build_flatten_skipped",
+                    "pos", compact(currentFlattenTarget.pos()),
+                    "kind", currentFlattenTarget.kind());
             currentFlattenTarget = null;
             return;
         }

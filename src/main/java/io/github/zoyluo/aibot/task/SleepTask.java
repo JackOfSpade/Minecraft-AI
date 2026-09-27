@@ -74,7 +74,9 @@ public final class SleepTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 3000) {
-            fail("sleep_timeout");
+            // phase+bed 一起带上:3000t 超时在 FIND_BED/PLACE_BED/WALK_TO_BED 任一阶段都可能触发(最常见
+            // 是 WALK_TO_BED 卡路径),光看 "sleep_timeout" 分不清是找不到床、放不下床还是走不到床边。
+            fail("sleep_timeout phase=" + phase + (bedPos == null ? "" : " bed=" + compact(bedPos)));
             return;
         }
         switch (phase) {

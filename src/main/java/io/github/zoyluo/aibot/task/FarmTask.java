@@ -6,6 +6,7 @@ import io.github.zoyluo.aibot.action.FarmAction;
 import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -119,7 +120,9 @@ public final class FarmTask extends AbstractTask {
         }
         if (!keepTending && produceItem == null && elapsed > 2400) {
             // 数量受限模式(produceItem!=null)要等作物自然成熟,走下面 12000t 配额超时,不受这条 2400t 短超时制约。
-            fail("farm_timeout");
+            // phase/note 一起带上:这条超时在 SURVEY/GOTO/TILL/PLANT/HARVEST/DEPOSIT* 任一阶段都可能触发,
+            // 光看 "farm_timeout" 分不清卡在哪一步、上一次动作失败的原因是什么。
+            fail("farm_timeout phase=" + phase + (note.isBlank() ? "" : " note=" + note));
             return;
         }
         // P3:数量受限模式有自己的硬超时(等作物成熟要时间,但不能无限),复用 keepTending 的巡逻逻辑。
@@ -283,6 +286,9 @@ public final class FarmTask extends AbstractTask {
                 .orElse(null);
         if (basePos == null) {
             note = "deposit_skipped:no_base";
+            // keepTending 循环里这会每 DEPOSIT_INTERVAL_ACTIONS 次动作静默重演一次;没有这条记录的话,
+            // 产出物永远堆在背包里、看 task_completed/日志完全看不出原因(remembered base 从没设置过)。
+            BotLog.action(bot, "farm_deposit_no_base");
             finishDeposit();
             return;
         }
@@ -306,6 +312,8 @@ public final class FarmTask extends AbstractTask {
         }
         if (depositContainerIndex >= depositContainers.size()) {
             note = "deposit_skipped:no_base_container";
+            // 同上:没有可用容器时静默放弃存放,循环会一直重试同一件事而不留痕迹。
+            BotLog.action(bot, "farm_deposit_no_container", "base", compact(basePos));
             finishDeposit();
             return;
         }

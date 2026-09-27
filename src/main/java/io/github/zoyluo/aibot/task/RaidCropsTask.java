@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.FarmAction;
 import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.OreProspector;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.CropBlock;
@@ -73,7 +74,7 @@ public final class RaidCropsTask extends AbstractTask {
             return;
         }
         if (elapsed - lastProgressTick > NO_PROGRESS_LIMIT) {
-            finishOrFail("raid_no_progress");
+            finishOrFail(bot, "raid_no_progress");
             return;
         }
         switch (phase) {
@@ -88,7 +89,7 @@ public final class RaidCropsTask extends AbstractTask {
         ServerWorld world = bot.getEntityWorld();
         BlockPos found = OreProspector.nearest(bot, SCAN_RADIUS, RaidCropsTask::isMatureCrop);
         if (found == null) {
-            finishOrFail("no_mature_crops");
+            finishOrFail(bot, "no_mature_crops");
             return;
         }
         current = found;
@@ -149,8 +150,12 @@ public final class RaidCropsTask extends AbstractTask {
         return null;
     }
 
-    private void finishOrFail(String reason) {
+    private void finishOrFail(AIPlayerEntity bot, String reason) {
         if (harvested > 0) {
+            // task_completed only carries elapsed_ticks, so a best-effort partial completion
+            // (harvested < target) would otherwise look identical to a full success in the logs --
+            // no way to tell it stopped early, or why (no more mature crops vs. stalled progress).
+            BotLog.action(bot, "raid_crops_partial", "harvested", harvested, "target", target, "reason", reason);
             complete();
         } else {
             fail(reason);

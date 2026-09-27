@@ -9,6 +9,7 @@ import io.github.zoyluo.aibot.craft.CraftingHelper;
 import io.github.zoyluo.aibot.craft.RecipeRegistry;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.BlockState;
@@ -90,6 +91,10 @@ public final class CraftTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 900) {
+            // "craft_timeout" alone does not say which phase/step it stalled in; the generic
+            // task_failed line has no other field for that, so record it here before failing.
+            BotLog.warn(LogCategory.TASK, bot, "craft_stalled", "phase", phase,
+                    "step", nextStep, "total_steps", plan == null ? 0 : plan.steps().size());
             fail("craft_timeout");
             return;
         }
@@ -215,6 +220,10 @@ public final class CraftTask extends AbstractTask {
             return;
         }
         if (++reclaimTicks > RECLAIM_TIMEOUT_TICKS) {
+            // Best-effort reclaim gives up here silently otherwise: the craft still completes, so
+            // nothing else would ever record that a carried crafting table was permanently lost.
+            BotLog.warn(LogCategory.TASK, bot, "craft_table_reclaim_abandoned",
+                    "reason", "timeout", "pos", selfPlacedTablePos.toShortString());
             selfPlacedTablePos = null;
             finishReclaim(bot);
             return;
@@ -229,6 +238,8 @@ public final class CraftTask extends AbstractTask {
                 tableReclaimMiner.begin(bot, selfPlacedTablePos);
             }
             if (tableReclaimMiner.tick(bot) == BlockMiner.Status.FAILED) {
+                BotLog.warn(LogCategory.TASK, bot, "craft_table_reclaim_abandoned",
+                        "reason", "mine_failed", "pos", selfPlacedTablePos.toShortString());
                 selfPlacedTablePos = null;
                 finishReclaim(bot);
             }
@@ -237,6 +248,8 @@ public final class CraftTask extends AbstractTask {
         if (!state.isAir()) {
             // Something else already claimed/replaced our placed block -- never chase a block
             // this task no longer owns.
+            BotLog.warn(LogCategory.TASK, bot, "craft_table_reclaim_abandoned",
+                    "reason", "position_claimed", "pos", selfPlacedTablePos.toShortString());
             selfPlacedTablePos = null;
             finishReclaim(bot);
             return;

@@ -3,6 +3,8 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.ContainerAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.inventory.Inventory;
@@ -90,6 +92,13 @@ public final class ContainerTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 1200) {
+            // The bare "container_timeout" reason alone does not say which of the three phases it
+            // stalled in (never found a container, stuck walking, or stuck transferring), so a
+            // reader would have to re-run it under a debugger to tell why. Log the breadcrumb once,
+            // right before the generic task_failed line fires.
+            BotLog.warn(LogCategory.TASK, bot, "container_timeout_context", "phase", phase,
+                    "container", containerPos == null ? "none" : containerPos.toShortString(),
+                    "transferred", transferred);
             fail("container_timeout");
             return;
         }
@@ -186,6 +195,16 @@ public final class ContainerTask extends AbstractTask {
         if ("container_full".equals(doneReason) && transferred == 0) {
             fail(doneReason);
             return;
+        }
+        // This path calls complete() even when fewer items moved than were requested (e.g. the
+        // container ran out of space or of the item partway through). task_completed alone reads
+        // as full success with no hint that the request was only partly satisfied, so log the
+        // shortfall here -- the only place that knows both the target and the stop reason.
+        if (targetCount != Integer.MAX_VALUE && transferred < targetCount) {
+            BotLog.action(bot, "container_partial_complete",
+                    "item", item == null ? "all" : Registries.ITEM.getId(item).toString(),
+                    "requested", targetCount, "transferred", transferred,
+                    "reason", doneReason.isBlank() ? "no_more_available" : doneReason);
         }
         complete();
     }

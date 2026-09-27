@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.ContainerAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.entity.EquipmentSlot;
@@ -78,6 +79,8 @@ public final class StockpileTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 1600) {
+            BotLog.action(bot, "stockpile_timeout_detail", "phase", phase, "transferred", transferred,
+                    "note", note.isBlank() ? "none" : note);
             fail("stockpile_timeout");
             return;
         }

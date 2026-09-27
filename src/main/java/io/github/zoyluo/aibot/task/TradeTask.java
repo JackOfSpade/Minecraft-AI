@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mixin.MerchantEntityInvokerMixin;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -150,6 +151,11 @@ public final class TradeTask extends AbstractTask {
             fail("after_using_failed");
             return;
         }
+        // task_completed only carries elapsed_ticks; without this, what was actually bought/sold
+        // (the whole point of this task) leaves no trace at all once it succeeds.
+        BotLog.action(bot, "trade_completed",
+                "received", Registries.ITEM.getId(sell.getItem()), "received_count", sell.getCount(),
+                "paid", Registries.ITEM.getId(firstBuy.getItem()), "paid_count", firstBuy.getCount());
         complete();
     }
 

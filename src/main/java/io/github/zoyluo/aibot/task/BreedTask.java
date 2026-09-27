@@ -5,6 +5,8 @@ import io.github.zoyluo.aibot.action.InteractAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.passive.AnimalEntity;
 import net.minecraft.item.Item;
@@ -140,6 +142,13 @@ public final class BreedTask extends AbstractTask {
         if (state == TaskState.RUNNING && phase == Phase.DONE) {
             if (first != null && second != null && first.canBreedWith(second)) {
                 first.breed(bot.getEntityWorld(), second);
+            } else {
+                // bredPairs still counts this toward the target below even though no baby was
+                // actually produced (e.g. the pair went on breeding cooldown between the two feed
+                // ticks) -- the task then completes normally, so this is the only place that fact
+                // is ever recorded.
+                BotLog.warn(LogCategory.TASK, bot, "breed_pair_not_receptive",
+                        "type", Registries.ENTITY_TYPE.getId(type).toString());
             }
             bredPairs++;
             first = null;

@@ -4,10 +4,12 @@ import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -86,6 +88,7 @@ public final class PlaceStationsTask extends AbstractTask {
         Item station = pending.get(0);
         int slot = findSlot(bot, station);
         if (slot < 0) {
+            BotLog.action(bot, "place_stations_missing_item", "item", Registries.ITEM.getId(station));
             pending.remove(0); // 背包没这件了 → 跳过
             return;
         }
@@ -95,6 +98,7 @@ public final class PlaceStationsTask extends AbstractTask {
             return;
         }
         if (InventoryAction.equipFromSlot(bot, slot) < 0) {
+            BotLog.action(bot, "place_stations_equip_failed", "item", Registries.ITEM.getId(station));
             pending.remove(0);
             return;
         }
@@ -105,6 +109,9 @@ public final class PlaceStationsTask extends AbstractTask {
             ready++;
             placedPositions.add(spot.toImmutable());
             pending.remove(0);
+        } else {
+            BotLog.action(bot, "place_stations_place_failed", "item", Registries.ITEM.getId(station),
+                    "pos", spot.toShortString(), "reason", result.reason());
         }
     }
 

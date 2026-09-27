@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.action.ContainerAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.component.DataComponentTypes;
@@ -153,6 +154,10 @@ public final class ResupplyTask extends AbstractTask {
             // 没有基地(深处挖矿/野外远征):别死在 no_base——直接用背包料就地合(stone_pickaxe=圆石+棍+随身工作台;
             // iron_pickaxe=备用铁锭+棍)。深处磨穿镐时背包常有充足圆石/备料,合不出(缺料)CraftTask 自会 no_supply
             // 诚实失败。治 real_armor:挖26铁石镐磨穿→resupply→FIND_BASE→no_base 死锁(bot有78圆石+表却去找基地)。
+            // No remembered base at all is a real decision point: it silently reroutes to crafting
+            // from carried materials instead, many ticks before any eventual craft success/failure,
+            // and would otherwise leave no trace if that craft later fails generically.
+            BotLog.action(bot, "resupply_no_base_craft_in_place", "need", need);
             startCrafting(bot);
             return;
         }
@@ -318,6 +323,11 @@ public final class ResupplyTask extends AbstractTask {
         if (craftTask.state() == TaskState.COMPLETED) {
             craftTask = null;
             if (need == Need.TOOL && !equipUsableTool(bot)) {
+                // "no_supply" is reused by several distinct causes in this task (missing craft
+                // target, no food slot, this one); the craft just reported success, so without this
+                // line a reader could not tell this specific case apart from the others.
+                BotLog.warn(LogCategory.TASK, bot, "resupply_crafted_tool_unusable",
+                        "item", Registries.ITEM.getId(requestedItem).toString());
                 fail("no_supply");
                 return;
             }
@@ -348,6 +358,7 @@ public final class ResupplyTask extends AbstractTask {
         }
         if (eatTask == null) {
             if (InventoryAction.findFoodSlot(bot) < 0) {
+                BotLog.warn(LogCategory.TASK, bot, "resupply_no_food_to_eat");
                 fail("no_supply");
                 return;
             }

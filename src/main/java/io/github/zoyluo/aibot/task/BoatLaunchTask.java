@@ -164,6 +164,11 @@ public final class BoatLaunchTask extends AbstractTask {
             ActionResult walk = bot.getActionPack().startWalkTo(launchSite.shore().toCenterPos(), 1.0D);
             if (walk.isFailed()) {
                 lastProblem = "shore_unreachable:" + path.reason();
+                // 放弃这个 shore、回 FIND_WATER 换一个:如果最终超时在 APPROACH_SHORE,单看
+                // "boat_launch_timeout:approach_shore" 分不清是卡在同一个 shore 反复重试,还是
+                // 换了好几个都够不到 -- 这条记录每次放弃时都留痕。
+                BotLog.action(bot, "boat_shore_abandoned", "shore", launchSite.shore().toShortString(),
+                        "reason", path.reason());
                 launchSite = null;
                 phase = Phase.FIND_WATER;
             }

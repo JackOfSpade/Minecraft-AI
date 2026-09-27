@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.CreeperEntity;
@@ -61,7 +62,7 @@ public final class EvadeTask extends AbstractTask {
     protected void onTick(AIPlayerEntity bot) {
         if (escapeGoal == null) {
             // 无处可逃(深处隧道/被围)→ 干净失败,交 DangerWatcher 升级筑墙自保,不假完成空转挨打。
-            failNoValidEscapeRoute(bot);
+            failNoValidEscapeRoute(bot, "initial");
             return;
         }
         bot.getActionPack().setSprinting(true); // 持续保持(其他控制器可能每 tick 复位)
@@ -74,7 +75,7 @@ public final class EvadeTask extends AbstractTask {
             if (hasObservedUnsettledPressure(bot)) {
                 BlockPos previous = escapeGoal;
                 if (!startBestEscapePath(bot)) {
-                    failNoValidEscapeRoute(bot);
+                    failNoValidEscapeRoute(bot, "pressure_extend");
                     return;
                 }
                 BotLog.action(bot, "evade_pressure_extended",
@@ -90,7 +91,7 @@ public final class EvadeTask extends AbstractTask {
         }
         if (bot.getActionPack().isPathExecutorIdle() && elapsed > 10) {
             if (!startBestEscapePath(bot)) {
-                failNoValidEscapeRoute(bot);
+                failNoValidEscapeRoute(bot, "repath");
                 return;
             }
         }
@@ -105,7 +106,13 @@ public final class EvadeTask extends AbstractTask {
         bot.getActionPack().stopAll();
     }
 
-    private void failNoValidEscapeRoute(AIPlayerEntity bot) {
+    private void failNoValidEscapeRoute(AIPlayerEntity bot, String stage) {
+        // "no_valid_escape_route" is the same reason string from three different call sites
+        // (initial admission, mid-escape pressure re-plan, and idle repath); without recording
+        // which stage it was, a reader could not tell whether the bot never found a route at all
+        // or lost one partway through an otherwise-successful escape.
+        BotLog.warn(LogCategory.TASK, bot, "evade_no_escape_route", "stage", stage,
+                "threat", threat.type());
         bot.getActionPack().stopAll();
         fail("no_valid_escape_route");
     }

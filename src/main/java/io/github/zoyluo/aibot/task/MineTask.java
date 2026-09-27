@@ -65,6 +65,8 @@ public final class MineTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 2400) {
+            BotLog.action(bot, "mine_timeout_detail", "phase", phase, "count", countSoFar + "/" + countNeeded,
+                    "target", Registries.BLOCK.getId(targetBlock));
             fail("mine_timeout");
             return;
         }

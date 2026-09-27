@@ -57,7 +57,9 @@ public final class MilkCowTask extends AbstractTask {
             return;
         }
         if (elapsed - lastProgressTick > NO_PROGRESS_LIMIT) {
-            finishOrFail("milk_no_progress");
+            // note 是最近一次 milk() 失败的具体原因(牛不在挤奶范围/动作被拒等);光看
+            // "milk_no_progress" 只知道 600t 没进展,分不清是一直挤不中同一头牛还是别的原因。
+            finishOrFail("milk_no_progress" + (note.isBlank() ? "" : ":" + note));
             return;
         }
         CowEntity cow = MilkCowAction.nearestCow(bot, SEARCH);

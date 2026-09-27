@@ -2,6 +2,7 @@ package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -94,6 +95,11 @@ public final class GuardTask extends AbstractTask {
     private void watch(AIPlayerEntity bot) {
         target = CombatCore.nearestHostileAround(bot, guardPoint, GUARD_RADIUS).orElse(null);
         if (target != null) {
+            // This task never completes/fails (a persistent watch), so combat episodes would
+            // otherwise leave zero trace -- no way to tell, after the fact, whether/when/against
+            // what the guard actually fought.
+            BotLog.danger(bot, "guard_engage", "target", target.getType().toString(),
+                    "pos", target.getBlockPos().toShortString());
             CombatCore.equipMelee(bot);
             phase = Phase.APPROACH;
             CombatCore.startApproach(bot, target);
@@ -110,6 +116,8 @@ public final class GuardTask extends AbstractTask {
 
     private void approach(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
+            BotLog.danger(bot, "guard_disengage", "phase", "APPROACH",
+                    "reason", target == null ? "target_gone" : "target_dead");
             target = null;
             phase = Phase.RETURN;
             return;
@@ -127,6 +135,8 @@ public final class GuardTask extends AbstractTask {
 
     private void strike(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
+            BotLog.danger(bot, "guard_disengage", "phase", "STRIKE",
+                    "reason", target == null ? "target_gone" : "target_dead");
             target = null;
             phase = Phase.RETURN;
             return;
@@ -144,6 +154,8 @@ public final class GuardTask extends AbstractTask {
 
     private void reposition(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
+            BotLog.danger(bot, "guard_disengage", "phase", "REPOSITION",
+                    "reason", target == null ? "target_gone" : "target_dead");
             bot.getActionPack().stopMovement();
             target = null;
             phase = Phase.RETURN;

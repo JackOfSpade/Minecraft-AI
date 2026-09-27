@@ -2,6 +2,7 @@ package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.action.BoatAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -118,6 +119,10 @@ public final class BoatFollowTask extends AbstractTask {
         if (targetSwimming) {
             // Even an explicitly requested boat follower must not turn a swimmer into a boat
             // request.  Release any boat and hand back to the normal mode-aware follower.
+            // Logged because this mode switch is otherwise invisible: continuedFollow is driven
+            // directly (never through TaskManager), so nothing else records why an explicit
+            // boat_follow request ended up walking/swimming on land instead.
+            BotLog.action(bot, "boat_follow_target_swimming", "target", targetName);
             BoatSupport.mountedBoat(bot).ifPresent(boat -> {
                 BoatAction.stopBoat(boat);
                 bot.dismountVehicle();
@@ -136,6 +141,9 @@ public final class BoatFollowTask extends AbstractTask {
                 waiting = true;
                 return;
             }
+            // Same visibility gap as the swimming case above: the player got off the boat, so this
+            // explicit boat-follow instruction is handing off to land-follow now.
+            BotLog.action(bot, "boat_follow_target_left_boat", "target", targetName);
             continuedFollow = new FollowTask(targetName);
             continuedFollow.start(bot);
             continuedFollow.tick(bot);

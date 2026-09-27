@@ -9,6 +9,7 @@ import io.github.zoyluo.aibot.action.BlockMiner;
 import io.github.zoyluo.aibot.action.ToolSelector;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.mining.ToolTier;
@@ -231,6 +232,12 @@ public final class StripMineTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > Math.max(2400, (descentStepsPlanned + length + branchSpacing * Math.max(1, length / Math.max(1, branchSpacing))) * 400)) {
+            // "strip_mine_timeout" alone does not say which phase it stalled in or how much of the
+            // plan it actually got through (tunneling, a depot round-trip, walking back to work,
+            // ...); log that breadcrumb once, right before the generic task_failed line fires.
+            BotLog.warn(LogCategory.TASK, bot, "strip_mine_timeout_context", "phase", phase,
+                    "distance", distanceCompleted, "tunnel_blocks", tunnelBlocksMined,
+                    "vein_blocks", veinBlocksMined, "note", note);
             fail("strip_mine_timeout");
             return;
         }
@@ -352,6 +359,11 @@ public final class StripMineTask extends AbstractTask {
         }
         currentStep = steps.pollFirst();
         if (currentStep == null) {
+            // The whole planned tunnel is drained here -- the only place that knows this run
+            // finished the plan rather than bailing early. Without this, a successful
+            // task_completed line carries no count of what was actually mined.
+            BotLog.action(bot, "strip_mine_plan_complete", "distance", distanceCompleted,
+                    "tunnel_blocks", tunnelBlocksMined, "vein_blocks", veinBlocksMined);
             note = "completed";
             phase = Phase.DONE;
             return;
@@ -540,6 +552,11 @@ public final class StripMineTask extends AbstractTask {
     }
 
     private void beginReturn(AIPlayerEntity bot) {
+        // Why the bot broke off tunneling for a depot round-trip is only known here, this tick --
+        // by the time a subsequent RETURN/RETURN_TO_WORK step fails, the trigger (full inventory vs.
+        // dying tool) would otherwise leave no trace behind the generic path-failure reason.
+        BotLog.action(bot, "strip_mine_return", "reason", note, "distance", distanceCompleted,
+                "tunnel_blocks", tunnelBlocksMined, "vein_blocks", veinBlocksMined);
         returnStand = bot.getBlockPos().toImmutable();
         returningForFinalStop = "tool_durability_low".equals(note);
         if (activeDepotChest == null) {

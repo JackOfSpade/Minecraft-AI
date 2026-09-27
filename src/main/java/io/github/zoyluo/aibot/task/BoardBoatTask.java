@@ -3,6 +3,8 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.BoatAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.util.math.BlockPos;
 
@@ -110,6 +112,9 @@ public final class BoardBoatTask extends AbstractTask {
     private void approach(AIPlayerEntity bot) {
         AbstractBoatEntity boat = BoatSupport.boatById(bot, boatId).orElse(null);
         if (boat == null) {
+            // "boat_unavailable" is the same reason from both approach() and board(); record the
+            // phase it was lost in, since that is otherwise the only difference between them.
+            BotLog.warn(LogCategory.TASK, bot, "board_boat_target_lost", "phase", "approach");
             fail("boat_unavailable");
             return;
         }
@@ -138,6 +143,7 @@ public final class BoardBoatTask extends AbstractTask {
     private void board(AIPlayerEntity bot) {
         AbstractBoatEntity boat = BoatSupport.boatById(bot, boatId).orElse(null);
         if (boat == null) {
+            BotLog.warn(LogCategory.TASK, bot, "board_boat_target_lost", "phase", "board");
             fail("boat_unavailable");
             return;
         }
@@ -149,6 +155,11 @@ public final class BoardBoatTask extends AbstractTask {
         }
         if (!result.isFailed() && boardAttempts >= MAX_BOARD_ATTEMPTS
                 && bot.getVehicle() != boat) {
+            // The board interaction itself reported success, yet the bot never actually ended up
+            // in the boat -- worth the actual vehicle state here, since "not_confirmed" alone
+            // does not say what happened instead.
+            BotLog.warn(LogCategory.TASK, bot, "board_boat_vehicle_mismatch",
+                    "vehicle", bot.getVehicle() == null ? "none" : bot.getVehicle().getType());
             fail("boat_board_not_confirmed");
         }
     }
