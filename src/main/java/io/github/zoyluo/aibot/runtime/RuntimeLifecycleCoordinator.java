@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.runtime;
 
 import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.aibot.brain.AmbientConversationCoordinator;
 import io.github.zoyluo.aibot.brain.BotReporter;
 import io.github.zoyluo.aibot.brain.BotRuntimeOptions;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
@@ -49,6 +50,7 @@ public final class RuntimeLifecycleCoordinator {
         BotLogWriter.INSTANCE.start(config);
         BrainCoordinator.INSTANCE.configure(config);
         ChatRecipientRouter.INSTANCE.configure(config);
+        AmbientConversationCoordinator.INSTANCE.configure(config);
         PoiAdvisor.INSTANCE.configure(config);
         BotPersistence.INSTANCE.resumeWrites();
         RuntimeRecipeIndex.rebuild(server);
@@ -66,6 +68,7 @@ public final class RuntimeLifecycleCoordinator {
         AIPlayerManager.INSTANCE.onServerStopping(server);
         BotEdits.flushSync(BotEdits.defaultSidecarPath());
         ChatRecipientRouter.INSTANCE.shutdown();
+        AmbientConversationCoordinator.INSTANCE.shutdown();
         PoiAdvisor.INSTANCE.shutdown();
         BrainCoordinator.INSTANCE.shutdown();
         clearWorldRuntime();
@@ -175,6 +178,7 @@ public final class RuntimeLifecycleCoordinator {
         MiningEvidenceAudit.clearAll();
         MiningAssistRuntime.clearWorldRuntime();
         PoiCoordinator.INSTANCE.clearAll();
+        AmbientConversationCoordinator.INSTANCE.reset();
         TpsGuard.INSTANCE.reset();
         AStarPathfinder.invalidateCache("runtime_world_boundary");
     }

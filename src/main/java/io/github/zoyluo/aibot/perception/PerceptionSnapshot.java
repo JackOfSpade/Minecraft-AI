@@ -74,6 +74,6 @@ public record PerceptionSnapshot(
     public record TaskInfo(String name, String state, double progress, int elapsedTicks, String description, String failureReason) {
     }
 
-    public record TimeInfo(long worldTime, boolean isDay, int light) {
+    public record TimeInfo(long worldTime, boolean isDay, int light, boolean isRaining, boolean isThundering) {
     }
 }

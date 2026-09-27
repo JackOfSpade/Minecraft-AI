@@ -41,7 +41,8 @@ public record AIBotConfig(
         Mining mining,
         Goal goal,
         Nav nav,
-        Pickup pickup
+        Pickup pickup,
+        Conversation conversation
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     /** Environment variable that overrides the API key from the config file (any provider). */
@@ -138,11 +139,11 @@ public record AIBotConfig(
     }
 
     public AIBotConfig withLlm(Llm llm) {
-        return new AIBotConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
+        return new AIBotConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
     }
 
     private AIBotConfig withProfile(OperatingProfile profile) {
-        return new AIBotConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
+        return new AIBotConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
     }
 
     private AIBotConfig withDefaults() {
@@ -163,7 +164,8 @@ public record AIBotConfig(
                 mining == null ? defaults.mining : mining.withDefaults(defaults.mining),
                 goal == null ? defaults.goal : goal.withDefaults(defaults.goal),
                 nav == null ? defaults.nav : nav.withDefaults(defaults.nav),
-                pickup == null ? defaults.pickup : pickup.withDefaults(defaults.pickup));
+                pickup == null ? defaults.pickup : pickup.withDefaults(defaults.pickup),
+                conversation == null ? defaults.conversation : conversation.withDefaults(defaults.conversation));
     }
 
     public static AIBotConfig defaults() {
@@ -200,7 +202,8 @@ public record AIBotConfig(
                 new Mining(2, 0.10D, true),
                 new Goal(24, true, true), // S7:配方补全后链更深(熟食/盾/钻装备等),16→24 留余量
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3),
-                new Pickup(2.75D, 2.5D, 8.0D)); // 实测 1.5/1.0 太小:砍树掉落物垂直差>1 就吸不到→countSoFar=0 死循环
+                new Pickup(2.75D, 2.5D, 8.0D), // 实测 1.5/1.0 太小:砍树掉落物垂直差>1 就吸不到→countSoFar=0 死循环
+                new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100));
     }
 
     private static void logProfileResolution(ProfileResolver.Resolution resolution,
@@ -409,6 +412,46 @@ public record AIBotConfig(
                     positiveDoubleOrDefault(forceRadiusH, defaults.forceRadiusH),
                     positiveDoubleOrDefault(forceRadiusV, defaults.forceRadiusV),
                     positiveDoubleOrDefault(sweepRadius, defaults.sweepRadius));
+        }
+    }
+
+    /**
+     * Ambient bot-to-bot conversations: occasionally, when nobody is instructing them, 1+ eligible
+     * companions have a short in-character back-and-forth, each line an independent LLM call (see
+     * {@link io.github.zoyluo.aibot.brain.AmbientConversationCoordinator}). Never routes through the
+     * per-bot planner/tool-loop, so it never disrupts whatever a bot is doing.
+     */
+    public record Conversation(
+            Boolean enabled,
+            /** Minimum ticks between the END of one conversation and the next being allowed to start. */
+            int cooldownTicks,
+            /** How often, in ticks, eligibility is re-rolled once the cooldown has elapsed. */
+            int checkIntervalTicks,
+            /** Probability [0,1] of starting a conversation on each eligible check. */
+            double startChancePerCheck,
+            int minParticipants,
+            int maxParticipants,
+            /** Reading-speed estimate used to size the pause before the next bot replies. */
+            double readingWordsPerMinute,
+            /** Added per word of the previous line, on top of reading time, to simulate "thinking". */
+            double thinkingSecondsPerWord,
+            double minReplyDelaySeconds,
+            double maxReplyDelaySeconds,
+            int maxTokens
+    ) {
+        Conversation withDefaults(Conversation defaults) {
+            return new Conversation(
+                    boolOrDefault(enabled, defaults.enabled),
+                    positiveOrDefault(cooldownTicks, defaults.cooldownTicks),
+                    positiveOrDefault(checkIntervalTicks, defaults.checkIntervalTicks),
+                    startChancePerCheck > 0.0D ? Math.min(1.0D, startChancePerCheck) : defaults.startChancePerCheck,
+                    positiveOrDefault(minParticipants, defaults.minParticipants),
+                    positiveOrDefault(maxParticipants, defaults.maxParticipants),
+                    positiveDoubleOrDefault(readingWordsPerMinute, defaults.readingWordsPerMinute),
+                    thinkingSecondsPerWord > 0.0D ? thinkingSecondsPerWord : defaults.thinkingSecondsPerWord,
+                    positiveDoubleOrDefault(minReplyDelaySeconds, defaults.minReplyDelaySeconds),
+                    positiveDoubleOrDefault(maxReplyDelaySeconds, defaults.maxReplyDelaySeconds),
+                    positiveOrDefault(maxTokens, defaults.maxTokens));
         }
     }
 

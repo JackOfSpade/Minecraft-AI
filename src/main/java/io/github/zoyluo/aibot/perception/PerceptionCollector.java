@@ -70,7 +70,8 @@ public final class PerceptionCollector {
                 blocks,
                 rawEntities,
                 rawItems,
-                new PerceptionSnapshot.TimeInfo(world.getTimeOfDay() % 24000L, world.isDay(), world.getLightLevel(center)));
+                new PerceptionSnapshot.TimeInfo(world.getTimeOfDay() % 24000L, world.isDay(), world.getLightLevel(center),
+                        world.isRaining(), world.isThundering()));
     }
 
     /** Lightweight self-only state for routing; unlike collect, this never scans the world. */

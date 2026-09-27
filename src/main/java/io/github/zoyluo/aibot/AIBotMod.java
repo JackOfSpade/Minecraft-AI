@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot;
 
+import io.github.zoyluo.aibot.brain.AmbientConversationCoordinator;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatCaptureListener;
 import io.github.zoyluo.aibot.brain.ChatRecipientRouter;
@@ -64,6 +65,7 @@ public class AIBotMod implements ModInitializer {
 
         BrainCoordinator.INSTANCE.configure(config);
         ChatRecipientRouter.INSTANCE.configure(config);
+        AmbientConversationCoordinator.INSTANCE.configure(config);
         PoiAdvisor.INSTANCE.configure(config);
         ChatCaptureListener.register();
         AIPayloads.register();
@@ -79,6 +81,7 @@ public class AIBotMod implements ModInitializer {
             TpsGuard.INSTANCE.tick(server);
             TaskManager.INSTANCE.tickAll(server);
             BotTickCoordinator.INSTANCE.tick(server);
+            AmbientConversationCoordinator.INSTANCE.tick(server);
             AIBotServerNetworking.INSTANCE.tick(server);
             io.github.zoyluo.aibot.log.DiagnosticLogger.INSTANCE.tick(server);
             if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {
