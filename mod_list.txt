@@ -92,8 +92,10 @@ GRAPHICS / PHYSICS / ATMOSPHERE
 | Particle Rain          | v4-beta.11+1.21.11-fabric   |
 | Falling Leaves         | 2.0.3+1.21.11               |
 | 3D Skin Layers         | 1.11.3-1.21.11              |
-| First-person Model     | 2.7.2-1.21.11               |
 | Not Enough Animations  | 1.12.4-1.21.11              |
+
+FirstPerson (2.7.2-1.21.11, "enables the third-person model in first-person")
+was removed 2026-09-27 by the user's own preference.
 
 Complementary Unbound is a shaderpack: it goes in the profile's
 "shaderpacks" folder, not "mods", and needs Iris (above) to select it
