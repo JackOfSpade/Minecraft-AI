@@ -5,10 +5,6 @@ Purpose: record of every mod/datapack to install when a game profile is
 created (launcher instance, server pack, etc.). This file is a plan/reference,
 not something the "aibot" mod reads at runtime.
 
-The curated mod and datapack list was cleared on purpose so the pack can be
-rebuilt from scratch. What is left below is only what Fabric and this project
-need in order to run.
-
 --------------------------------------------------------------------------
 REQUIRED RUNTIME
 --------------------------------------------------------------------------
@@ -19,13 +15,14 @@ REQUIRED RUNTIME
   https://fabricmc.net/use/installer/
 
 --------------------------------------------------------------------------
-MODS (Fabric, install into the profile's "mods" folder)
+THIS PROJECT'S OWN MODS (install into the profile's "mods" folder)
 --------------------------------------------------------------------------
 
 1. Fabric API
    Version: 0.141.6+1.21.11
    https://modrinth.com/mod/fabric-api
-   Required by the aibot mod (see fabric.mod.json "depends").
+   Required by the aibot mod (see fabric.mod.json "depends"), and by nearly
+   every mod below.
 
 2. AIBot (this project)
    File: aibot-<mod_version>.jar, built from this repo
@@ -33,8 +30,143 @@ MODS (Fabric, install into the profile's "mods" folder)
    builds it and installs it into a profile, see docs/DEPLOY_LOCAL.md).
    Requires Fabric API (#1).
 
+3. PvP BOT Inhabitants
+   File: pvpbot-inhabitants-<version>.jar, built from
+   C:\Users\PC\Desktop\Minecraft-Spawn-Bots-Wrapper (a separate local repo)
+   (gradlew build, then build/libs/pvpbot-inhabitants-*.jar).
+   Standalone addon that populates registered structures (POIs) with
+   randomized PvP BOT inhabitants; does not modify or bundle PvP BOT itself.
+   Requires Fabric API (#1), PvP BOT (below) and HeroBot (below).
+   Privacy: PvP BOT sends anonymous bot/damage stats to an external server
+   over plain HTTP by default; this profile disables that
+   ("send_anonymous_statistics": false in config/pvpbot/stats_config.json,
+   set after the first server start generates the file). This addon itself
+   sends no telemetry.
+
+--------------------------------------------------------------------------
+CORE / PERFORMANCE
+--------------------------------------------------------------------------
+
+| Mod             | Version                   |
+|-----------------|---------------------------|
+| Iris            | 1.10.7+1.21.11-fabric     |
+| Sodium          | mc1.21.11-0.8.7-fabric    |
+| Lithium         | mc1.21.11-0.21.4-fabric   |
+| FerriteCore     | 8.2.0-fabric              |
+| ModernFix-mVUS  | 5.26.3-build.1            |
+| Particle Core   | 0.3.2+1.21.11             |
+
+Keep Sodium at 0.8.7 here: Iris 1.10.7's 1.21.11 Fabric release declares
+that exact Sodium version as its required dependency.
+
+--------------------------------------------------------------------------
+WORLD GENERATION / EXPLORATION
+--------------------------------------------------------------------------
+
+| Mod                  | Version        |
+|----------------------|----------------|
+| Tectonic             | 3.0.19         |
+| Terralith            | 2.6.1          |
+| Dungeons & Taverns    | 5.1.0+mod      |
+| Explorify            | 1.6.4          |
+| Towns & Towers       | 1.13.9         |
+| Amplified Nether     | 1.2.13         |
+| Nature's Compass     | 1.21.11-2.5.0-fabric |
+| PvP BOT (Fabric)     | 0.0.15         |
+
+PvP BOT populates the world with bot enemies/allies; PvP BOT Inhabitants
+(this project's own addon, above) is what places them inside structures.
+
+--------------------------------------------------------------------------
+GRAPHICS / PHYSICS / ATMOSPHERE
+--------------------------------------------------------------------------
+
+| Mod / shader           | Version                     |
+|-------------------------|-----------------------------|
+| Physics Mod Free       | 3.1.40                      |
+| Complementary Unbound  | r5.7.1 (shaderpack)         |
+| Euphoria Patches       | 1.8.5-r5.7.1-fabric         |
+| LocalizedWeather       | 1.4.0+1.21.11               |
+| Particle Rain          | v4-beta.11+1.21.11-fabric   |
+| Falling Leaves         | 2.0.3+1.21.11               |
+| 3D Skin Layers         | 1.11.3-1.21.11              |
+| First-person Model     | 2.7.2-1.21.11               |
+| Not Enough Animations  | 1.12.4-1.21.11              |
+
+Complementary Unbound is a shaderpack: it goes in the profile's
+"shaderpacks" folder, not "mods", and needs Iris (above) to select it
+(Options > Video > Shaderpack Selection). Euphoria Patches, despite the
+name, is a regular mod (goes in "mods") that patches Complementary at
+runtime -- it does nothing without Complementary Unbound + Iris installed.
+
+--------------------------------------------------------------------------
+AUDIO
+--------------------------------------------------------------------------
+
+| Mod                       | Version                  |
+|---------------------------|---------------------------|
+| Sound Physics Remastered  | fabric-1.21.11-1.5.1      |
+| Presence Footsteps        | 1.12.4+1.21.11            |
+
+--------------------------------------------------------------------------
+GAMEPLAY / COMBAT / HUD
+--------------------------------------------------------------------------
+
+| Mod                   | Version                  |
+|-----------------------|---------------------------|
+| DeathMarker           | v1.0.0-1.21-fabric        |
+| Custom Time Cycle     | 0.1.5-1.21.11             |
+| Better Name Visibility| 2.0.2                     |
+| Better Respawn        | fabric-1.21.11-2.0.6      |
+| Compass Bar           | latest compatible 1.21.11 Fabric build |
+| AttributeFix          | 21.11.1                   |
+| Easy Anvils           | 21.11.1                   |
+
+(PvP BOT itself is listed under World Generation / Exploration above, since
+that is what it primarily adds; it is a gameplay/combat mod too.)
+
+Better Name Visibility requires YetAnotherConfigLib (YACL) -- added under
+Inventory / UI / QOL below; it was missing from the original list and would
+have failed to load without it.
+
+--------------------------------------------------------------------------
+INVENTORY / UI / QOL
+--------------------------------------------------------------------------
+
+| Mod                | Version                      |
+|--------------------|-------------------------------|
+| Mod Menu           | 17.0.0                        |
+| InventoryTweak     | 3.5 (the Anvian's-Lib-based build; a same-numbered but unrelated owo-lib-based build also exists, not used) |
+| Inventory Sorting  | 2.1.4+fabric-1.21.11           |
+| Shulker Box Tooltip| 5.2.16+1.21.11-fabric          |
+| YetAnotherConfigLib (YACL) | 3.8.2+1.21.11-fabric  |
+
+--------------------------------------------------------------------------
+REQUIRED LIBRARIES / DEPENDENCIES
+--------------------------------------------------------------------------
+
+| Library                  | Version                        |
+|---------------------------|--------------------------------|
+| Cloth Config API         | 21.11.153+fabric               |
+| Lithostitched            | 1.7.2-fabric-21.11              |
+| Cristel Lib              | 3.1.7 (for Fabric 1.21.11)       |
+| HeroBot                  | 1.4.3 / 1.21.11                  |
+| Fzzy Config              | 0.7.6+1.21.11                    |
+| Fabric Language Kotlin   | latest compatible 1.21.11 Fabric release |
+| Anvian's Lib             | 1.4                              |
+| owo-lib                  | 0.13.0+1.21.11 (not required by the InventoryTweak build used above; kept since it was on the original list) |
+| Prickle                  | 21.11.1                          |
+| Puzzles Lib              | 21.11.11                         |
+| Forge Config API Port    | 21.11.1                          |
+| Text Placeholder API     | 2.8.2+1.21.10 (compatible with 1.21.11) |
+
+HeroBot is a required dependency of PvP BOT (and, transitively, of this
+project's own PvP BOT Inhabitants addon above) -- it is a third-party
+library, unrelated to and does not conflict with this repo's own "AIBot"
+mod (io.github.zoyluo.aibot).
+
 --------------------------------------------------------------------------
 DATAPACKS
 --------------------------------------------------------------------------
 
-None. The project does not need any datapack to work.
+None required beyond what the mods above bundle themselves.
