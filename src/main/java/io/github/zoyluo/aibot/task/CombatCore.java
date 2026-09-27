@@ -17,6 +17,7 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
@@ -169,6 +170,27 @@ public final class CombatCore {
     public static void lookAt(AIPlayerEntity bot, LivingEntity target) {
         Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
         LookAction.lookAt(bot, targetCenter);
+    }
+
+    /**
+     * Aims for a bow shot at {@code target}'s center: same yaw as {@link #lookAt}, but the pitch is
+     * solved via {@link ProjectileBallistics} so a fully-drawn arrow actually lands there instead of
+     * dropping short with increasing range. {@link #lookAt} points straight at the target, which is
+     * correct for melee (and negligibly different from this at melee range) but is the aim of a
+     * human archer who never compensates for arrow drop -- fine at a few blocks, an increasingly
+     * clear miss-low at the far end of ranged engagement.
+     */
+    public static void lookAtForBowShot(AIPlayerEntity bot, LivingEntity target) {
+        Vec3d eye = bot.getEyePos();
+        Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
+        double dx = targetCenter.x - eye.x;
+        double dz = targetCenter.z - eye.z;
+        double dy = targetCenter.y - eye.y;
+        double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+        float yaw = MathHelper.wrapDegrees((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D));
+        double pitch = ProjectileBallistics.pitchForShot(
+                horizontalDistance, dy, ProjectileBallistics.FULL_DRAW_ARROW_SPEED);
+        LookAction.setYawPitch(bot, yaw, (float) pitch);
     }
 
     public static void startApproach(AIPlayerEntity bot, LivingEntity target) {

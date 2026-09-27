@@ -39,7 +39,7 @@ package io.github.zoyluo.aibot.mining.assist;
  * @param poiEvidenceStale    item 9: the POI facts are not fresh (score never computed or older than 60 ticks while {@code poi.enabled}, no state, or the window cannot be trusted); fails closed as POI_EVIDENCE
  * @param poiWindowVeto       item 9: {@link SafeGate#poiWindowVeto} of the POI window
  * @param poiCandidatePending item 9: a POI candidate is pending, see {@link SafeGate#candidatePending}
- * @param inNoDetourZone      item 9: inside a mandatory no-detour zone (always false in P1, filled by P2)
+ * @param inNoDetourZone      item 9: inside a mandatory no-detour zone ({@link io.github.zoyluo.aibot.mining.assist.MandatoryLatch#inNoDetourZone})
  * @param trapNear            item 10: a remembered TRAP cell within 3 blocks of the bot, the stand pose or the valuable
  */
 public record SafeGateInputs(

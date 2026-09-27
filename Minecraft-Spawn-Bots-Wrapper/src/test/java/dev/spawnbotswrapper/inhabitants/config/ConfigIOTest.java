@@ -91,6 +91,7 @@ class ConfigIOTest {
                   "processing": { "maxStructuresPerTick": 0, "maxLiveBots": -5 },
                   "profiles": { "coverageBuckets": 1000 },
                   "spawning": { "backend": "nonsense", "namePrefix": "bad prefix!!" },
+                  "connection": { "joinHoldTicks": 999999 },
                   "commandPermissionLevel": 9
                 }
                 """, StandardCharsets.UTF_8);
@@ -104,6 +105,7 @@ class ConfigIOTest {
         assertEquals(64, c.profiles.coverageBuckets);
         assertEquals("AUTO", c.spawning.backend);
         assertEquals("badprefi", c.spawning.namePrefix); // stripped to "badprefix", then cut to 8 characters
+        assertEquals(72000, c.connection.joinHoldTicks);
         assertEquals(4, c.commandPermissionLevel);
         assertFalse(r.warnings().isEmpty());
     }

@@ -335,7 +335,7 @@ public final class CombatTask extends AbstractTask {
             beginRanged(bot);
             return;
         }
-        CombatCore.lookAt(bot, target);
+        CombatCore.lookAtForBowShot(bot, target);
         if (!bot.isUsingItem()) {
             ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
             if (result.isFailed()) {
@@ -870,11 +870,11 @@ public final class CombatTask extends AbstractTask {
                 abandonPeekaboo(bot, "peekaboo_peek_step_failed");
                 return;
             }
-            CombatCore.lookAt(bot, target);
+            CombatCore.lookAtForBowShot(bot, target);
             return;
         }
         if (peekCycleTicks <= PEEKABOO_EXPOSE_TICKS) {
-            CombatCore.lookAt(bot, target);
+            CombatCore.lookAtForBowShot(bot, target);
             return;
         }
         if (bot.isUsingItem()) {

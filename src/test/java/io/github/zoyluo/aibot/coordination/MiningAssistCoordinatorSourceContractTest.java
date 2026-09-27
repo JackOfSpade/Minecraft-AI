@@ -180,8 +180,15 @@ class MiningAssistCoordinatorSourceContractTest {
                 "status, expiry, break peek (at most 4 breaks), sweep, shadow POI, cost summary");
         assertEquals(1, count(source, "PoiDetector.evaluate("), "one heavy operation per bot per tick");
         assertTrue(sense.contains("config.poi().enabled() && PoiDetector.due(state, tick)"));
-        assertTrue(sense.contains("MiningAssistLog.poiBand(bot, state, PoiDetector.evaluate("),
-                "the evaluation feeds nothing but the (rate limited) band log");
+        // P2: the single evaluation is now kept in a local so it can feed both the (still unconditional,
+        // rate limited) band log and, once actionable and poiActive(), the coordinator -- never a second call.
+        int evaluateCall = sense.indexOf("PoiDetector.Result result = PoiDetector.evaluate(bot, state, world, tick);");
+        int bandLog = sense.indexOf("MiningAssistLog.poiBand(bot, state, result, tick);");
+        int onCandidate = sense.indexOf("PoiCoordinator.INSTANCE.onCandidate(bot, state, world, result, tick);");
+        assertTrue(evaluateCall >= 0 && bandLog > evaluateCall && onCandidate > bandLog,
+                "evaluate once, log the band unconditionally, then (only if actionable) hand it to the coordinator");
+        assertTrue(sense.contains("config.poiActive() && (result.band() == PoiScorer.Band.MANDATORY"),
+                "acting on a candidate is gated on poiActive() in addition to the unconditional poi.enabled() scoring");
     }
 
     @Test

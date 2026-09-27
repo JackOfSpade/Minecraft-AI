@@ -27,6 +27,7 @@ public final class TaskManager {
     private final Map<UUID, TaskStatus> lastStatus = new ConcurrentHashMap<>();
     private final Map<UUID, FailureRecord> lastFailure = new ConcurrentHashMap<>();
     private final Map<UUID, FailureRecord> pendingFailure = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> userPauseEpoch = new ConcurrentHashMap<>();
 
     private TaskManager() {
     }
@@ -155,6 +156,7 @@ public final class TaskManager {
     /** User-intent cancellation: clear active and paused work without creating a failure/replan. */
     public boolean cancelIntentTasks(AIPlayerEntity bot, String reason) {
         UUID uuid = bot.getUuid();
+        bumpUserPauseEpoch(uuid);
         Task current = active.remove(uuid);
         activeOrigins.remove(uuid);
         ExecutionStack<Task> stack = executionStacks.remove(uuid);
@@ -221,6 +223,25 @@ public final class TaskManager {
         return userPaused.contains(bot.getUuid());
     }
 
+    /** Design 6.5 "Pause epoch": additive per-bot counter bumped by pauseUserIntent, resumeUserIntent, and
+     * cancelIntentTasks (which also covers bot unload, since onBotDespawn calls cancelIntentTasks(bot,
+     * "bot_unload") as its own first statement). A genuine despawn must bump it exactly once:
+     * {@code RuntimeLifecycleCoordinator.deleteBot} already cancels active/paused work through
+     * {@code IntentController.cancelAll} (which itself reaches {@code cancelIntentTasks} via
+     * {@code cancelActiveAndPausedWork}), so it calls {@link #forgetDespawnedBot} there, never
+     * {@link #onBotDespawn} — the latter's own {@code cancelIntentTasks} call would double-bump the epoch
+     * for the same despawn (real-server regression guard: {@code OreDigPoiGameTests
+     * .userPauseEpochBumpsOnEveryTransition}). {@code RuntimeLifecycleCoordinator.unloadBot} has no such
+     * prior cancellation and keeps calling {@link #onBotDespawn} for its one bump.
+     * Unused by TaskManager itself in P2; P3's hold logic reads it to detect a player action during a hold. */
+    public int userPauseEpoch(AIPlayerEntity bot) {
+        return userPauseEpoch.getOrDefault(bot.getUuid(), 0);
+    }
+
+    private void bumpUserPauseEpoch(UUID uuid) {
+        userPauseEpoch.merge(uuid, 1, Integer::sum);
+    }
+
     public TaskStatus status(AIPlayerEntity bot) {
         Task current = active.get(bot.getUuid());
         if (current != null) {
@@ -282,6 +303,7 @@ public final class TaskManager {
 
     public boolean pauseUserIntent(AIPlayerEntity bot, String why) {
         UUID uuid = bot.getUuid();
+        bumpUserPauseEpoch(uuid);
         boolean changed = userPaused.add(uuid);
         TaskOrigin origin = activeOrigins.get(uuid);
         if (active.containsKey(uuid) && (origin == null || !origin.safety())) {
@@ -295,6 +317,7 @@ public final class TaskManager {
 
     public boolean resumeUserIntent(AIPlayerEntity bot, String why) {
         UUID uuid = bot.getUuid();
+        bumpUserPauseEpoch(uuid);
         boolean changed = userPaused.remove(uuid);
         if (!active.containsKey(uuid)) {
             int before = pausedDepth(bot);
@@ -404,11 +427,21 @@ public final class TaskManager {
         lastStatus.clear();
         lastFailure.clear();
         pendingFailure.clear();
+        userPauseEpoch.clear();
         BotLog.task(null, "tasks_cleared");
     }
 
     public void onBotDespawn(AIPlayerEntity bot) {
         cancelIntentTasks(bot, "bot_unload");
+        forgetDespawnedBot(bot);
+    }
+
+    /** The per-bot bookkeeping cleanup half of {@link #onBotDespawn}, without the {@code cancelIntentTasks}
+     * call (and its {@code userPauseEpoch} bump): for a caller that already ran the equivalent cancellation
+     * itself (see {@link #userPauseEpoch}'s javadoc). Safe to call after work is already cancelled — every
+     * map removal here is then a no-op except the ones {@code cancelIntentTasks} never touches
+     * ({@code lastStatus}, {@code BotReporter}). */
+    public void forgetDespawnedBot(AIPlayerEntity bot) {
         executionStacks.remove(bot.getUuid());
         activeOrigins.remove(bot.getUuid());
         userPaused.remove(bot.getUuid());
@@ -426,6 +459,7 @@ public final class TaskManager {
         lastStatus.clear();
         lastFailure.clear();
         pendingFailure.clear();
+        userPauseEpoch.clear();
     }
 
     public int activeCount() {

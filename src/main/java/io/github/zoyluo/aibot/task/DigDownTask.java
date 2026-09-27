@@ -195,6 +195,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         return true;
     }
 
+    /** Mining-assist design 6.1: the POI coordinator's per-task-class notice variant needs to know whether this
+     * task is currently descending, as opposed to climbing back out (RETURN) or finished (DONE). */
+    public boolean isDescending() {
+        return phase == Phase.DESCEND;
+    }
+
     /**
      * A nearby observed lava cell closes this descent entry; the safe response is to repay the
      * task's factual staircase debt, not to hand a sealed underground pose to generic Evade.

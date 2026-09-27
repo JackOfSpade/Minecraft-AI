@@ -55,6 +55,24 @@ public final class BotMemory {
         return Optional.empty();
     }
 
+    /** Removes a place marker if present. Mirrors {@link #forget(String)} for places. Returns true when one was removed. */
+    public boolean forgetPlace(String name) {
+        return places.remove(cleanKey(name)) != null;
+    }
+
+    /** The first stored place (insertion order) whose key starts with {@code prefix}, or empty. Used to recover a
+     * label-suffixed transient marker (for example {@code poi_hold_<label>}) after a restart, when the caller does
+     * not yet know the label. */
+    public Optional<Map.Entry<String, Place>> firstPlaceWithPrefix(String prefix) {
+        String needle = prefix.toLowerCase(java.util.Locale.ROOT);
+        for (Map.Entry<String, Place> entry : places.entrySet()) {
+            if (entry.getKey().startsWith(needle)) {
+                return Optional.of(entry);
+            }
+        }
+        return Optional.empty();
+    }
+
     public void setGoal(String title, Iterable<String> steps) {
         goalTitle = title == null ? "" : title.trim();
         goalSteps.clear();

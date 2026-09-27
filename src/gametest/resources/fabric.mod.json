@@ -40,7 +40,8 @@
       "io.github.zoyluo.aibot.task.MineValuablesGameTests",
       "io.github.zoyluo.aibot.mining.assist.MiningAssistSenseGameTests",
       "io.github.zoyluo.aibot.task.OreDigOpportunisticGameTests",
-      "io.github.zoyluo.aibot.task.OreDigOpportunisticLifecycleGameTests"
+      "io.github.zoyluo.aibot.task.OreDigOpportunisticLifecycleGameTests",
+      "io.github.zoyluo.aibot.task.OreDigPoiGameTests"
     ]
   },
   "depends": {

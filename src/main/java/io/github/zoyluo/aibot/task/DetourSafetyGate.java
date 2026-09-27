@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
 import io.github.zoyluo.aibot.mining.assist.AssistGate;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.aibot.mining.assist.MandatoryLatch;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
@@ -56,8 +57,8 @@ import java.util.UUID;
  *       three POI passes), or when there is no state; the structure score {@code state.poiStructureScore()};
  *       {@code SafeGate.poiWindowVeto(state.poiWindow())}; a pending candidate through
  *       {@code SafeGate.candidatePending(state.lastPoiBand(), anyCandidateHysteresisSatisfied,
- *       CAVERN_BLOCKS_DETOUR)} (a tracked candidate that merely exists does not count); the no-detour zone is
- *       false in P1.</li>
+ *       CAVERN_BLOCKS_DETOUR)} (a tracked candidate that merely exists does not count); the no-detour zone reads
+ *       {@code MandatoryLatch.inNoDetourZone}.</li>
  *   <li>Item 10: {@code HazardField.anyTrapWithin(centre, 3)} around the bot, {@code pose} and {@code ore}.</li>
  * </ul>
  * A missing {@code MiningAssistState} FAILS CLOSED: {@code poiEvidenceStale} is set (the gate answers POI_EVIDENCE)
@@ -171,7 +172,7 @@ public final class DetourSafetyGate {
                         .poiWindowVeto(SafeGate.poiWindowVeto(state.poiWindow()))
                         .poiCandidatePending(SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,
                                 CAVERN_BLOCKS_DETOUR))
-                        .inNoDetourZone(false);
+                        .inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.getBlockPos()));
             }
         }
         if (stage.reads(10)) {

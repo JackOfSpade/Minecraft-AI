@@ -61,10 +61,6 @@ public final class AIBotCommand {
         ServerPlayerEntity executor = source.getPlayer();
         GameMode gameMode = executor == null ? GameMode.SURVIVAL : executor.interactionManager.getGameMode();
         UUID ownerUuid = executor == null ? null : executor.getUuid();
-        if (ownerUuid != null && AIPlayerManager.INSTANCE.botOf(ownerUuid).isPresent()) {
-            source.sendError(Text.literal("[AIBot] 你已经有一个 AI 助手了,请先 /aibot despawn <名字>"));
-            return 0;
-        }
         var rotation = source.getRotation();
         var spawned = AIPlayerManager.INSTANCE.spawn(
                 source.getServer(),
@@ -82,7 +78,7 @@ public final class AIBotCommand {
             return 1;
         }
 
-        source.sendError(Text.literal("[AIBot] 无法生成 " + name + " (名称已存在或已达到限制)"));
+        source.sendError(Text.literal("[AIBot] 无法生成 " + name + " (名称已被占用)"));
         return 0;
     }
 

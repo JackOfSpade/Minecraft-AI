@@ -49,6 +49,10 @@ public final class MissionAssistLedger {
     public static final int TICK_BUDGET_CAP = 3600;
     /** Design 4.13: least server ticks between two rare-find chat lines of one bot. */
     public static final int ANNOUNCE_INTERVAL_TICKS = 600;
+    /** Design 6.7: cap on FYI ("notify-and-continue") lines per mission. */
+    public static final int POI_FYI_LIMIT = 3;
+    /** Design 6.4: cap on the "one notify-and-continue line each" fallback once the hold cap is reached. */
+    public static final int POI_CERTAIN_NOTIFY_AFTER_CAP_LIMIT = 3;
     /**
      * Sentinel for "never" ({@code Integer.MIN_VALUE}: a plain {@code tick - x} subtraction overflows for it). Every
      * comparison against a NEVER-capable field is explicit: {@code x == NEVER} first, then a {@code long}
@@ -164,6 +168,9 @@ public final class MissionAssistLedger {
         private int lastAnnounceTick = NEVER;
         private boolean detoursDisabled;
         private int lastTouchedTick = NEVER;
+        private int poiHoldsOrStops;
+        private int poiFyiCount;
+        private int poiCertainNotifyAfterCap;
 
         /** Public so test hosts can hold a private, unshared entry; production code uses {@link MissionAssistLedger#get}. */
         public Entry() {
@@ -260,6 +267,33 @@ public final class MissionAssistLedger {
 
         public void noteAnnounced(int serverTick) {
             lastAnnounceTick = serverTick;
+        }
+
+        /** Design 6.4: non-mandatory POI stops (structure-certain or fallback) counted against poi.maxHoldsPerMission. */
+        public int poiHoldsOrStops() {
+            return poiHoldsOrStops;
+        }
+
+        public void notePoiHoldOrStop() {
+            poiHoldsOrStops++;
+        }
+
+        /** Design 6.7: FYI lines, capped at POI_FYI_LIMIT per mission. */
+        public boolean poiFyiCapReached() {
+            return poiFyiCount >= POI_FYI_LIMIT;
+        }
+
+        public void notePoiFyi() {
+            poiFyiCount++;
+        }
+
+        /** Design 6.4: the "one line each, at most 3 more" fallback once the hold cap is reached. */
+        public boolean poiCertainNotifyAfterCapReached() {
+            return poiCertainNotifyAfterCap >= POI_CERTAIN_NOTIFY_AFTER_CAP_LIMIT;
+        }
+
+        public void notePoiCertainNotifyAfterCap() {
+            poiCertainNotifyAfterCap++;
         }
 
         public int detoursStarted() {

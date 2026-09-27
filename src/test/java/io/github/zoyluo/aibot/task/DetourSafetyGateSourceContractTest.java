@@ -117,8 +117,9 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("candidate.hysteresis().satisfied(tick)"));
         assertTrue(body.contains("SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,"));
         assertTrue(body.contains("CAVERN_BLOCKS_DETOUR"));
-        assertTrue(body.contains("b.inNoDetourZone(false)") || body.contains(".inNoDetourZone(false)"),
-                "the no-detour zone is always false in P1");
+        // P2: the no-detour zone now reads the real mandatory-repeat latch instead of a hard-coded false.
+        assertTrue(body.contains(".inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.getBlockPos()))"),
+                "the no-detour zone reads MandatoryLatch.inNoDetourZone");
         // Item 10.
         assertTrue(body.contains("state.hazards().anyTrapWithin("));
     }

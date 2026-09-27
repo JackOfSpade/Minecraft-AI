@@ -14,6 +14,7 @@ import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
 import io.github.zoyluo.aibot.mining.assist.OreClaims;
 import io.github.zoyluo.aibot.mining.assist.PoiDetector;
+import io.github.zoyluo.aibot.mining.assist.PoiScorer;
 import io.github.zoyluo.aibot.mining.assist.SensePlan;
 import io.github.zoyluo.aibot.mining.assist.SenseStatus;
 import io.github.zoyluo.aibot.mining.assist.ViewSweeper;
@@ -79,6 +80,11 @@ public final class MiningAssistCoordinator {
         }
     }
 
+    /** Design 6.8 "Multi-bot routing": true while a POI stop is open for this bot. */
+    public static boolean awaitingContinue(AIPlayerEntity bot) {
+        return PoiCoordinator.INSTANCE.awaitingContinue(bot);
+    }
+
     private static void run(AIPlayerEntity bot, int tick, boolean handled) {
         // P1 (F.2, design 2.3 steps 3b/3c): a live detour must be tended even in the very ticks right after a
         // sensor fault, which is exactly when the fault cooldown below would otherwise skip this bot. Its own
@@ -87,6 +93,14 @@ public final class MiningAssistCoordinator {
             maintainDetour(bot, tick);
         } catch (RuntimeException ignored) {
             // maintainDetour must never take down the sensor pass that follows.
+        }
+        // P2 (design 6.5 "Restart during a hold"): an open POI stop must be tended (resume detection, restart
+        // rehydration) even while the fault cooldown below would skip this bot, and even while the bot is paused
+        // and therefore has no sensed task at all.
+        try {
+            PoiCoordinator.INSTANCE.tick(bot, tick);
+        } catch (RuntimeException ignored) {
+            // must never take down the sensor pass that follows.
         }
         UUID botId = bot.getUuid();
         if (MiningAssistRuntime.failures().coolingDown(botId, tick)) {
@@ -171,9 +185,19 @@ public final class MiningAssistCoordinator {
             MiningAssistLog.sightings(bot, state, tick, config.detour().announceMinValue());
         }
 
-        // The one heavy operation of the tick: shadow POI scoring, logged on band changes only.
+        // The one heavy operation of the tick: shadow POI scoring, logged on band changes only. Scoring and
+        // logging stay unconditional of mode (unchanged from P0/P1: SENSE/DETOUR keep shadow-only POI behaviour).
+        // P2: a candidate that is MANDATORY/STRUCTURE_CERTAIN on this single evaluation, or POSSIBLE/CAVERN_ONLY
+        // whose hysteresis is now satisfied, is handed to the coordinator -- but only once the mode allows POI
+        // to act (poiActive()).
         if (config.poi().enabled() && PoiDetector.due(state, tick)) {
-            MiningAssistLog.poiBand(bot, state, PoiDetector.evaluate(bot, state, world, tick), tick);
+            PoiDetector.Result result = PoiDetector.evaluate(bot, state, world, tick);
+            MiningAssistLog.poiBand(bot, state, result, tick);
+            if (config.poiActive() && (result.band() == PoiScorer.Band.MANDATORY
+                    || result.band() == PoiScorer.Band.STRUCTURE_CERTAIN
+                    || result.confirmed())) {
+                PoiCoordinator.INSTANCE.onCandidate(bot, state, world, result, tick);
+            }
         }
         MiningAssistLog.summaryIfDue(bot, state, tick);
     }

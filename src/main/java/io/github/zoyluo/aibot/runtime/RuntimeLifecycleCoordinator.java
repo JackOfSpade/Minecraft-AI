@@ -94,12 +94,16 @@ public final class RuntimeLifecycleCoordinator {
         BotLog.lifecycle(bot, "bot_runtime_death_reset");
     }
 
-    /** Explicit despawn is deletion: publish cancellation first, then forget every cached projection. */
+    /** Explicit despawn is deletion: publish cancellation first, then forget every cached projection.
+     * {@code IntentController.cancelAll} above already cancels active/paused work (reaching
+     * {@code TaskManager.cancelIntentTasks} via {@code cancelActiveAndPausedWork}), so cleanup here uses
+     * {@code TaskManager.forgetDespawnedBot}, not {@code onBotDespawn}: the latter's own
+     * {@code cancelIntentTasks} call would bump {@code userPauseEpoch} a second time for one despawn. */
     public void deleteBot(AIPlayerEntity bot) {
         IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "bot_despawn");
         BrainCoordinator.INSTANCE.reset(bot);
         IdleCoordinator.INSTANCE.onBotRemoved(bot);
-        TaskManager.INSTANCE.onBotDespawn(bot);
+        TaskManager.INSTANCE.forgetDespawnedBot(bot);
         GoalExecutor.INSTANCE.unload(bot);
         // GameTest-only (see EmergencyShelterTask#forgetCleanupDebtsOwnedBy): this bot is gone for
         // good, so its own still-pending shelter cleanup debt can no longer be a real chore for
@@ -127,7 +131,7 @@ public final class RuntimeLifecycleCoordinator {
         BotReporter.INSTANCE.onCleared(bot);
         DiagnosticLogger.INSTANCE.clear(bot);
         CapabilityRuntime.clear(bot);
-        MiningAssistRuntime.clearBot(bot);
+        MiningAssistRuntime.clearBotUnload(bot);
     }
 
     private static void forgetBot(AIPlayerEntity bot) {

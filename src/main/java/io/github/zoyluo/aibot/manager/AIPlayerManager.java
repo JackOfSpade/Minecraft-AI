@@ -45,7 +45,12 @@ public final class AIPlayerManager {
     private final Map<UUID, AIPlayerEntity> players = new ConcurrentHashMap<>();
     private final Map<String, UUID> nameIndex = new ConcurrentHashMap<>();
     private final Map<UUID, String> roles = new ConcurrentHashMap<>();
-    private final Map<UUID, UUID> ownerIndex = new ConcurrentHashMap<>();
+    /**
+     * Every bot a player owns, in spawn order (oldest first). A player may own any number of bots;
+     * {@link #botOf} picks the most recently spawned one as the implicit "my bot" default when a
+     * command or chat message doesn't name one, but any of them remains addressable by name.
+     */
+    private final Map<UUID, java.util.LinkedHashSet<UUID>> ownerIndex = new ConcurrentHashMap<>();
     private final Map<UUID, UUID> botOwners = new ConcurrentHashMap<>();
 
     private AIPlayerManager() {
@@ -117,9 +122,6 @@ public final class AIPlayerManager {
         if (nameIndex.containsKey(normalizedName) || server.getPlayerManager().getPlayer(name) != null) {
             return Optional.empty();
         }
-        if (ownerUuid != null && botOf(ownerUuid).isPresent()) {
-            return Optional.empty();
-        }
 
         GameProfile profile = OfflineProfileFactory.create(name);
         SyncedClientOptions options = SyncedClientOptions.createDefault();
@@ -145,7 +147,7 @@ public final class AIPlayerManager {
         nameIndex.put(normalizedName, player.getUuid());
         roles.put(player.getUuid(), "worker");
         if (ownerUuid != null) {
-            ownerIndex.put(ownerUuid, player.getUuid());
+            ownerIndex.computeIfAbsent(ownerUuid, ignored -> new java.util.LinkedHashSet<>()).add(player.getUuid());
             botOwners.put(player.getUuid(), ownerUuid);
         }
         BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.getBlockPos()), "mode", effectiveMode.asString());
@@ -219,17 +221,44 @@ public final class AIPlayerManager {
         return Optional.ofNullable(players.get(uuid));
     }
 
+    /**
+     * The implicit "my bot" default for a command or chat message that doesn't name one: the most
+     * recently spawned of the owner's bots, or empty if they have none right now. Any bot an owner
+     * has -- not just this one -- remains addressable by giving its name explicitly; see
+     * {@link #botsOf} to enumerate all of them.
+     */
     public Optional<AIPlayerEntity> botOf(UUID ownerUuid) {
-        UUID botUuid = ownerIndex.get(ownerUuid);
-        if (botUuid == null) {
+        java.util.LinkedHashSet<UUID> owned = ownerIndex.get(ownerUuid);
+        if (owned == null || owned.isEmpty()) {
             return Optional.empty();
+        }
+        UUID botUuid = null;
+        for (UUID candidate : owned) {
+            botUuid = candidate; // LinkedHashSet: last iterated == most recently added
         }
         AIPlayerEntity bot = players.get(botUuid);
         if (bot == null) {
-            ownerIndex.remove(ownerUuid);
-            return Optional.empty();
+            // Stale entry (should already have been cleared by despawn/clearOwner); self-heal.
+            owned.remove(botUuid);
+            return botOf(ownerUuid);
         }
         return Optional.of(bot);
+    }
+
+    /** Every bot {@code ownerUuid} currently owns, oldest first. Empty (never null) if none. */
+    public Collection<AIPlayerEntity> botsOf(UUID ownerUuid) {
+        java.util.LinkedHashSet<UUID> owned = ownerIndex.get(ownerUuid);
+        if (owned == null || owned.isEmpty()) {
+            return java.util.List.of();
+        }
+        java.util.List<AIPlayerEntity> result = new java.util.ArrayList<>(owned.size());
+        for (UUID botUuid : owned) {
+            AIPlayerEntity bot = players.get(botUuid);
+            if (bot != null) {
+                result.add(bot);
+            }
+        }
+        return Collections.unmodifiableList(result);
     }
 
     public Optional<UUID> ownerOf(AIPlayerEntity bot) {
@@ -273,9 +302,13 @@ public final class AIPlayerManager {
 
     private void clearOwner(UUID botUuid) {
         UUID ownerUuid = botOwners.remove(botUuid);
-        if (ownerUuid != null) {
-            ownerIndex.remove(ownerUuid, botUuid);
+        if (ownerUuid == null) {
+            return;
         }
+        ownerIndex.computeIfPresent(ownerUuid, (ignored, owned) -> {
+            owned.remove(botUuid);
+            return owned.isEmpty() ? null : owned;
+        });
     }
 
     private static void disconnect(MinecraftServer server, AIPlayerEntity entity, String reason) {

@@ -94,12 +94,47 @@ class MiningAssistWiringSourceContractTest {
     void perBotAndWorldAssistStateIsClearedWhereTheOtherRuntimeStateIs() throws IOException {
         String lifecycle = read(MAIN.resolve("runtime/RuntimeLifecycleCoordinator.java"));
         String transientBody = between(lifecycle, "private static void clearTransient(", "private static void forgetBot(");
-        assertTrue(transientBody.contains("MiningAssistRuntime.clearBot(bot);"));
+        // P2 (design 6.4/6.5): a genuine bot-unload/death/reset also drops the POI dedupe registry and the
+        // mandatory-repeat latch, which plain clearBot (also called from the idle-release path mid an open
+        // POI hold) must not touch -- see MiningAssistRuntime.clearBotUnload's javadoc.
+        assertTrue(transientBody.contains("MiningAssistRuntime.clearBotUnload(bot);"));
         String forget = between(lifecycle, "private static void forgetBot(", "private static void clearWorldRuntime()");
         assertTrue(forget.contains("MiningAssistRuntime.clearForced(bot.getUuid());"),
                 "a bot that is gone for good must not keep the harness opt-in alive");
         String world = lifecycle.substring(lifecycle.indexOf("private static void clearWorldRuntime()"));
         assertTrue(world.contains("MiningAssistRuntime.clearWorldRuntime();"));
+    }
+
+    // ---- P2: clearBot vs clearBotUnload must not fold into one another ----------------------------------
+
+    @Test
+    void clearBotNeverTouchesThePoiRegistryOrTheMandatoryLatchButClearBotUnloadDoesBoth() throws IOException {
+        // Regression guard for the P2 fix: MiningAssistCoordinator.notSensing's 2400-tick idle-release path
+        // calls plain clearBot while a bot may be paused mid an open POI hold, so POI state must survive it.
+        // Only the genuine-unload path (RuntimeLifecycleCoordinator.clearTransient, asserted above) is allowed
+        // to drop PoiRegistry/MandatoryLatch, through the separate clearBotUnload wrapper.
+        String runtime = read(MAIN.resolve("mining/assist/MiningAssistRuntime.java"));
+        String clearBot = between(runtime,
+                "public static void clearBot(AIPlayerEntity bot) {",
+                "public static void clearBotUnload(AIPlayerEntity bot) {");
+        assertFalse(clearBot.contains("PoiRegistry.clear("), "the idle-release path must never drop an open POI hold's dedupe state");
+        assertFalse(clearBot.contains("MandatoryLatch.clear("), "the idle-release path must never drop the mandatory latch");
+
+        String clearBotUnload = between(runtime,
+                "public static void clearBotUnload(AIPlayerEntity bot) {",
+                "public static SenseFailureGate failures() {");
+        assertTrue(clearBotUnload.contains("clearBot(bot);"), "clearBotUnload still does everything clearBot does");
+        assertTrue(clearBotUnload.contains("PoiRegistry.clear(bot.getUuid());"));
+        assertTrue(clearBotUnload.contains("MandatoryLatch.clear(bot.getUuid());"));
+    }
+
+    @Test
+    void theIdleReleasePathStillCallsPlainClearBotNotClearBotUnload() throws IOException {
+        String coordinator = read(MAIN.resolve("coordination/MiningAssistCoordinator.java"));
+        String notSensing = between(coordinator,
+                "private static void notSensing(", "private static String activeTaskName(");
+        assertTrue(notSensing.contains("MiningAssistRuntime.clearBot(bot);"));
+        assertFalse(notSensing.contains("clearBotUnload("));
     }
 
     // ---- harness -----------------------------------------------------------------------------------------

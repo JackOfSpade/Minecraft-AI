@@ -60,6 +60,8 @@ public final class InhabitantsConfig {
     public Deterministic deterministic = new Deterministic();
     public Processing processing = new Processing();
     public Spawning spawning = new Spawning();
+    /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
+    public Connection connection = new Connection();
 
     /** Rolled once per structure: occupied or abandoned, and how many bots if occupied. */
     public static final class Rule {
@@ -198,6 +200,20 @@ public final class InhabitantsConfig {
          * for good: the addon releases its upstream leftovers (patrol path etc.). It is NEVER respawned.
          */
         public int goneConfirmTicks = 6000;
+    }
+
+    public static final class Connection {
+        /**
+         * After a server start, PvP BOT restores its bots one by one with no completion signal, and that
+         * restore burst can stall the server tick loop; a player who joins mid-stall could be placed into
+         * the world before the surrounding terrain/chunks have finished loading and fall through it. This
+         * addon holds any player who begins connecting during the first this-many ticks after server start
+         * on their client's own native loading screen (via the vanilla configuration-phase task mechanism);
+         * their player entity is never created until the hold ends, so there is no teleport-then-freeze.
+         * 0 disables the hold entirely. Independent of {@code processing.restoreSettleTicks} (which only
+         * gates this addon's own bot reconciliation) and never touches the population/roster engine.
+         */
+        public int joinHoldTicks = 1800;
     }
 
     public static final class Spawning {

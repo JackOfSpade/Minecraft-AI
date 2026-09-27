@@ -2,6 +2,7 @@ package io.github.zoyluo.aibot.brain;
 
 import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
 import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.aibot.coordination.MiningAssistCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.goal.GoalExecutor;
 import io.github.zoyluo.aibot.log.BotLog;
@@ -83,14 +84,16 @@ public final class ChatCaptureListener {
     /** Builds routing facts on the server thread without scanning terrain, entities, or containers. */
     private static ChatRecipientRouter.CapabilitySummary capabilityFor(AIPlayerEntity bot) {
         PerceptionSnapshot.SelfState self = PerceptionCollector.collectSelfState(bot);
-        ChatRecipientRouter.TaskSummary taskSummary = GoalExecutor.INSTANCE.batchCheckpointStatus(bot)
-                .filter(GoalExecutor.BatchCheckpointStatus::awaitingPlayer)
-                .map(ignored -> new ChatRecipientRouter.TaskSummary(
-                        "goal_batch_checkpoint", "AWAITING_PLAYER_CONTINUE", 1.0D))
-                .orElseGet(() -> {
-                    PerceptionSnapshot.TaskInfo task = PerceptionCollector.collectTaskInfo(bot);
-                    return new ChatRecipientRouter.TaskSummary(task.name(), task.state(), task.progress());
-                });
+        ChatRecipientRouter.TaskSummary taskSummary = MiningAssistCoordinator.awaitingContinue(bot)
+                ? new ChatRecipientRouter.TaskSummary("poi_hold", "AWAITING_PLAYER_CONTINUE", 1.0D)
+                : GoalExecutor.INSTANCE.batchCheckpointStatus(bot)
+                        .filter(GoalExecutor.BatchCheckpointStatus::awaitingPlayer)
+                        .map(ignored -> new ChatRecipientRouter.TaskSummary(
+                                "goal_batch_checkpoint", "AWAITING_PLAYER_CONTINUE", 1.0D))
+                        .orElseGet(() -> {
+                            PerceptionSnapshot.TaskInfo task = PerceptionCollector.collectTaskInfo(bot);
+                            return new ChatRecipientRouter.TaskSummary(task.name(), task.state(), task.progress());
+                        });
         return new ChatRecipientRouter.CapabilitySummary(
                 self.inventoryCount(),
                 self.equipment(),
