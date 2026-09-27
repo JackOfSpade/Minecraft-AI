@@ -85,7 +85,7 @@ operator 的四个默认值为 `true`，用于保持旧版本行为；它们是�
 
 Mining Assist（[MINING_ASSIST.md](MINING_ASSIST.md)）不新增任何 operator capability，也不放宽任何 profile。它的视线射线（`castViewRay`）只从 Bot 自己的眼睛发出第一命中射线，长度不超过感知半径，不调用 `CapabilityRuntime.decide`，因此在两种 profile 下完全一致。挖掘后的邻格窥视和实体证据复用现有的 `OreScan.observe` / `canObserveEntity` 观察证明，它们的结果遵循当前 profile 的 capability 决定，与其他挖矿任务相同（`operator` 下若启用了 `hiddenBlockScan`，这些观察也随之放宽）。它不使用结构查询、传送或强制拾取。
 
-P0 阶段默认模式是 `sense`（只记录影子日志，不改变任何 Bot 行为）。用 `AIBOT_MINING_ASSIST=off` 或 `miningAssist.mode` 关闭它；GameTest、verify 与证据运行默认关闭。它与 profile 一样在启动时解析，更改后应重启服务端。
+默认模式仍是 `sense`（只记录影子日志，不改变任何 Bot 行为），要等 GameTest 与四 bot 成本闸门跑绿之后才会切到 `detour`，这是编排者的最后一步，不在本仓库这次改动里。用 `AIBOT_MINING_ASSIST=off` 或 `miningAssist.mode` 关闭它；GameTest、verify 与证据运行默认关闭（`assist_mine_lane` 之外的脚本一律固定 `off`）。它与 profile 一样在启动时解析，更改后应重启服务端。P1 的顺路绕路（`detour`/`all` 模式）同样不新增 capability、不放宽任何 profile——它只用既有的 `OreScan.observe`/`ObservableWorldQuery` 观察证明和已有的走位寻路，没有传送、没有强制拾取、没有隐藏扫描；两种 profile 下行为一致。
 
 ## 可观测性与审计
 

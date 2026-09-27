@@ -3,7 +3,10 @@ package io.github.zoyluo.aibot.mining.assist;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Pure admission and ranking policy of the opportunistic valuables detour (mining-assist design 4.2), plus the
@@ -62,6 +65,19 @@ public final class DetourPolicy {
     /** Chebyshev radius in which another {@code _ore} sighting proves the natural context of a raw block ({@link #naturalContext}). */
     public static final int NATURAL_CONTEXT_RADIUS = 4;
 
+    private static final String DEEPSLATE_PREFIX = "deepslate_";
+    private static final String NEVER_DETOUR_ID = "gilded_blackstone";
+    private static final String ORE_SUFFIX = "_ore";
+    private static final String ANCIENT_DEBRIS_ID = "ancient_debris";
+
+    private static final Comparator<Ranked> RANK_ORDER = Comparator
+            .comparingDouble(Ranked::score).reversed()
+            .thenComparing(Comparator.comparingInt(Ranked::value).reversed())
+            .thenComparingLong(Ranked::distanceSq)
+            .thenComparingInt((Ranked r) -> r.sighting().pos().getY())
+            .thenComparingInt((Ranked r) -> r.sighting().pos().getZ())
+            .thenComparingInt((Ranked r) -> r.sighting().pos().getX());
+
     /** Whether a target is locked, and if so whether it is within {@value #TARGET_NEAR_BLOCKS} blocks of the bot. */
     public enum TargetLock {
         NONE,
@@ -98,32 +114,50 @@ public final class DetourPolicy {
 
     /** {@code max(|dx|,|dz|) + 0.5 * min(|dx|,|dz|)}. */
     public static double horizontalCost(int dx, int dz) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.horizontalCost");
+        int ax = Math.abs(dx);
+        int az = Math.abs(dz);
+        return Math.max(ax, az) + 0.5D * Math.min(ax, az);
     }
 
     /** {@code 1.6 * dy} when {@code dy > 0}, else {@code 1.2 * |dy|}. */
     public static double verticalCost(int dy) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.verticalCost");
+        return dy > 0 ? 1.6D * dy : 1.2D * Math.abs(dy);
     }
 
     /** {@code horizontalCost(dx, dz) + verticalCost(dy)}. */
     public static double cost(int dx, int dy, int dz) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.cost");
+        return horizontalCost(dx, dz) + verticalCost(dy);
     }
 
     /** {@code clamp(4 + 0.16 * value, 6, 20)}. */
     public static double maxCost(int value) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.maxCost");
+        double raw = 4.0D + 0.16D * value;
+        return Math.max(6.0D, Math.min(20.0D, raw));
     }
 
     /** {@code value * (1 + 0.15 * min(clusterSize - 1, 6)) / (6 + cost)}. A clusterSize below 1 counts as 1. */
     public static double score(int value, int clusterSize, double cost) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.score");
+        int size = Math.max(1, clusterSize);
+        double multiplier = 1.0D + CLUSTER_BONUS * Math.min(size - 1, CLUSTER_BONUS_STEPS);
+        return value * multiplier / (6.0D + cost);
     }
 
     /** The positions of {@code all} that hold the same {@code blockId} as {@code candidate} within Chebyshev 3 (3D), candidate included and first. */
     public static List<BlockPos> cluster(SightingLedger.Sighting candidate, List<SightingLedger.Sighting> all) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.cluster");
+        List<BlockPos> result = new ArrayList<>();
+        result.add(candidate.pos());
+        for (SightingLedger.Sighting s : all) {
+            if (s.pos().equals(candidate.pos())) {
+                continue;
+            }
+            if (!s.blockId().equals(candidate.blockId())) {
+                continue;
+            }
+            if (chebyshev3D(candidate.pos(), s.pos()) <= CLUSTER_RADIUS) {
+                result.add(s.pos());
+            }
+        }
+        return result;
     }
 
     /**
@@ -136,7 +170,38 @@ public final class DetourPolicy {
      */
     public static Admission admit(int value, int clusterSize, BlockPos ore, BlockPos feet, Vec3d eye,
                                   BlockPos anchorFace, TargetLock lock, MiningAssistConfig.Detour cfg) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.admit");
+        if (value < cfg.minValue()) {
+            return Admission.VALUE;
+        }
+        if (lock == TargetLock.NEAR) {
+            return Admission.TARGET_NEAR;
+        }
+        double eyeDistance = eye.distanceTo(new Vec3d(ore.getX() + 0.5D, ore.getY() + 0.5D, ore.getZ() + 0.5D));
+        if (eyeDistance > MAX_EYE_DISTANCE) {
+            return Admission.RANGE;
+        }
+        int chebyshevHorizontal = Math.max(Math.abs(ore.getX() - anchorFace.getX()), Math.abs(ore.getZ() - anchorFace.getZ()));
+        if (chebyshevHorizontal > cfg.maxRadius()) {
+            return Admission.RANGE;
+        }
+        if (ore.getY() > anchorFace.getY() + cfg.maxUp() || ore.getY() < anchorFace.getY() - cfg.maxDown()) {
+            return Admission.RANGE;
+        }
+        int dx = ore.getX() - feet.getX();
+        int dy = ore.getY() - feet.getY();
+        int dz = ore.getZ() - feet.getZ();
+        double c = cost(dx, dy, dz);
+        if (c > maxCost(value)) {
+            return Admission.COST;
+        }
+        double s = score(value, clusterSize, c);
+        if (s < cfg.minScore()) {
+            return Admission.SCORE;
+        }
+        if (lock == TargetLock.LOCKED && s < LOCKED_TARGET_SCORE_FACTOR * cfg.minScore()) {
+            return Admission.LOCKED_SCORE;
+        }
+        return Admission.ADMIT;
     }
 
     /**
@@ -149,7 +214,31 @@ public final class DetourPolicy {
      */
     public static List<Ranked> rank(List<SightingLedger.Sighting> sightings, BlockPos feet, Vec3d eye,
                                     BlockPos anchorFace, TargetLock lock, MiningAssistConfig.Detour cfg) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.rank");
+        List<Ranked> out = new ArrayList<>();
+        for (SightingLedger.Sighting s : sightings) {
+            if (neverDetour(s.blockId())) {
+                continue;
+            }
+            if (!naturalContext(s, sightings)) {
+                continue;
+            }
+            List<BlockPos> clusterCells = cluster(s, sightings);
+            int clusterSize = clusterCells.size();
+            int value = ValueTable.valueOf(s.blockId());
+            Admission admission = admit(value, clusterSize, s.pos(), feet, eye, anchorFace, lock, cfg);
+            if (!admission.admitted()) {
+                continue;
+            }
+            int dx = s.pos().getX() - feet.getX();
+            int dy = s.pos().getY() - feet.getY();
+            int dz = s.pos().getZ() - feet.getZ();
+            double c = cost(dx, dy, dz);
+            double sc = score(value, clusterSize, c);
+            long distSq = distanceSq(feet, s.pos());
+            out.add(new Ranked(s, value, clusterSize, clusterCells, c, sc, distSq));
+        }
+        out.sort(RANK_ORDER);
+        return out;
     }
 
     /**
@@ -174,7 +263,7 @@ public final class DetourPolicy {
      * to place), whatever the surroundings. Every other id is decided by {@link #naturalContext}.
      */
     public static boolean neverDetour(String ledgerId) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.neverDetour");
+        return NEVER_DETOUR_ID.equals(stripNamespace(ledgerId));
     }
 
     /**
@@ -186,7 +275,23 @@ public final class DetourPolicy {
      * ledger id is read after stripping a {@code ns:} prefix.
      */
     public static boolean naturalContext(SightingLedger.Sighting candidate, List<SightingLedger.Sighting> all) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.naturalContext");
+        String id = stripNamespace(candidate.blockId());
+        if (NEVER_DETOUR_ID.equals(id)) {
+            return false;
+        }
+        if (id.endsWith(ORE_SUFFIX) || ANCIENT_DEBRIS_ID.equals(id)) {
+            return true;
+        }
+        for (SightingLedger.Sighting s : all) {
+            if (s.pos().equals(candidate.pos())) {
+                continue;
+            }
+            String otherId = stripNamespace(s.blockId());
+            if (otherId.endsWith(ORE_SUFFIX) && chebyshev3D(candidate.pos(), s.pos()) <= NATURAL_CONTEXT_RADIUS) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -194,7 +299,9 @@ public final class DetourPolicy {
      * leaseTicks + LEASE_PER_BREAK_TICKS * max(0, breaks))} (300, +60 per break, cap 600 by default).
      */
     public static int leaseTicks(MiningAssistConfig.Detour cfg, int breaks) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.leaseTicks");
+        int b = Math.max(0, breaks);
+        long raw = (long) cfg.leaseTicks() + (long) MiningAssistConfig.Detour.LEASE_PER_BREAK_TICKS * b;
+        return (int) Math.min(MiningAssistConfig.Detour.LEASE_CAP_TICKS, raw);
     }
 
     /**
@@ -204,7 +311,12 @@ public final class DetourPolicy {
      */
     public static boolean standWithinLimits(BlockPos stand, BlockPos anchorFace, int minStandY,
                                             MiningAssistConfig.Detour cfg) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.standWithinLimits");
+        int floor = Math.max(minStandY, anchorFace.getY() - STAND_BELOW_ANCHOR);
+        if (stand.getY() < floor) {
+            return false;
+        }
+        int chebyshevHorizontal = Math.max(Math.abs(stand.getX() - anchorFace.getX()), Math.abs(stand.getZ() - anchorFace.getZ()));
+        return chebyshevHorizontal <= cfg.maxRadius();
     }
 
     /**
@@ -212,17 +324,22 @@ public final class DetourPolicy {
      * |dx| and |dz| at most 1). The detour never breaks and never stands on it (design 4.5, 4.6 step 4).
      */
     public static boolean inAnchorFloorPatch(BlockPos cell, BlockPos anchorFace) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.inAnchorFloorPatch");
+        if (cell.getY() != anchorFace.getY() - 1) {
+            return false;
+        }
+        int dx = Math.abs(cell.getX() - anchorFace.getX());
+        int dz = Math.abs(cell.getZ() - anchorFace.getZ());
+        return dx <= 1 && dz <= 1;
     }
 
     /** Design 4.3: an observed path length from {@code ObservedReach} is acceptable when it is at most {@code 2 * detour.maxRadius}. */
     public static boolean pathLengthOk(int observedLength, MiningAssistConfig.Detour cfg) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.pathLengthOk");
+        return observedLength <= PATH_LENGTH_RADIUS_FACTOR * cfg.maxRadius();
     }
 
     /** Design 4.13: whether a value earns the rare-find chat line ({@code value >= detour.announceMinValue}). */
     public static boolean announces(int value, MiningAssistConfig.Detour cfg) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.announces");
+        return value >= cfg.announceMinValue();
     }
 
     /**
@@ -231,6 +348,66 @@ public final class DetourPolicy {
      * case. A null or blank id gives "Spotted a valuable nearby, grabbing it." Never longer than 80 characters.
      */
     public static String announceText(String ledgerId) {
-        throw new UnsupportedOperationException("P1 stub: DetourPolicy.announceText");
+        String name = blockDisplayName(ledgerId);
+        if (name == null) {
+            return "Spotted a valuable nearby, grabbing it.";
+        }
+        String suffix = " nearby, grabbing it.";
+        String prefix = "Spotted ";
+        String line = prefix + name + suffix;
+        if (line.length() <= 80) {
+            return line;
+        }
+        int maxNameLen = Math.max(0, 80 - prefix.length() - suffix.length());
+        String truncated = name.length() > maxNameLen ? name.substring(0, maxNameLen).trim() : name;
+        return prefix + truncated + suffix;
+    }
+
+    private static String blockDisplayName(String ledgerId) {
+        if (ledgerId == null) {
+            return null;
+        }
+        String p = ledgerId.trim();
+        if (p.isEmpty()) {
+            return null;
+        }
+        p = p.toLowerCase(Locale.ROOT);
+        int colon = p.indexOf(':');
+        if (colon >= 0) {
+            p = p.substring(colon + 1);
+        }
+        if (p.startsWith(DEEPSLATE_PREFIX)) {
+            p = p.substring(DEEPSLATE_PREFIX.length());
+        }
+        if (p.isEmpty()) {
+            return null;
+        }
+        return p.replace('_', ' ');
+    }
+
+    private static String stripNamespace(String ledgerId) {
+        if (ledgerId == null) {
+            return "";
+        }
+        String p = ledgerId.trim().toLowerCase(Locale.ROOT);
+        int colon = p.indexOf(':');
+        if (colon >= 0) {
+            p = p.substring(colon + 1);
+        }
+        return p;
+    }
+
+    private static int chebyshev3D(BlockPos a, BlockPos b) {
+        int dx = Math.abs(a.getX() - b.getX());
+        int dy = Math.abs(a.getY() - b.getY());
+        int dz = Math.abs(a.getZ() - b.getZ());
+        return Math.max(dx, Math.max(dy, dz));
+    }
+
+    private static long distanceSq(BlockPos a, BlockPos b) {
+        long dx = a.getX() - b.getX();
+        long dy = a.getY() - b.getY();
+        long dz = a.getZ() - b.getZ();
+        return dx * dx + dy * dy + dz * dz;
     }
 }

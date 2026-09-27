@@ -520,6 +520,16 @@ class AssistObservationSourceContractTest {
         assertEquals(2, count(runtime, "MiningEvidenceAudit.hasSession(id)"));
     }
 
+    // ---- P1 (INTEGRATOR-1): the two new guarded files must stay under this scan ----------------------
+
+    @Test
+    void theP1DetourFilesAreInTheGuardedSetAndExistOnDisk() {
+        for (String relative : List.of("task/OreDigDetourEngine.java", "task/DetourSafetyGate.java")) {
+            assertTrue(GUARDED_FILES.contains(relative), relative + " must be a guarded file");
+            assertTrue(Files.exists(MAIN.resolve(relative)), relative + " must exist");
+        }
+    }
+
     @Test
     void theGateReturnsFirstWhileTheSwitchIsOffInEveryEntryPoint() throws IOException {
         String runtime = code(ASSIST.resolve("MiningAssistRuntime.java"));

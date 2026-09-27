@@ -251,4 +251,64 @@ class MiningAssistStateTest {
         assertFalse(state.breakthroughActive());
         assertEquals("minecraft:overworld", state.dimensionKey());
     }
+
+    // ---- P1 (F.3, M20): resetObservations also clears the detour's own exclusions, POI score and biome tick ----
+
+    @Test
+    void resetObservationsClearsExclusionsAndTheBiomeAndPoiScoreFacts() {
+        MiningAssistState state = new MiningAssistState(BOT);
+        state.exclusions().exclude(new BlockPos(1, 2, 3), 0, 600);
+        state.noteBiomeRead(10);
+        state.notePoiScore(10, 0.9D);
+        state.setLastPoiBand(PoiScorer.Band.MANDATORY);
+        assertEquals(1, state.exclusions().size());
+
+        state.resetObservations();
+
+        assertEquals(0, state.exclusions().size(), "a dimension change must not carry an exclusion into the new world");
+        assertFalse(state.exclusions().isExcluded(new BlockPos(1, 2, 3), 0));
+        assertEquals(MiningAssistState.NEVER, state.biomeTick());
+        assertEquals(MiningAssistState.NEVER, state.poiScoreTick());
+        assertEquals(0.0D, state.poiStructureScore());
+        assertEquals(PoiScorer.Band.NONE, state.lastPoiBand());
+    }
+
+    // ---- P1 (F.2, design 2.3/2.4): the published detour tuple -------------------------------------------------
+
+    @Test
+    void publishDetourStoresTheTupleAndClearDetourDropsItButKeepsHurtTimeSeen() {
+        MiningAssistState state = new MiningAssistState(BOT);
+        assertNull(state.detourOwner());
+        assertEquals(DetourPhase.IDLE, state.detourPhase());
+        assertEquals(MiningAssistState.NEVER, state.detourPublishedTick());
+        assertNull(state.detourControl());
+        assertEquals(0, state.hurtTimeSeen(), "0 before the coordinator has ever run");
+
+        Object owner = new Object();
+        DetourControl control = reason -> { };
+        state.publishDetour(owner, DetourPhase.APPROACH, 500, control);
+        assertSame(owner, state.detourOwner());
+        assertEquals(DetourPhase.APPROACH, state.detourPhase());
+        assertEquals(500, state.detourPublishedTick());
+        assertSame(control, state.detourControl());
+
+        state.noteHurtTime(7);
+        state.clearDetour();
+        assertNull(state.detourOwner());
+        assertEquals(DetourPhase.IDLE, state.detourPhase());
+        assertEquals(MiningAssistState.NEVER, state.detourPublishedTick());
+        assertNull(state.detourControl());
+        assertEquals(7, state.hurtTimeSeen(), "clearDetour must not reset the coordinator's hurt-edge memory");
+    }
+
+    // ---- P1 (M6/M20 review): staleOrNever, the shared NEVER-safe predicate --------------------------------
+
+    @Test
+    void staleOrNeverAtNow1000() {
+        assertTrue(MiningAssistState.staleOrNever(1000, MiningAssistState.NEVER, 20), "never computed is stale");
+        assertFalse(MiningAssistState.staleOrNever(1000, 980, 20), "age 20 is still fresh");
+        assertTrue(MiningAssistState.staleOrNever(1000, 979, 20), "age 21 is stale");
+        assertFalse(MiningAssistState.staleOrNever(1000, 1000, 20), "age 0 is fresh");
+        assertTrue(MiningAssistState.staleOrNever(900, 1000, 20), "a tick that moved backwards is stale");
+    }
 }

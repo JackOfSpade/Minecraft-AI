@@ -54,7 +54,21 @@ public final class DetourLiveness {
      */
     public static Verdict check(boolean ownerIsActiveTask, boolean running, DetourPhase phase,
                                 int publishedTick, int nowTick) {
-        throw new UnsupportedOperationException("P1 stub: DetourLiveness.check");
+        if (!ownerIsActiveTask) {
+            return Verdict.OWNER_CHANGED;
+        }
+        if (!running) {
+            return Verdict.NOT_RUNNING;
+        }
+        if (phase == null || phase == DetourPhase.IDLE) {
+            return Verdict.PHASE_IDLE;
+        }
+        if (publishedTick == MiningAssistState.NEVER
+                || nowTick < publishedTick
+                || (long) nowTick - (long) publishedTick > MAX_PUBLISH_AGE_TICKS) {
+            return Verdict.STALE;
+        }
+        return Verdict.LIVE;
     }
 
     /**
@@ -68,6 +82,15 @@ public final class DetourLiveness {
      */
     public static String netReason(DetourPhase phase, boolean tpsDegraded, boolean headroomAbort,
                                    int hurtTime, int hurtTimeSeen) {
-        throw new UnsupportedOperationException("P1 stub: DetourLiveness.netReason");
+        if (phase == null || !phase.netAbortable()) {
+            return null;
+        }
+        if (tpsDegraded || headroomAbort) {
+            return NET_DEGRADED_TPS;
+        }
+        if (hurtTime > hurtTimeSeen) {
+            return NET_HURT;
+        }
+        return null;
     }
 }

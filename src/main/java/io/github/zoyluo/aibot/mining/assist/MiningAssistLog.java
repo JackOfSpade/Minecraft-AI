@@ -34,6 +34,44 @@ public final class MiningAssistLog {
         return MiningAssistRuntime.config().sense().shadowLog();
     }
 
+    // ---- P1 (H.1): the six detour window counters, wired from the engine's own log events -----------------
+
+    /**
+     * Classifies one of the engine's own detour log events (design 4.13, {@code docs/LOGGING.md}) into the
+     * matching window counter of {@link SenseCounters} and bumps it. Pure bookkeeping, not logging: this never
+     * writes a line itself (the event was already logged by the caller through {@code DetourHost.log}/
+     * {@code warn}) and never touches {@code sense.shadowLog}, because the cost summary reports these counters
+     * unconditionally, the same as {@code peekedBreaks} or {@code sightingsAdded}.
+     *
+     * <p>The six events line up one to one with the six counters: {@code ore_dig_detour_start} to
+     * {@link SenseCounters#detourStarts}, {@code ore_dig_detour_break} to {@link SenseCounters#detourBreaks},
+     * {@code ore_dig_detour_seal} to {@link SenseCounters#detourSeals}, {@code ore_dig_detour_drop_lost} to
+     * {@link SenseCounters#detourDropsLost}, {@code ore_dig_detour_abort} to {@link SenseCounters#detourAborts}
+     * (every abort reason of design 4.12, {@code ore_dig_detour_abort} is logged once per abort so this is not
+     * double counted by {@code ore_dig_detour_end}), and {@code ore_dig_detour_return_rebased} to
+     * {@link SenseCounters#detourRebases}. Any other event (including {@code ore_dig_detour_skip},
+     * {@code _route}, {@code _end}, {@code _orphan}, {@code _cursor_drift}, {@code _lava_claimed} and
+     * {@code _resume_return}, which are not window counters) is a no-op: unknown events never throw.</p>
+     *
+     * @param state may be null (a caller with no state, for example a race with the coordinator's own state
+     *              drop, must not crash the detour over a diagnostics counter); a null state is a no-op
+     */
+    public static void noteDetourEvent(MiningAssistState state, String event) {
+        if (state == null || event == null) {
+            return;
+        }
+        SenseCounters counters = state.counters();
+        switch (event) {
+            case "ore_dig_detour_start" -> counters.detourStarts++;
+            case "ore_dig_detour_break" -> counters.detourBreaks++;
+            case "ore_dig_detour_seal" -> counters.detourSeals++;
+            case "ore_dig_detour_drop_lost" -> counters.detourDropsLost++;
+            case "ore_dig_detour_abort" -> counters.detourAborts++;
+            case "ore_dig_detour_return_rebased" -> counters.detourRebases++;
+            default -> { }
+        }
+    }
+
     /**
      * Writes the bot's cost summary if its reporting window is due, then starts a new window. Cheap when
      * not due (two integer compares). Category {@code PROFILE}, event {@code assist_sense_summary}.

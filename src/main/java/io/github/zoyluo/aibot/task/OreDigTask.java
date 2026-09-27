@@ -18,26 +18,54 @@ import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
 import io.github.zoyluo.aibot.mining.OreProspector;
 import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.mining.ToolTier;
+import io.github.zoyluo.aibot.mining.assist.BotEdits;
+import io.github.zoyluo.aibot.mining.assist.DetourControl;
+import io.github.zoyluo.aibot.mining.assist.DetourPhase;
+import io.github.zoyluo.aibot.mining.assist.DetourPolicy;
+import io.github.zoyluo.aibot.mining.assist.InventoryHeadroom;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistLog;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
+import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.aibot.mining.assist.ObservedReach;
+import io.github.zoyluo.aibot.mining.assist.OreClaims;
+import io.github.zoyluo.aibot.mining.assist.RouteBudget;
+import io.github.zoyluo.aibot.mining.assist.SafeGate;
+import io.github.zoyluo.aibot.mining.assist.SafeReason;
+import io.github.zoyluo.aibot.mining.assist.SightingLedger;
+import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.aibot.memory.EpisodeLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.mode.CapabilityRuntime;
 import io.github.zoyluo.aibot.mode.FakePlayerMotion;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.FallingBlock;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -218,6 +246,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int resourceEpoch;
     private boolean inventoryServiceUsed;
     private LavaReroute lavaReroute;
+    private OreDigDetourEngine detour;
+    private boolean detourInterruptedFlag;
     private BlockPos blockedBodyRecoveryTarget;
     private PendingBlindAdvance pendingBlindAdvance;
     private BlockPos rememberedHighWorkPoseRouteOwner;
@@ -402,6 +432,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * safety ownership and therefore decline this fast path.
      */
     boolean avoidObservedLava(AIPlayerEntity bot, BlockPos lavaPos) {
+        if (assistDetourActive()) {
+            return detourClaimLava(bot, lavaPos);
+        }
         if (lavaPos == null || bot.isInLava() || bot.isOnFire()
                 || bot.getHealth() <= 8.0F || restoringFace
                 || pendingPickupPos != null || activeTargetBreakPos != null
@@ -466,6 +499,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * fallback.
      */
     Optional<MiningBarricadeTask> prepareHostileBarricade(AIPlayerEntity bot, BlockPos hostilePos) {
+        if (assistDetourActive()) {
+            return Optional.empty();
+        }
         if (stripDirIndex < 0 || stripDirIndex >= STRIP_DIRS.length
                 || restoringFace || pendingPickupPos != null || activeTargetBreakPos != null) {
             BotLog.danger(bot, "ore_dig_hostile_barricade_rejected",
@@ -798,6 +834,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        detourInterrupted(bot);
         publishInterruptionCursor(bot, true);
         clearPendingBlindAdvance();
         miner.cancel(bot);
@@ -815,6 +852,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // destination as a new mining cursor.
         restoringFace = !bot.getBlockPos().equals(lastFace);
         restoreFaceStarted = elapsed;
+        detourResumed(restoringFace);
         if (restoringFace) {
             miner.cancel(bot);
             bot.getActionPack().stopAll();
@@ -823,11 +861,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        boolean detourWasLive = detourInterrupted(bot);
         publishInterruptionCursor(bot, false);
         clearPendingBlindAdvance();
         markMineFace(bot);
         miner.cancel(bot);
         bot.getActionPack().stopAll();
+        reapplyAnchor(bot, detourWasLive);
     }
 
     /**
@@ -902,6 +942,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         if (restoringFace) {
+            if (detourResumeReturn(bot)) {
+                return;
+            }
             returnToSavedFace(bot);
             return;
         }
@@ -1045,6 +1088,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
             stripMine(bot, world);
+            return;
+        }
+
+        // Mining assist R1 (design 4.14): a live or startable opportunistic detour owns this tick.
+        if (tickOpportunistic(bot, world)) {
             return;
         }
 
@@ -1590,6 +1638,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private boolean ownsActiveBlindBranchCollision(AIPlayerEntity bot,
                                                     BlockPos feet,
                                                     BlockPos retreat) {
+        if (assistDetourActive()) {
+            return false;
+        }
         if (restoringFace || targetCount <= 0 || collected >= targetCount
                 || targetOre != null || pendingPickupPos != null
                 || activeTargetBreakPos != null || !veinQueue.isEmpty()
@@ -1985,7 +2036,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BlockPos origin = cursorOrigin == null
                 ? (lastFace == null ? BlockPos.ORIGIN : lastFace)
                 : cursorOrigin;
-        BlockPos face = lastFace == null ? origin : lastFace;
+        BlockPos face = detourPublishedFace(lastFace == null ? origin : lastFace);
         boolean committed = state == TaskState.COMPLETED;
         BlockPos durableControlledRear = committed
                 ? null : checkpointControlledStripRear(face);
@@ -2046,6 +2097,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /** Keeps only the structurally exact branch-owned rear identity; no safety is cached. */
     private BlockPos checkpointControlledStripRear(BlockPos face) {
         if (controlledStripRear == null || face == null
+                || assistDetourActive()
                 || stripDirIndex < 0 || stripDirIndex >= STRIP_DIRS.length
                 || stripStepsLeft <= 0
                 || targetOre != null || pendingPickupPos != null
@@ -4962,6 +5014,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (oreExcluded(bot, pos) || !withinReach(bot, pos)) {
                 continue;
             }
+            if (OreClaims.heldByOther(bot, pos)) {
+                continue;
+            }
             if (!ToolTier.canHarvestWithInventory(bot, world.getBlockState(pos))) {
                 continue; // 挖不动的不顺(挖钻石路过绿宝石但只有石镐:别空手刨)
             }
@@ -4972,6 +5027,962 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return pos;
         }
         return null;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Mining assist R1 (design 4.14): the opportunistic valuables detour. Everything below is additive (P1
+    // contract section E). The engine and its host never dig, never teleport and never bypass the exact-once
+    // re-proof discipline the rest of this file already follows (I1-I3); see task/DetourHost.java for the
+    // honesty rules the inner class below must keep.
+    // ---------------------------------------------------------------------------------------------------------
+
+    private OreDigTask.DetourHostImpl detourHost;        // declared here, created lazily
+    private MiningAssistState detourState;               // the state the running detour trusts (M39); null when idle
+    private BlockPos detourInterruptedFace;
+    private int detourResumeStart = -1;
+    private int detourResumeAttempts;
+    private int detourResumeLastAttempt = -1_000_000;
+
+    /** Whether the detour engine currently owns any part of this task's behaviour. */
+    private boolean assistDetourActive() {
+        return detour != null && detour.isActive();
+    }
+
+    /**
+     * Ticks the opportunistic detour, if any, before the vein/bonus/target/scan ladder (hook 9). Returns true
+     * when the detour owned this tick (OreDig's caller must return at once). The two static reads below and the
+     * exception fence run OUTSIDE the assist-off fast path, so an idle bot with the mode off (or SENSE) pays one
+     * volatile read and a return (M30, design 8.2 hook 9/13).
+     */
+    private boolean tickOpportunistic(AIPlayerEntity bot, ServerWorld world) {
+        boolean live = detour != null && detour.isActive();
+        if (!live && (!MiningAssistRuntime.senseConfigured() || !MiningAssistRuntime.config().detourActive())) {
+            return false;                                     // mode off / SENSE: two static reads, no behaviour change
+        }
+        try {
+            if (live) {
+                MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                if (fresh != detourState) {
+                    // The coordinator's exception fence dropped (and possibly rebuilt) the bot's state: hazards,
+                    // exclusions and POI facts of the running detour are gone or belong to a different instance.
+                    // A detour must never keep walking on knowledge it no longer has (I15). Ask for an abort; the
+                    // engine keeps binding the OLD (now orphaned) detourState object for the rest of this detour,
+                    // so no host method sees null and the RETURN that follows still releases claims and settles
+                    // the ledger normally. requestAbort is a no-op once RETURN has already begun (idempotent).
+                    detour.requestAbort("safety_state_lost");
+                }
+            } else {
+                detourState = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                if (detourState == null) {
+                    return false;                                 // the sensor never ran: nothing nominated
+                }
+                if (detour == null) {
+                    detour = new OreDigDetourEngine();
+                }
+                if (detourHost == null) {
+                    detourHost = new DetourHostImpl();
+                }
+            }
+            detourHost.bind(bot, world, detourState);
+            OreDigDetourEngine.Result result = detour.tick(detourHost);
+            switch (result.kind()) {
+                case IDLE -> {
+                    return false;
+                }
+                case FINISHED -> {
+                    MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                    if (fresh != null) {
+                        fresh.clearDetour();
+                    }
+                    detourState = null;
+                    return true;
+                }
+                default -> {
+                    MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                    if (fresh != null) {
+                        fresh.publishDetour(this, detour.phase(), detourHost.serverTick(), detourHost);
+                    }
+                    return true;
+                }
+            }
+        } catch (RuntimeException e) {
+            // Best-effort unwind: never let a defect anywhere in the seven writers' code (or a stub nobody
+            // finished) reach TaskManager.tickAll (I8, M41). Order matters: stop movement/mining before
+            // anything that might itself throw.
+            try {
+                bot.getActionPack().stopAll();
+                miner.cancel(bot);
+            } catch (RuntimeException ignored) {
+                // already unwinding; the action pack or miner is in an unknown state either way
+            }
+            if (detour != null) {
+                try {
+                    detour.interrupt(detourHost, "exception");
+                } catch (RuntimeException ignored) {
+                }
+            }
+            MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+            if (fresh != null) {
+                if (fresh.detourControl() != null) {
+                    fresh.detourControl().abandoned(MiningAssistRuntime.serverTick(bot));
+                }
+                fresh.clearDetour();
+            }
+            detourState = null;
+            BotLog.error(bot, "ore_dig_detour_engine_exception", e,
+                    "phase", detour == null ? "?" : detour.phase());
+            return false;
+        }
+    }
+
+    /** Hook 11: the checkpoint face is the live anchor face while a detour is active, else the given face. */
+    private BlockPos detourPublishedFace(BlockPos face) {
+        return detour != null && detour.isActive() ? detour.anchorFace() : face;
+    }
+
+    /**
+     * Hook 3: a lava sighting claimed by a live detour (design 4.14, M40). The original immediate-danger guard
+     * of {@code avoidObservedLava} is not dropped here: lava in or touching the bot's own cell still falls
+     * through to the generic Evade/pause path. In RETURN a claim would do nothing useful (the detour is already
+     * walking home), so it is left to the generic path, whose interrupt/resume brings the bot home once safe.
+     */
+    private boolean detourClaimLava(AIPlayerEntity bot, BlockPos lavaPos) {
+        if (lavaPos == null || bot.isInLava() || bot.isOnFire()
+                || bot.getHealth() <= 8.0F || hasImmediateLava(bot)) {
+            return false;
+        }
+        if (detour.phase() == DetourPhase.RETURN) {
+            return false;
+        }
+        bot.getActionPack().stopAll();
+        miner.cancel(bot);
+        detour.requestAbort(SafeReason.LAVA_THREAT_BOX.abortReason());
+        BotLog.danger(bot, "ore_dig_detour_lava_claimed",
+                "lava", lavaPos.toShortString(), "phase", detour.phase());
+        return true;
+    }
+
+    /**
+     * Hooks 5/6: interrupts a live detour without a return (design 4.10). Returns whether THIS call interrupted
+     * a live engine, so a stale flag from an earlier pause can never make a later, unrelated abort rewrite
+     * {@code lastFace} (M40).
+     */
+    private boolean detourInterrupted(AIPlayerEntity bot) {
+        if (detour == null || !detour.isActive()) {
+            return false;
+        }
+        if (detourHost == null) {
+            detourHost = new DetourHostImpl();
+        }
+        detourHost.bind(bot, bot.getEntityWorld(), detourState);
+        DetourHost.Anchor anchor = detour.interrupt(detourHost, "paused");
+        if (anchor == null) {
+            return false;
+        }
+        lastFace = anchor.face();
+        detourInterruptedFace = anchor.face();
+        detourInterruptedFlag = true;
+        detourResumeStart = -1;
+        detourResumeAttempts = 0;
+        MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        if (fresh != null) {
+            fresh.clearDetour();
+        }
+        detourState = null;
+        return true;
+    }
+
+    /**
+     * Hook 6 (last statement of {@code onAbort}): re-marks {@code mine_face} at the anchor when THIS abort
+     * interrupted a live detour, so the persisted "resume mining" place is the anchor, never the excursion cell
+     * {@code markMineFace} just recorded at the live (aborted) feet (M40).
+     */
+    private void reapplyAnchor(AIPlayerEntity bot, boolean detourWasLive) {
+        if (!detourWasLive) {
+            return;
+        }
+        if (detourInterruptedFace != null) {
+            lastFace = detourInterruptedFace;
+            markMineFace(bot);
+        }
+    }
+
+    /**
+     * Hook 7 (replaces the old one-line guard): rebases the target monitors once per interruption and clears
+     * the sticky flag as soon as there is nothing left to walk back to (a pause with zero transit), instead of
+     * leaving it set for the rest of the task (M40).
+     */
+    private void detourResumed(boolean restoringFace) {
+        if (!detourInterruptedFlag) {
+            return;
+        }
+        detourRebaseTargetMonitors();
+        if (!restoringFace) {
+            detourInterruptedFlag = false;
+            detourInterruptedFace = null;
+        }
+    }
+
+    /**
+     * Named with the {@code detour} prefix (not the design's bare {@code rebaseTargetMonitors}) so it never
+     * shares a simple name with the interface method {@code DetourHostImpl.rebaseTargetMonitors()} that
+     * delegates to it (an unqualified same-name delegation would call itself, JLS 15.12.1).
+     */
+    private void detourRebaseTargetMonitors() {
+        targetApproachTick = elapsed;
+        if (targetOre != null) {
+            lastTargetDist = Double.MAX_VALUE;
+        }
+    }
+
+    /**
+     * Hook 8: the walk-only resume of an interrupted detour, tried before the existing {@code returnToSavedFace}
+     * machinery. While it returns true, {@code returnToSavedFace} is not called, so {@code RESTORE_FACE_LIMIT}
+     * still bounds everything.
+     */
+    private boolean detourResumeReturn(AIPlayerEntity bot) {
+        if (!detourInterruptedFlag || lastFace == null) {
+            return false;
+        }
+        if (detourResumeStart < 0) {
+            detourResumeStart = elapsed;
+        }
+        boolean pathIdle = bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle();
+        if (bot.getBlockPos().equals(lastFace)
+                || elapsed - detourResumeStart > 300
+                || (detourResumeAttempts >= 3 && pathIdle)) {          // count a finished attempt, not a started one
+            detourInterruptedFlag = false;
+            detourInterruptedFace = null;
+            return false;                                             // returnToSavedFace takes over (arrival bookkeeping too)
+        }
+        if (pathIdle && elapsed - detourResumeLastAttempt >= 20) {
+            int minY = Math.max(MIN_Y + 1, Math.min(bot.getBlockPos().getY(), lastFace.getY()) - 1);
+            ActionResult route = bot.getActionPack().startSurfacePathTo(lastFace, minY);
+            detourResumeLastAttempt = elapsed;
+            if (!"pathfinding_throttled".equals(route.reason())) {
+                detourResumeAttempts++;
+            }
+            BotLog.task(bot, "ore_dig_detour_resume_return",
+                    "to", lastFace.toShortString(),
+                    "result", route.isFailed() ? route.reason() : "ok",
+                    "attempts", detourResumeAttempts);
+        }
+        return true;
+    }
+
+    /**
+     * The return-failure rebase (design 4.10): the current feet cell becomes the face and the strip progress
+     * cursor; keeps {@code cursorOrigin} and {@code completedBatches}. Only the host calls this (it passes
+     * {@code bot.getBlockPos()}).
+     */
+    private void detourRebaseCursor(BlockPos here) {
+        lastFace = here;
+        stripProgressPos = here;
+        stripDirIndex = -1;
+        stripLegIndex = 0;
+        stripStepsLeft = 0;
+        stripLegLength = STRIP_SEGMENT;
+        boundaryRerouteOrigin = null;
+        clearStripMovementOwnership();
+    }
+
+    /**
+     * {@code Registries.BLOCK.get} of {@code id} ({@code minecraft} namespace for a bare path). An id missing
+     * from the registry is reported as absent (never resolved to {@code Blocks.AIR}, for which a predicate
+     * testing "is this block" would wrongly answer PRESENT over real air): every caller treats a null return as
+     * "nothing to observe" (design 9, review round finding, see {@code DetourHost#observeBlockIs}).
+     */
+    private static Block blockOf(String id) {
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+        String trimmed = id.trim();
+        int colon = trimmed.indexOf(':');
+        Identifier identifier = colon >= 0
+                ? Identifier.of(trimmed.substring(0, colon), trimmed.substring(colon + 1))
+                : Identifier.of("minecraft", trimmed);
+        return Registries.BLOCK.getOptionalValue(identifier).orElse(null);
+    }
+
+    /**
+     * Production {@link DetourHost} and {@link DetourControl}: the engine's and the coordinator's only window
+     * into this task and the world. Reaches OreDig's privates because it is a non-static member class; every
+     * delegation to an outer member of the same simple name is qualified (class comment of
+     * {@code task/DetourHost.java}). Every block read here goes through {@code OreScan}/{@code
+     * ObservableWorldQuery}/{@code Standability} exactly like the rest of this file (I1-I3): no teleport, no
+     * hidden scan, no forced pickup outside the existing capability-gated {@code HarvestCore} call.
+     */
+    private final class DetourHostImpl implements DetourHost, DetourControl {
+        private AIPlayerEntity bot;
+        private ServerWorld world;
+        private MiningAssistState state;
+        private String routeFailure = "";
+        private final Map<String, Boolean> targetIdCache = new HashMap<>();
+        /**
+         * The block state the last successful {@link #observeBlockIs} of that EXACT cell saw, per cell (not just
+         * the last one: {@link #toolVerdict} is asked for the selector's ranked candidate and separately for the
+         * engine's current member in the same tick, which are not always the same cell). Bounded: cleared
+         * wholesale past a small cap rather than tracked per detour, since a detour never touches more than a
+         * handful of cells.
+         */
+        private final Map<BlockPos, BlockState> observedStates = new HashMap<>();
+        /** The mission ledger key last resolved while an origin was present (design C.1 {@code ledger()}). */
+        private String lastLedgerKey;
+
+        void bind(AIPlayerEntity bot, ServerWorld world, MiningAssistState state) {
+            this.bot = bot;
+            this.world = world;
+            this.state = state;
+        }
+
+        // ---- DetourControl --------------------------------------------------------------------------------
+
+        @Override
+        public void abortNow(String reason) {
+            if (bot != null) {
+                bot.getActionPack().stopAll();
+                miner.cancel(bot);
+            }
+            if (detour != null) {
+                detour.requestAbort(reason);
+            }
+        }
+
+        @Override
+        public void abandoned(int serverTick) {
+            if (detour != null) {
+                detour.abandon(detourHost);
+            }
+            detourState = null;
+        }
+
+        // ---- time, identity, position, configuration -------------------------------------------------------
+
+        @Override
+        public int now() {
+            return elapsed;
+        }
+
+        @Override
+        public int serverTick() {
+            return MiningAssistRuntime.serverTick(bot);
+        }
+
+        @Override
+        public int staggerSeed() {
+            return Math.floorMod(bot.getUuid().hashCode(), 10);
+        }
+
+        @Override
+        public int taskMaxElapsedTicks() {
+            return maxElapsed;
+        }
+
+        @Override
+        public BlockPos feet() {
+            return bot.getBlockPos();
+        }
+
+        @Override
+        public Vec3d eyePos() {
+            return bot.getEyePos();
+        }
+
+        @Override
+        public int minStandY() {
+            return MIN_Y + 1;
+        }
+
+        @Override
+        public boolean feetStandable() {
+            BlockPos feetPos = bot.getBlockPos();
+            if (!ObservableWorldQuery.canObserveCell(bot, feetPos)
+                    || !ObservableWorldQuery.canObserveCell(bot, feetPos.up())
+                    || !ObservableWorldQuery.canObserveBlock(bot, feetPos.down())) {
+                return false;
+            }
+            Standability.clearCache();
+            return Standability.isStandable(world, feetPos);
+        }
+
+        @Override
+        public int lavaBandTopY() {
+            return DetourPolicy.lavaBandTopY(BotEdits.dimensionKey(world));
+        }
+
+        @Override
+        public MiningAssistConfig.Detour config() {
+            return MiningAssistRuntime.config().detour();
+        }
+
+        @Override
+        public boolean deterministic() {
+            return MiningAssistRuntime.deterministic(bot.getUuid());
+        }
+
+        // ---- owners -----------------------------------------------------------------------------------------
+
+        @Override
+        public boolean ownersIdle() {
+            return !restoringFace && miner.target() == null && pendingPickupPos == null
+                    && activeTargetBreakPos == null && bonusOre == null && veinQueue.isEmpty()
+                    && blockedBodyRecoveryTarget == null && !hasStagedBlindFootWork(bot)
+                    && lavaReroute == null && boundaryRerouteOrigin == null
+                    && pendingBlindAdvance == null
+                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle();
+        }
+
+        @Override
+        public DetourPolicy.TargetLock targetLock() {
+            if (targetOre == null) {
+                return DetourPolicy.TargetLock.NONE;
+            }
+            return bot.getBlockPos().isWithinDistance(targetOre, DetourPolicy.TARGET_NEAR_BLOCKS)
+                    ? DetourPolicy.TargetLock.NEAR : DetourPolicy.TargetLock.LOCKED;
+        }
+
+        @Override
+        public boolean isTargetOre(String blockId) {
+            Boolean cached = targetIdCache.get(blockId);
+            if (cached != null) {
+                return cached;
+            }
+            Block block = blockOf(blockId);
+            boolean result = block != null
+                    && (targetOres.contains(block)
+                            || !Collections.disjoint(HarvestCore.expectedDropsFor(block), targetDrops));
+            targetIdCache.put(blockId, result);
+            return result;
+        }
+
+        @Override
+        public boolean bonusOwns(BlockPos pos, String blockId) {
+            if (bonusMined >= BONUS_CAP || blockId == null || !blockId.endsWith("_ore")) {
+                return false;
+            }
+            BlockPos feetPos = bot.getBlockPos();
+            if (Math.abs(pos.getX() - feetPos.getX()) > 2 || Math.abs(pos.getZ() - feetPos.getZ()) > 2) {
+                return false;
+            }
+            if (pos.getY() < feetPos.getY() || pos.getY() > feetPos.getY() + 3) {
+                return false;
+            }
+            return withinReach(bot, pos);
+        }
+
+        // ---- nominations, exclusions, claims, ledgers --------------------------------------------------------
+
+        @Override
+        public List<SightingLedger.Sighting> sightings() {
+            return state == null ? List.of() : state.sightings().snapshotSortedByValueDesc();
+        }
+
+        @Override
+        public void forgetSighting(BlockPos pos) {
+            if (state != null) {
+                state.sightings().markGone(pos);
+            }
+        }
+
+        @Override
+        public MissionAssistLedger.Entry ledger() {
+            Optional<TaskOrigin> origin = TaskManager.INSTANCE.activeOrigin(bot);
+            if (origin.isPresent()) {
+                lastLedgerKey = MissionAssistLedger.keyFor(
+                        bot.getUuid(), origin.get().missionId(), origin.get().jobId());
+            } else if (lastLedgerKey == null) {
+                lastLedgerKey = MissionAssistLedger.keyFor(bot.getUuid(), null, null);
+            }
+            return MissionAssistLedger.get(lastLedgerKey, serverTick());
+        }
+
+        @Override
+        public boolean excluded(BlockPos pos) {
+            return (state != null && state.exclusions().isExcluded(pos, serverTick())) || oreExcluded(bot, pos);
+        }
+
+        @Override
+        public void exclude(BlockPos pos, int ttlServerTicks) {
+            if (state != null) {
+                state.exclusions().exclude(pos, serverTick(), ttlServerTicks);
+            }
+        }
+
+        @Override
+        public boolean shouldLogSkip(BlockPos pos) {
+            return state != null && state.exclusions().shouldLogSkip(pos, serverTick());
+        }
+
+        @Override
+        public boolean claimedByOther(BlockPos pos) {
+            return OreClaims.heldByOther(bot, pos);
+        }
+
+        @Override
+        public boolean tryClaim(BlockPos pos) {
+            return OreClaims.tryClaim(bot, pos);
+        }
+
+        @Override
+        public void renewClaims() {
+            OreClaims.renewAll(bot);
+        }
+
+        @Override
+        public void releaseClaims() {
+            OreClaims.releaseAll(bot.getUuid());
+        }
+
+        // ---- observation --------------------------------------------------------------------------------------
+
+        @Override
+        public Seen observeBlockIs(BlockPos pos, String blockId) {
+            Block block = blockOf(blockId);
+            if (block == null) {
+                return Seen.GONE;
+            }
+            BlockPos immutable = pos.toImmutable();
+            OreScan.Observation observation = OreScan.observe(bot, pos, blockState -> {
+                rememberObservedState(immutable, blockState);
+                return blockState.isOf(block);
+            });
+            return switch (observation) {
+                case OBSERVED_PRESENT -> Seen.PRESENT;
+                case OBSERVED_GONE -> Seen.GONE;
+                case UNKNOWN -> Seen.UNKNOWN;
+            };
+        }
+
+        private void rememberObservedState(BlockPos pos, BlockState blockState) {
+            if (observedStates.size() > 16) {
+                observedStates.clear();
+            }
+            observedStates.put(pos, blockState);
+        }
+
+        @Override
+        public FluidProbe probeFluidAround(BlockPos cell) {
+            BlockPos present = null;
+            boolean unknown = false;
+            for (Direction d : new Direction[]{
+                    Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
+                BlockPos n = cell.offset(d);
+                OreScan.Observation observation = OreScan.observeDangerFluid(bot, n);
+                if (observation == OreScan.Observation.OBSERVED_PRESENT) {
+                    if (present == null) {
+                        present = n.toImmutable();
+                    }
+                } else if (observation == OreScan.Observation.UNKNOWN) {
+                    unknown = true;
+                }
+            }
+            return new FluidProbe(present, unknown);
+        }
+
+        @Override
+        public ObservedReach.Result observedReach(BlockPos from, BlockPos to) {
+            return ObservedReach.search(state == null ? null : state.occupancyIfPresent(), from, to);
+        }
+
+        @Override
+        public List<BlockPos> veinAt(BlockPos seed, String blockId, int cap) {
+            Block block = blockOf(blockId);
+            if (block == null) {
+                return List.of();
+            }
+            return OreScan.veinFrom(bot, seed, OreScan.oreFamily(block), cap);
+        }
+
+        @Override
+        public List<BlockPos> neighbours26Same(BlockPos around, String blockId) {
+            Block block = blockOf(blockId);
+            if (block == null) {
+                return List.of();
+            }
+            List<BlockPos> result = new ArrayList<>();
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) {
+                            continue;
+                        }
+                        BlockPos n = around.add(dx, dy, dz);
+                        if (OreScan.observe(bot, n, blockState -> blockState.isOf(block))
+                                == OreScan.Observation.OBSERVED_PRESENT) {
+                            result.add(n.toImmutable());
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+
+        // ---- pose and geometry ---------------------------------------------------------------------------------
+
+        @Override
+        public Pose poseFor(BlockPos ore, Anchor anchor, Set<BlockPos> forbiddenStands) {
+            Standability.clearCache();
+            if (DetourPolicy.inAnchorFloorPatch(ore, anchor.face())) {
+                return null;
+            }
+            MiningAssistConfig.Detour cfg = config();
+            BlockPos feetPos = bot.getBlockPos();
+            List<BlockPos> candidates = new ArrayList<>();
+            if (hasRecoverableTargetBreakPose(bot, ore)
+                    && !OreDigTask.isCurrentSupport(bot, ore)
+                    && (!needsTargetDropSupport(bot, ore) || hasReliableObservedDropCatch(bot, world, ore.down()))) {
+                candidates.add(feetPos);
+            }
+            BlockPos approach = approachGoalFor(bot, world, ore);
+            if (approach != null) {
+                candidates.add(approach);
+            }
+            for (Direction d : new Direction[]{Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST}) {
+                BlockPos stand = ore.offset(d);
+                if (!ObservableWorldQuery.canObserveCell(bot, stand)
+                        || !ObservableWorldQuery.canObserveCell(bot, stand.up())
+                        || !ObservableWorldQuery.canObserveBlock(bot, stand.down())) {
+                    continue;
+                }
+                if (!Standability.isStandable(world, stand)) {
+                    continue;
+                }
+                if (OreScan.adjacentHazard(bot, stand) != OreScan.Observation.OBSERVED_GONE) {
+                    continue;
+                }
+                if (!hasReliableObservedDropCatch(bot, world, ore.down())) {
+                    continue;
+                }
+                candidates.add(stand.toImmutable());
+            }
+            for (BlockPos stand : candidates) {
+                if (forbiddenStands.contains(stand) || excluded(stand)) {
+                    continue;
+                }
+                if (!DetourPolicy.standWithinLimits(stand, anchor.face(), minStandY(), cfg)) {
+                    continue;
+                }
+                if (DetourPolicy.inAnchorFloorPatch(stand, anchor.face())) {
+                    continue;
+                }
+                if (state != null) {
+                    if (state.hazards().anyLavaWithin(stand, cfg.lavaClearRadius())) {
+                        continue;
+                    }
+                    if (state.hazards().anyTrapWithin(stand, 3) || state.hazards().anyTrapWithin(ore, 3)) {
+                        continue;
+                    }
+                }
+                return new Pose(stand, stand.equals(feetPos));
+            }
+            return null;
+        }
+
+        @Override
+        public boolean inBreakEnvelope(BlockPos ore) {
+            return hasRecoverableTargetBreakPose(bot, ore);
+        }
+
+        @Override
+        public boolean isCurrentSupport(BlockPos ore) {
+            return OreDigTask.isCurrentSupport(bot, ore);
+        }
+
+        @Override
+        public GeometryVerdict breakGeometry(BlockPos ore) {
+            BlockPos feetPos = bot.getBlockPos();
+            int dy = ore.getY() - feetPos.getY();
+            if (dy >= 1) {
+                BlockPos above = ore.up();
+                if (!ObservableWorldQuery.canObserveBlock(bot, above)) {
+                    return GeometryVerdict.ABOVE_UNOBSERVED;
+                }
+                if (world.getBlockState(above).getBlock() instanceof FallingBlock) {
+                    return GeometryVerdict.ABOVE_FALLING;
+                }
+            }
+            if (needsTargetDropSupport(bot, ore) && !hasReliableObservedDropCatch(bot, world, ore.down())) {
+                return GeometryVerdict.CATCH_MISSING;
+            }
+            return GeometryVerdict.OK;
+        }
+
+        // ---- resource gates -------------------------------------------------------------------------------------
+
+        @Override
+        public ToolVerdict toolVerdict(BlockPos ore, int plannedMembers) {
+            BlockState st = observedStates.get(ore);
+            if (st == null) {
+                if (!ObservableWorldQuery.canObserveCell(bot, ore) && !ObservableWorldQuery.canObserveBlock(bot, ore)) {
+                    return ToolVerdict.NO_TOOL;
+                }
+                st = world.getBlockState(ore);
+                rememberObservedState(ore.toImmutable(), st);
+            }
+            if (!ToolTier.canHarvestWithInventory(bot, st)) {
+                return ToolVerdict.NO_TOOL;
+            }
+            ToolSelector.Selection selection = ToolSelector.equipMiningChannelTool(bot, st);
+            if (selection.slot() < 0 || (st.isToolRequired() && selection.stack().isEmpty())) {
+                return ToolVerdict.NO_TOOL;
+            }
+            ItemStack stack = selection.stack();
+            int maxDamage = stack.getMaxDamage();
+            int remaining = maxDamage - stack.getDamage();
+            return InventoryHeadroom.durabilityOk(remaining, maxDamage, plannedMembers)
+                    ? ToolVerdict.OK : ToolVerdict.WEAR;
+        }
+
+        @Override
+        public boolean capacityOk(BlockPos ore, String blockId) {
+            int reserve = rareExpeditionBatch ? config().minFreeSlotsRareBatch() : config().minFreeSlots();
+            List<ItemStack> main = bot.getInventory().getMainStacks();
+            int empty = 0;
+            for (ItemStack stack : main) {
+                if (stack.isEmpty()) {
+                    empty++;
+                }
+            }
+            InventoryHeadroom.Estimate estimate = InventoryHeadroom.estimate(blockId);
+            if (!estimate.itemKnown()) {
+                return InventoryHeadroom.unknownDropOk(empty, reserve);
+            }
+            Block block = blockOf(blockId);
+            Set<Item> drops = block == null ? Set.of() : HarvestCore.expectedDropsFor(block);
+            Item dropItem = drops.isEmpty() ? null : drops.iterator().next();
+            int room = 0;
+            if (dropItem != null) {
+                for (ItemStack stack : main) {
+                    if (!stack.isEmpty() && stack.getItem() == dropItem) {
+                        room += stack.getMaxCount() - stack.getCount();
+                    }
+                }
+            }
+            return InventoryHeadroom.capacityOk(empty, room, estimate.maxItems(), reserve);
+        }
+
+        @Override
+        public boolean sealMaterialOk() {
+            var slot = MaterialPalette.pickSacrificialBlockSlot(bot, protectedStoneLikeReserve);
+            if (slot.isEmpty()) {
+                return false;
+            }
+            ItemStack stack = bot.getInventory().getMainStacks().get(slot.getAsInt());
+            Item item = stack.getItem();
+            boolean protectedStoneLike = item == Items.COBBLESTONE
+                    || item == Items.COBBLED_DEEPSLATE || item == Items.BLACKSTONE;
+            return protectedStoneLike
+                    ? stack.getCount() - protectedStoneLikeReserve >= 2
+                    : stack.getCount() >= 2;
+        }
+
+        // ---- movement -----------------------------------------------------------------------------------------
+
+        @Override
+        public boolean routeStartAllowed() {
+            return RouteBudget.shared().canStart(serverTick(), deterministic());
+        }
+
+        @Override
+        public RouteResult startRoute(BlockPos stand, int minY, BlockPos returnAnchorOrNull) {
+            return route(stand, minY, returnAnchorOrNull, false);
+        }
+
+        @Override
+        public RouteResult startReturnRoute(BlockPos face, int minY) {
+            return route(face, minY, null, true);
+        }
+
+        private RouteResult route(BlockPos stand, int minY, BlockPos anchorOrNull, boolean isReturn) {
+            int tick = serverTick();
+            if (!isReturn && !RouteBudget.shared().canStart(tick, deterministic())) {
+                return RouteResult.BUDGET;
+            }
+            long t0 = System.nanoTime();
+            ActionResult result = (isReturn || anchorOrNull == null)
+                    ? bot.getActionPack().startSurfacePathTo(stand, minY)
+                    : bot.getActionPack().startSurfacePathTo(stand, minY, anchorOrNull);
+            if (result.isFailed() && "pathfinding_throttled".equals(result.reason())) {
+                return RouteResult.THROTTLED;                 // no search ran, no ms spent: checked before any charge
+            }
+            RouteBudget.shared().noteStart(tick, System.nanoTime() - t0, deterministic());
+            if (result.isFailed()) {
+                routeFailure = result.reason();
+                return RouteResult.FAILED;
+            }
+            if (!stand.equals(bot.getActionPack().activePathGoal())) {
+                bot.getActionPack().stopAll();
+                routeFailure = "resolved_goal_mismatch";
+                return RouteResult.FAILED;
+            }
+            return RouteResult.OK;
+        }
+
+        @Override
+        public String routeFailureReason() {
+            return routeFailure;
+        }
+
+        @Override
+        public boolean pathIdle() {
+            return bot.getActionPack().isPathExecutorIdle();
+        }
+
+        @Override
+        public boolean walkIdle() {
+            return bot.getActionPack().isWalkToIdle();
+        }
+
+        @Override
+        public void stopAll() {
+            bot.getActionPack().stopAll();
+        }
+
+        @Override
+        public void cancelMining() {
+            miner.cancel(bot);
+        }
+
+        // ---- mining, sealing, drops -----------------------------------------------------------------------------
+
+        @Override
+        public MineStep mineStep(BlockPos pos) {
+            BlockMiner.Status status = beginMine(bot, pos);
+            return switch (status) {
+                case DONE -> MineStep.DONE;
+                case MINING -> MineStep.MINING;
+                case FAILED -> MineStep.failed(miner.failureReason());
+                case IDLE -> MineStep.failed("miner_idle");
+            };
+        }
+
+        @Override
+        public SealResult sealOneFluidNeighbour(BlockPos fluidCell) {
+            var slot = MaterialPalette.pickSacrificialBlockSlot(bot, protectedStoneLikeReserve);
+            if (slot.isEmpty()) {
+                return SealResult.NO_BLOCK;
+            }
+            InventoryAction.equipFromSlot(bot, slot.getAsInt());
+            ActionResult result = BuildAction.placeBlockAt(bot, fluidCell);
+            return result.isFailed() ? SealResult.FAILED : SealResult.SEALED;
+        }
+
+        @Override
+        public int inventoryTotal() {
+            return HarvestCore.totalInventoryCount(bot);
+        }
+
+        @Override
+        public void tryForcedPickup() {
+            HarvestCore.forcePickupNearbyAnyOf(bot, null, 3.0D, 3.0D);
+        }
+
+        @Override
+        public DropView observeDrop(BlockPos breakCell) {
+            Standability.clearCache();
+            Vec3d centre = breakCell.toCenterPos();
+            List<ItemEntity> nearby = bot.getEntityWorld().getEntitiesByClass(ItemEntity.class,
+                    bot.getBoundingBox().expand(8.0D),
+                    e -> !e.getStack().isEmpty() && ObservableWorldQuery.canObserveEntity(bot, e));
+            ItemEntity best = null;
+            double bestDistSq = Double.MAX_VALUE;
+            for (ItemEntity candidate : nearby) {
+                double distSq = candidate.getEntityPos().squaredDistanceTo(centre);
+                if (distSq > 3.5D * 3.5D) {
+                    continue;
+                }
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = candidate;
+                }
+            }
+            if (best == null) {
+                return DropView.NONE;
+            }
+            BlockPos stand = best.getBlockPos();
+            boolean legal = ObservableWorldQuery.canObserveCell(bot, stand)
+                    && ObservableWorldQuery.canObserveCell(bot, stand.up())
+                    && ObservableWorldQuery.canObserveBlock(bot, stand.down())
+                    && Standability.isStandable(world, stand)
+                    && OreScan.adjacentHazard(bot, stand) == OreScan.Observation.OBSERVED_GONE;
+            return new DropView(true, legal ? stand.toImmutable() : null);
+        }
+
+        // ---- safety and progress --------------------------------------------------------------------------------
+
+        @Override
+        public SafeReason safety(SafeGate.Stage stage, BlockPos pose, BlockPos ore) {
+            return DetourSafetyGate.evaluate(bot, stage, pose, ore);
+        }
+
+        @Override
+        public void noteProgress() {
+            OreDigTask.this.noteProgress();
+        }
+
+        // ---- anchor and cursor ----------------------------------------------------------------------------------
+
+        @Override
+        public Anchor captureAnchor() {
+            return new Anchor(bot.getBlockPos(), stripDirIndex, stripLegIndex, stripStepsLeft, stripLegLength);
+        }
+
+        @Override
+        public void clearStripOwnership() {
+            clearStripMovementOwnership();
+        }
+
+        @Override
+        public boolean restoreAnchorNumbers(Anchor anchor) {
+            boolean changed = stripDirIndex != anchor.stripDirIndex()
+                    || stripLegIndex != anchor.stripLegIndex()
+                    || stripStepsLeft != anchor.stripStepsLeft()
+                    || stripLegLength != anchor.stripLegLength();
+            stripDirIndex = anchor.stripDirIndex();
+            stripLegIndex = anchor.stripLegIndex();
+            stripStepsLeft = anchor.stripStepsLeft();
+            stripLegLength = anchor.stripLegLength();
+            return changed;
+        }
+
+        @Override
+        public void rebaseTargetMonitors() {
+            OreDigTask.this.detourRebaseTargetMonitors();
+        }
+
+        @Override
+        public void rebaseCursorHere() {
+            OreDigTask.this.detourRebaseCursor(bot.getBlockPos());
+        }
+
+        // ---- logging and side effects ---------------------------------------------------------------------------
+
+        @Override
+        public void log(String event, Object... kv) {
+            MiningAssistLog.noteDetourEvent(state, event);
+            BotLog.task(bot, event, kv);
+        }
+
+        @Override
+        public void warn(String event, Object... kv) {
+            MiningAssistLog.noteDetourEvent(state, event);
+            BotLog.warn(LogCategory.TASK, bot, event, kv);
+        }
+
+        @Override
+        public void announce(String blockId) {
+            BrainCoordinator.INSTANCE.sendBotReply(bot, DetourPolicy.announceText(blockId));
+        }
+
+        @Override
+        public void recordFind(BlockPos pos, String blockId) {
+            Block block = blockOf(blockId);
+            if (block == null) {
+                return;
+            }
+            EpisodeLog.INSTANCE.record(bot, EpisodeLog.Type.RESOURCE_FOUND, pos,
+                    Registries.BLOCK.getId(block).toString());
+        }
     }
 
     // 探矿:近处扫不到矿时,在 PROSPECT_RANGE 大范围(只扫已加载区块)定位最近的目标矿;限频护 TPS。

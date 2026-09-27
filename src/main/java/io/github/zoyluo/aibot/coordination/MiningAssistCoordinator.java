@@ -4,11 +4,15 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.assist.BotEdits;
 import io.github.zoyluo.aibot.mining.assist.BreakPeek;
+import io.github.zoyluo.aibot.mining.assist.DetourControl;
+import io.github.zoyluo.aibot.mining.assist.DetourLiveness;
+import io.github.zoyluo.aibot.mining.assist.DetourPhase;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistLog;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
+import io.github.zoyluo.aibot.mining.assist.OreClaims;
 import io.github.zoyluo.aibot.mining.assist.PoiDetector;
 import io.github.zoyluo.aibot.mining.assist.SensePlan;
 import io.github.zoyluo.aibot.mining.assist.SenseStatus;
@@ -20,6 +24,7 @@ import io.github.zoyluo.aibot.task.MineValuablesTask;
 import io.github.zoyluo.aibot.task.OreDigTask;
 import io.github.zoyluo.aibot.task.Task;
 import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.aibot.task.TaskState;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -75,6 +80,14 @@ public final class MiningAssistCoordinator {
     }
 
     private static void run(AIPlayerEntity bot, int tick, boolean handled) {
+        // P1 (F.2, design 2.3 steps 3b/3c): a live detour must be tended even in the very ticks right after a
+        // sensor fault, which is exactly when the fault cooldown below would otherwise skip this bot. Its own
+        // fence keeps a still-unfinished writer's stub, or any other failure here, from touching sensing at all.
+        try {
+            maintainDetour(bot, tick);
+        } catch (RuntimeException ignored) {
+            // maintainDetour must never take down the sensor pass that follows.
+        }
         UUID botId = bot.getUuid();
         if (MiningAssistRuntime.failures().coolingDown(botId, tick)) {
             return;
@@ -97,6 +110,42 @@ public final class MiningAssistCoordinator {
                 || task instanceof DescendToYTask
                 || task instanceof MineTask
                 || task instanceof MineValuablesTask;
+    }
+
+    /** Design 2.3 step 3b and 3c: live derivation of the published detour, orphan cleanup, tick-granular net. */
+    private static void maintainDetour(AIPlayerEntity bot, int tick) {
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        int hurt = bot.hurtTime;
+        if (state == null || state.detourOwner() == null) {
+            return;                     // note: hurtTimeSeen is NOT touched here (M-review): it must stay stale
+        }                               // only across an ABSENT detour, never mid-detour (see below)
+        Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+        DetourLiveness.Verdict verdict = DetourLiveness.check(
+                active != null && active == state.detourOwner(),
+                active != null && active.state() == TaskState.RUNNING,
+                state.detourPhase(), state.detourPublishedTick(), tick);
+        if (verdict != DetourLiveness.Verdict.LIVE) {
+            DetourPhase phase = state.detourPhase();
+            DetourControl control = state.detourControl();
+            int released = OreClaims.releaseAll(bot.getUuid());
+            if (control != null) {
+                control.abandoned(tick);          // settles the CACHED mission ledger entry the engine itself cannot reach any more
+            }
+            state.clearDetour();
+            state.noteHurtTime(hurt);
+            BotLog.task(bot, "ore_dig_detour_orphan", "cause", verdict.name().toLowerCase(java.util.Locale.ROOT),
+                    "phase", phase, "claims_released", released);
+            return;                                   // never stopAll(): a SAFETY task may own the action pack
+        }
+        boolean tpsDegraded = MiningAssistRuntime.tpsDegraded(bot);
+        boolean headroomAbort = state.detourPhase().netAbortable()
+                && MiningAssistRuntime.headroom().shouldAbort(tpsDegraded);
+        String reason = DetourLiveness.netReason(state.detourPhase(), tpsDegraded, headroomAbort, hurt,
+                state.hurtTimeSeen());
+        state.noteHurtTime(hurt);                       // every LIVE run updates it, so the first hit's rise is always seen next run
+        if (reason != null && state.detourControl() != null) {
+            state.detourControl().abortNow(reason);
+        }
     }
 
     private static void sense(AIPlayerEntity bot, int tick) {

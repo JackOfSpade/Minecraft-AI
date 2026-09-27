@@ -1,5 +1,7 @@
 package io.github.zoyluo.aibot.mining.assist;
 
+import java.util.Locale;
+
 /**
  * Pure inventory and tool-wear rules of the detour (mining-assist design 4.6 steps 7 and 8). The host reads the
  * inventory (empty main slots, room left in partial stacks of the drop item, the tool's durability) and asks
@@ -34,6 +36,8 @@ public final class InventoryHeadroom {
     /** Design 4.6 step 7: fraction of the tool's maximum durability that must remain. */
     public static final double WEAR_FRACTION = 0.15D;
 
+    private static final String DEEPSLATE_PREFIX = "deepslate_";
+
     /**
      * What one break of a block is expected to yield: at most {@code maxItems} items (no Fortune), and whether
      * the drop item is known well enough to compute room in partial stacks. {@code itemKnown == false} means
@@ -50,12 +54,21 @@ public final class InventoryHeadroom {
      * the class comment for the formula. Negative inputs count as 0; a {@code reserve} below 0 counts as 0.
      */
     public static boolean capacityOk(int emptyMainSlots, int roomInPartialStacks, int expectedYield, int reserve) {
-        throw new UnsupportedOperationException("P1 stub: InventoryHeadroom.capacityOk");
+        int empty = Math.max(0, emptyMainSlots);
+        int room = Math.max(0, roomInPartialStacks);
+        int yield = Math.max(0, expectedYield);
+        int res = Math.max(0, reserve);
+        int overflow = Math.max(0, yield - room);
+        int slotsNeeded = ceilDiv(overflow, STACK_SIZE);
+        return empty - slotsNeeded >= res;
     }
 
     /** True when {@code emptyMainSlots >= max(reserve, UNKNOWN_DROP_MIN_EMPTY_SLOTS)}. */
     public static boolean unknownDropOk(int emptyMainSlots, int reserve) {
-        throw new UnsupportedOperationException("P1 stub: InventoryHeadroom.unknownDropOk");
+        int empty = Math.max(0, emptyMainSlots);
+        int res = Math.max(0, reserve);
+        int need = Math.max(res, UNKNOWN_DROP_MIN_EMPTY_SLOTS);
+        return empty >= need;
     }
 
     /**
@@ -66,7 +79,32 @@ public final class InventoryHeadroom {
      * for an unlisted block and is treated as unknown by the caller.
      */
     public static Estimate estimate(String registryPath) {
-        throw new UnsupportedOperationException("P1 stub: InventoryHeadroom.estimate");
+        String p = normalize(registryPath);
+        if (p == null) {
+            return new Estimate(4, false);
+        }
+        switch (p) {
+            case "coal_ore":
+            case "iron_ore":
+            case "gold_ore":
+            case "diamond_ore":
+            case "emerald_ore":
+            case "nether_quartz_ore":
+            case "ancient_debris":
+            case "raw_iron_block":
+            case "raw_gold_block":
+            case "raw_copper_block":
+                return new Estimate(1, true);
+            case "copper_ore":
+            case "redstone_ore":
+                return new Estimate(5, true);
+            case "lapis_ore":
+                return new Estimate(9, true);
+            case "nether_gold_ore":
+                return new Estimate(6, true);
+            default:
+                return new Estimate(4, false);
+        }
     }
 
     /**
@@ -75,6 +113,36 @@ public final class InventoryHeadroom {
      * tool) is always fine. {@code remaining} is {@code maxDamage - damage}.
      */
     public static boolean durabilityOk(int remainingDurability, int maxDamage, int plannedMembers) {
-        throw new UnsupportedOperationException("P1 stub: InventoryHeadroom.durabilityOk");
+        if (maxDamage <= 0) {
+            return true;
+        }
+        int members = Math.max(0, plannedMembers);
+        int flat = WEAR_BASE + WEAR_PER_MEMBER * members;
+        int fraction = (int) Math.ceil(WEAR_FRACTION * maxDamage);
+        int need = Math.max(flat, fraction);
+        return remainingDurability >= need;
+    }
+
+    private static String normalize(String registryPath) {
+        if (registryPath == null) {
+            return null;
+        }
+        String p = registryPath.trim();
+        if (p.isEmpty()) {
+            return null;
+        }
+        p = p.toLowerCase(Locale.ROOT);
+        int colon = p.indexOf(':');
+        if (colon >= 0) {
+            p = p.substring(colon + 1);
+        }
+        if (p.startsWith(DEEPSLATE_PREFIX)) {
+            p = p.substring(DEEPSLATE_PREFIX.length());
+        }
+        return p.isEmpty() ? null : p;
+    }
+
+    private static int ceilDiv(int value, int divisor) {
+        return (value + divisor - 1) / divisor;
     }
 }

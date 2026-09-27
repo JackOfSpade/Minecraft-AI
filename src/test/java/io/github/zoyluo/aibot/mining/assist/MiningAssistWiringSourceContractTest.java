@@ -117,8 +117,8 @@ class MiningAssistWiringSourceContractTest {
     // ---- P0 leaves the mining tasks alone ------------------------------------------------------------------
 
     @Test
-    void oreDigTaskAndTheOtherMiningTasksDoNotReferenceTheAssistInPhaseZero() throws IOException {
-        for (String task : new String[] {"OreDigTask", "DigDownTask", "DescendToYTask", "MineTask",
+    void theOtherMiningTasksDoNotReferenceTheAssistInPhaseOne() throws IOException {
+        for (String task : new String[] {"DigDownTask", "DescendToYTask", "MineTask",
                 "MineValuablesTask", "StripMineTask"}) {
             String source = read(MAIN.resolve("task/" + task + ".java"));
             assertFalse(source.contains("mining.assist"), task + " must not import the assist in P0");

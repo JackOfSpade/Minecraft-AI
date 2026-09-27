@@ -227,6 +227,43 @@ class MiningAssistCoordinatorSourceContractTest {
                 "the banned-token scan must cover the coordinator");
     }
 
+    // ---- P1 (F.2): the detour net and orphan cleanup, design 2.3 steps 3b/3c ------------------------
+
+    @Test
+    void maintainDetourIsTheFirstStatementOfRunInsideItsOwnFence() throws IOException {
+        String source = source();
+        String run = method(source, "private static void run(AIPlayerEntity bot, int tick, boolean handled) {");
+        int tryBlock = run.indexOf("try {");
+        int maintain = run.indexOf("maintainDetour(bot, tick);");
+        int catchBlock = run.indexOf("catch (RuntimeException");
+        int coolingDown = run.indexOf("MiningAssistRuntime.failures().coolingDown(botId, tick)");
+        assertTrue(tryBlock >= 0 && maintain > tryBlock && catchBlock > maintain,
+                "maintainDetour runs inside its own try/catch");
+        assertTrue(coolingDown > catchBlock,
+                "maintainDetour must run before the fault cooldown early return, not after it");
+        // It really is the first statement: nothing of substance precedes the try block.
+        String beforeTry = run.substring(0, tryBlock);
+        assertFalse(beforeTry.contains(";"), "no statement runs before the maintainDetour fence: " + beforeTry);
+    }
+
+    @Test
+    void maintainDetourDerivesLivenessCleansUpOrphansAndNeverCallsStopAll() throws IOException {
+        String source = source();
+        String method = method(source, "private static void maintainDetour(AIPlayerEntity bot, int tick) {");
+        for (String token : List.of(
+                "DetourLiveness.check(",
+                "OreClaims.releaseAll(",
+                "state.clearDetour()",
+                "abortNow(",
+                "abandoned(",
+                "\"ore_dig_detour_orphan\"")) {
+            assertTrue(method.contains(token), "maintainDetour must contain " + token);
+        }
+        assertFalse(method.contains(".stopAll("),
+                "the orphan cleanup must never touch the action pack (a SAFETY task may own it)");
+        assertTrue(method.contains("DetourLiveness.Verdict.LIVE"));
+    }
+
     private static int count(String text, String needle) {
         Matcher matcher = Pattern.compile(Pattern.quote(needle)).matcher(text);
         int count = 0;

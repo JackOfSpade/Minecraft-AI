@@ -492,5 +492,7 @@ public final class MiningAssistState {
         biomeTick = NEVER;
         poiStructureScore = 0.0D;
         poiScoreTick = NEVER;
+        // P1 (F.3): an exclusion keyed by BlockPos is a cell of the old world; never carry it into a new one.
+        exclusions.clear();
     }
 }

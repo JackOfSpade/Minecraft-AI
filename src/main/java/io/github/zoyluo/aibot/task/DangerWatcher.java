@@ -1313,4 +1313,21 @@ public final class DangerWatcher {
         }
         return false;
     }
+
+    /**
+     * P1 (mining-assist design 4.4 item 7): the first lava cell the bot can observe in the 5x3x5 threat box around
+     * it. The same probe as the LAVA branch of collectTopThreat, duplicated so that method stays untouched.
+     */
+    static Optional<BlockPos> observedLavaInThreatBox(AIPlayerEntity bot) {
+        return BlockPos.stream(bot.getBlockPos().add(-2, -1, -2), bot.getBlockPos().add(2, 1, 2))
+                .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> bot.getEntityWorld().getBlockState(pos).getFluidState().isIn(FluidTags.LAVA))
+                .map(BlockPos::toImmutable)
+                .findFirst();
+    }
+
+    /** P1 (design 4.4 item 5): whether the threat scheduler is still inside its assignment-time cooldown. */
+    boolean threatCooldownActive(AIPlayerEntity bot, int nowTick) {
+        return nowTick < nextThreatAttemptTick.getOrDefault(bot.getUuid(), 0);
+    }
 }

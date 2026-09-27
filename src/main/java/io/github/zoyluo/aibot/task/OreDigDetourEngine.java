@@ -1,7 +1,18 @@
 package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.mining.assist.DetourPhase;
+import io.github.zoyluo.aibot.mining.assist.DetourPolicy;
+import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.aibot.mining.assist.SafeGate;
+import io.github.zoyluo.aibot.mining.assist.SafeReason;
 import net.minecraft.util.math.BlockPos;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * The opportunistic valuables detour of OreDig (mining-assist design 4.1 to 4.14, phase P1, walk only): a small
@@ -126,13 +137,85 @@ final class OreDigDetourEngine {
         }
     }
 
+    /** The one open drop debt of the running detour (design 4.9): the break cell, the inventory baseline it is measured against, and when it started. */
+    private static final class DropDebt {
+        final BlockPos cell;
+        int baseline;
+        final int startedTick;
+
+        DropDebt(BlockPos cell, int baseline, int startedTick) {
+            this.cell = cell;
+            this.baseline = baseline;
+            this.startedTick = startedTick;
+        }
+    }
+
+    // ---- state (see the P1 contract, section C.3, "fields the engine needs") ----------------------------------
+    private DetourPhase phase = DetourPhase.IDLE;
+    private DetourHost.Anchor anchor;
+    private BlockPos seed;
+    private String curId;
+    private List<BlockPos> clusterCells = List.of();
+    private BlockPos cur;
+    private DetourHost.Pose pose;
+    private final List<BlockPos> pending = new ArrayList<>();
+    private final Set<BlockPos> done = new HashSet<>();
+    private final Set<BlockPos> noStep = new HashSet<>();
+
+    private int startNow;
+    private int leaseDeadline;
+    private int lastBeat;
+    private double beatDist;
+    private int phaseEnter;
+    private int routeAttempts;
+    private int lastRouteAttempt;
+    private int waitSince = -1;
+    private int returnRetryAt;
+    private int lastTickNow;
+    private int lastClaimRenew;
+
+    private int breaks;
+    private int membersStarted;
+    private int seals;
+    private int dropsLost;
+
+    private String abortReason;
+    private String pendingAbort;
+    private String returnWhy;
+
+    // per-member (MINE)
+    private int mineStart;
+    private int swingStart;
+    private boolean swingStarted;
+    private boolean prepGated;
+    private int reposes;
+    private int lastMineBeat;
+    private int unknownSince = -1;
+    private int swingBaseline;
+
+    // POSTBREAK / SETTLE_DROP
+    private BlockPos lastBreak;
+    private int postStart;
+    private DropDebt debt;
+    private int sealsThisDebt;
+    private int settleStart;
+    private boolean gained;
+    private int chaseAttempts;
+    private int lastChase;
+
+    // RETURN
+    private int returnStart;
+    private int returnAttempts;
+
+    private MissionAssistLedger.Entry ledger;
+
     OreDigDetourEngine() {
     }
 
-    // ---- driving --------------------------------------------------------------------------------------------------
+    // ---- driving --------------------------------------------------------------------------------------------
 
     /**
-     * One task tick. IDLE: when {@code DetourStartSelector.checkDue(host.now(), host.staggerSeed())} run
+     * One task tick. IDLE: when {@code DetourStartSelector.checkDue(now, host.staggerSeed())} run
      * {@link DetourStartSelector#select}; a selection is started with {@link #start} (which consumes the tick),
      * otherwise the result is IDLE. Active: detect a tick gap ({@link #TICK_GAP_ABORT_TICKS}), consume any pending
      * net abort, then lease, SAFE gate, claim renewal (every 40 server ticks), then the phase step. An abort raised
@@ -140,7 +223,66 @@ final class OreDigDetourEngine {
      * except in the tick that finishes.
      */
     Result tick(DetourHost host) {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.tick");
+        int now = host.now();
+        if (phase == DetourPhase.IDLE) {
+            if (!DetourStartSelector.checkDue(now, host.staggerSeed())) {
+                return Result.IDLE;
+            }
+            DetourStartSelector.Result r = DetourStartSelector.select(host);
+            if (r.selection() == null) {
+                return Result.IDLE;
+            }
+            start(host, r.selection());
+            return Result.CONSUMED;
+        }
+
+        int gap = now - lastTickNow;
+        lastTickNow = now;
+        if (gap > TICK_GAP_ABORT_TICKS) {
+            if (phase != DetourPhase.RETURN) {
+                return abort(host, "tick_gap");
+            }
+            beat(host);
+        }
+        if (pendingAbort != null) {
+            String r = pendingAbort;
+            pendingAbort = null;
+            if (phase != DetourPhase.RETURN) {
+                return abort(host, r);
+            }
+        }
+        if (phase != DetourPhase.RETURN) {
+            if (now > leaseDeadline) {
+                return abort(host, "lease");
+            }
+            SafeGate.Stage stage = ((now - startNow) % 2 == 0) ? SafeGate.Stage.TICK_FULL : SafeGate.Stage.TICK_FAST;
+            SafeReason reason = host.safety(stage, pose == null ? null : pose.stand(), cur);
+            if (reason != SafeReason.OK) {
+                return abort(host, reason.abortReason());
+            }
+            if (host.serverTick() - lastClaimRenew >= 40) {
+                host.renewClaims();
+                lastClaimRenew = host.serverTick();
+            }
+        }
+
+        if (phase == DetourPhase.APPROACH) {
+            return tickApproach(host);
+        }
+        if (phase == DetourPhase.MINE) {
+            return tickMine(host);
+        }
+        if (phase == DetourPhase.POSTBREAK) {
+            return tickPostbreak(host);
+        }
+        if (phase == DetourPhase.SETTLE_DROP) {
+            return tickSettle(host);
+        }
+        if (phase == DetourPhase.RETURN) {
+            return tickReturn(host);
+        }
+        // NEXT and FINISH are always resolved inside the tick that reaches them; IDLE is handled above.
+        return Result.CONSUMED;
     }
 
     /**
@@ -153,7 +295,79 @@ final class OreDigDetourEngine {
      * hand built selection. The engine must be IDLE.
      */
     void start(DetourHost host, DetourStartSelector.Selection selection) {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.start");
+        anchor = host.captureAnchor();
+        host.clearStripOwnership();
+        host.stopAll();
+        beat(host);
+
+        int now = host.now();
+        startNow = now;
+        lastTickNow = now;
+        breaks = 0;
+        membersStarted = 0;
+        seals = 0;
+        dropsLost = 0;
+        pendingAbort = null;
+        abortReason = null;
+        returnWhy = null;
+
+        leaseDeadline = now + DetourPolicy.leaseTicks(host.config(), 0);
+        ledger = host.ledger();
+        ledger.noteStart(host.serverTick());
+        lastClaimRenew = host.serverTick();
+
+        seed = selection.seed().toImmutable();
+        curId = selection.blockId();
+        clusterCells = new ArrayList<>(selection.cluster());
+
+        host.exclude(seed, ATTEMPT_EXCLUDE_TICKS);
+
+        BlockPos feet = host.feet();
+        List<BlockPos> members = new ArrayList<>();
+        for (BlockPos p : host.veinAt(seed, curId, MEMBER_CAP)) {
+            BlockPos pos = p.toImmutable();
+            if (pos.equals(seed) || host.excluded(pos) || members.contains(pos)) {
+                continue;
+            }
+            members.add(pos);
+        }
+        members.sort(Comparator.<BlockPos>comparingLong(p -> distSq(feet, p))
+                .thenComparing(OreDigDetourEngine::compareBlockPos));
+        if (members.size() > MEMBER_CAP - 1) {
+            members = new ArrayList<>(members.subList(0, MEMBER_CAP - 1));
+        }
+
+        int claimLimit = Math.min(START_CLAIMS, members.size());
+        List<BlockPos> toClaim = new ArrayList<>(members.subList(0, claimLimit));
+        for (BlockPos p : toClaim) {
+            if (!host.tryClaim(p)) {
+                members.remove(p);
+            }
+        }
+
+        pending.clear();
+        done.clear();
+        noStep.clear();
+        pending.addAll(members);
+
+        host.recordFind(seed, curId);
+        int value = selection.value();
+        if (DetourPolicy.announces(value, host.config()) && ledger.announceAllowed(host.serverTick())) {
+            host.announce(curId);
+            ledger.noteAnnounced(host.serverTick());
+        }
+        host.log("ore_dig_detour_start", "pos", seed, "block", curId, "value", value);
+
+        membersStarted = 1;
+        cur = seed;
+        pose = selection.pose();
+        reposes = 0;
+
+        if (pose.zeroTransit()) {
+            enterMine(host);
+        } else {
+            enterApproach(host);
+        }
     }
 
     /**
@@ -162,7 +376,12 @@ final class OreDigDetourEngine {
      * {@code tickOpportunistic}. Ignored while idle or in RETURN. The first reason wins.
      */
     void requestAbort(String reason) {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.requestAbort");
+        if (phase == DetourPhase.IDLE || phase == DetourPhase.RETURN) {
+            return;
+        }
+        if (pendingAbort == null) {
+            pendingAbort = reason;
+        }
     }
 
     /**
@@ -174,7 +393,19 @@ final class OreDigDetourEngine {
      * or null when idle, so the caller can set {@code lastFace = anchor.face()}.
      */
     DetourHost.Anchor interrupt(DetourHost host, String reason) {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.interrupt");
+        if (phase == DetourPhase.IDLE) {
+            return null;
+        }
+        host.releaseClaims();
+        boolean drift = host.restoreAnchorNumbers(anchor);
+        if (drift) {
+            host.log("ore_dig_detour_cursor_drift", "face", anchor.face());
+        }
+        ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        host.log("ore_dig_detour_abort", "reason", reason == null ? "paused" : reason);
+        DetourHost.Anchor result = anchor;
+        resetToIdle();
+        return result;
     }
 
     /**
@@ -184,38 +415,43 @@ final class OreDigDetourEngine {
      * a no-op when idle. Reached through {@code DetourControl.abandoned}.
      */
     void abandon(DetourHost host) {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.abandon");
+        if (phase == DetourPhase.IDLE) {
+            return;
+        }
+        ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        host.log("ore_dig_detour_abort", "reason", "abandoned");
+        resetToIdle();
     }
 
     // ---- introspection --------------------------------------------------------------------------------------------
 
     /** True from a start until the tick that finishes it. Drives {@code assistDetourActive()} in OreDig. */
     boolean isActive() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.isActive");
+        return phase != DetourPhase.IDLE;
     }
 
     DetourPhase phase() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.phase");
+        return phase;
     }
 
     /** The anchor of the running detour, or null when idle. */
     DetourHost.Anchor anchor() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.anchor");
+        return anchor;
     }
 
     /** {@code anchor().face()} while active, else null: what {@code detourPublishedFace} substitutes into the checkpoint. */
     BlockPos anchorFace() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.anchorFace");
+        return anchor == null ? null : anchor.face();
     }
 
     /** The member being approached or mined, or null. */
     BlockPos currentOre() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.currentOre");
+        return cur;
     }
 
     /** The abort reason of the running detour, or null when it has none (a normal end has none). */
     String abortReason() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.abortReason");
+        return abortReason;
     }
 
     /**
@@ -223,18 +459,642 @@ final class OreDigDetourEngine {
      * handles a FINISHED result can still read them for the end log line and the window counters).
      */
     int breaks() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.breaks");
+        return breaks;
     }
 
     int membersStarted() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.membersStarted");
+        return membersStarted;
     }
 
     int seals() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.seals");
+        return seals;
     }
 
     int dropsLost() {
-        throw new UnsupportedOperationException("P1 stub: OreDigDetourEngine.dropsLost");
+        return dropsLost;
+    }
+
+    // ===========================================================================================================
+    // Phase steps
+    // ===========================================================================================================
+
+    private Result tickApproach(DetourHost host) {
+        int now = host.now();
+        if ((now - phaseEnter) % 10 == 0) {
+            DetourHost.Seen s = host.observeBlockIs(cur, curId);
+            if (s == DetourHost.Seen.GONE) {
+                host.forgetSighting(cur);
+                memberDone(cur);
+                logSkip(host, cur, "gone");
+                return toNext(host);
+            }
+            // UNKNOWN: nothing, an approach never mines.
+        }
+        BlockPos feet = host.feet();
+        boolean arrived = feet.equals(pose.stand())
+                || (host.pathIdle() && host.walkIdle() && host.inBreakEnvelope(cur) && !host.isCurrentSupport(cur));
+        if (arrived) {
+            enterMine(host);
+            return tickMine(host);
+        }
+        double d = euclid(feet, pose.stand());
+        if (d <= beatDist - PROGRESS_BLOCKS) {
+            beat(host);
+        }
+        if (now - lastBeat > APPROACH_STALL_TICKS || now - phaseEnter > APPROACH_TOTAL_TICKS) {
+            return abort(host, "approach_stall");
+        }
+        if (host.pathIdle()) {
+            if (routeAttempts >= ROUTE_ATTEMPTS) {
+                return abort(host, "route");
+            }
+            if (routeAttempts == 0 || now - lastRouteAttempt >= ROUTE_ATTEMPT_GAP_TICKS) {
+                SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, pose.stand(), cur);
+                if (r != SafeReason.OK) {
+                    return abort(host, r.abortReason());
+                }
+                DetourHost.RouteResult rr = host.startRoute(pose.stand(), routeMinY(feet, pose.stand(), host), anchor.face());
+                if (rr == DetourHost.RouteResult.OK) {
+                    routeAttempts++;
+                    lastRouteAttempt = now;
+                    waitSince = -1;
+                    beat(host);
+                } else if (rr == DetourHost.RouteResult.FAILED) {
+                    routeAttempts++;
+                    lastRouteAttempt = now;
+                    waitSince = -1;
+                    host.log("ore_dig_detour_route", "leg", "approach", "result", rr, "reason", host.routeFailureReason());
+                } else {
+                    // THROTTLED or BUDGET
+                    if (waitSince < 0) {
+                        waitSince = now;
+                    } else if (now - waitSince > ROUTE_WAIT_MAX_TICKS) {
+                        return abort(host, "budget");
+                    }
+                }
+            }
+        }
+        return Result.CONSUMED;
+    }
+
+    private void enterApproach(DetourHost host) {
+        phase = DetourPhase.APPROACH;
+        phaseEnter = host.now();
+        routeAttempts = 0;
+        waitSince = -1;
+        beat(host);
+    }
+
+    private void enterMine(DetourHost host) {
+        phase = DetourPhase.MINE;
+        mineStart = host.now();
+        swingStarted = false;
+        prepGated = false;
+        unknownSince = -1;
+        beat(host);
+    }
+
+    private Result tickMine(DetourHost host) {
+        int now = host.now();
+        if (!swingStarted) {
+            if (now - mineStart > MINE_PREP_TICKS) {
+                host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                memberDone(cur);
+                logSkip(host, cur, "prep_timeout");
+                return toNext(host);
+            }
+            DetourHost.Seen s = host.observeBlockIs(cur, curId);
+            if (s == DetourHost.Seen.GONE) {
+                host.forgetSighting(cur);
+                memberDone(cur);
+                logSkip(host, cur, "gone");
+                return toNext(host);
+            }
+            if (s == DetourHost.Seen.UNKNOWN) {
+                if (unknownSince < 0) {
+                    unknownSince = now;
+                }
+                if (now - unknownSince >= REPROOF_UNKNOWN_TICKS) {
+                    host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                    memberDone(cur);
+                    logSkip(host, cur, "unknown");
+                    return toNext(host);
+                }
+                return Result.CONSUMED;
+            }
+            unknownSince = -1;
+            if (!prepGated) {
+                SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, pose.stand(), cur);
+                if (r != SafeReason.OK) {
+                    return abort(host, r.abortReason());
+                }
+                prepGated = true;
+            }
+            BlockPos feet = host.feet();
+            int band = Math.min(Math.min(feet.getY(), pose.stand().getY()), cur.getY());
+            if (band <= host.lavaBandTopY() && !host.sealMaterialOk()) {
+                host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                memberDone(cur);
+                logSkip(host, cur, "seal_material");
+                return toNext(host);
+            }
+            if (!host.tryClaim(cur)) {
+                memberDone(cur);
+                logSkip(host, cur, "claimed");
+                return toNext(host);
+            }
+            if (!host.pathIdle() || !host.walkIdle()) {
+                return Result.CONSUMED;
+            }
+            if (!host.inBreakEnvelope(cur) || host.isCurrentSupport(cur)) {
+                DetourHost.Pose p = host.poseFor(cur, anchor, noStep);
+                if (p == null) {
+                    host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                    memberDone(cur);
+                    logSkip(host, cur, "no_pose");
+                    return toNext(host);
+                }
+                if (!p.stand().equals(feet)) {
+                    if (reposes >= MAX_REPOSES_PER_MEMBER) {
+                        host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                        memberDone(cur);
+                        logSkip(host, cur, "pose_thrash");
+                        return toNext(host);
+                    }
+                    reposes++;
+                    pose = p;
+                    prepGated = false;
+                    enterApproach(host);
+                    return Result.CONSUMED;
+                }
+                // p.stand == feet: fall through
+            }
+            DetourHost.GeometryVerdict g = host.breakGeometry(cur);
+            if (g != DetourHost.GeometryVerdict.OK) {
+                host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                memberDone(cur);
+                logSkip(host, cur, "geometry");
+                return toNext(host);
+            }
+            DetourHost.FluidProbe f = host.probeFluidAround(cur);
+            if (f.present() != null) {
+                host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+                memberDone(cur);
+                logSkip(host, cur, "fluid_adjacent");
+                return toNext(host);
+            }
+            DetourHost.ToolVerdict t = host.toolVerdict(cur, 1 + pending.size());
+            if (t == DetourHost.ToolVerdict.NO_TOOL) {
+                return abort(host, "tool");
+            }
+            if (t == DetourHost.ToolVerdict.WEAR) {
+                return abort(host, "tool_wear");
+            }
+            if (!host.capacityOk(cur, curId)) {
+                return abort(host, "capacity");
+            }
+            swingStarted = true;
+            swingStart = now;
+            lastMineBeat = now;
+            swingBaseline = host.inventoryTotal();
+            beat(host);
+            // falls through to the swing section below, same tick.
+        }
+
+        if (now - swingStart > MINE_SWING_TICKS) {
+            host.cancelMining();
+            host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+            memberDone(cur);
+            logSkip(host, cur, "mine_timeout");
+            return toNext(host);
+        }
+        DetourHost.MineStep ms = host.mineStep(cur);
+        if (ms.status() == DetourHost.MineStep.Status.MINING) {
+            if (now - lastMineBeat >= MINE_BEAT_TICKS) {
+                beat(host);
+                lastMineBeat = now;
+            }
+            return Result.CONSUMED;
+        }
+        if (ms.status() == DetourHost.MineStep.Status.DONE) {
+            return onBreakDone(host);
+        }
+        // FAILED
+        if (ms.isMissingChannelTool()) {
+            return abort(host, "tool");
+        }
+        host.cancelMining();
+        host.exclude(cur, ATTEMPT_EXCLUDE_TICKS);
+        memberDone(cur);
+        host.log("ore_dig_detour_skip", "reason", "break_failed", "pos", cur, "block", curId, "detail", ms.reason());
+        return toNext(host);
+    }
+
+    private Result onBreakDone(DetourHost host) {
+        breaks++;
+        lastBreak = cur;
+        host.log("ore_dig_detour_break", "pos", cur, "block", curId, "breaks", breaks);
+        leaseDeadline = startNow + DetourPolicy.leaseTicks(host.config(), breaks);
+        host.forgetSighting(cur);
+        memberDone(cur);
+        beat(host);
+        debt = new DropDebt(cur, swingBaseline, host.now());
+        sealsThisDebt = 0;
+        phase = DetourPhase.POSTBREAK;
+        postStart = host.now();
+        return tickPostbreak(host);
+    }
+
+    private Result tickPostbreak(DetourHost host) {
+        int now = host.now();
+        if (now - postStart > POSTBREAK_TOTAL_TICKS) {
+            return abort(host, "fluid_unsealable");
+        }
+        DetourHost.FluidProbe f = host.probeFluidAround(lastBreak);
+        if (f.present() != null) {
+            if (seals >= SEAL_CAP) {
+                return abort(host, "fluid_unsealable");
+            }
+            DetourHost.SealResult r = host.sealOneFluidNeighbour(f.present());
+            if (r == DetourHost.SealResult.SEALED) {
+                seals++;
+                sealsThisDebt++;
+                host.log("ore_dig_detour_seal", "pos", f.present());
+                beat(host);
+                return Result.CONSUMED;
+            }
+            return abort(host, "fluid_unsealable");
+        }
+        if (f.unknown()) {
+            noStep.add(lastBreak);
+        }
+        for (BlockPos p : host.neighbours26Same(lastBreak, curId)) {
+            BlockPos pos = p.toImmutable();
+            if (!done.contains(pos) && !pending.contains(pos) && !host.excluded(pos)
+                    && membersStarted + pending.size() < MEMBER_CAP) {
+                pending.add(pos);
+            }
+        }
+        debt.baseline = swingBaseline - sealsThisDebt;
+        phase = DetourPhase.SETTLE_DROP;
+        settleStart = now;
+        chaseAttempts = 0;
+        gained = false;
+        beat(host);
+        return Result.CONSUMED;
+    }
+
+    private Result tickSettle(DetourHost host) {
+        int now = host.now();
+        int t = now - settleStart;
+        host.tryForcedPickup();
+        if (host.inventoryTotal() > debt.baseline && !gained) {
+            gained = true;
+            beat(host);
+        }
+        DetourHost.DropView dv = null;
+        boolean settled;
+        if (gained && t >= SETTLE_MIN_TICKS) {
+            settled = true;
+        } else if (t >= SETTLE_NO_DROP_TICKS) {
+            dv = host.observeDrop(debt.cell);
+            settled = !dv.visible();
+        } else {
+            settled = false;
+        }
+        if (settled) {
+            leaveSettle(host);
+            return toNext(host);
+        }
+        if (t >= SETTLE_TOTAL_TICKS) {
+            dropsLost++;
+            host.log("ore_dig_detour_drop_lost", "reason", "timeout", "pos", debt.cell);
+            leaveSettle(host);
+            return toNext(host);
+        }
+        if (!gained && t >= SETTLE_MIN_TICKS && chaseAttempts < CHASE_ATTEMPTS && host.pathIdle()) {
+            if (dv == null) {
+                dv = host.observeDrop(debt.cell);
+            }
+            if (dv.visible()) {
+                if (dv.stand() == null || noStep.contains(dv.stand())) {
+                    dropsLost++;
+                    host.log("ore_dig_detour_drop_lost", "reason", "no_stand", "pos", debt.cell);
+                    leaveSettle(host);
+                    return toNext(host);
+                }
+                if (!dv.stand().equals(host.feet()) && (chaseAttempts == 0 || now - lastChase >= ROUTE_ATTEMPT_GAP_TICKS)) {
+                    SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, dv.stand(), null);
+                    if (r != SafeReason.OK) {
+                        return abort(host, r.abortReason());
+                    }
+                    int minY = Math.max(host.minStandY(), Math.min(Math.min(host.feet().getY(), dv.stand().getY()), anchor.y() - 3));
+                    DetourHost.RouteResult rr = host.startRoute(dv.stand(), minY, anchor.face());
+                    if (rr == DetourHost.RouteResult.OK) {
+                        chaseAttempts++;
+                        lastChase = now;
+                        beat(host);
+                    } else if (rr == DetourHost.RouteResult.FAILED) {
+                        chaseAttempts++;
+                        lastChase = now;
+                    }
+                    // THROTTLED/BUDGET: nothing.
+                }
+            }
+        }
+        return Result.CONSUMED;
+    }
+
+    private void leaveSettle(DetourHost host) {
+        if (!host.pathIdle()) {
+            host.stopAll();
+        }
+        debt = null;
+    }
+
+    private Result toNext(DetourHost host) {
+        phase = DetourPhase.NEXT;
+        beat(host);
+        if (!host.pathIdle()) {
+            host.stopAll();
+        }
+        if (membersStarted >= MEMBER_CAP) {
+            return beginReturn(host, "caps");
+        }
+        while (true) {
+            BlockPos feet = host.feet();
+            BlockPos m = nearestPending(feet);
+            if (m == null) {
+                return beginReturn(host, "done");
+            }
+            pending.remove(m);
+            if (done.contains(m) || host.excluded(m)) {
+                continue;
+            }
+            if (host.claimedByOther(m)) {
+                done.add(m);
+                logSkip(host, m, "claimed");
+                continue;
+            }
+            DetourHost.Pose p = host.poseFor(m, anchor, noStep);
+            if (p == null) {
+                done.add(m);
+                host.exclude(m, ATTEMPT_EXCLUDE_TICKS);
+                logSkip(host, m, "no_pose");
+                continue;
+            }
+            if (!p.zeroTransit() && ledger.zeroTransitOnly(host.serverTick())) {
+                done.add(m);
+                logSkip(host, m, "route_failures");
+                continue;
+            }
+            int band = Math.min(Math.min(feet.getY(), p.stand().getY()), m.getY());
+            if (band <= host.lavaBandTopY() && !host.sealMaterialOk()) {
+                done.add(m);
+                logSkip(host, m, "seal_material");
+                continue;
+            }
+            cur = m;
+            pose = p;
+            membersStarted++;
+            reposes = 0;
+            if (p.zeroTransit()) {
+                enterMine(host);
+                return tickMine(host);
+            }
+            enterApproach(host);
+            return tickApproach(host);
+        }
+    }
+
+    private Result beginReturn(DetourHost host, String why) {
+        returnWhy = why;
+        phase = DetourPhase.RETURN;
+        returnStart = host.now();
+        returnAttempts = 0;
+        returnRetryAt = returnStart;
+        host.cancelMining();
+        if (!host.pathIdle()) {
+            host.stopAll();
+        }
+        host.releaseClaims();
+        beat(host);
+        return Result.CONSUMED;
+    }
+
+    private Result tickReturn(DetourHost host) {
+        int now = host.now();
+        BlockPos here = host.feet();
+        if (here.equals(anchor.face())) {
+            return finish(host);
+        }
+        double d = euclid(here, anchor.face());
+        if (d <= beatDist - PROGRESS_BLOCKS) {
+            beat(host);
+        }
+        if (now - returnStart > RETURN_TOTAL_TICKS) {
+            return rebase(host, "total_cap");
+        }
+        boolean standable = host.feetStandable();
+        if (!standable && now - lastBeat >= RETURN_UNSTANDABLE_RETRY_TICKS) {
+            beat(host);
+        }
+        if (standable && now - lastBeat > RETURN_STALL_TICKS) {
+            return rebase(host, "stall");
+        }
+        if (host.pathIdle()) {
+            if (standable && returnAttempts >= ROUTE_ATTEMPTS) {
+                return rebase(host, "route");
+            }
+            if (now >= returnRetryAt) {
+                int minY = Math.max(host.minStandY(), Math.min(here.getY(), anchor.y()) - 1);
+                DetourHost.RouteResult rr = host.startReturnRoute(anchor.face(), minY);
+                if (rr == DetourHost.RouteResult.OK) {
+                    returnAttempts++;
+                    returnRetryAt = now + (standable ? ROUTE_ATTEMPT_GAP_TICKS : RETURN_UNSTANDABLE_RETRY_TICKS);
+                    beat(host);
+                } else if (rr == DetourHost.RouteResult.FAILED) {
+                    returnAttempts++;
+                    returnRetryAt = now + (standable ? ROUTE_ATTEMPT_GAP_TICKS : RETURN_UNSTANDABLE_RETRY_TICKS);
+                    host.log("ore_dig_detour_route", "leg", "return", "result", rr, "reason", host.routeFailureReason());
+                    if (!standable) {
+                        beat(host);
+                    }
+                } else {
+                    // THROTTLED or BUDGET: always a beat, never a rebase.
+                    returnRetryAt = now + RETURN_WAIT_RETRY_TICKS;
+                    beat(host);
+                }
+            }
+        }
+        return Result.CONSUMED;
+    }
+
+    private Result finish(DetourHost host) {
+        boolean drift = host.restoreAnchorNumbers(anchor);
+        if (drift) {
+            host.log("ore_dig_detour_cursor_drift", "face", anchor.face());
+        }
+        host.rebaseTargetMonitors();
+        host.noteProgress();
+        host.releaseClaims();
+        boolean completed = abortReason == null;
+        ledger.noteEnd(host.serverTick(), completed, host.now() - startNow);
+        String reason = abortReason != null ? abortReason : returnWhy;
+        host.log("ore_dig_detour_end", "reason", reason, "breaks", breaks, "members", membersStarted,
+                "seals", seals, "drops_lost", dropsLost, "ticks", host.now() - startNow, "abort", abortReason);
+        Result result = Result.finished(reason);
+        resetToIdle();
+        return result;
+    }
+
+    private Result rebase(DetourHost host, String why) {
+        host.stopAll();
+        host.rebaseCursorHere();
+        ledger.disableDetours();
+        host.warn("ore_dig_detour_return_rebased", "reason", why, "unsafe", !host.feetStandable(), "at", host.feet(),
+                "anchor", anchor.face(), "breaks", breaks);
+        host.rebaseTargetMonitors();
+        host.noteProgress();
+        host.releaseClaims();
+        ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        host.log("ore_dig_detour_end", "reason", "return_rebased", "breaks", breaks, "members", membersStarted,
+                "seals", seals, "drops_lost", dropsLost, "ticks", host.now() - startNow, "abort", abortReason);
+        Result result = Result.finished("return_rebased");
+        resetToIdle();
+        return result;
+    }
+
+    private Result abort(DetourHost host, String reason) {
+        if (abortReason == null) {
+            abortReason = reason;
+        }
+        host.log("ore_dig_detour_abort", "reason", abortReason, "phase", phase, "pos", cur, "breaks", breaks);
+        host.cancelMining();
+        host.stopAll();
+        applyAbortEffects(host, abortReason);
+        return beginReturn(host, abortReason);
+    }
+
+    private void applyAbortEffects(DetourHost host, String reason) {
+        switch (reason) {
+            case "lease" -> excludeCluster(host, ATTEMPT_EXCLUDE_TICKS);
+            case "approach_stall", "route" -> {
+                excludeCluster(host, FAILURE_EXCLUDE_TICKS);
+                if (pose != null) {
+                    host.exclude(pose.stand(), FAILURE_EXCLUDE_TICKS);
+                }
+                ledger.noteRouteFailure(host.serverTick());
+            }
+            case "tool", "tool_wear" -> excludeCluster(host, FAILURE_EXCLUDE_TICKS);
+            case "fluid_unsealable" -> {
+                excludeCluster(host, FAILURE_EXCLUDE_TICKS);
+                ledger.noteHazard(host.serverTick());
+            }
+            default -> {
+                // safety_*, degraded_tps, paused, deep_dark_biome, poi_evidence, trap_spot, budget, capacity,
+                // tick_gap, safety_state_lost: no exclusion, no ledger effect (C.5).
+            }
+        }
+    }
+
+    // ===========================================================================================================
+    // Helpers
+    // ===========================================================================================================
+
+    private void memberDone(BlockPos p) {
+        done.add(p);
+        pending.remove(p);
+    }
+
+    private void logSkip(DetourHost host, BlockPos pos, String reason) {
+        host.log("ore_dig_detour_skip", "reason", reason, "pos", pos, "block", curId);
+    }
+
+    private void excludeCluster(DetourHost host, int ttlServerTicks) {
+        Set<BlockPos> targets = new LinkedHashSet<>(clusterCells);
+        targets.addAll(pending);
+        for (BlockPos p : targets) {
+            host.exclude(p, ttlServerTicks);
+        }
+    }
+
+    private BlockPos nearestPending(BlockPos feet) {
+        BlockPos best = null;
+        long bestDist = Long.MAX_VALUE;
+        for (BlockPos p : pending) {
+            long d = distSq(feet, p);
+            if (best == null || d < bestDist || (d == bestDist && compareBlockPos(p, best) < 0)) {
+                best = p;
+                bestDist = d;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * {@code lastBeat = now}, {@code beatDist} refreshed to the distance to the current phase goal (APPROACH: the
+     * pose stand; RETURN: the anchor face; any other phase has no such goal and keeps whatever it holds, which is
+     * only ever read again once APPROACH or RETURN is (re)entered, and both re-beat on entry), then
+     * {@code host.noteProgress()}.
+     */
+    private void beat(DetourHost host) {
+        lastBeat = host.now();
+        if (phase == DetourPhase.APPROACH && pose != null) {
+            beatDist = euclid(host.feet(), pose.stand());
+        } else if (phase == DetourPhase.RETURN && anchor != null) {
+            beatDist = euclid(host.feet(), anchor.face());
+        }
+        host.noteProgress();
+    }
+
+    private void resetToIdle() {
+        phase = DetourPhase.IDLE;
+        pendingAbort = null;
+        abortReason = null;
+        returnWhy = null;
+        anchor = null;
+        seed = null;
+        curId = null;
+        cur = null;
+        pose = null;
+        pending.clear();
+        done.clear();
+        noStep.clear();
+        clusterCells = List.of();
+        debt = null;
+        lastBreak = null;
+        // breaks, membersStarted, seals, dropsLost are deliberately NOT reset here: start() resets them.
+    }
+
+    private static int routeMinY(BlockPos a, BlockPos b, DetourHost host) {
+        return Math.max(host.minStandY(), Math.min(a.getY(), b.getY()) - 1);
+    }
+
+    private static double euclid(BlockPos a, BlockPos b) {
+        double dx = a.getX() - b.getX();
+        double dy = a.getY() - b.getY();
+        double dz = a.getZ() - b.getZ();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private static long distSq(BlockPos a, BlockPos b) {
+        long dx = a.getX() - b.getX();
+        long dy = a.getY() - b.getY();
+        long dz = a.getZ() - b.getZ();
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    /** BlockPos order the design uses for ties: y ascending, then z, then x. */
+    private static int compareBlockPos(BlockPos a, BlockPos b) {
+        int c = Integer.compare(a.getY(), b.getY());
+        if (c != 0) {
+            return c;
+        }
+        c = Integer.compare(a.getZ(), b.getZ());
+        if (c != 0) {
+            return c;
+        }
+        return Integer.compare(a.getX(), b.getX());
     }
 }

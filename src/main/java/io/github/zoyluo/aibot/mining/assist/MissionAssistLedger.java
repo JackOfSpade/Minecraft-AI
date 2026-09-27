@@ -1,5 +1,7 @@
 package io.github.zoyluo.aibot.mining.assist;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -66,6 +68,11 @@ public final class MissionAssistLedger {
         TICK_BUDGET
     }
 
+    /** {@code key -> Entry}. Small (one per live mission), plain {@code HashMap}. */
+    private static final Map<String, Entry> ENTRIES = new HashMap<>();
+    /** Server tick {@link #get} last swept expired entries at; {@link MiningAssistState#NEVER} before the first sweep. */
+    private static int lastPruneTick = NEVER;
+
     private MissionAssistLedger() {
     }
 
@@ -75,7 +82,14 @@ public final class MissionAssistLedger {
      * (missionId, jobId) wins; {@code botId} must not be null.
      */
     public static String keyFor(UUID botId, UUID missionId, UUID jobId) {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.keyFor");
+        String bot = botId.toString();
+        if (missionId != null) {
+            return "m:" + missionId + "@" + bot;
+        }
+        if (jobId != null) {
+            return "j:" + jobId + "@" + bot;
+        }
+        return "adhoc:" + bot;
     }
 
     /**
@@ -84,22 +98,40 @@ public final class MissionAssistLedger {
      * itself expired when asked for is replaced by a fresh one.
      */
     public static Entry get(String key, int nowTick) {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.get");
+        maybePrune(nowTick);
+        Entry e = ENTRIES.get(key);
+        if (e == null || MiningAssistState.staleOrNever(nowTick, e.lastTouchedTick, TTL_TICKS)) {
+            e = new Entry();
+            ENTRIES.put(key, e);
+        }
+        e.lastTouchedTick = nowTick;
+        return e;
+    }
+
+    private static void maybePrune(int nowTick) {
+        if (lastPruneTick != NEVER && (long) nowTick - (long) lastPruneTick < 1200) {
+            return;
+        }
+        lastPruneTick = nowTick;
+        ENTRIES.entrySet().removeIf(en -> MiningAssistState.staleOrNever(nowTick, en.getValue().lastTouchedTick, TTL_TICKS));
     }
 
     /** Drops every record (world unload). */
     public static void clearAll() {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.clearAll");
+        ENTRIES.clear();
+        lastPruneTick = NEVER;
     }
 
     /** Drops the records of one bot (all keys ending in {@code "@" + botId} and {@code "adhoc:" + botId}). */
     public static void clearBot(UUID botId) {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.clearBot");
+        String suffix = "@" + botId;
+        String adhoc = "adhoc:" + botId;
+        ENTRIES.keySet().removeIf(k -> k.endsWith(suffix) || k.equals(adhoc));
     }
 
     /** Number of stored records (diagnostics and tests). */
     public static int size() {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.size");
+        return ENTRIES.size();
     }
 
     /**
@@ -107,12 +139,17 @@ public final class MissionAssistLedger {
      * overflow. Failures below 0 count as 0.
      */
     public static int intervalTicks(int minIntervalTicks, int consecutiveRouteFailures) {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.intervalTicks");
+        int failures = Math.min(Math.max(consecutiveRouteFailures, 0), 10);
+        long scaled = (long) minIntervalTicks * (1L << failures);
+        return (int) Math.min(INTERVAL_CAP_TICKS, scaled);
     }
 
     /** {@code min(TICK_BUDGET_CAP, maxElapsedTicks / 6)}; a non-positive {@code maxElapsedTicks} gives 0. */
     public static int detourTickBudget(int maxElapsedTicks) {
-        throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.detourTickBudget");
+        if (maxElapsedTicks <= 0) {
+            return 0;
+        }
+        return Math.min(TICK_BUDGET_CAP, maxElapsedTicks / 6);
     }
 
     /** The mutable counters of one mission. Server thread only. */
@@ -139,7 +176,7 @@ public final class MissionAssistLedger {
 
         /** Switches detours off for the rest of the mission (set after a return that rebased the cursor). */
         public void disableDetours() {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.disableDetours");
+            detoursDisabled = true;
         }
 
         /**
@@ -148,12 +185,30 @@ public final class MissionAssistLedger {
          * @param maxElapsedTicks OreDig's {@code maxElapsed} in task ticks
          */
         public StartVerdict startVerdict(int serverTick, MiningAssistConfig.Detour cfg, int maxElapsedTicks) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.startVerdict");
+            if (detoursDisabled) {
+                return StartVerdict.DISABLED;
+            }
+            if (hazardCooldownUntil != NEVER && serverTick < hazardCooldownUntil) {
+                return StartVerdict.HAZARD_COOLDOWN;
+            }
+            if (lastEndTick != NEVER) {
+                int interval = intervalTicks(cfg.minIntervalTicks(), consecutiveRouteFailures);
+                if ((long) serverTick - (long) lastEndTick < interval) {
+                    return StartVerdict.INTERVAL;
+                }
+            }
+            if (detoursStarted >= cfg.maxPerMission()) {
+                return StartVerdict.MAX_PER_MISSION;
+            }
+            if (detourTicks >= detourTickBudget(maxElapsedTicks)) {
+                return StartVerdict.TICK_BUDGET;
+            }
+            return StartVerdict.OK;
         }
 
         /** A detour started: {@code detoursStarted++}. */
         public void noteStart(int serverTick) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.noteStart");
+            detoursStarted++;
         }
 
         /**
@@ -162,7 +217,11 @@ public final class MissionAssistLedger {
          * true for a detour that reached its FINISH without an abort reason.
          */
         public void noteEnd(int serverTick, boolean completed, int detourTicksSpent) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.noteEnd");
+            lastEndTick = serverTick;
+            detourTicks += detourTicksSpent;
+            if (completed) {
+                consecutiveRouteFailures = 0;
+            }
         }
 
         /**
@@ -171,26 +230,36 @@ public final class MissionAssistLedger {
          * {@code serverTick + 6000}.
          */
         public void noteRouteFailure(int serverTick) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.noteRouteFailure");
+            consecutiveRouteFailures++;
+            missionRouteFailures++;
+            if (missionRouteFailures >= MISSION_ROUTE_FAILURE_LIMIT) {
+                zeroTransitUntil = serverTick + ZERO_TRANSIT_ONLY_TICKS;
+            }
         }
 
         /** {@code fluid_unsealable}: no start until {@code serverTick + 600}. */
         public void noteHazard(int serverTick) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.noteHazard");
+            hazardCooldownUntil = serverTick + HAZARD_COOLDOWN_TICKS;
         }
 
         /** True while only zero-transit (arm's length, no route) detours may start. */
         public boolean zeroTransitOnly(int serverTick) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.zeroTransitOnly");
+            if (zeroTransitUntil == NEVER) {
+                return false;
+            }
+            return serverTick < zeroTransitUntil;
         }
 
         /** True when {@code serverTick - lastAnnounceTick >= 600} or no line was ever sent. */
         public boolean announceAllowed(int serverTick) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.announceAllowed");
+            if (lastAnnounceTick == NEVER) {
+                return true;
+            }
+            return (long) serverTick - (long) lastAnnounceTick >= ANNOUNCE_INTERVAL_TICKS;
         }
 
         public void noteAnnounced(int serverTick) {
-            throw new UnsupportedOperationException("P1 stub: MissionAssistLedger.Entry.noteAnnounced");
+            lastAnnounceTick = serverTick;
         }
 
         public int detoursStarted() {

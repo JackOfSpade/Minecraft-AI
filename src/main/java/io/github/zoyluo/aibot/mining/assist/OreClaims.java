@@ -1,8 +1,13 @@
 package io.github.zoyluo.aibot.mining.assist;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -32,6 +37,13 @@ public final class OreClaims {
     /** How often the engine renews the leases of a live detour, in server ticks. */
     public static final int RENEW_INTERVAL_TICKS = 40;
 
+    /** One soft lease: the owner and the server tick it expires at. */
+    private record Claim(UUID owner, int expiresTick) {
+    }
+
+    /** {@code dimensionKey -> (posKey -> Claim)}. Plain {@code HashMap} for the outer, small (few dimensions) map; the inner map is the boxing-free fastutil one. */
+    private static final Map<String, Long2ObjectOpenHashMap<Claim>> CLAIMS = new HashMap<>();
+
     private OreClaims() {
     }
 
@@ -42,37 +54,95 @@ public final class OreClaims {
      * when another owner holds an unexpired claim on it.
      */
     public static boolean tryClaim(String dimensionKey, UUID owner, long posKey, int nowTick) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.tryClaim");
+        Long2ObjectOpenHashMap<Claim> table = CLAIMS.computeIfAbsent(dimensionKey, k -> new Long2ObjectOpenHashMap<>());
+        Claim existing = table.get(posKey);
+        if (existing != null && nowTick < existing.expiresTick() && !existing.owner().equals(owner)) {
+            return false;
+        }
+        table.put(posKey, new Claim(owner, nowTick + LEASE_TICKS));
+        return true;
     }
 
     /** True when an owner other than {@code me} holds an unexpired claim on {@code posKey}. An expired claim is not held (and is removed). */
     public static boolean heldByOther(String dimensionKey, UUID me, long posKey, int nowTick) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.heldByOther");
+        Long2ObjectOpenHashMap<Claim> table = CLAIMS.get(dimensionKey);
+        if (table == null) {
+            return false;
+        }
+        Claim c = table.get(posKey);
+        if (c == null) {
+            return false;
+        }
+        if (nowTick >= c.expiresTick()) {
+            table.remove(posKey);
+            return false;
+        }
+        return !c.owner().equals(me);
     }
 
     /** Refreshes the lease of every claim held by {@code owner} to {@code nowTick + LEASE_TICKS}. Returns how many were refreshed (expired ones are dropped, not refreshed). */
     public static int renewAll(UUID owner, int nowTick) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.renewAll");
+        int renewed = 0;
+        for (Long2ObjectOpenHashMap<Claim> table : CLAIMS.values()) {
+            Iterator<Long2ObjectMap.Entry<Claim>> it = table.long2ObjectEntrySet().iterator();
+            while (it.hasNext()) {
+                Long2ObjectMap.Entry<Claim> e = it.next();
+                Claim c = e.getValue();
+                if (!c.owner().equals(owner)) {
+                    continue;
+                }
+                if (nowTick >= c.expiresTick()) {
+                    it.remove();
+                    continue;
+                }
+                e.setValue(new Claim(owner, nowTick + LEASE_TICKS));
+                renewed++;
+            }
+        }
+        return renewed;
     }
 
     /** Releases one claim if {@code owner} holds it. Returns true when a claim was removed. */
     public static boolean release(String dimensionKey, UUID owner, long posKey) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.release");
+        Long2ObjectOpenHashMap<Claim> table = CLAIMS.get(dimensionKey);
+        if (table == null) {
+            return false;
+        }
+        Claim c = table.get(posKey);
+        if (c == null || !c.owner().equals(owner)) {
+            return false;
+        }
+        table.remove(posKey);
+        return true;
     }
 
     /** Releases every claim of {@code owner} in every dimension (FINISH, abort, pause, delete, orphan cleanup, state clear). Returns how many were removed. */
     public static int releaseAll(UUID owner) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.releaseAll");
+        int removed = 0;
+        for (Long2ObjectOpenHashMap<Claim> table : CLAIMS.values()) {
+            Iterator<Long2ObjectMap.Entry<Claim>> it = table.long2ObjectEntrySet().iterator();
+            while (it.hasNext()) {
+                if (it.next().getValue().owner().equals(owner)) {
+                    it.remove();
+                    removed++;
+                }
+            }
+        }
+        return removed;
     }
 
     /** Drops every claim (world unload). */
     public static void clearAll() {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.clearAll");
+        CLAIMS.clear();
     }
 
     /** Number of stored claims including expired ones not yet dropped (diagnostics and tests). */
     public static int size() {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.size");
+        int total = 0;
+        for (Long2ObjectOpenHashMap<Claim> table : CLAIMS.values()) {
+            total += table.size();
+        }
+        return total;
     }
 
     // ---- adapters for callers that hold a bot (hook 2 of OreDigTask, the host) -------------------------------
@@ -87,16 +157,27 @@ public final class OreClaims {
      * dimension or the tick answers false.
      */
     public static boolean heldByOther(AIPlayerEntity bot, BlockPos pos) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.heldByOther(bot)");
+        if (size() == 0) {
+            return false;
+        }
+        try {
+            String dimensionKey = BotEdits.dimensionKey(bot.getEntityWorld());
+            int nowTick = MiningAssistRuntime.serverTick(bot);
+            return heldByOther(dimensionKey, bot.getUuid(), pos.asLong(), nowTick);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** {@link #tryClaim} for a bot's own dimension, uuid and server tick. */
     public static boolean tryClaim(AIPlayerEntity bot, BlockPos pos) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.tryClaim(bot)");
+        String dimensionKey = BotEdits.dimensionKey(bot.getEntityWorld());
+        int nowTick = MiningAssistRuntime.serverTick(bot);
+        return tryClaim(dimensionKey, bot.getUuid(), pos.asLong(), nowTick);
     }
 
     /** {@link #renewAll} for a bot at its server tick. */
     public static int renewAll(AIPlayerEntity bot) {
-        throw new UnsupportedOperationException("P1 stub: OreClaims.renewAll(bot)");
+        return renewAll(bot.getUuid(), MiningAssistRuntime.serverTick(bot));
     }
 }

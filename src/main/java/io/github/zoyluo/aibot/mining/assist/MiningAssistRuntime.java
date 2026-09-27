@@ -169,6 +169,8 @@ public final class MiningAssistRuntime {
         rebuildHeadroom();
         refreshSenseAny();
         GATE.clear();
+        // P1 (F.4): the route budget's capacity tracks the live config, not just its construction-time default.
+        RouteBudget.shared().reconfigure(newConfig.route().bucketMs());
     }
 
     private static void logConfig(MiningAssistConfig parsed) {
@@ -380,7 +382,8 @@ public final class MiningAssistRuntime {
         return last == null ? null : last.denyReason();
     }
 
-    private static boolean tpsDegraded(AIPlayerEntity bot) {
+    /** P1 contract M3: made public so {@code task/DetourSafetyGate} (item 2) can read the live TPS verdict. */
+    public static boolean tpsDegraded(AIPlayerEntity bot) {
         Boolean override = testTpsDegraded;
         if (override != null) {
             return override;
@@ -401,6 +404,8 @@ public final class MiningAssistRuntime {
         MiningAssistRegistry.clear(bot);
         GATE.remove(bot.getUuid());
         FAILURES.clear(bot.getUuid());
+        // P1 (F.4, M5): a detour's soft claims must not outlive the bot's own transient state.
+        OreClaims.releaseAll(bot.getUuid());
     }
 
     /** The coordinator's exception fence: per-bot failure log throttle and sensing cooldown. */
@@ -422,6 +427,10 @@ public final class MiningAssistRuntime {
         BlockFactsAdapter.clearCache();
         rebuildHeadroom();
         refreshSenseAny();
+        // P1 (F.4, M5): the detour's own server-wide statics (design 2.4) are not owned by any bot's state.
+        OreClaims.clearAll();
+        MissionAssistLedger.clearAll();
+        RouteBudget.shared().reset();
     }
 
     /** Restores the shipped defaults and drops everything (unit tests). */

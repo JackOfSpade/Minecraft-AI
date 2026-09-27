@@ -33,9 +33,21 @@ public final class RouteBudget {
     /** A start needs at least this many milliseconds in the bucket. */
     public static final int MIN_START_MS = 30;
 
+    /** Sentinel meaning "no server tick observed yet" for both clocks (a fresh bucket, or one just {@link #reset}). */
+    private static final int UNSET = Integer.MIN_VALUE;
+
     private static final RouteBudget SHARED = new RouteBudget(100);
 
+    private int capacityMs;
+    private double balanceMs;
+    private int lastRefillTick;
+    private int lastStartTick;
+
     public RouteBudget(int capacityMs) {
+        this.capacityMs = capacityMs;
+        this.balanceMs = capacityMs;
+        this.lastRefillTick = UNSET;
+        this.lastStartTick = UNSET;
     }
 
     /** The process-wide instance the host uses. Its capacity is set from {@code route.bucketMs} by {@link #reconfigure}. */
@@ -45,7 +57,8 @@ public final class RouteBudget {
 
     /** Sets the capacity (clamped to at least {@value #MIN_START_MS}) and refills the bucket. */
     public void reconfigure(int capacityMs) {
-        throw new UnsupportedOperationException("P1 stub: RouteBudget.reconfigure");
+        this.capacityMs = Math.max(capacityMs, MIN_START_MS);
+        this.balanceMs = this.capacityMs;
     }
 
     /**
@@ -54,7 +67,14 @@ public final class RouteBudget {
      * not consume anything (the caller may peek before choosing a candidate).
      */
     public boolean canStart(int serverTick, boolean deterministic) {
-        throw new UnsupportedOperationException("P1 stub: RouteBudget.canStart");
+        if (serverTick == lastStartTick) {
+            return false;
+        }
+        if (deterministic) {
+            return true;
+        }
+        refill(serverTick);
+        return balanceMs >= MIN_START_MS;
     }
 
     /**
@@ -63,16 +83,50 @@ public final class RouteBudget {
      * (floor {@code -capacity}). A negative cost counts as 0.
      */
     public void noteStart(int serverTick, long costNanos, boolean deterministic) {
-        throw new UnsupportedOperationException("P1 stub: RouteBudget.noteStart");
+        lastStartTick = serverTick;
+        if (deterministic) {
+            return;
+        }
+        refill(serverTick);
+        long cost = Math.max(costNanos, 0L);
+        long ms = (cost + 999_999L) / 1_000_000L;
+        balanceMs -= ms;
+        if (balanceMs < -capacityMs) {
+            balanceMs = -capacityMs;
+        }
     }
 
     /** The balance in milliseconds after refilling to {@code serverTick} (diagnostics and tests). */
     public double availableMs(int serverTick) {
-        throw new UnsupportedOperationException("P1 stub: RouteBudget.availableMs");
+        refill(serverTick);
+        return balanceMs;
     }
 
     /** Full bucket, no token taken (world unload, tests). */
     public void reset() {
-        throw new UnsupportedOperationException("P1 stub: RouteBudget.reset");
+        balanceMs = capacityMs;
+        lastRefillTick = UNSET;
+        lastStartTick = UNSET;
+    }
+
+    /**
+     * Applies refill up to {@code serverTick}: {@value #REFILL_MS_PER_TICK} ms per elapsed tick since the last
+     * refill, capped at {@code capacityMs}. A tick that moves backwards (or repeats) resets the clock without
+     * refilling, per the class contract.
+     */
+    private void refill(int serverTick) {
+        if (lastRefillTick == UNSET) {
+            lastRefillTick = serverTick;
+            return;
+        }
+        long elapsed = (long) serverTick - (long) lastRefillTick;
+        if (elapsed < 0) {
+            lastRefillTick = serverTick;
+            return;
+        }
+        if (elapsed > 0) {
+            balanceMs = Math.min(capacityMs, balanceMs + elapsed * REFILL_MS_PER_TICK);
+            lastRefillTick = serverTick;
+        }
     }
 }

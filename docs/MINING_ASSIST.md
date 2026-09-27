@@ -6,10 +6,14 @@ notice ore in a cave, remember lava, and recognise the palette of a structure. T
 (`MINING_ASSIST_DESIGN.md`, revision 2, kept outside this repository) has the section numbers quoted below;
 this page describes what is shipped.
 
-## Status: phase P0, sense in shadow
+## Status: P1 built, default still `sense` until flipped
 
-The shipped default mode is `sense`. In this phase the assist observes and writes logs. It changes nothing
-a bot does:
+Phase P1 (the opportunistic valuables detour) is built and tested, but the shipped default mode stays
+`sense` until the GameTest lane and the 4-bot cost gate have run clean (that flip, and the matching config
+and doc line, is the orchestrator's own last step of the phase, not part of the code in this repository
+version). A server that wants the detour today opts in explicitly with `miningAssist.mode` set to `detour`
+or `all` (see Modes). With the shipped default, P0's guarantee still holds: the assist only observes and
+writes logs, and changes nothing a bot does:
 
 - no detour to a valuable, no pause, no stop for a structure, no chat message, no LLM call;
 - no task is assigned or modified, and `OreDigTask` (like every other mining task) is not touched;
@@ -18,15 +22,17 @@ a bot does:
 
 What P0 exists for is measurement: how much the sensor costs per tick, what it sees, and what the POI scorer
 would have said. Later phases (detour, POI stop-and-notify, LLM confirmation, exploration) each ship behind
-their own mode and only after these numbers are known.
+their own mode and only after these numbers are known. P1 is the detour; it is described below.
 
 ## Modes
 
 | Mode | Meaning |
 |---|---|
 | `off` | The first statement of every hook, of the coordinator, of the gate and of the tick measurement is one static read and a return, and the placed-blocks file is not read at start-up. What still runs is the bare per-bot call and the once-per-tick dirty-flag check of the sidecar writer. |
-| `sense` | Sensor, shadow POI scoring and shadow logs. Nothing acts. Shipped default in P0. |
-| `detour`, `poi`, `all` | Reserved for later phases. In P0 they behave like `sense` (the sensor runs, nothing acts), except that the shadow log lines default to off outside `sense`. |
+| `sense` | Sensor, shadow POI scoring and shadow logs. Nothing acts. Shipped default. |
+| `detour` | Sensor plus the P1 opportunistic detour: a mining task may walk off its strip face to break a valuable it saw on the way, then return to the exact anchor (see below). |
+| `poi` | Reserved for P2 (deterministic POI stop-and-notify). Behaves like `sense` today: the sensor and the shadow POI scorer run, nothing acts. |
+| `all` | Every phase shipped so far at once: today this is the same as `detour` (P2 is not shipped yet). |
 
 Resolution order, first match wins:
 
@@ -124,10 +130,63 @@ are read in P0:
 | `poi.cavernDimensions` | `["minecraft:overworld"]` | Dimensions where the open-cavern signal counts. |
 | `poi.dedupeRadius` | 40 | Radius within which POI evidence counts as the same candidate site. |
 | `edits.sidecar` | true | Persist the placed-blocks record. |
-| `detour.announceMinValue` | 90 | Smallest raw value that gets an `assist_sighting` line. |
+| `detour.announceMinValue` | 90 | Smallest raw value that gets an `assist_sighting` line (and, in `detour`/`all` mode, the rare-find chat line). |
+| `detour.enabled` | true | Master switch of the detour itself; `detourActive()` is this AND the mode allowing it. |
+| `detour.minValue`, `detour.minScore` | 45, 1.5 | Admission thresholds of the detour's cost/value ranking (design 4.2). |
+| `detour.maxRadius`, `detour.maxUp`, `detour.maxDown` | 12, 2, 4 | How far off the strip face a detour may walk. |
+| `detour.leaseTicks`, `detour.minIntervalTicks`, `detour.maxPerMission` | 300, 400, 24 | Per-mission budget and cooldown (`MissionAssistLedger`). |
+| `detour.minFreeSlots`, `detour.startHpMargin`, `detour.lavaClearRadius` | 3, 4, 4 | Inventory reserve, extra hp margin to start, and how close a remembered lava cell may be. |
+| `route.bucketMs` | 100 | Server-wide millisecond budget for starting a detour route (`RouteBudget`); reconfigured live when the config reloads. |
+| `tick.startWorkMs`, `tick.abortWorkMs` | 38, 48 | Start and abort gates of the tick headroom; a running detour re-asks these before every break, route leg and drop chase (design 4.3/4.6). |
+| `safety.deepDarkVeto` | true | Whether the own-cell deep-dark biome vetoes a detour start and self-aborts a running one. |
 
-The other keys of the design (`route.*`, the remaining `detour.*` and `poi.*`, `safety.*`, `advisor.*`,
-`explore.*`) are parsed and validated but nothing reads them until their phase ships.
+The other keys of the design (the remaining `poi.*`, `advisor.*`, `explore.*`) are parsed and validated but
+nothing reads them until their phase ships.
+
+## The detour (P1)
+
+In `detour` or `all` mode, a mining task (currently only `OreDigTask`) may leave its strip face for a short,
+walk-only excursion to a valuable it already saw with an ordinary view ray, then return to the exact face it
+left. Nothing about this is a new privilege: the SAFE gate (mode, origin, TPS, hp, hazards, POI evidence,
+traps — design 4.4) is asked before the detour starts and again, live, before every break, every new route
+leg and every drop chase; any failure self-aborts the same tick and the bot walks back. Every action is
+preceded by the same exact-cell re-proof every other mining task uses; a ray hit is still only a nomination.
+
+- **Walk-only.** The detour only ever calls the ordinary walk-path start (`startSurfacePathTo`); it never digs
+  a shortcut through stone the way OreDig's own fallback paths sometimes do. A valuable that a walk-only route
+  cannot reach is skipped, not dug toward.
+- **Opportunistic, not a search.** It only reacts to sightings the sensor already made in shadow; it never
+  goes looking. A mission with nothing nearby worth the trip never detours.
+- **Bounded.** At most 12 members of one vein per detour, at most a handful of detours per mission
+  (`detour.maxPerMission`), a lease that lengthens a little with every break but is capped, and a mission-wide
+  budget of detour ticks. Two bots never claim the same cell (`OreClaims`, a soft lease, not a lock).
+- **Anchor invariant.** The strip-mining numbers (direction, leg, steps left, leg length) are never touched
+  during a detour; only the anchor face substitutes for the live feet in the checkpoint. This relies on those
+  four numbers changing only inside `stripMine`/`digTowardStep`/`digDownOneLayer`, which the detour code does
+  not call.
+- **A detour never fails the mission (I8).** Everything the engine does, past the mode-off check, runs inside
+  an exception fence: a defect there stops the movement and the miner, clears the published state and logs
+  once, but the mining task itself keeps running.
+- **Honest limits (design 12), carried over from the design as written:**
+  - The walk-only route crosses whatever cells the executor's raw A* chose; `Standability.isDangerous` omits
+    pressure plates and tripwire, so a trap first seen mid-route is only caught by the live TICK gate, not by
+    the start check.
+  - `GoalExecutor.madeReplanProgress`'s y-decrease credit and the mission's own replan/tick budgets are the
+    only backstop for a failure mid-excursion; the detour adds no new one.
+  - A pre-existing, unclaimed target or vein break by another bot is not claim-protected (only a fresh
+    `scanBonusOre` cell is); a double break is harmless because each bot's own exact-once ledger re-proves.
+  - The anchor invariant above depends on no other code path touching the four strip numbers while a detour
+    is live; it was true at the time this phase shipped and is worth re-checking if the strip-mining code
+    changes.
+
+### What changed for a bot
+
+With `detour` or `all` mode on: a bot mining with assist on may leave its strip face for up to about 12
+blocks, mine a short vein of a valuable it happened to see, and return to the exact face it left, walking
+back rather than teleporting. If the value found is at least `detour.announceMinValue` (default 90) and the
+bot has not announced one in the last 600 ticks, it says one line in chat, for example "Spotted diamond ore
+nearby, grabbing it." Nothing else about the mission changes: the same tool policy, the same strip pattern,
+the same anchor once it is back.
 
 The sensing radius is the existing `perception.radius` of the main config (default 16), capped at 24 blocks
 for the sensor (the ray budget is counted in rays, so an unbounded radius would make every ray longer with no

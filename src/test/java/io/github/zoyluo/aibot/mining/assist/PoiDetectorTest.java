@@ -3,8 +3,13 @@ package io.github.zoyluo.aibot.mining.assist;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.BOT;
 import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.OVERWORLD;
@@ -13,8 +18,77 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The pure parts of the PoiDetector adapter: scheduling, labels and log fields. The world-facing part is source-contract tested. */
+/**
+ * The pure parts of the PoiDetector adapter: scheduling, labels and log fields. {@link #refreshBiome} and
+ * {@link #evaluate} themselves need a real {@code AIPlayerEntity}/{@code ServerWorld}, which the pure JUnit lane
+ * cannot construct (review round, P1 contract G.5): those two methods are pinned here as source-contract checks
+ * on the comment-stripped production text instead of exercised live. The live behaviour (a real biome read,
+ * {@code deepDark}/{@code poiStructureScore} filled) is covered by the GameTest lane and by
+ * {@code MiningAssistStateTest}'s accessor tests.
+ */
 class PoiDetectorTest {
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path ASSIST = MAIN.resolve("mining/assist");
+
+    /** Source without comments, so a Javadoc mentioning a call is not mistaken for the call itself. */
+    private static String code(Path path) throws IOException {
+        return Files.readString(path).replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("//[^\\n]*", " ");
+    }
+
+    private static int count(String text, String needle) {
+        Matcher matcher = Pattern.compile(Pattern.quote(needle)).matcher(text);
+        int found = 0;
+        while (matcher.find()) {
+            found++;
+        }
+        return found;
+    }
+
+    /** One method of a comment-free source: from its signature to its closing brace at method indentation. */
+    private static String method(String source, String signature) {
+        int start = source.indexOf(signature);
+        assertTrue(start >= 0, signature + " must exist");
+        int end = source.indexOf("\n    }\n", start);
+        assertTrue(end > start, signature + " must end with a method-level closing brace");
+        return source.substring(start, end);
+    }
+
+    // ---- P1 (F.3, M18): refreshBiome moved the one own-cell biome read out of evaluate --------------------
+
+    @Test
+    void refreshBiomeReadsTheFeetBiomeAndNotesWhenItWasReadSourceContract() throws IOException {
+        String detector = code(ASSIST.resolve("PoiDetector.java"));
+        String refreshBiome = method(detector,
+                "public static void refreshBiome(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {");
+        assertTrue(refreshBiome.contains("world.getBiome(feet)"), "the own-cell biome read moved here, unchanged");
+        assertTrue(refreshBiome.contains("BlockPos feet = bot.getBlockPos();"));
+        assertTrue(refreshBiome.contains("state.noteBiomeRead(serverTick);"),
+                "so DetourSafetyGate item 8 can tell whether the fact is fresh");
+    }
+
+    @Test
+    void evaluateCallsRefreshBiomeAndRecordsThePoiScoreSourceContract() throws IOException {
+        String detector = code(ASSIST.resolve("PoiDetector.java"));
+        String evaluate = method(detector,
+                "public static Result evaluate(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {");
+        assertTrue(evaluate.contains("refreshBiome(bot, state, world, serverTick);"),
+                "evaluate no longer reads the biome itself");
+        assertTrue(evaluate.contains("state.notePoiScore(serverTick, score.s());"),
+                "design 4.4 item 9: the SAFE gate reads this score, so it must be timestamped when it is written");
+    }
+
+    @Test
+    void exactlyOneBiomeReadRemainsInTheWholeAssistPackage() throws IOException {
+        int biomeReads = 0;
+        try (var stream = Files.walk(ASSIST)) {
+            for (Path file : stream.filter(p -> p.toString().endsWith(".java")).toList()) {
+                biomeReads += count(code(file), ".getBiome(");
+            }
+        }
+        assertEquals(1, biomeReads, "refreshBiome must be the only place in the package that reads the world's biome");
+    }
+
+    // ---- pure scheduling, labels, log fields --------------------------------------------------------------
     @Test
     void firstCallArmsAStaggerOfUpToFifteenTicksThenEvaluatesEveryTwentyTicks() {
         MiningAssistState state = new MiningAssistState(BOT);

@@ -160,6 +160,7 @@ Mining Assist（见 [MINING_ASSIST.md](MINING_ASSIST.md)）在真实任务里默
 - `scripts/evidence_validate.sh` 要求 manifest 里的 `mining_assist_mode` 与 effective config 中的模式一致，并拒绝任何非 `off` 的 certifying bundle（原因 `certifying_bundle_has_mining_assist_mode`）。在 Mining Assist 出现之前封存的旧 bundle 既没有该键也没有该配置段，仍按 `off` 校验通过；只有其中一处存在则判为不一致。`--self-test` 覆盖了这些情形。
 - `scripts/ci_static_check.sh` 检查 `evidence_run.sh` 的默认值与两处 `AIBOT_MINING_ASSIST` 钉死，并拒绝任何 workflow 把模式设为非 `off`（环境变量、`--assist` 参数或 `miningAssist` 配置段）。
 - GameTest 与 `/aibot verify` harness 在 `AIBotHarnessTestMod` 中调用 `MiningAssistRuntime.setHarnessDefaultOff(true)`（`true` 表示 harness 默认关闭），此后 gate 对所有 bot 关闭、各类钩子什么都不做，直到某个测试用 `MiningAssistRuntime.forceEnable(uuid)` 为单个 bot 显式开启；显式的环境变量或配置文件模式仍然优先。
+- P1（顺路绕路，见 [MINING_ASSIST.md](MINING_ASSIST.md) 的“The detour (P1)”）已经实现，但 harness 默认仍是 `off`；`assist_mine_lane` 这一条 verify 场景是唯一按名字显式选择 `detour` 模式的通道，其余场景与上面列出的三条脚本一样固定钉死在 `off`，不受 P1 落地影响。`OreDigOpportunisticGameTests`（`src/gametest/java/io/github/zoyluo/aibot/mining/assist`）是 P1 自己的 GameTest 覆盖，跑在这条独立通道里，同样用 `forceEnable` 逐 bot 显式开启，不改变上面任何一条钉死规则。
 
 ## CI 约束
 

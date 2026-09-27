@@ -1,8 +1,15 @@
 package io.github.zoyluo.aibot.task;
 
+import io.github.zoyluo.aibot.mining.assist.DetourPolicy;
+import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.aibot.mining.assist.ObservedReach;
+import io.github.zoyluo.aibot.mining.assist.SafeGate;
+import io.github.zoyluo.aibot.mining.assist.SafeReason;
+import io.github.zoyluo.aibot.mining.assist.SightingLedger;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * The IDLE half of the detour engine: decides, for one bot at one moment, whether a detour may start and on what
@@ -106,11 +113,148 @@ final class DetourStartSelector {
 
     /** Whether a start check is due at task tick {@code taskTick}: {@code (taskTick + staggerSeed) % START_CHECK_INTERVAL_TICKS == 0}. */
     static boolean checkDue(int taskTick, int staggerSeed) {
-        throw new UnsupportedOperationException("P1 stub: DetourStartSelector.checkDue");
+        return Math.floorMod(taskTick + staggerSeed, START_CHECK_INTERVAL_TICKS) == 0;
     }
 
     /** The procedure of the class comment. */
     static Result select(DetourHost host) {
-        throw new UnsupportedOperationException("P1 stub: DetourStartSelector.select");
+        if (!host.ownersIdle() || host.now() < MIN_TASK_AGE_TICKS) {
+            return Result.NONE;
+        }
+        MissionAssistLedger.Entry ledger = host.ledger();
+        MissionAssistLedger.StartVerdict verdict =
+                ledger.startVerdict(host.serverTick(), host.config(), host.taskMaxElapsedTicks());
+        if (verdict != MissionAssistLedger.StartVerdict.OK) {
+            return Result.NONE;
+        }
+        List<SightingLedger.Sighting> sightings = host.sightings();
+        if (sightings.isEmpty()) {
+            return Result.NONE;
+        }
+        DetourHost.Anchor anchor = host.captureAnchor();
+        List<DetourPolicy.Ranked> ranked = DetourPolicy.rank(
+                sightings, host.feet(), host.eyePos(), anchor.face(), host.targetLock(), host.config());
+        if (ranked.isEmpty()) {
+            return Result.NONE;
+        }
+        if (host.safety(SafeGate.Stage.START, null, null) != SafeReason.OK) {
+            return Result.NONE;
+        }
+
+        int reproofs = 0;
+        int evaluated = 0;
+        for (DetourPolicy.Ranked r : ranked) {
+            BlockPos pos = r.sighting().pos();
+            String blockId = r.sighting().blockId();
+            int value = r.value();
+
+            if (host.excluded(pos)) {
+                logSkip(host, pos, blockId, value, "excluded");
+                continue;
+            }
+            if (host.isTargetOre(blockId) || host.bonusOwns(pos, blockId)) {
+                continue;
+            }
+            if (host.claimedByOther(pos)) {
+                logSkip(host, pos, blockId, value, "claimed");
+                continue;
+            }
+            if (reproofs >= MAX_REPROOFS) {
+                break;
+            }
+            reproofs++;
+            DetourHost.Seen seen = host.observeBlockIs(pos, blockId);
+            if (seen == DetourHost.Seen.GONE) {
+                host.forgetSighting(pos);
+                logSkip(host, pos, blockId, value, "gone");
+                continue;
+            }
+            if (seen == DetourHost.Seen.UNKNOWN) {
+                logSkip(host, pos, blockId, value, "unknown");
+                continue;
+            }
+            // PRESENT: an "evaluated" candidate (bounds the pose/reach cost of this check).
+            if (evaluated >= MAX_EVALUATED) {
+                break;
+            }
+            evaluated++;
+
+            if (!host.capacityOk(pos, blockId)) {
+                logSkip(host, pos, blockId, value, "capacity");
+                excludeCluster(host, r.cluster(), SOFT_EXCLUDE_TICKS);
+                continue;
+            }
+
+            DetourHost.Pose pose = host.poseFor(pos, anchor, Set.of());
+            if (pose == null) {
+                logSkip(host, pos, blockId, value, "no_pose");
+                excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
+                continue;
+            }
+
+            if (!pose.zeroTransit()) {
+                if (ledger.zeroTransitOnly(host.serverTick())) {
+                    logSkip(host, pos, blockId, value, "route_failures");
+                    continue;
+                }
+                ObservedReach.Result reach = host.observedReach(host.feet(), pose.stand());
+                if (reach.status() == ObservedReach.Status.UNREACHABLE) {
+                    logSkip(host, pos, blockId, value, "unreachable_observed");
+                    excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
+                    continue;
+                }
+                if (reach.status() == ObservedReach.Status.REACHABLE
+                        && !DetourPolicy.pathLengthOk(reach.length(), host.config())) {
+                    logSkip(host, pos, blockId, value, "path_too_long");
+                    excludeCluster(host, r.cluster(), CLUSTER_EXCLUDE_TICKS);
+                    continue;
+                }
+                // INCONCLUSIVE, or REACHABLE within the length limit: go on.
+                if (!host.routeStartAllowed()) {
+                    return Result.none("budget");
+                }
+            }
+
+            int bandFloor = Math.min(host.feet().getY(), Math.min(pose.stand().getY(), pos.getY()));
+            if (bandFloor <= host.lavaBandTopY() && !host.sealMaterialOk()) {
+                logSkip(host, pos, blockId, value, "seal_material");
+                excludeCluster(host, r.cluster(), SOFT_EXCLUDE_TICKS);
+                continue;
+            }
+
+            DetourHost.ToolVerdict toolVerdict = host.toolVerdict(pos, 1);
+            if (toolVerdict == DetourHost.ToolVerdict.NO_TOOL) {
+                logSkip(host, pos, blockId, value, "tool");
+                excludeCluster(host, r.cluster(), TOOL_EXCLUDE_TICKS);
+                continue;
+            }
+            if (toolVerdict == DetourHost.ToolVerdict.WEAR) {
+                logSkip(host, pos, blockId, value, "tool_wear");
+                excludeCluster(host, r.cluster(), TOOL_EXCLUDE_TICKS);
+                continue;
+            }
+
+            if (!host.tryClaim(pos)) {
+                logSkip(host, pos, blockId, value, "claimed");
+                continue;
+            }
+
+            return Result.of(new Selection(pos, blockId, value, r.score(), pose, r.cluster(), anchor));
+        }
+        return Result.NONE;
+    }
+
+    /** {@code host.log("ore_dig_detour_skip", "reason", r, "pos", pos, "block", blockId, "value", v)}, gated by {@code host.shouldLogSkip}. */
+    private static void logSkip(DetourHost host, BlockPos pos, String blockId, int value, String reason) {
+        if (host.shouldLogSkip(pos)) {
+            host.log("ore_dig_detour_skip", "reason", reason, "pos", pos, "block", blockId, "value", value);
+        }
+    }
+
+    /** Excludes every cell of {@code cluster} for {@code ttlServerTicks} server ticks. */
+    private static void excludeCluster(DetourHost host, List<BlockPos> cluster, int ttlServerTicks) {
+        for (BlockPos cell : cluster) {
+            host.exclude(cell, ttlServerTicks);
+        }
     }
 }

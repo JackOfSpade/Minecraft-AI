@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.mining.assist;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -366,6 +367,31 @@ class MiningAssistRuntimeTest {
         assertNull(MiningAssistRuntime.testTpsDegraded());
         assertFalse(MiningAssistRuntime.isForced(BOT));
         assertEquals(0, MiningAssistRegistry.size());
+    }
+
+    // ---- P1 (F.4, M5): the detour's own server-wide statics are lifecycle-cleared too ------------
+
+    @Test
+    void clearWorldRuntimeAlsoClearsTheDetourStatics() {
+        MiningAssistRuntime.install(null, NO_ENV);
+        assertTrue(OreClaims.tryClaim("minecraft:overworld", BOT, new BlockPos(1, 2, 3).asLong(), 0));
+        assertEquals(1, OreClaims.size());
+        MissionAssistLedger.get("adhoc:" + BOT, 0).noteStart(0);
+        assertEquals(1, MissionAssistLedger.size());
+        RouteBudget.shared().noteStart(0, 50_000_000L, false);
+
+        MiningAssistRuntime.clearWorldRuntime();
+
+        assertEquals(0, OreClaims.size(), "a detour's soft claims must not outlive the world");
+        assertEquals(0, MissionAssistLedger.size(), "per-mission bookkeeping is server-wide, not per-bot");
+        assertEquals(100.0D, RouteBudget.shared().availableMs(0), 1.0e-9D, "reset gives a full bucket back");
+    }
+
+    @Test
+    void installReconfiguresTheSharedRouteBudgetFromTheLiveConfig() {
+        MiningAssistRuntime.install(json("{\"miningAssist\":{\"route\":{\"bucketMs\":40}}}"), NO_ENV);
+        assertEquals(40.0D, RouteBudget.shared().availableMs(0), 1.0e-9D,
+                "the shared route budget's capacity tracks the live config, not just its own default");
     }
 
     // ---- file loading ----------------------------------------------------------------------------

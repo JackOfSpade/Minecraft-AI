@@ -1,10 +1,23 @@
 package io.github.zoyluo.aibot.task;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
+import io.github.zoyluo.aibot.mining.assist.AssistGate;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
+import io.github.zoyluo.aibot.mining.assist.PoiDetector;
+import io.github.zoyluo.aibot.mining.assist.PoiScorer;
 import io.github.zoyluo.aibot.mining.assist.SafeGate;
 import io.github.zoyluo.aibot.mining.assist.SafeGateInputs;
 import io.github.zoyluo.aibot.mining.assist.SafeReason;
+import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+
+import java.util.UUID;
 
 /**
  * The Minecraft side of the detour SAFE gate (mining-assist design 4.4, invariant I7): reads live state and hands
@@ -72,11 +85,108 @@ public final class DetourSafetyGate {
      * yet); when given they extend the lava and trap radius checks to those cells.
      */
     public static SafeGateInputs inputs(AIPlayerEntity bot, SafeGate.Stage stage, BlockPos pose, BlockPos ore) {
-        throw new UnsupportedOperationException("P1 stub: DetourSafetyGate.inputs");
+        UUID uuid = bot.getUuid();
+        MiningAssistConfig cfg = MiningAssistRuntime.config();
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(uuid);
+        int tick = MiningAssistRuntime.serverTick(bot);
+        SafeGateInputs.Builder b = SafeGateInputs.builder();
+
+        if (stage.reads(1)) {
+            boolean modeAllowsDetour = cfg.detourActive()
+                    && AssistGate.denyReason(cfg.mode(), cfg.harnessOff(), MiningAssistRuntime.isForced(uuid),
+                            true, false, false) == null;
+            boolean originReal = TaskManager.INSTANCE.activeOrigin(bot)
+                    .map(origin -> AssistGate.isRealOrigin(origin.kind().name()))
+                    .orElse(false);
+            b.modeAllowsDetour(modeAllowsDetour)
+                    .originReal(originReal)
+                    .auditSession(MiningEvidenceAudit.hasSession(uuid));
+        }
+        if (stage.reads(2)) {
+            boolean tpsDegraded = MiningAssistRuntime.tpsDegraded(bot);
+            b.tpsDegraded(tpsDegraded);
+            if (stage.isStart()) {
+                b.headroomStartOk(MiningAssistRuntime.headroom().canStart(tpsDegraded));
+            } else {
+                b.headroomAbort(MiningAssistRuntime.headroom().shouldAbort(tpsDegraded));
+            }
+        }
+        if (stage.reads(3)) {
+            AIBotConfig.Combat combat = AIBotConfig.get().combat();
+            AIBotConfig.Survival survival = AIBotConfig.get().survival();
+            b.health(bot.getHealth())
+                    .retreatHp(combat.retreatHp())
+                    .startHpMargin(cfg.detour().startHpMargin())
+                    .hurtTime(bot.hurtTime)
+                    .onFire(bot.isOnFire())
+                    .inLava(bot.isInLava())
+                    .submerged(bot.isSubmergedInWater())
+                    .touchingWater(bot.isTouchingWater())
+                    .foodLevel(bot.getHungerManager().getFoodLevel())
+                    .hungerCritical(survival.hungerCriticalThreshold());
+        }
+        if (stage.reads(4)) {
+            b.waterRescueActive(NavSafetyNet.INSTANCE.isWaterRescueActive(bot))
+                    .pausedDepth(TaskManager.INSTANCE.pausedDepth(bot))
+                    .userPaused(TaskManager.INSTANCE.isUserPaused(bot))
+                    .originSafety(TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false));
+        }
+        if (stage.reads(5)) {
+            b.threatCooldown(DangerWatcher.INSTANCE.threatCooldownActive(bot, tick))
+                    .shelterEpisode(DangerWatcher.INSTANCE.shelterEpisodeActive(bot));
+        }
+        if (stage.reads(6)) {
+            b.hostilePressure(DangerWatcher.hasObservableHostilePressure(bot));
+        }
+        if (stage.reads(7)) {
+            b.lavaInThreatBox(DangerWatcher.observedLavaInThreatBox(bot).isPresent());
+            int radius = cfg.detour().lavaClearRadius();
+            boolean hazardLavaNear = state != null && (
+                    state.hazards().anyLavaWithin(bot.getBlockPos(), radius)
+                    || (pose != null && state.hazards().anyLavaWithin(pose, radius))
+                    || (ore != null && state.hazards().anyLavaWithin(ore, radius)));
+            b.hazardLavaNear(hazardLavaNear);
+        }
+        if (stage.reads(8)) {
+            if (state == null) {
+                b.deepDark(false);
+            } else {
+                if (MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)) {
+                    ServerWorld world = bot.getEntityWorld();
+                    PoiDetector.refreshBiome(bot, state, world, tick);
+                }
+                b.deepDark(cfg.safety().deepDarkVeto() && state.deepDark());
+            }
+        }
+        if (stage.reads(9)) {
+            if (state == null) {
+                b.poiEvidenceStale(true);
+            } else {
+                boolean stale = cfg.poi().enabled()
+                        && MiningAssistState.staleOrNever(tick, state.poiScoreTick(), 3 * PoiScorer.EVAL_INTERVAL_TICKS);
+                boolean anyCandidateSatisfied = state.poiCandidates().snapshot().stream()
+                        .anyMatch(candidate -> candidate.hysteresis().satisfied(tick));
+                b.poiEvidenceStale(stale)
+                        .poiStructureScore(state.poiStructureScore())
+                        .poiWindowVeto(SafeGate.poiWindowVeto(state.poiWindow()))
+                        .poiCandidatePending(SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,
+                                CAVERN_BLOCKS_DETOUR))
+                        .inNoDetourZone(false);
+            }
+        }
+        if (stage.reads(10)) {
+            int radius = 3;
+            boolean trapNear = state != null && (
+                    state.hazards().anyTrapWithin(bot.getBlockPos(), radius)
+                    || (pose != null && state.hazards().anyTrapWithin(pose, radius))
+                    || (ore != null && state.hazards().anyTrapWithin(ore, radius)));
+            b.trapNear(trapNear);
+        }
+        return b.build();
     }
 
     /** {@code SafeGate.evaluate(inputs(bot, stage, pose, ore), stage)}. */
     public static SafeReason evaluate(AIPlayerEntity bot, SafeGate.Stage stage, BlockPos pose, BlockPos ore) {
-        throw new UnsupportedOperationException("P1 stub: DetourSafetyGate.evaluate");
+        return SafeGate.evaluate(inputs(bot, stage, pose, ore), stage);
     }
 }

@@ -54,3 +54,31 @@ Mining Assist 的传感器在真实任务里只观察、只写日志,不改变 b
 - 它以为看到了什么:`assist_poi_band`、`assist_sighting` 与摘要里的 `best_sighting`。这些只是传感器的提名,不代表 bot 真的挖到了。
 
 如果某次排查发现这些日志仍不足以判断传感器为什么没有提名一个后来被挖到的矿,按上面的自我改进原则,只在传感这一类请求里补缺失的那条,不要整体调高详细度。
+
+## Mining Assist 日志(P1 顺路捡矿)
+
+P1 给挖矿任务加了一段"顺路绕路":走位挖一段路上原生看到的贵重矿(design 4 节),默认仍是
+`sense`(不绕路),要绕路需要把 `miningAssist.mode` 显式设成 `detour`(或 `all`)。下表是 P1
+新增的事件,格式与上面 `assist_*` 一行保持一致,同样不逐 tick 记录,只在阶段边界、跳过、
+异常和结束时各写一条。
+
+| 类别 | event | 何时写出 | 关键字段 |
+|---|---|---|---|
+| TASK | `ore_dig_detour_start` | 一次绕路开始 | `block`、`pos`、`value`、`score`、`cluster`、`members`、`pose`、`zero_transit`、`anchor`、`locked` |
+| TASK | `ore_dig_detour_skip` | 某个候选或矿脉成员被跳过(排除、已认领、消失、无法站位、路线太长……);每格每 600 tick 至多一条 | `reason`、`pos`、`block`、`value` |
+| TASK | `ore_dig_detour_route` | 每一次接近、追赶掉落物或返程的寻路尝试 | `leg`(`approach`/`chase`/`return`)、`to`、`result`、`attempt`、`reason` |
+| TASK | `ore_dig_detour_break` | 每挖到一块 | `pos`、`block`、`breaks`、`members`、`lease_left` |
+| TASK | `ore_dig_detour_seal` | 每一次封堵挖出的流体 | `cell`、`seals` |
+| TASK | `ore_dig_detour_drop_lost` | 掉落物等待超时或落点不可站立 | `cell`、`waited`、`reason`(`timeout`/`no_stand`) |
+| TASK | `ore_dig_detour_abort` | 绕路中止(含暂停时的中止) | `reason`(design 4.12 的中止原因)、`phase`、`pos`、`breaks` |
+| TASK | `ore_dig_detour_end` | 一次绕路彻底结束(FINISH) | `reason`、`breaks`、`members`、`seals`、`drops_lost`、`ticks`、`abort` |
+| TASK | `ore_dig_detour_orphan` | 协调器发现发布的绕路已经失去归属(任务被替换、结束或状态过期),代为释放认领并清空发布的元组 | `cause`(`owner_changed`/`not_running`/`phase_idle`/`stale`)、`phase`、`claims_released` |
+| TASK | `ore_dig_detour_cursor_drift` | `restoreAnchorNumbers` 发现走带位置和出发前记的锚点对不上,已经按锚点修正 | `dir`、`leg`、`steps`、`len` |
+| WARN | `ore_dig_detour_return_rebased` | 走位返程连续失败,只能原地放弃这次绕路并禁用本任务后续绕路(响亮记录,便于事后核查) | `reason`、`unsafe`、`at`、`anchor`、`breaks` |
+| DANGER | `ore_dig_detour_lava_claimed` | 绕路自己认领了一次岩浆险情(不再走通用的 Evade/暂停路径) | `lava`、`phase` |
+| TASK | `ore_dig_detour_resume_return` | 暂停后恢复绕路时,走位返回锚点的一次尝试起止 | `face`、`attempt`、`result` |
+
+绕路本身不会永久失败任务(design I8):找不到东西可以顺路挖,或者绕路中途撞上任何安全
+门槛,都只是安静地放弃/中止,原来的挖矿任务照常继续。这些事件因此都用来回答"这次绕路
+绕成了没有、为什么没绕、值不值得":有没有找到顺路的矿看 `ore_dig_detour_start`/`_skip`,
+中途出了什么事看 `_abort`/`_route`,一次绕路到底挣了几块矿看 `_end`。

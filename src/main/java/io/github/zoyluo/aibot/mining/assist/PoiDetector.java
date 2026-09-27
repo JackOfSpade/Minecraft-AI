@@ -101,6 +101,18 @@ public final class PoiDetector {
     }
 
     /**
+     * P1 (mining-assist design 4.4 item 8, M18): reads the own-cell biome id and stores it, independent of
+     * {@code poi.enabled}. This is the only place in the package that reads the world's biome (moved out of
+     * {@link #evaluate}, which used to run this only inside the shadow POI pass); {@code task/DetourSafetyGate}
+     * calls it directly when {@code MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)}.
+     */
+    public static void refreshBiome(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {
+        BlockPos feet = bot.getBlockPos();
+        state.setBiome(world.getBiome(feet).getKey().map(key -> key.getValue().toString()).orElse(""));
+        state.noteBiomeRead(serverTick);
+    }
+
+    /**
      * True when this bot's evaluation is due at {@code serverTick}. The first call arms a stagger of
      * {@code uuid.hashCode() & 15} ticks (so bots do not all evaluate on the same tick) and returns
      * false; afterwards it is due every {@value PoiScorer#EVAL_INTERVAL_TICKS} ticks.
@@ -127,7 +139,7 @@ public final class PoiDetector {
         state.enterDimension(dimension);
 
         BlockPos feet = bot.getBlockPos();
-        state.setBiome(world.getBiome(feet).getKey().map(key -> key.getValue().toString()).orElse(""));
+        refreshBiome(bot, state, world, serverTick);
 
         EntityEvidence entities = scanEntities(bot, world, radius);
         state.counters().entityScans++;
@@ -141,6 +153,7 @@ public final class PoiDetector {
         PoiSignals signals = PoiAssembler.assemble(state.poiWindow(), bot.getX(), bot.getY(), bot.getZ(),
                 entities, openness, radius, dimension, config.poi().cavernDimensions());
         PoiScorer.PoiScore score = PoiScorer.evaluate(signals);
+        state.notePoiScore(serverTick, score.s());
         PoiScorer.Band band = score.band();
 
         BlockPos anchor = score.centroidBlock() != null ? score.centroidBlock() : feet;

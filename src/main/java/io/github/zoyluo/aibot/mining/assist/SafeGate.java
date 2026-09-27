@@ -82,7 +82,108 @@ public final class SafeGate {
     public static SafeReason evaluate(SafeGateInputs inputs, Stage stage) {
         Objects.requireNonNull(inputs, "inputs");
         Objects.requireNonNull(stage, "stage");
-        throw new UnsupportedOperationException("P1 stub: SafeGate.evaluate");
+
+        if (stage.reads(1)) {
+            if (!inputs.modeAllowsDetour()) {
+                return SafeReason.MODE;
+            }
+            if (!inputs.originReal()) {
+                return SafeReason.ORIGIN;
+            }
+            if (inputs.auditSession()) {
+                return SafeReason.AUDIT;
+            }
+        }
+        if (stage.reads(2)) {
+            if (inputs.tpsDegraded()) {
+                return SafeReason.TPS;
+            }
+            boolean headroomFails = stage.isStart() ? !inputs.headroomStartOk() : inputs.headroomAbort();
+            if (headroomFails) {
+                return SafeReason.HEADROOM;
+            }
+        }
+        if (stage.reads(3)) {
+            boolean hpFails = stage.isStart()
+                    ? inputs.health() < inputs.retreatHp() + inputs.startHpMargin()
+                    : inputs.health() <= inputs.retreatHp();
+            if (hpFails) {
+                return SafeReason.HP;
+            }
+            if (inputs.hurtTime() > 0) {
+                return SafeReason.HURT;
+            }
+            if (inputs.onFire()) {
+                return SafeReason.ON_FIRE;
+            }
+            if (inputs.inLava()) {
+                return SafeReason.IN_LAVA;
+            }
+            if (inputs.submerged()) {
+                return SafeReason.SUBMERGED;
+            }
+            if (inputs.touchingWater()) {
+                return SafeReason.TOUCHING_WATER;
+            }
+            if (inputs.foodLevel() <= inputs.hungerCritical()) {
+                return SafeReason.FOOD;
+            }
+        }
+        if (stage.reads(4)) {
+            if (inputs.waterRescueActive()) {
+                return SafeReason.WATER_RESCUE;
+            }
+            if (inputs.pausedDepth() > 0) {
+                return SafeReason.PAUSED;
+            }
+            if (inputs.userPaused()) {
+                return SafeReason.USER_PAUSED;
+            }
+            if (inputs.originSafety()) {
+                return SafeReason.ORIGIN_SAFETY;
+            }
+        }
+        if (stage.reads(5)) {
+            if (inputs.threatCooldown()) {
+                return SafeReason.THREAT_COOLDOWN;
+            }
+            if (inputs.shelterEpisode()) {
+                return SafeReason.SHELTER_EPISODE;
+            }
+        }
+        if (stage.reads(6)) {
+            if (inputs.hostilePressure()) {
+                return SafeReason.HOSTILE_PRESSURE;
+            }
+        }
+        if (stage.reads(7)) {
+            if (inputs.lavaInThreatBox()) {
+                return SafeReason.LAVA_THREAT_BOX;
+            }
+            if (inputs.hazardLavaNear()) {
+                return SafeReason.HAZARD_LAVA;
+            }
+        }
+        if (stage.reads(8)) {
+            if (inputs.deepDark()) {
+                return SafeReason.DEEP_DARK_BIOME;
+            }
+        }
+        if (stage.reads(9)) {
+            if (inputs.poiEvidenceStale()
+                    || inputs.poiStructureScore() >= POI_S_LIMIT
+                    || inputs.poiWindowVeto()
+                    || inputs.poiCandidatePending()
+                    || inputs.inNoDetourZone()) {
+                return SafeReason.POI_EVIDENCE;
+            }
+        }
+        if (stage.reads(10)) {
+            if (inputs.trapNear()) {
+                return SafeReason.TRAP_SPOT;
+            }
+        }
+        return SafeReason.OK;
     }
 
     /**
@@ -92,7 +193,26 @@ public final class SafeGate {
      * flag-only entries. A null or empty window gives false.
      */
     public static boolean poiWindowVeto(PoiEvidenceWindow window) {
-        throw new UnsupportedOperationException("P1 stub: SafeGate.poiWindowVeto");
+        if (window == null || window.isEmpty()) {
+            return false;
+        }
+        for (PoiEvidenceWindow.Entry entry : window.structuralEntries()) {
+            if (vetoes(entry)) {
+                return true;
+            }
+        }
+        for (PoiEvidenceWindow.Entry entry : window.flagOnlyEntries()) {
+            if (vetoes(entry)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean vetoes(PoiEvidenceWindow.Entry entry) {
+        return entry.bucket() == PoiBucket.SCULK_STRUCT
+                || entry.bucket() == PoiBucket.SPAWNER
+                || PoiEvidenceFlags.has(entry.flags(), PoiEvidenceFlags.REINFORCED_DEEPSLATE);
     }
 
     /**
@@ -108,6 +228,12 @@ public final class SafeGate {
      */
     public static boolean candidatePending(PoiScorer.Band lastBand, boolean anyCandidateSatisfied,
                                            boolean cavernBlocksDetour) {
-        throw new UnsupportedOperationException("P1 stub: SafeGate.candidatePending");
+        PoiScorer.Band band = lastBand == null ? PoiScorer.Band.NONE : lastBand;
+        boolean bandPending = switch (band) {
+            case NONE -> false;
+            case CAVERN_ONLY -> cavernBlocksDetour;
+            case POSSIBLE, STRUCTURE_CERTAIN, MANDATORY -> true;
+        };
+        return bandPending || anyCandidateSatisfied;
     }
 }
