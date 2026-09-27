@@ -128,14 +128,14 @@ grave system, packet-only marker+hologram at your death spot (nothing written
 to the world, so it can't leak or crash-corrupt), 10-minute despawn with
 quick-collect, and an admin loot-backup safety net (`/graves rollback`,
 `/graves restore`) beyond vanilla's normal item despawn. No client jar
+involved, so it isn't exposed to the client-rendering API break that killed
+DeathMarker. https://modrinth.com/mod/fiw-graves
 
 DeathCompass (by Nikrecs) stacks with Fiw Graves: on respawn it puts a
 lodestone-targeted compass pointing at your last death spot straight into
 your inventory (drops at your feet if the inventory is full). Zero config,
 server-side/singleplayer, requires Architectury API (below, added alongside
 it) plus Fabric API (already installed).
-involved, so it isn't exposed to the client-rendering API break that killed
-DeathMarker. https://modrinth.com/mod/fiw-graves
 
 DeathMarker (v1.0.0-1.21-fabric) was removed 2026-09-27: it crashes the client
 on load (NoClassDefFoundError on Fabric API's WorldRenderEvents). Its only
