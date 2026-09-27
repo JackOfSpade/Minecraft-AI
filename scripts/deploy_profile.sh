@@ -5,7 +5,8 @@
 #
 #   1. refuses to run while a Minecraft game client is running (the jar would be locked);
 #   2. builds the mod jar (skipped with --no-build);
-#   3. copies build/libs/aibot-*.jar into <profile>/mods, replacing any older aibot-*.jar;
+#   3. copies build/libs/Minecraft-AI-*.jar into <profile>/mods, replacing any older Minecraft-AI-*.jar
+#      (and any older aibot-*.jar left over from before the jar was renamed);
 #   4. applies the LLM settings from the gitignored .env to <profile>/config/aibot.json (the "llm"
 #      section; the pre-rename "deepseek" section is migrated) and makes sure logging is enabled
 #      (skipped with --no-config). The API key is never printed;
@@ -88,9 +89,9 @@ if [ "$DO_BUILD" = 1 ]; then
 fi
 
 # ---- 3. install the jar
-JAR="$(ls -1 build/libs/aibot-*.jar 2>/dev/null | grep -v -E -- '-(sources|dev)\.jar$' | head -n1 || true)"
+JAR="$(ls -1 build/libs/Minecraft-AI-*.jar 2>/dev/null | grep -v -E -- '-(sources|dev)\.jar$' | head -n1 || true)"
 [ -n "$JAR" ] && [ -f "$JAR" ] || die "no built jar in build/libs (build first)"
-for old in "$MODS_DIR"/aibot-*.jar; do
+for old in "$MODS_DIR"/Minecraft-AI-*.jar "$MODS_DIR"/aibot-*.jar; do
   [ -e "$old" ] && rm -f -- "$old"
 done
 cp -- "$JAR" "$MODS_DIR/"

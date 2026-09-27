@@ -2,14 +2,11 @@
   "schemaVersion": 1,
   "id": "aibot",
   "version": "${version}",
-  "name": "AIBot",
-  "description": "A Minecraft Fabric mod that lets an AI act as a real player in the world.",
-  "authors": [
-    "zoyluo"
-  ],
+  "name": "Minecraft-AI",
+  "description": "Forked from zoyluo/mc_aiplayer.",
   "contact": {
-    "homepage": "https://github.com/zoyluoblue/mc_aiplayer",
-    "sources": "https://github.com/zoyluoblue/mc_aiplayer"
+    "homepage": "https://github.com/JackOfSpade/Minecraft-AI",
+    "sources": "https://github.com/JackOfSpade/Minecraft-AI"
   },
   "license": "MIT",
   "environment": "*",

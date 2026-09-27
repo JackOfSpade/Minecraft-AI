@@ -24,10 +24,12 @@ THIS PROJECT'S OWN MODS (install into the profile's "mods" folder)
    Required by the aibot mod (see fabric.mod.json "depends"), and by nearly
    every mod below.
 
-2. AIBot (this project)
-   File: aibot-<mod_version>.jar, built from this repo
-   (gradlew build, then build/libs/aibot-*.jar; bash scripts/deploy_profile.sh
-   builds it and installs it into a profile, see docs/DEPLOY_LOCAL.md).
+2. AIBot / Minecraft-AI (this project)
+   File: Minecraft-AI-<mod_version>.jar, built from this repo
+   (gradlew build, then build/libs/Minecraft-AI-*.jar; bash scripts/deploy_profile.sh
+   builds it and installs it into a profile, see docs/DEPLOY_LOCAL.md). In-game the
+   mod displays as "Minecraft-AI" with no author (renamed 2026-09-27 to drop the
+   attribution left over from the zoyluo/mc_aiplayer fork this project started from).
    Requires Fabric API (#1).
 
 3. PvP BOT Inhabitants
