@@ -86,8 +86,8 @@ GRAPHICS / PHYSICS / ATMOSPHERE
 | Mod / shader           | Version                     |
 |-------------------------|-----------------------------|
 | Physics Mod Free       | 3.1.40                      |
-| Complementary Unbound  | r5.7.1 (shaderpack)         |
-| Euphoria Patches       | 1.8.5-r5.7.1-fabric         |
+| Complementary Unbound  | r5.9.3 (shaderpack)         |
+| Euphoria Patches       | 1.10.5-r5.9.3-fabric        |
 | LocalizedWeather       | 1.4.0+1.21.11               |
 | Particle Rain          | v4-beta.11+1.21.11-fabric   |
 | Falling Leaves         | 2.0.3+1.21.11               |
@@ -100,6 +100,15 @@ Complementary Unbound is a shaderpack: it goes in the profile's
 (Options > Video > Shaderpack Selection). Euphoria Patches, despite the
 name, is a regular mod (goes in "mods") that patches Complementary at
 runtime -- it does nothing without Complementary Unbound + Iris installed.
+
+Bumped r5.7.1/1.8.5 -> r5.9.3/1.10.5 on 2026-09-27: the old pair (8 months
+old, 5 point-releases behind) failed to compile its final.fsh shader
+("undefined variable") on this profile's exact combo -- the very next
+upstream release's changelog fixes the same class of bug ("X not declared
+compile error"), so this was an upstream bug, not a broken install. Old
+shaderpack folder and old Euphoria jar removed; the new shaderpack is kept
+as the .zip Modrinth ships (Iris loads shaderpack zips directly, no need to
+extract) and config/iris.properties' shaderPack pointer was updated to match.
 
 --------------------------------------------------------------------------
 AUDIO
