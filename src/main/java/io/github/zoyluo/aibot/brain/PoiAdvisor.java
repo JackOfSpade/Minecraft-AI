@@ -239,6 +239,15 @@ public final class PoiAdvisor {
         testTransport = transport;
     }
 
+    /** True while a stub transport is installed. {@code PoiCoordinator.advisorAvailable} treats this as
+     * standing in for "the LLM key is present": a stub transport never needs a real key, and the harness's
+     * real {@code AIBotConfig} may or may not have one configured, which would otherwise make every GameTest
+     * exercising the consult path (design 9: "GameTests for hold, continue, stop, timeout, ...") depend on
+     * incidental, environment-specific config it has no business depending on. */
+    public static boolean hasTestTransport() {
+        return testTransport != null;
+    }
+
     /** Overrides the 10s wall-clock guard for tests; {@code null} restores {@link #DEFAULT_CONSULT_DEADLINE_MS}. */
     public static void setTestConsultDeadlineMs(Long millis) {
         testDeadlineMs = millis;

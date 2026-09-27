@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatCaptureListener;
 import io.github.zoyluo.aibot.brain.ChatRecipientRouter;
+import io.github.zoyluo.aibot.brain.PoiAdvisor;
 import io.github.zoyluo.aibot.command.AIBotCommand;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.BotLogWriter;
@@ -63,6 +64,7 @@ public class AIBotMod implements ModInitializer {
 
         BrainCoordinator.INSTANCE.configure(config);
         ChatRecipientRouter.INSTANCE.configure(config);
+        PoiAdvisor.INSTANCE.configure(config);
         ChatCaptureListener.register();
         AIPayloads.register();
         AIBotServerNetworking.INSTANCE.register();

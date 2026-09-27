@@ -457,6 +457,9 @@ public final class MiningAssistRuntime {
         // P2: same reasoning for the POI registry and the mandatory latch.
         PoiRegistry.clearAll();
         MandatoryLatch.clearAll();
+        // P3: the advisor's cross-bot verdict cache and its mission/global consult budget.
+        PoiCache.clearAll();
+        PoiConsultBudget.clearAll();
     }
 
     /** Restores the shipped defaults and drops everything (unit tests). */

@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.brain.BotReporter;
 import io.github.zoyluo.aibot.brain.BotRuntimeOptions;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatRecipientRouter;
+import io.github.zoyluo.aibot.brain.PoiAdvisor;
 import io.github.zoyluo.aibot.coordination.IdleCoordinator;
 import io.github.zoyluo.aibot.coordination.TaskBoard;
 import io.github.zoyluo.aibot.craft.RuntimeRecipeIndex;
@@ -47,6 +48,7 @@ public final class RuntimeLifecycleCoordinator {
         BotLogWriter.INSTANCE.start(config);
         BrainCoordinator.INSTANCE.configure(config);
         ChatRecipientRouter.INSTANCE.configure(config);
+        PoiAdvisor.INSTANCE.configure(config);
         BotPersistence.INSTANCE.resumeWrites();
         RuntimeRecipeIndex.rebuild(server);
         KnowledgeBase.INSTANCE.attachServer(server);
@@ -63,6 +65,7 @@ public final class RuntimeLifecycleCoordinator {
         AIPlayerManager.INSTANCE.onServerStopping(server);
         BotEdits.flushSync(BotEdits.defaultSidecarPath());
         ChatRecipientRouter.INSTANCE.shutdown();
+        PoiAdvisor.INSTANCE.shutdown();
         BrainCoordinator.INSTANCE.shutdown();
         clearWorldRuntime();
         KnowledgeBase.INSTANCE.detachServer();

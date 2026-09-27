@@ -85,9 +85,12 @@ class AssistObservationSourceContractTest {
         return Files.readString(path);
     }
 
-    /** Source without comments, so a Javadoc that names a call is not mistaken for the call. */
+    /** Source without comments or text-block/string content, so a Javadoc that names a call, or prose inside
+     * a {@code """..."""} text block (e.g. P3's LLM system prompt, which legitimately contains the plain
+     * English word "World" as prose, not a type), is never mistaken for real code by the regex scans below. */
     private static String code(Path path) throws IOException {
-        return read(path).replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("//[^\\n]*", " ");
+        return read(path).replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("//[^\\n]*", " ")
+                .replaceAll("(?s)\"\"\".*?\"\"\"", " ");
     }
 
     private static List<Path> assistSources() throws IOException {

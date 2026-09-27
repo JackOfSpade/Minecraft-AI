@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.task;
 import com.google.gson.JsonObject;
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
+import io.github.zoyluo.aibot.brain.PoiAdvisor;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLogWriter;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
@@ -12,8 +13,11 @@ import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
+import io.github.zoyluo.aibot.mining.assist.PoiCache;
+import io.github.zoyluo.aibot.mining.assist.PoiConsultBudget;
 import io.github.zoyluo.aibot.mining.assist.PoiDetector;
 import io.github.zoyluo.aibot.mining.assist.PoiLabeler;
+import io.github.zoyluo.aibot.mining.assist.PoiPrompt;
 import io.github.zoyluo.aibot.mining.assist.PoiRegistry;
 import io.github.zoyluo.aibot.mining.assist.PoiScorer;
 import io.github.zoyluo.aibot.coordination.PoiCoordinator;
@@ -48,6 +52,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Real-Minecraft GameTests for the P2 (R3 deterministic POI) stop/notify flow (mining-assist design 6.1-6.5,
@@ -958,6 +963,366 @@ public final class OreDigPoiGameTests {
             h.require(TaskManager.INSTANCE.userPauseEpoch(bot) == beforeDespawn + 1,
                     "a despawn during an active pause bumped the epoch by "
                             + (TaskManager.INSTANCE.userPauseEpoch(bot) - beforeDespawn) + ", expected exactly 1");
+            h.pass();
+        }));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // P3 R4 LLM confirm: hold, consult, timeout, stale/late verdict, degraded-TPS skip (stub transport)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * The core happy path of design 6.5's {@code consult()}: a POSSIBLE candidate with the advisor available
+     * (a stub {@link PoiAdvisor} transport stands in for the real HTTP client) holds the mission through
+     * {@code TaskManager.pauseUserIntent} <em>before</em> the transport ever answers (proven by asserting the
+     * pause the same tick {@code onCandidate} returns, well before the stub's own artificial delay elapses),
+     * then a STOP verdict promotes that hold in place into a real stop -- never a second
+     * {@code IntentController.pause} -- with the dedupe registry recording it STOPPED.
+     */
+    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_stop", maxTicks = 300)
+    public void possibleCandidateHoldsThenStop(TestContext context) {
+        Harness h = new Harness(context);
+        Room room = h.newRoom(130, -3, 3, -3, 3, 3);
+        AIPlayerEntity bot = h.spawn("PoiHoldStopGT", room, 0, 0);
+        String botName = bot.getGameProfile().name();
+        h.enablePoi(bot, null);
+        h.onCleanup(() -> {
+            PoiAdvisor.setTestTransport(null);
+            PoiConsultBudget.clearAll();
+            PoiCache.clearAll();
+        });
+        PoiConsultBudget.clearAll();
+        PoiCache.clearAll();
+        PoiAdvisor.setTestTransport(payload -> {
+            Thread.sleep(250L); // real time, on the advisor's own worker thread, never the server thread
+            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "mineshaft", "high", "gametest stub stop");
+        });
+        String dim = BotEdits.dimensionKey(room.world);
+        BlockPos anchor = room.at(2, 0, 0);
+        Progress p = new Progress();
+        int[] phase = {0};
+
+        context.runAtEveryTick(() -> h.guard(() -> {
+            if (h.done) {
+                return;
+            }
+            if (!h.settle(bot, p)) {
+                return;
+            }
+            if (phase[0] == 0) {
+                h.assertStrict(bot, "poi_hold_stop");
+                freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_hold_stop");
+                MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
+                state.enterDimension(dim);
+                int tick = MiningAssistRuntime.serverTick(bot);
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "mineshaft", anchor, 0.55D, false, "");
+                PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
+                h.require(TaskManager.INSTANCE.isUserPaused(bot),
+                        "the hold must pause the bot synchronously, before the (stubbed) advisor ever answers");
+                List<String> started = botLog(botName);
+                h.require(started != null && hasEvent(started, "poi_consult_started"), "no poi_consult_started log line");
+                phase[0] = 1;
+                return;
+            }
+            if (phase[0] == 1) {
+                List<String> lines = botLog(botName);
+                boolean resolved = lines != null && hasEvent(lines, "poi_stop");
+                if (!resolved) {
+                    h.require(TaskManager.INSTANCE.isUserPaused(bot),
+                            "the bot must stay paused for the whole hold, until the verdict resolves it");
+                    h.require(p.tick < 250, "the stub verdict (250ms delay) never resolved within the test budget");
+                    return;
+                }
+                h.require(TaskManager.INSTANCE.isUserPaused(bot), "a STOP verdict must leave the bot paused");
+                PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUuid());
+                h.require(open != null && "FALLBACK".equals(open.source()) && "mineshaft".equals(open.label()),
+                        "the open case after a verdict-driven stop was " + open);
+                h.assertStrict(bot, "poi_hold_stop_end");
+                h.pass();
+            }
+        }));
+    }
+
+    /**
+     * Same as {@link #possibleCandidateHoldsThenStop}, but the stub verdict is CONTINUE: design 6.5's
+     * {@code TaskManager.resumeUserIntent(bot, "poi_cleared")} un-pauses the mission and the dedupe registry
+     * records the candidate DECLINED, never STOPPED.
+     */
+    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_continue", maxTicks = 300)
+    public void possibleCandidateHoldsThenContinue(TestContext context) {
+        Harness h = new Harness(context);
+        Room room = h.newRoom(140, -3, 3, -3, 3, 3);
+        AIPlayerEntity bot = h.spawn("PoiHoldContinueGT", room, 0, 0);
+        String botName = bot.getGameProfile().name();
+        h.enablePoi(bot, null);
+        h.onCleanup(() -> {
+            PoiAdvisor.setTestTransport(null);
+            PoiConsultBudget.clearAll();
+            PoiCache.clearAll();
+        });
+        PoiConsultBudget.clearAll();
+        PoiCache.clearAll();
+        PoiAdvisor.setTestTransport(payload -> {
+            Thread.sleep(250L);
+            return new PoiPrompt.Verdict(PoiPrompt.Decision.CONTINUE, "natural_cave", "medium", "gametest stub continue");
+        });
+        String dim = BotEdits.dimensionKey(room.world);
+        BlockPos anchor = room.at(2, 0, 0);
+        Progress p = new Progress();
+        int[] phase = {0};
+        Task[] taskHolder = new Task[1];
+
+        context.runAtEveryTick(() -> h.guard(() -> {
+            if (h.done) {
+                return;
+            }
+            if (!h.settle(bot, p)) {
+                return;
+            }
+            if (phase[0] == 0) {
+                h.assertStrict(bot, "poi_hold_continue");
+                taskHolder[0] = freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_hold_continue");
+                MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
+                state.enterDimension(dim);
+                int tick = MiningAssistRuntime.serverTick(bot);
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "cavern", anchor, 0.50D, false, "");
+                PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
+                h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
+                phase[0] = 1;
+                return;
+            }
+            if (phase[0] == 1) {
+                List<String> lines = botLog(botName);
+                boolean resolved = lines != null && hasEvent(lines, "poi_continue");
+                if (!resolved) {
+                    h.require(p.tick < 250, "the stub verdict (250ms delay) never resolved within the test budget");
+                    return;
+                }
+                h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a CONTINUE verdict must resume the bot");
+                h.require(TaskManager.INSTANCE.getActive(bot).orElse(null) == taskHolder[0],
+                        "the frozen task must be active again after resumeUserIntent");
+                h.require(PoiRegistry.openCase(bot.getUuid()) == null, "a CONTINUE must never open a case");
+                List<String> stopLines = botLog(botName);
+                h.require(stopLines == null || !hasEvent(stopLines, "poi_stop"), "a poi_stop line was written for a CONTINUE verdict");
+                h.assertStrict(bot, "poi_hold_continue_end");
+                h.pass();
+            }
+        }));
+    }
+
+    /**
+     * Design 6.5's stale-result rule: a player action during the hold (here, a direct
+     * {@code TaskManager.resumeUserIntent}, standing in for the player's own "continue") bumps the pause
+     * epoch, so the eventual verdict -- even a STOP -- must never re-pause the bot or claim "Stopped." It
+     * becomes a notify-only "Late check" line instead (design 6.6: "Late replies never pause"), and the
+     * registry still records the outcome for future dedupe even though the bot's pause state is untouched.
+     */
+    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_player_pause_during_hold_is_never_overridden",
+            maxTicks = 300)
+    public void playerPauseDuringHoldIsNeverOverridden(TestContext context) {
+        Harness h = new Harness(context);
+        Room room = h.newRoom(150, -3, 3, -3, 3, 3);
+        AIPlayerEntity bot = h.spawn("PoiHoldStaleGT", room, 0, 0);
+        String botName = bot.getGameProfile().name();
+        h.enablePoi(bot, null);
+        h.onCleanup(() -> {
+            PoiAdvisor.setTestTransport(null);
+            PoiConsultBudget.clearAll();
+            PoiCache.clearAll();
+        });
+        PoiConsultBudget.clearAll();
+        PoiCache.clearAll();
+        PoiAdvisor.setTestTransport(payload -> {
+            Thread.sleep(400L);
+            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "dungeon", "high", "gametest stub late stop");
+        });
+        String dim = BotEdits.dimensionKey(room.world);
+        BlockPos anchor = room.at(2, 0, 0);
+        Progress p = new Progress();
+        int[] phase = {0};
+
+        context.runAtEveryTick(() -> h.guard(() -> {
+            if (h.done) {
+                return;
+            }
+            if (!h.settle(bot, p)) {
+                return;
+            }
+            if (phase[0] == 0) {
+                h.assertStrict(bot, "poi_hold_stale");
+                freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_hold_stale");
+                MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
+                state.enterDimension(dim);
+                int tick = MiningAssistRuntime.serverTick(bot);
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "dungeon", anchor, 0.55D, false, "");
+                PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
+                h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
+                phase[0] = 1;
+                return;
+            }
+            if (phase[0] == 1) {
+                // The player "acts" during the hold, independent of PoiCoordinator entirely -- exactly what a
+                // real "continue" phrase does through IntentController.routePlayerControlPhrase.
+                TaskManager.INSTANCE.resumeUserIntent(bot, "gametest_player_continue_during_hold");
+                h.require(!TaskManager.INSTANCE.isUserPaused(bot), "fixture error: resumeUserIntent did not resume");
+                phase[0] = 2;
+                return;
+            }
+            if (phase[0] == 2) {
+                List<String> lines = botLog(botName);
+                boolean resolved = lines != null && hasEvent(lines, "poi_late_check");
+                if (!resolved) {
+                    h.require(!TaskManager.INSTANCE.isUserPaused(bot),
+                            "a late verdict must never re-pause a bot the player already resumed");
+                    h.require(p.tick < 300, "the stub verdict (400ms delay) never resolved within the test budget");
+                    return;
+                }
+                h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a late STOP must never claim the pause back");
+                h.require(!hasEvent(lines, "poi_stop"), "a late STOP must never log a real poi_stop");
+                h.require(PoiRegistry.openCase(bot.getUuid()) == null, "a late verdict must never open a case");
+                boolean recordedStopped = PoiRegistry.snapshot(bot.getUuid()).stream()
+                        .anyMatch(e -> e.label().equals("dungeon") && e.state() == PoiRegistry.State.STOPPED);
+                h.require(recordedStopped, "the registry must still record the late STOP for future dedupe");
+                h.assertStrict(bot, "poi_hold_stale_end");
+                h.pass();
+            }
+        }));
+    }
+
+    /**
+     * Design 6.5's "deadline reached (any state) -> applyFallback()": {@code poi.holdDeadlineTicks} is
+     * shrunk far below the stub transport's own delay, so {@code PoiCoordinator.tick}'s own deadline check
+     * resolves the case through the design 6.7 fallback matrix (S=0.85 &gt;= 0.75, so {@code
+     * unavailablePolicy=STOP_IF_STRUCTURE} stops it) before the advisor ever answers. The hold's existing
+     * pause is promoted in place, exactly like a real verdict's STOP branch. When the stub eventually does
+     * answer, its (now-stale) verdict must be a silent no-op: no second stop, no duplicate log line.
+     */
+    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_consult_deadline_applies_fallback_when_advisor_is_slow",
+            maxTicks = 700)
+    public void consultDeadlineAppliesFallbackWhenAdvisorIsSlow(TestContext context) {
+        Harness h = new Harness(context);
+        Room room = h.newRoom(160, -3, 3, -3, 3, 3);
+        AIPlayerEntity bot = h.spawn("PoiDeadlineGT", room, 0, 0);
+        String botName = bot.getGameProfile().name();
+        JsonObject poi = new JsonObject();
+        poi.addProperty("holdDeadlineTicks", 20); // 1s: comfortably shorter than the stub's 3s delay
+        h.enablePoi(bot, poi);
+        h.onCleanup(() -> {
+            PoiAdvisor.setTestTransport(null);
+            PoiConsultBudget.clearAll();
+            PoiCache.clearAll();
+        });
+        PoiConsultBudget.clearAll();
+        PoiCache.clearAll();
+        PoiAdvisor.setTestTransport(payload -> {
+            Thread.sleep(3000L);
+            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "stronghold", "low", "gametest stub too-slow stop");
+        });
+        String dim = BotEdits.dimensionKey(room.world);
+        BlockPos anchor = room.at(2, 0, 0);
+        Progress p = new Progress();
+        int[] phase = {0};
+
+        context.runAtEveryTick(() -> h.guard(() -> {
+            if (h.done) {
+                return;
+            }
+            if (!h.settle(bot, p)) {
+                return;
+            }
+            if (phase[0] == 0) {
+                h.assertStrict(bot, "poi_deadline");
+                freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_deadline");
+                MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
+                state.enterDimension(dim);
+                int tick = MiningAssistRuntime.serverTick(bot);
+                PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false, "");
+                PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
+                h.require(TaskManager.INSTANCE.isUserPaused(bot), "the hold must pause the bot synchronously");
+                phase[0] = 1;
+                return;
+            }
+            if (phase[0] == 1) {
+                List<String> lines = botLog(botName);
+                boolean deadlineHit = lines != null && hasEvent(lines, "poi_consult_deadline");
+                if (!deadlineHit) {
+                    h.require(p.tick < 120, "the 1s hold deadline never fired within the test budget");
+                    return;
+                }
+                h.require(hasEvent(lines, "poi_stop"),
+                        "the deadline's own fallback (S=0.85 >= 0.75, STOP_IF_STRUCTURE) must stop the bot");
+                h.require(TaskManager.INSTANCE.isUserPaused(bot), "the deadline-triggered stop must leave the bot paused");
+                phase[0] = 2;
+                return;
+            }
+            if (phase[0] == 2) {
+                // Give the (now-stale) 3s-delayed stub a further margin to answer, then confirm it changed
+                // nothing: still exactly one poi_stop line, still paused, no second consult attempt logged.
+                if (p.tick < 450) {
+                    return;
+                }
+                List<String> lines = botLog(botName);
+                int stopCount = lines == null ? 0 : (int) lines.stream().filter(l -> l.contains("event=poi_stop ") || l.endsWith("event=poi_stop")).count();
+                h.require(stopCount == 1, "a late, already-superseded verdict must never add a second poi_stop, saw " + stopCount);
+                h.require(TaskManager.INSTANCE.isUserPaused(bot), "the bot must still be paused from the deadline's own stop");
+                h.assertStrict(bot, "poi_deadline_end");
+                h.pass();
+            }
+        }));
+    }
+
+    /**
+     * Design 6.6: "Skipped while TPS is degraded." With the TPS test override forced degraded, {@code
+     * advisorAvailable} must return false before ever reaching {@link PoiAdvisor#consult}, so the stub
+     * transport (present, but must never be invoked) is bypassed entirely and the design 6.7 fallback matrix
+     * runs synchronously, exactly like P2 -- no hold, no pause-then-resolve delay.
+     */
+    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_degraded_tps_skips_consult_and_uses_fallback",
+            maxTicks = 200)
+    public void degradedTpsSkipsConsultAndUsesFallback(TestContext context) {
+        Harness h = new Harness(context);
+        Room room = h.newRoom(170, -3, 3, -3, 3, 3);
+        AIPlayerEntity bot = h.spawn("PoiDegradedTpsGT", room, 0, 0);
+        h.enablePoi(bot, null);
+        MiningAssistRuntime.setTestTpsDegraded(Boolean.TRUE);
+        AtomicBoolean transportCalled = new AtomicBoolean(false);
+        h.onCleanup(() -> {
+            PoiAdvisor.setTestTransport(null);
+            PoiConsultBudget.clearAll();
+            PoiCache.clearAll();
+        });
+        PoiConsultBudget.clearAll();
+        PoiCache.clearAll();
+        PoiAdvisor.setTestTransport(payload -> {
+            transportCalled.set(true);
+            return new PoiPrompt.Verdict(PoiPrompt.Decision.CONTINUE, "natural_cave", "high", "must never be called");
+        });
+        String dim = BotEdits.dimensionKey(room.world);
+        BlockPos anchor = room.at(2, 0, 0);
+
+        context.runAtEveryTick(() -> h.guard(() -> {
+            if (h.done) {
+                return;
+            }
+            if (!h.settle(bot, new Progress())) {
+                return;
+            }
+            h.assertStrict(bot, "poi_degraded_tps");
+            freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_degraded_tps");
+            MiningAssistState state = MiningAssistRegistry.getOrCreate(bot);
+            state.enterDimension(dim);
+            int tick = MiningAssistRuntime.serverTick(bot);
+            // S = 0.85 >= 0.75: the default STOP_IF_STRUCTURE keyless fallback stops it, synchronously,
+            // exactly the P2 code path -- proving degraded TPS skipped the consult/hold machinery entirely.
+            PoiDetector.Result possible = syntheticResult(PoiScorer.Band.POSSIBLE, "stronghold", anchor, 0.85D, false, "");
+            PoiCoordinator.INSTANCE.onCandidate(bot, state, room.world, possible, tick);
+
+            h.require(!transportCalled.get(), "degraded TPS must never reach the advisor transport at all");
+            h.require(TaskManager.INSTANCE.isUserPaused(bot), "the keyless fallback must still stop a strong candidate");
+            List<String> lines = botLog(bot.getGameProfile().name());
+            h.require(lines != null && hasEvent(lines, "poi_stop"), "no poi_stop log line was written");
+            h.require(!hasEvent(lines, "poi_consult_started"), "degraded TPS must never start a real consult");
+            h.assertStrict(bot, "poi_degraded_tps_end");
             h.pass();
         }));
     }

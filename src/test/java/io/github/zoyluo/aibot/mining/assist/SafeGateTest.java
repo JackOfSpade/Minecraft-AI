@@ -512,9 +512,75 @@ class SafeGateTest {
         assertTrue(SafeGate.candidatePending(null, true, false));
     }
 
+    /** Design 4.4's three detour-start/tick stages only (START, TICK_FAST, TICK_FULL): every one of them
+     * reads item 1 and, of the items exercised by every {@code assertEveryStage} call site in this file
+     * (1, 2, 4, 5), each item is read by at least START/TICK_FULL and (for 1-4) TICK_FAST alike, so a single
+     * failing reason is expected identically across all three. {@link Stage#HOLD} (design 6.5's {@code
+     * safeToHold}) deliberately reads only items 3 and 6 and is asserted on its own, in the "HOLD stage"
+     * section below -- looping it in here would wrongly expect items 1/2/4/5/7/8/9/10 failures to reach it too. */
     private static void assertEveryStage(SafeReason expected, SafeGateInputs in) {
-        for (Stage s : Stage.values()) {
+        for (Stage s : new Stage[] {Stage.START, Stage.TICK_FAST, Stage.TICK_FULL}) {
             assertEquals(expected, SafeGate.evaluate(in, s), s.name());
         }
+    }
+
+    // ---- HOLD stage (design 6.5 safeToHold): items 3 and 6 only, nothing else ------------------------
+
+    @Test
+    void holdReadsItem3HealthAndHurt() {
+        SafeGateInputs hurt = SafeGateInputs.builder().hurtTime(1).build();
+        assertEquals(SafeReason.HURT, SafeGate.evaluate(hurt, Stage.HOLD));
+        SafeGateInputs lowHp = SafeGateInputs.builder().health(5.0F).retreatHp(10).build();
+        assertEquals(SafeReason.HP, SafeGate.evaluate(lowHp, Stage.HOLD));
+    }
+
+    @Test
+    void holdReadsItem3FireLavaSubmergedWaterAndFood() {
+        assertEquals(SafeReason.ON_FIRE, SafeGate.evaluate(SafeGateInputs.builder().onFire(true).build(), Stage.HOLD));
+        assertEquals(SafeReason.IN_LAVA, SafeGate.evaluate(SafeGateInputs.builder().inLava(true).build(), Stage.HOLD));
+        assertEquals(SafeReason.SUBMERGED, SafeGate.evaluate(SafeGateInputs.builder().submerged(true).build(), Stage.HOLD));
+        assertEquals(SafeReason.TOUCHING_WATER,
+                SafeGate.evaluate(SafeGateInputs.builder().touchingWater(true).build(), Stage.HOLD));
+        SafeGateInputs starving = SafeGateInputs.builder().foodLevel(0).hungerCritical(6).build();
+        assertEquals(SafeReason.FOOD, SafeGate.evaluate(starving, Stage.HOLD));
+    }
+
+    @Test
+    void holdReadsItem6HostilePressure() {
+        SafeGateInputs pressured = SafeGateInputs.builder().hostilePressure(true).build();
+        assertEquals(SafeReason.HOSTILE_PRESSURE, SafeGate.evaluate(pressured, Stage.HOLD));
+    }
+
+    @Test
+    void holdIgnoresEveryOtherItem() {
+        SafeGateInputs[] onlyOtherItemsFail = {
+                SafeGateInputs.builder().modeAllowsDetour(false).build(),
+                SafeGateInputs.builder().tpsDegraded(true).headroomAbort(true).build(),
+                SafeGateInputs.builder().userPaused(true).build(),
+                SafeGateInputs.builder().threatCooldown(true).build(),
+                SafeGateInputs.builder().lavaInThreatBox(true).build(),
+                SafeGateInputs.builder().deepDark(true).build(),
+                SafeGateInputs.builder().poiStructureScore(1.0D).build(),
+                SafeGateInputs.builder().trapNear(true).build(),
+        };
+        for (SafeGateInputs in : onlyOtherItemsFail) {
+            assertEquals(SafeReason.OK, SafeGate.evaluate(in, Stage.HOLD),
+                    "HOLD must not read items 1/2/4/5/7/8/9/10");
+        }
+    }
+
+    @Test
+    void holdUsesTheTickHpThresholdNotTheStartMargin() {
+        // START fails once health < retreatHp + startHpMargin; HOLD (never "isStart") only fails at
+        // health <= retreatHp, exactly like TICK_FAST/TICK_FULL.
+        SafeGateInputs betweenTickAndStartThreshold = SafeGateInputs.builder()
+                .health(11.0F).retreatHp(10).startHpMargin(4).build();
+        assertEquals(SafeReason.OK, SafeGate.evaluate(betweenTickAndStartThreshold, Stage.HOLD));
+        assertEquals(SafeReason.HP, SafeGate.evaluate(betweenTickAndStartThreshold, Stage.START));
+    }
+
+    @Test
+    void holdPassesOnAllClearInputs() {
+        assertEquals(SafeReason.OK, SafeGate.evaluate(SafeGateInputs.allClear(), Stage.HOLD));
     }
 }

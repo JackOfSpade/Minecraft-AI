@@ -190,4 +190,15 @@ public final class DetourSafetyGate {
     public static SafeReason evaluate(AIPlayerEntity bot, SafeGate.Stage stage, BlockPos pose, BlockPos ore) {
         return SafeGate.evaluate(inputs(bot, stage, pose, ore), stage);
     }
+
+    /**
+     * Design 6.5 {@code safeToHold}: true when {@link SafeGate.Stage#HOLD} finds no hostile pressure, health
+     * above {@code combat.retreatHp()} and no hurt flash. {@code coordination.PoiCoordinator} calls this (it
+     * cannot reach {@code DangerWatcher.hasObservableHostilePressure} itself, package-private in {@code task})
+     * rather than the general {@link #evaluate}, since a hold is not a detour start/tick and reads none of
+     * the mode/origin/headroom/pause/POI-evidence items those use.
+     */
+    public static boolean safeToHold(AIPlayerEntity bot) {
+        return evaluate(bot, SafeGate.Stage.HOLD, null, null) == SafeReason.OK;
+    }
 }

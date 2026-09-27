@@ -55,17 +55,26 @@ public final class SafeGate {
     public enum Stage {
         START,
         TICK_FAST,
-        TICK_FULL;
+        TICK_FULL,
+        /** Design 6.5 {@code safeToHold}: item 3 (health, hurt, fire, lava, submerged, water, food -- the
+         * bundle {@code SafeGate} already groups those checks under) and item 6 (hostile pressure), and
+         * nothing else -- no mode/origin/audit, no headroom, no pause-depth/user-paused/origin-safety, no
+         * threat cooldown/shelter, no lava-threat-box/hazard, no deep-dark, no POI-evidence veto, no trap.
+         * Holding is "is it safe to stand still and wait here", not "is it safe to start or continue a
+         * detour", so it reuses only the raw health/threat primitives, never the detour-specific ones. */
+        HOLD;
 
         /** Whether this stage reads design item {@code item} (1..10). */
         public boolean reads(int item) {
             return switch (this) {
                 case START, TICK_FULL -> item >= 1 && item <= 10;
                 case TICK_FAST -> item >= 1 && item <= 4;
+                case HOLD -> item == 3 || item == 6;
             };
         }
 
-        /** START uses the start thresholds (hp margin, headroom start gate); both TICK stages use the tick ones. */
+        /** START uses the start thresholds (hp margin, headroom start gate); both TICK stages and HOLD use
+         * the tick ones (HOLD never reads headroom at all, so this only matters for item 3's hp check). */
         public boolean isStart() {
             return this == START;
         }
