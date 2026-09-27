@@ -48,8 +48,17 @@ import java.util.function.Function;
  * the once-per-tick dirty-flag check of {@code BotEdits.snapshotIfDue}.</p>
  */
 public final class MiningAssistRuntime {
-    /** The phase's shipped default mode. P0 ships sensing in shadow: sense, no detour, no pause, no chat, no LLM. */
-    public static final AssistMode SHIPPED_DEFAULT_MODE = AssistMode.SENSE;
+    /**
+     * The phase's shipped default mode. Flipped SENSE -&gt; DETOUR 2026-09-27 for a user-directed live
+     * single-bot playtest of P1 (the walk-only opportunistic valuables detour): the design's own gate
+     * for this flip (GameTest suite fully green + a 4-bot tick-cost check + three clean unfiltered
+     * runs) is not yet fully met -- two GameTest scenarios and one flaky one remain open, and the
+     * 4-bot cost gate was never run. The user explicitly substituted a live one-bot playtest plus
+     * post-session log review for that gate ("with one bot tho, not doing 4-bots... generate the
+     * logging we need to check for any bugs after i'm done"). No POI capability exists yet (P2/P3
+     * unbuilt), so DETOUR is the correct mode, not POI/ALL.
+     */
+    public static final AssistMode SHIPPED_DEFAULT_MODE = AssistMode.DETOUR;
 
     private static final Function<String, String> PROCESS_ENV = System::getenv;
 

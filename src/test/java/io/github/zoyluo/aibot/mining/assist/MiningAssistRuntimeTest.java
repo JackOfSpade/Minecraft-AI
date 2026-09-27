@@ -43,13 +43,16 @@ class MiningAssistRuntimeTest {
     // ---- shipped default -------------------------------------------------------------------------
 
     @Test
-    void phaseZeroShipsSenseInShadow() {
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.SHIPPED_DEFAULT_MODE);
+    void shippedDefaultIsDetourForTheP1LiveSingleBotPlaytest() {
+        // Flipped SENSE -> DETOUR 2026-09-27 (see MiningAssistRuntime.SHIPPED_DEFAULT_MODE's javadoc):
+        // the user substituted a live one-bot playtest for the design's formal 4-bot cost gate. P2/P3
+        // (POI) are still unbuilt, so poiActive() must stay false regardless.
+        assertEquals(AssistMode.DETOUR, MiningAssistRuntime.SHIPPED_DEFAULT_MODE);
         MiningAssistRuntime.install(null, NO_ENV);
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.mode());
+        assertEquals(AssistMode.DETOUR, MiningAssistRuntime.mode());
         assertTrue(MiningAssistRuntime.senseConfigured());
-        assertFalse(MiningAssistRuntime.config().detourActive(), "P0 never detours");
-        assertFalse(MiningAssistRuntime.config().poiActive(), "P0 never acts on POI");
+        assertTrue(MiningAssistRuntime.config().detourActive(), "the shipped default now detours");
+        assertFalse(MiningAssistRuntime.config().poiActive(), "POI (P2/P3) is not built yet");
         assertFalse(MiningAssistRuntime.config().harnessOff());
     }
 
@@ -70,7 +73,8 @@ class MiningAssistRuntimeTest {
         MiningAssistRuntime.install(null, NO_ENV);
         assertTrue(MiningAssistRuntime.harnessDefaultOff());
         assertTrue(MiningAssistRuntime.config().harnessOff());
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.mode());
+        assertEquals(MiningAssistRuntime.SHIPPED_DEFAULT_MODE, MiningAssistRuntime.mode(),
+                "the harness-off flag gates acting, not the reported mode");
         assertTrue(MiningAssistRuntime.deterministic(BOT), "the harness default makes runs deterministic");
     }
 
@@ -410,13 +414,14 @@ class MiningAssistRuntimeTest {
     @Test
     void loadFailsOpenToTheShippedDefaultOnMissingOrBrokenFiles(@TempDir Path dir) throws IOException {
         org.junit.jupiter.api.Assumptions.assumeTrue(System.getenv(MiningAssistConfig.ENV_MODE) == null);
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.load(dir.resolve("missing.json")).mode());
+        AssistMode shipped = MiningAssistRuntime.SHIPPED_DEFAULT_MODE;
+        assertEquals(shipped, MiningAssistRuntime.load(dir.resolve("missing.json")).mode());
         Path broken = dir.resolve("broken.json");
         Files.writeString(broken, "{ this is not json");
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.load(broken).mode());
+        assertEquals(shipped, MiningAssistRuntime.load(broken).mode());
         Path notObject = dir.resolve("array.json");
         Files.writeString(notObject, "[1,2,3]");
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.load(notObject).mode());
-        assertEquals(AssistMode.SENSE, MiningAssistRuntime.load(null).mode());
+        assertEquals(shipped, MiningAssistRuntime.load(notObject).mode());
+        assertEquals(shipped, MiningAssistRuntime.load(null).mode());
     }
 }

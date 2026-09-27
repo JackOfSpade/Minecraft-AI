@@ -77,7 +77,6 @@ public final class CombatTask extends AbstractTask {
     private LivingEntity target;
     private int kills;
     private int repositionTicks;
-    private int bowChargeTicks;
     private int blockTicks;
     private int healTicks;
     private boolean eating;
@@ -347,10 +346,12 @@ public final class CombatTask extends AbstractTask {
                 return;
             }
         }
-        bowChargeTicks++;
-        if (bowChargeTicks >= BOW_CHARGE_TICKS) {
+        // getItemUseTime() is Minecraft's own count of ticks since the CURRENT draw began -- it
+        // self-resets if something upstream (e.g. ActionPack#stopAll from another task) interrupted
+        // and restarted the use. A hand-rolled tick counter here would desync from that and could
+        // release a shot well before it's actually at full pull.
+        if (bot.getItemUseTime() >= BOW_CHARGE_TICKS) {
             bot.stopUsingItem();
-            bowChargeTicks = 0;
             phase = Phase.APPROACH;
         }
     }
@@ -704,7 +705,6 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         bot.getActionPack().stopMovement();
-        bowChargeTicks = 0;
         if (shouldUsePeekaboo(bot)) {
             beginPeekaboo(bot);
         } else {
@@ -848,8 +848,9 @@ public final class CombatTask extends AbstractTask {
                 return;
             }
         }
-        bowChargeTicks++;
-        if (bowChargeTicks >= BOW_CHARGE_TICKS) {
+        // See the identical check in ranged(): getItemUseTime() tracks the CURRENT draw, so it
+        // can't fire early even if this draw was interrupted and restarted mid-charge.
+        if (bot.getItemUseTime() >= BOW_CHARGE_TICKS) {
             phase = Phase.COVER_PEEK;
             peekCycleTicks = 0;
         }
@@ -884,7 +885,6 @@ public final class CombatTask extends AbstractTask {
             abandonPeekaboo(bot, "peekaboo_hide_step_failed");
             return;
         }
-        bowChargeTicks = 0;
         if (!shouldUseBow(bot)) {
             finishRangedLoadout(bot);
             CombatCore.ensureMeleeWeapon(bot);
@@ -922,7 +922,6 @@ public final class CombatTask extends AbstractTask {
             BotLog.action(bot, "restore_ranged_offhand_skipped", "reason", "inventory_changed");
         }
         rangedLoadout = null;
-        bowChargeTicks = 0;
     }
 
     @Override
