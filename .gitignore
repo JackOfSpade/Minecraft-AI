@@ -12,6 +12,8 @@ desktop.ini
 .env
 .env.*
 *.env
+# The committed template (no secrets) must stay visible despite the patterns above.
+!.env.example
 secrets.properties
 secrets.*.properties
 local.properties
