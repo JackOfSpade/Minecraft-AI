@@ -114,13 +114,20 @@ GAMEPLAY / COMBAT / HUD
 
 | Mod                   | Version                  |
 |-----------------------|---------------------------|
-| DeathMarker           | v1.0.0-1.21-fabric        |
 | Custom Time Cycle     | 0.1.5-1.21.11             |
 | Better Name Visibility| 2.0.2                     |
 | Better Respawn        | fabric-1.21.11-2.0.6      |
 | Compass Bar           | latest compatible 1.21.11 Fabric build |
 | AttributeFix          | 21.11.1                   |
 | Easy Anvils           | 21.11.1                   |
+
+DeathMarker (v1.0.0-1.21-fabric) was removed 2026-09-27: it crashes the client
+on load (NoClassDefFoundError on Fabric API's WorldRenderEvents). Its only
+Fabric build is compiled against a much older Fabric API (its GitHub source
+targets 1.20.1 / fabric_api_version 0.92.7); Minecraft's client rendering
+internals moved on by 1.21.11 and the mod (last updated 8 months ago, no
+GitHub releases) was never rebuilt against a newer one. Re-add it if/when the
+author (LumaBlossom) publishes a 1.21.11-compatible build.
 
 (PvP BOT itself is listed under World Generation / Exploration above, since
 that is what it primarily adds; it is a gameplay/combat mod too.)
