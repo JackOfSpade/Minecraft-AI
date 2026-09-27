@@ -18,6 +18,8 @@ import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.memory.EpisodeLog;
 import io.github.zoyluo.aibot.memory.KnowledgeBase;
 import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
+import io.github.zoyluo.aibot.mining.assist.BotEdits;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mode.CapabilityRuntime;
 import io.github.zoyluo.aibot.network.AIBotServerNetworking;
 import io.github.zoyluo.aibot.observe.BotProfiler;
@@ -48,6 +50,7 @@ public final class RuntimeLifecycleCoordinator {
         BotPersistence.INSTANCE.resumeWrites();
         RuntimeRecipeIndex.rebuild(server);
         KnowledgeBase.INSTANCE.attachServer(server);
+        BotEdits.loadFromDisk(BotEdits.defaultSidecarPath());
         int restored = BotPersistence.INSTANCE.loadAndRespawn(server);
         BotLog.lifecycle("server_runtime_ready", "restored_bots", restored,
                 "runtime_session", TaskBoard.INSTANCE.runtimeSessionId());
@@ -58,6 +61,7 @@ public final class RuntimeLifecycleCoordinator {
         BotPersistence.INSTANCE.freezeWrites();
         int persisted = BotPersistence.INSTANCE.saveAll(server);
         AIPlayerManager.INSTANCE.onServerStopping(server);
+        BotEdits.flushSync(BotEdits.defaultSidecarPath());
         ChatRecipientRouter.INSTANCE.shutdown();
         BrainCoordinator.INSTANCE.shutdown();
         clearWorldRuntime();
@@ -123,10 +127,12 @@ public final class RuntimeLifecycleCoordinator {
         BotReporter.INSTANCE.onCleared(bot);
         DiagnosticLogger.INSTANCE.clear(bot);
         CapabilityRuntime.clear(bot);
+        MiningAssistRuntime.clearBot(bot);
     }
 
     private static void forgetBot(AIPlayerEntity bot) {
         MiningEvidenceAudit.clear(bot);
+        MiningAssistRuntime.clearForced(bot.getUuid());
         clearTransient(bot);
         BotRuntimeOptions.INSTANCE.clear(bot);
         BotMemoryStore.INSTANCE.remove(bot.getUuid());
@@ -156,6 +162,7 @@ public final class RuntimeLifecycleCoordinator {
         AIBotServerNetworking.INSTANCE.clear();
         CapabilityRuntime.clearAll();
         MiningEvidenceAudit.clearAll();
+        MiningAssistRuntime.clearWorldRuntime();
         TpsGuard.INSTANCE.reset();
         AStarPathfinder.invalidateCache("runtime_world_boundary");
     }

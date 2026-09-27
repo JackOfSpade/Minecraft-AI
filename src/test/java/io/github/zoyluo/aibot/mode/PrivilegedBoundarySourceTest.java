@@ -92,6 +92,8 @@ class PrivilegedBoundarySourceTest {
                 "log/DiagnosticLogger.java",
                 "mining/OreProspector.java",
                 "mining/OreScan.java",
+                "mining/assist/PoiDetector.java",
+                "mining/assist/ViewSweeper.java",
                 "perception/PerceptionCollector.java",
                 "task/ContainerTask.java",
                 "task/CraftTask.java",

@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
+import io.github.zoyluo.aibot.mining.assist.BotEdits;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.mode.OperatingProfile;
 import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
@@ -68,6 +69,7 @@ public final class BuildAction {
             player.swingHand(hand);
             player.updateLastActionTime();
             AStarPathfinder.invalidateCache("block_place");
+            BotEdits.notePlaced(player, destination);
             BotLog.action(player, "place", "pos", LogFields.pos(destination), "face", face, "item", item);
             return ActionResult.SUCCESS;
         }
@@ -211,6 +213,7 @@ public final class BuildAction {
         player.swingHand(hand);
         player.updateLastActionTime();
         AStarPathfinder.invalidateCache("block_place_fallback");
+        BotEdits.notePlaced(player, pos);
         BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", item);
         return ActionResult.SUCCESS;
     }

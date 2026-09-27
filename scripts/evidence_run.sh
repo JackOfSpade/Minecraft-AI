@@ -21,10 +21,17 @@ Options:
   --operator-capabilities <csv> operator-only enabled flags, or all/none
   --mode <name>                 deterministic (default) or llm_story
   --with-llm                    pass DEEPSEEK_API_KEY to the isolated server
+  --assist <mode>               mining assist mode for the run: off (default), sense,
+                                detour, poi or all; certifying Mining First scenarios
+                                accept only off
   --fixture-log <file>          seal a synthetic log without starting Minecraft
 
 The output root is fixed at artifacts/evidence. Existing evidence is never
 overwritten. Fixture evidence and dirty-worktree evidence are UNVERIFIED.
+
+The mining assist is pinned to off for every scenario unless --assist opts in. The
+mode is exported as AIBOT_MINING_ASSIST and written into both the runtime config and
+the sealed effective config, so config_hash covers it.
 EOF
 }
 
@@ -37,6 +44,7 @@ CAPABILITY_SPEC=""
 MODE="deterministic"
 WITH_LLM=0
 FIXTURE_LOG=""
+ASSIST_MODE="off"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --operator-capabilities) [[ $# -ge 2 ]] || { usage; exit 2; }; CAPABILITY_SPEC="$2"; shift 2 ;;
     --mode) [[ $# -ge 2 ]] || { usage; exit 2; }; MODE="$2"; shift 2 ;;
     --with-llm) WITH_LLM=1; shift ;;
+    --assist) [[ $# -ge 2 ]] || { usage; exit 2; }; ASSIST_MODE="$2"; shift 2 ;;
     --fixture-log) [[ $# -ge 2 ]] || { usage; exit 2; }; FIXTURE_LOG="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'evidence-run: unknown argument: %s\n' "$1" >&2; usage; exit 2 ;;
@@ -67,6 +76,10 @@ harness_safe_seed "$REQUESTED_SEED" || exit 2
 }
 case "$PROFILE" in strict_survival|operator) ;; *) printf 'evidence-run: invalid profile: %s\n' "$PROFILE" >&2; exit 2 ;; esac
 case "$MODE" in deterministic|llm_story) ;; *) printf 'evidence-run: invalid mode: %s\n' "$MODE" >&2; exit 2 ;; esac
+case "$ASSIST_MODE" in
+  off|sense|detour|poi|all) ;;
+  *) printf 'evidence-run: invalid --assist mode: %s\n' "$ASSIST_MODE" >&2; exit 2 ;;
+esac
 if [[ $WITH_LLM -eq 1 && -z "${DEEPSEEK_API_KEY:-}" ]]; then
   printf 'evidence-run: --with-llm requires DEEPSEEK_API_KEY\n' >&2
   exit 2
@@ -105,6 +118,13 @@ if MINING_TARGET="$(mining_target_for_scenario "$SCENARIO" 2>/dev/null)"; then
   SCENARIO_TIMEOUT_TICKS=not_observed
 else
   MINING_TARGET=""
+fi
+if [[ "$ASSIST_MODE" != off && -n "$MINING_TARGET" ]]; then
+  # Certifying from_zero scenarios hold audit sessions, so the assist gate would refuse them anyway;
+  # rejecting the mode here keeps the sealed config honest as well.
+  printf 'evidence-run: certifying Mining First scenario %s must run with the mining assist off (--assist %s)\n' \
+    "$SCENARIO" "$ASSIST_MODE" >&2
+  exit 2
 fi
 TIMEOUT_CONTRACT_ERROR=""
 
@@ -298,7 +318,8 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt" || exit 3
   printf '    "forcedPickup": %s,\n' "$FORCED_PICKUP"
   printf '    "manualTeleport": %s\n' "$MANUAL_TELEPORT"
   printf '  },\n'
-  printf '  "deepseek": { "apiKey": "" }\n'
+  printf '  "deepseek": { "apiKey": "" },\n'
+  printf '  "miningAssist": { "mode": "%s" }\n' "$ASSIST_MODE"
   printf '}\n'
 } > "$SERVER_RUN_DIR/config/aibot.json" || exit 3
 
@@ -315,7 +336,8 @@ KEY_MARKER='<redacted:unset>'
   printf '    "manualTeleport": %s\n' "$MANUAL_TELEPORT"
   printf '  },\n'
   printf '  "deepseek": { "enabled": %s, "apiKey": "%s" },\n' "$([[ $WITH_LLM -eq 1 ]] && printf true || printf false)" "$KEY_MARKER"
-  printf '  "server": { "onlineMode": false, "gamemode": "survival", "difficulty": "easy", "viewDistance": 10, "simulationDistance": 10 }\n'
+  printf '  "server": { "onlineMode": false, "gamemode": "survival", "difficulty": "easy", "viewDistance": 10, "simulationDistance": 10 },\n'
+  printf '  "miningAssist": { "mode": "%s" }\n' "$ASSIST_MODE"
   printf '}\n'
 } > "$STAGING/effective-config.redacted.json" || exit 3
 CONFIG_HASH="$(harness_sha256 "$STAGING/effective-config.redacted.json")" || exit 3
@@ -351,12 +373,12 @@ else
   FD_OPEN=1
 
   if [[ $WITH_LLM -eq 1 ]]; then
-    env AIBOT_PROFILE="$PROFILE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
+    env AIBOT_PROFILE="$PROFILE" AIBOT_MINING_ASSIST="$ASSIST_MODE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
       "$EXEC_ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
       -p "$EXEC_ROOT" -PaibotHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
       -I "$RUN_DIR/evidence.init.gradle" runHarnessServer <&9 >> "$STAGING/server.log" 2>&1 &
   else
-    env -u DEEPSEEK_API_KEY AIBOT_PROFILE="$PROFILE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
+    env -u DEEPSEEK_API_KEY AIBOT_PROFILE="$PROFILE" AIBOT_MINING_ASSIST="$ASSIST_MODE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
       "$EXEC_ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
       -p "$EXEC_ROOT" -PaibotHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
       -I "$RUN_DIR/evidence.init.gradle" runHarnessServer <&9 >> "$STAGING/server.log" 2>&1 &
@@ -644,6 +666,7 @@ OS_RUNTIME="$(uname -srm | tr '\t\r\n' '   ')"
   printf 'llm_enabled\t%s\n' "$([[ $WITH_LLM -eq 1 ]] && printf yes || printf no)"
   printf 'profile\t%s\n' "$PROFILE"
   printf 'operator_capabilities\t%s\n' "$CAPABILITIES"
+  printf 'mining_assist_mode\t%s\n' "$ASSIST_MODE"
   printf 'config_hash\t%s\n' "$CONFIG_HASH"
   printf 'config_sha256\t%s\n' "$CONFIG_HASH"
   printf 'server_port\t%s\n' "$SERVER_PORT"

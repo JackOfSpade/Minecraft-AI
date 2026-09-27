@@ -208,6 +208,11 @@ public final class HazardField {
      * WATER cell there and returns true; a TRAP cell is left alone because passing through it proves
      * nothing about traps. Same staleness rule as {@link #observeClear}. Cheap when the field holds no
      * lava or water, which makes it safe to call for every traversed cell.
+     *
+     * <p>The caller decides what counts as "travelled through": fluid shapes are partial height (a source
+     * is 8/9 of a block, flowing fluid lower), so a ray that only crosses the open top of the cell passes
+     * over the surface and proves nothing. The view sweeper calls this only when
+     * {@code SweepEngine.provesNoFluid} holds for the cell.</p>
      */
     public boolean observeNotFluid(BlockPos pos, int tick) {
         return clearCell(pos, tick, true);

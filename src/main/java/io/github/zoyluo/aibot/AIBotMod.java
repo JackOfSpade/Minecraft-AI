@@ -10,6 +10,8 @@ import io.github.zoyluo.aibot.inventory.BotInventoryScreenHandler;
 import io.github.zoyluo.aibot.network.AIBotServerNetworking;
 import io.github.zoyluo.aibot.network.payload.AIPayloads;
 import io.github.zoyluo.aibot.mode.CapabilityPolicy;
+import io.github.zoyluo.aibot.mining.assist.BotEdits;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.observe.TpsGuard;
 import io.github.zoyluo.aibot.persist.BotPersistence;
@@ -24,6 +26,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.Arrays;
 
 public class AIBotMod implements ModInitializer {
@@ -49,6 +52,9 @@ public class AIBotMod implements ModInitializer {
                 "nav_lookahead", config.nav().lookahead(),
                 "pickup_force_radius", config.pickup().forceRadiusH(),
                 "logging_enabled", config.logging().enabled());
+        // Mining assist: optional "miningAssist" section of the same aibot.json (separate parse pass; never throws).
+        MiningAssistRuntime.load(FabricLoader.getInstance().getConfigDir().resolve("aibot.json"));
+        Path assistSidecar = BotEdits.defaultSidecarPath();
 
         LOGGER.info("================================");
         LOGGER.info("  AIBot v{} loaded", getModVersion());
@@ -66,6 +72,7 @@ public class AIBotMod implements ModInitializer {
             RuntimeLifecycleCoordinator.INSTANCE.onServerStarted(server, config);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(RuntimeLifecycleCoordinator.INSTANCE::onServerStopping);
+        ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TpsGuard.INSTANCE.tick(server);
             TaskManager.INSTANCE.tickAll(server);
@@ -75,6 +82,9 @@ public class AIBotMod implements ModInitializer {
             if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {
                 BotPersistence.INSTANCE.saveAllAsync(server);
             }
+            BotEdits.snapshotIfDue(server.getTicks(), assistSidecar);
+            // Keep last: feeds this tick's measured work to the mining assist's TickHeadroom.
+            MiningAssistRuntime.endTick(server.getTicks());
         });
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 AIBotCommand.register(dispatcher, registryAccess));

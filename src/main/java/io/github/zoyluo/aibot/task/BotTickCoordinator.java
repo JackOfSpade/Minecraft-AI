@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.coordination.IdleCoordinator;
+import io.github.zoyluo.aibot.coordination.MiningAssistCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.goal.GoalExecutor;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
@@ -25,6 +26,8 @@ public final class BotTickCoordinator {
             }
             StuckWatcher.INSTANCE.tickBot(server, bot);
             boolean handled = runDanger && DangerWatcher.INSTANCE.scanBot(server, bot);
+            // Mining assist (shadow sensing): never consumes the tick, never throws, one static check when off.
+            MiningAssistCoordinator.INSTANCE.tickBot(server, bot, handled);
             if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {
                 continue;
             }

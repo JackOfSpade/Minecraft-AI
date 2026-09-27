@@ -47,6 +47,7 @@ bash scripts/evidence_run.sh \
 - `--timeout` 与 `--startup-timeout`：scenario 与启动超时；
 - `--mode deterministic`：默认，无 LLM 费用；
 - `--mode llm_story --with-llm`：显式启用 LLM，要求 `DEEPSEEK_API_KEY`；
+- `--assist off|sense|detour|poi|all`：Mining Assist 模式，默认且证据要求为 `off`，见下文“Mining Assist 模式钉死”；
 - `--fixture-log <file>`：只测试封存/解析结构，永远不能成为 `VERIFIED`。
 
 脚本使用独立 run directory、动态本地端口、进程锁和清理 trap，不执行全局 `gradlew --stop`，也不会删除共享 `run/`。已有 evidence 目录不会被覆盖。
@@ -149,6 +150,16 @@ Pin 流程还会验证：
 bash scripts/capability_matrix.sh --output docs/CAPABILITY_MATRIX.md
 bash scripts/capability_matrix.sh --check docs/CAPABILITY_MATRIX.md
 ```
+
+## Mining Assist 模式钉死
+
+Mining Assist（见 [MINING_ASSIST.md](MINING_ASSIST.md)）在真实任务里默认以 `sense` 影子模式运行，但所有证据运行都必须在它关闭的情况下取得，这样 evidence 不会混入传感器的运行时开销或日志：
+
+- `scripts/evidence_run.sh` 对每个 scenario（包括两个 `--with-llm` 分支）都把模式钉为 `off`：导出 `AIBOT_MINING_ASSIST=off`，并把 `"miningAssist": { "mode": "off" }` 同时写入运行时 `config/aibot.json` 与封存的 `effective-config.redacted.json`，所以 `config_hash` 覆盖该模式；manifest 中对应键为 `mining_assist_mode`。
+- 只有显式的 `--assist <mode>` 才会改变它。这是本地、非 certifying 的选择；`*_from_zero` 这三个 Mining First certifying scenario 会在运行时直接拒绝非 `off` 的模式。
+- `scripts/evidence_validate.sh` 要求 manifest 里的 `mining_assist_mode` 与 effective config 中的模式一致，并拒绝任何非 `off` 的 certifying bundle（原因 `certifying_bundle_has_mining_assist_mode`）。在 Mining Assist 出现之前封存的旧 bundle 既没有该键也没有该配置段，仍按 `off` 校验通过；只有其中一处存在则判为不一致。`--self-test` 覆盖了这些情形。
+- `scripts/ci_static_check.sh` 检查 `evidence_run.sh` 的默认值与两处 `AIBOT_MINING_ASSIST` 钉死，并拒绝任何 workflow 把模式设为非 `off`（环境变量、`--assist` 参数或 `miningAssist` 配置段）。
+- GameTest 与 `/aibot verify` harness 在 `AIBotHarnessTestMod` 中调用 `MiningAssistRuntime.setHarnessDefaultOff(true)`（`true` 表示 harness 默认关闭），此后 gate 对所有 bot 关闭、各类钩子什么都不做，直到某个测试用 `MiningAssistRuntime.forceEnable(uuid)` 为单个 bot 显式开启；显式的环境变量或配置文件模式仍然优先。
 
 ## CI 约束
 

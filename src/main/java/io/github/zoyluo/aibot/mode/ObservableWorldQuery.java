@@ -2,6 +2,7 @@ package io.github.zoyluo.aibot.mode;
 
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -191,5 +192,69 @@ public final class ObservableWorldQuery {
         }
         int radius = Math.max(Math.max(1, AIBotConfig.get().perception().radius()), range);
         return bot.squaredDistanceTo(entity) <= (double) radius * radius && bot.canSee(entity);
+    }
+
+    /** Which shape a view ray tests against. */
+    public enum ViewShape {
+        /** Collision shapes: the same surfaces every block observation predicate above accepts. */
+        COLLIDER,
+        /** Selection outlines: also meets rails, cobweb, torches, banners and sculk veins. */
+        OUTLINE
+    }
+
+    /**
+     * First-hit answer of {@link #castViewRay}. A miss has {@code hit == false} and
+     * {@code distance ==} the clamped range; a hit carries the exact hit cell, the struck face and the
+     * state of that one cell. A ray that was not cast at all (its end chunk is not loaded) is
+     * {@link #unknown()}: it says nothing about the world and must not be recorded as free space.
+     */
+    public record ViewHit(boolean hit, BlockPos pos, Direction side, double distance, BlockState state) {
+        public static ViewHit unknown() {
+            return new ViewHit(false, null, null, -1.0D, null);
+        }
+
+        public boolean isUnknown() {
+            return !hit && distance < 0.0D;
+        }
+    }
+
+    /**
+     * One honest view ray from the bot's own eye (mining-assist design 3.1): the first surface a real
+     * player would see along the direction, within the perception radius. The result is only a
+     * nomination; any action still has to re-prove the exact cell. The direction need not be a unit
+     * vector. There is deliberately no origin parameter, so a ray can only start at the eye.
+     *
+     * <p>The length is {@code min(range, max(1, perception radius))}. The state is read only for the
+     * single first-hit cell, after the ray has reported a block hit; a miss reads nothing. If the chunk
+     * holding the ray's end point is not loaded the ray is skipped and reported {@link ViewHit#unknown()}.
+     * This is a plain view query with no capability lookup: it sees nothing a player standing at the
+     * bot's eye could not see.</p>
+     */
+    public static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
+                                      double range, ViewShape shape) {
+        double limit = Math.min(range, Math.max(1, AIBotConfig.get().perception().radius()));
+        double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (!(limit > 0.0D) || !(length > 1.0E-9D)) {
+            return ViewHit.unknown();
+        }
+        Vec3d eye = bot.getEyePos();
+        Vec3d end = eye.add(dx / length * limit, dy / length * limit, dz / length * limit);
+        var world = bot.getServerWorld();
+        // Chunk coordinate is the block coordinate shifted right by four bits.
+        if (!world.getChunkManager().isChunkLoaded(
+                (int) Math.floor(end.x) >> 4, (int) Math.floor(end.z) >> 4)) {
+            return ViewHit.unknown();
+        }
+        BlockHitResult hit = world.raycast(new RaycastContext(
+                eye, end,
+                shape == ViewShape.OUTLINE
+                        ? RaycastContext.ShapeType.OUTLINE : RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.ANY,
+                bot));
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return new ViewHit(false, null, null, limit, null);
+        }
+        BlockPos pos = hit.getBlockPos();
+        return new ViewHit(true, pos, hit.getSide(), eye.distanceTo(hit.getPos()), world.getBlockState(pos));
     }
 }

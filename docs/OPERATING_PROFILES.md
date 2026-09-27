@@ -81,6 +81,12 @@ operator 的四个默认值为 `true`，用于保持旧版本行为；它们是�
 
 服务器自身的 Bot 创建、持久化恢复和正常死亡生命周期不是玩家可调用的 operator capability；它们属于静态生命周期边界。
 
+## Mining Assist 与 profile
+
+Mining Assist（[MINING_ASSIST.md](MINING_ASSIST.md)）不新增任何 operator capability，也不放宽任何 profile。它的视线射线（`castViewRay`）只从 Bot 自己的眼睛发出第一命中射线，长度不超过感知半径，不调用 `CapabilityRuntime.decide`，因此在两种 profile 下完全一致。挖掘后的邻格窥视和实体证据复用现有的 `OreScan.observe` / `canObserveEntity` 观察证明，它们的结果遵循当前 profile 的 capability 决定，与其他挖矿任务相同（`operator` 下若启用了 `hiddenBlockScan`，这些观察也随之放宽）。它不使用结构查询、传送或强制拾取。
+
+P0 阶段默认模式是 `sense`（只记录影子日志，不改变任何 Bot 行为）。用 `AIBOT_MINING_ASSIST=off` 或 `miningAssist.mode` 关闭它；GameTest、verify 与证据运行默认关闭。它与 profile 一样在启动时解析，更改后应重启服务端。
+
 ## 可观测性与审计
 
 启动时会记录 `operating_profile_resolved`，包含 profile 来源、配置开关和 effective capabilities；具体迁移/非法配置 warning 由相邻的独立配置事件记录。运行时 capability gate 会输出节流后的结构化 `capability_decision` 记录，说明 capability、profile、allow/deny 与 reason。

@@ -4,6 +4,7 @@ import com.mojang.datafixers.util.Either;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
+import io.github.zoyluo.aibot.mining.assist.BotEdits;
 import net.minecraft.block.BedBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -130,6 +131,8 @@ public final class SleepTask extends AbstractTask {
                 .with(BedBlock.PART, BedPart.HEAD);
         world.setBlockState(placement.foot(), foot, Block.NOTIFY_ALL);
         world.setBlockState(placement.head(), head, Block.NOTIFY_ALL);
+        BotEdits.notePlaced(world, placement.foot());
+        BotEdits.notePlaced(world, placement.head());
         if (!bot.getAbilities().creativeMode) {
             stack.decrement(1);
         }

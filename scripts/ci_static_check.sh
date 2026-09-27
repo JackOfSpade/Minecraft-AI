@@ -74,7 +74,7 @@ done
 for workflow in .github/workflows/ci.yml .github/workflows/nightly.yml .github/workflows/manual-llm.yml; do
   grep -Fq 'fetch-depth: 0' "$workflow" \
     || fail "$workflow must fetch full history for commit reachability validation"
-  grep -Fq 'actions/upload-artifact@v4' "$workflow" \
+  grep -Eq 'actions/upload-artifact@v[0-9]+' "$workflow" \
     || fail "$workflow does not upload diagnostics"
   grep -Fq 'if: always()' "$workflow" \
     || fail "$workflow may discard diagnostics after a failure"
@@ -99,7 +99,7 @@ grep -Fq 'scripts/mining_acceptance.sh' .github/workflows/nightly.yml \
   || fail 'nightly lacks the explicit long Mining First entrypoint'
 grep -Fq 'fromJSON(needs.prepare_mining_shards.outputs.matrix)' .github/workflows/nightly.yml \
   || fail 'from_zero Mining First workflow is not using the fixed parallel shard matrix'
-grep -Fq 'actions/download-artifact@v4' .github/workflows/nightly.yml \
+grep -Eq 'actions/download-artifact@v[0-9]+' .github/workflows/nightly.yml \
   || fail 'from_zero Mining First workflow does not download shard evidence for aggregation'
 grep -Fq 'scripts/mining_evidence_aggregate.sh' .github/workflows/nightly.yml \
   || fail 'from_zero Mining First workflow does not revalidate and aggregate shards'
@@ -143,6 +143,31 @@ grep -Fq 'confirm_billing:' "$manual" \
   || fail 'manual LLM workflow does not require explicit billing confirmation'
 grep -Fq -- '--mode llm_story' "$manual" \
   || fail 'manual LLM workflow is not explicitly marked as billed evidence'
+
+# The mining assist stays off in every evidence run and in every workflow: evidence_run.sh pins it in both
+# --with-llm branches and seals it into the hashed config, the validator refuses a non-off certifying
+# bundle, and no workflow may opt in (an explicit --assist mode is a local, non-certifying choice).
+grep -Fq 'ASSIST_MODE="off"' scripts/evidence_run.sh \
+  || fail 'evidence_run.sh does not default the mining assist to off'
+[[ "$(grep -Fc 'AIBOT_MINING_ASSIST="$ASSIST_MODE"' scripts/evidence_run.sh)" == 2 ]] \
+  || fail 'evidence_run.sh must pin AIBOT_MINING_ASSIST in both --with-llm branches'
+grep -Fq 'certifying_bundle_has_mining_assist_mode' scripts/evidence_validate.sh \
+  || fail 'evidence_validate.sh does not reject a non-off mining assist mode in certifying bundles'
+for workflow in .github/workflows/*.yml; do
+  if grep -Eiq 'miningAssist' "$workflow"; then
+    fail "$workflow must not configure the mining assist; evidence_run.sh pins it to off"
+  fi
+  if grep -Eq -- '--assist[[:space:]]*$' "$workflow"; then
+    fail "$workflow passes --assist without a mode on the same line"
+  fi
+  while IFS= read -r assist_setting; do
+    [[ -n "$assist_setting" ]] || continue
+    assist_value="$(printf '%s' "$assist_setting" \
+      | sed -E "s/^(AIBOT_MINING_ASSIST[[:space:]]*[:=]|--assist[[:space:]=])[[:space:]]*//; s/[\"']//g")"
+    [[ "$assist_value" == off ]] \
+      || fail "$workflow sets the mining assist to '$assist_value'; only off is allowed in CI"
+  done < <(grep -hoE -- "(AIBOT_MINING_ASSIST[[:space:]]*[:=]|--assist[[:space:]=])[[:space:]]*[^[:space:]#]*" "$workflow" || true)
+done
 
 # When invoked after `build`, inspect every produced jar. Sources and production jars must both
 # remain free of testmod classes and verification commands.

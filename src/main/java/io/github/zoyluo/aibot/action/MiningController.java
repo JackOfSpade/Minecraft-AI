@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.action;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
+import io.github.zoyluo.aibot.mining.assist.MiningAssistHooks;
 import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -79,6 +80,7 @@ public final class MiningController {
                     -1);
             world.setBlockBreakingInfo(player.getId(), pos, -1);
             AStarPathfinder.invalidateCache("block_break");
+            MiningAssistHooks.onBotBreak(player, pos);
             return ActionResult.SUCCESS;
         }
 

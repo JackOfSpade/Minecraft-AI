@@ -1,0 +1,244 @@
+# Mining Assist
+
+Mining Assist gives the mining bots an honest sense of their surroundings: first-hit view rays from the
+bot's own eye, clamped to the same perception radius every other observation uses. From that it can
+notice ore in a cave, remember lava, and recognise the palette of a structure. The full design document
+(`MINING_ASSIST_DESIGN.md`, revision 2, kept outside this repository) has the section numbers quoted below;
+this page describes what is shipped.
+
+## Status: phase P0, sense in shadow
+
+The shipped default mode is `sense`. In this phase the assist observes and writes logs. It changes nothing
+a bot does:
+
+- no detour to a valuable, no pause, no stop for a structure, no chat message, no LLM call;
+- no task is assigned or modified, and `OreDigTask` (like every other mining task) is not touched;
+- no new privilege: no teleport, no forced pickup, no hidden block scan, no structure lookup. A ray hit is a
+  nomination, never proof, and a hit on an unloaded chunk is "unknown", never "empty".
+
+What P0 exists for is measurement: how much the sensor costs per tick, what it sees, and what the POI scorer
+would have said. Later phases (detour, POI stop-and-notify, LLM confirmation, exploration) each ship behind
+their own mode and only after these numbers are known.
+
+## Modes
+
+| Mode | Meaning |
+|---|---|
+| `off` | The first statement of every hook, of the coordinator, of the gate and of the tick measurement is one static read and a return, and the placed-blocks file is not read at start-up. What still runs is the bare per-bot call and the once-per-tick dirty-flag check of the sidecar writer. |
+| `sense` | Sensor, shadow POI scoring and shadow logs. Nothing acts. Shipped default in P0. |
+| `detour`, `poi`, `all` | Reserved for later phases. In P0 they behave like `sense` (the sensor runs, nothing acts), except that the shadow log lines default to off outside `sense`. |
+
+Resolution order, first match wins:
+
+1. Environment variable `AIBOT_MINING_ASSIST` (non-blank).
+2. `miningAssist.mode` in `config/aibot.json`.
+3. The shipped default (`sense`).
+
+Names are case-insensitive. An explicit but unknown value resolves to `off` and logs a warning.
+`AIBOT_MINING_ASSIST_DETERMINISTIC=1` removes time-based throttling (used by reproducible runs).
+
+### Turning it off or on
+
+- Off for a server: set `"miningAssist": { "mode": "off" }` in `config/aibot.json`, or start the server with
+  `AIBOT_MINING_ASSIST=off`. Restart is required; the config is read once at start-up.
+- Only the shadow log lines off, sensor still running: `"miningAssist": { "sense": { "shadowLog": false } }`.
+- GameTests and `/aibot verify` scenarios run with the assist off by default (see Tests and evidence).
+
+## When it senses
+
+For each bot, every tick, `MiningAssistCoordinator` runs after the danger scan and before the goal executor.
+It never consumes the tick and never throws. The checks run cheapest first:
+
+1. Mode off (or harness default off with no opted-in bot): return after one static read.
+2. The danger scan handled this bot this tick: skip (design 2.3, step 3d).
+3. The active task is `OreDigTask`, `DigDownTask`, `DescendToYTask`, `MineTask` or `MineValuablesTask`.
+   `StripMineTask` is legacy and rejected in strict survival, so it is not covered. `DigDownTask` is sensed in
+   both of its phases in P0.
+4. The gate is open (below).
+5. The bot is underground: `!world.isSkyVisible(feet)`, an own-cell read.
+
+### The gate
+
+The assist only runs for a bot whose active request came from a real player or mission: origin `MISSION`,
+`PLAYER_COMMAND`, `PLAYER_PANEL`, `LLM_TOOL` or `JOB`. It is closed for `SAFETY`, `SYSTEM_BACKGROUND` and
+`VERIFY`, for a bot that holds a strict `MiningEvidenceAudit` session, while `TpsGuard` reports degraded TPS,
+and while the harness default is off (unless a test opts the bot in). No origin at all counts as not real. The
+verdict is cached for 20 ticks per bot, except that a cached open verdict is re-checked against the live
+origin and audit session on every call (two map lookups), so an audit session that begins never waits out
+the cache. A change of verdict writes one `assist_gate` line with the reason.
+
+## What a sensing tick does
+
+- **Break peek.** Up to 4 pending block breaks are drained. The break hook fires when the bot has finished
+  its side of the break, not when the world confirmed it (a protected region can refuse it), so the peek
+  never assumes success: it observes the broken cell through `OreScan.observe`, the same observation proof
+  the mining tasks use, and only a cell observed as air (or as fluid that flowed in) becomes open in the
+  occupancy window and enters the bot's dug ring. A cell that still holds its block is folded like any first
+  hit; one that cannot be observed stays unknown. Both count as `breaks_unconfirmed`. The six neighbours are
+  observed the same way. A neighbour that is open space, was not dug by the bot itself, and was not already
+  seen as open by an earlier ray is a breakthrough: the sweep restarts with a fresh rotation at a raised ray
+  rate for one sweep, at most once per 40 ticks per bot (a restart inside the gap is counted as
+  `breakthroughs_deferred` and the running sweep goes on).
+- **Sweep.** By default 40 collider rays per bot per tick (plus an outline re-cast on every second ray for
+  decor such as rails and cobweb), walking a 2048-direction lattice in a per-sweep random rotation, so any
+  partial sweep is spatially uniform. A full sweep takes about 51 ticks. The budget is shared: with several
+  sweeping bots each gets `min(rays per tick, global rays per tick / bots)`, and it is halved while the tick
+  headroom latch is set. Rays fill the bot's own memories: a free-length ring (for the openness estimate), a
+  65x65x65 observed-occupancy window (about 69 KB, allocated on the first sweep), a hazard field for lava,
+  water and traps, a ledger of valuable-block sightings (cap 64, entries expire after 6000 ticks), and a POI
+  evidence window. A remembered lava or water cell is forgotten by a ray only when the ray proves the cell
+  empty: the fluid shape is partial height (a source is 8/9 of a block, flowing fluid lower), so a ray that
+  merely crosses the open top of the cell passes over the surface and proves nothing. The proof needs the
+  ray's part inside the cell to reach the lowest tenth of it; a cell that is only grazed stays remembered and
+  reads as fluid in the occupancy window.
+- **Shadow POI scoring**, every 20 ticks per bot (staggered by `uuid.hashCode() & 15`). The scorer combines
+  the non-natural blocks the rays saw, visible entities (through `canObserveEntity`) and the cave openness
+  estimate into a band: `NONE`, `POSSIBLE`, `CAVERN_ONLY`, `STRUCTURE_CERTAIN` or `MANDATORY` (warden risk).
+  Only band changes are logged. It is the one heavy operation of the tick; nothing acts on it.
+- **The bot's own edits.** Blocks a bot placed (torches, planks, beds, seals) are recorded per dimension and
+  never count as structure evidence. The record is persisted to `config/aibot/mining_assist_edits.json`,
+  written by a background thread when it changed and at least 1200 ticks have passed, plus one synchronous
+  write on server stop. A missing or corrupt file is treated as empty. `edits.sidecar=false` keeps it in memory.
+- **Biome.** The biome id at the bot's own feet (the F3 equivalent) is read once per POI evaluation. It marks
+  the deep dark (for the future deep-dark veto, logged only) and lush caves (so azalea-tree logs and leaves
+  are not mistaken for structure wood).
+
+When a bot stops mining for 2400 ticks (two minutes) its state is released after one last cost line. Lava
+memory never expires by time; a stopped mission is the only time-based exit.
+
+## Configuration
+
+All keys are optional and live under `miningAssist` in `config/aibot.json`. Out-of-range values are clamped
+and wrong-typed values fall back to the default, each with one `assist_config_warning` at start-up. Keys that
+are read in P0:
+
+| Key | Default | Effect in P0 |
+|---|---|---|
+| `mode` | `sense` | See Modes. |
+| `sense.raysPerTick` | 40 | Collider rays per bot per tick (1..256). |
+| `sense.globalRaysPerTick` | 640 | Ray budget shared by all sweeping bots (1..4096). |
+| `sense.adaptiveThrottle` | true | Halve rays while the tick headroom latch is set. Off when deterministic. |
+| `sense.shadowLog` | true in `sense` mode | Band changes, sightings, session and cost lines. |
+| `tick.startWorkMs`, `tick.abortWorkMs` | 38, 48 | Start and abort gates of the tick headroom. P0 only reads the headroom's ray-halving latch (halve above 44 ms of work per tick, re-arm below 40 ms), so these two keys have no visible effect until an acting phase uses the gates. |
+| `poi.enabled` | true | Shadow POI scoring on or off. |
+| `poi.cavernDimensions` | `["minecraft:overworld"]` | Dimensions where the open-cavern signal counts. |
+| `poi.dedupeRadius` | 40 | Radius within which POI evidence counts as the same candidate site. |
+| `edits.sidecar` | true | Persist the placed-blocks record. |
+| `detour.announceMinValue` | 90 | Smallest raw value that gets an `assist_sighting` line. |
+
+The other keys of the design (`route.*`, the remaining `detour.*` and `poi.*`, `safety.*`, `advisor.*`,
+`explore.*`) are parsed and validated but nothing reads them until their phase ships.
+
+The sensing radius is the existing `perception.radius` of the main config (default 16), capped at 24 blocks
+for the sensor (the ray budget is counted in rays, so an unbounded radius would make every ray longer with no
+compensation); the assist never sees farther than a bot's ordinary perception does.
+
+## Logs
+
+Shadow logging is deliberately low volume and follows `LOGGING.md`. Everything is greppable with
+`event=assist_`. The events and their fields are listed in `LOGGING.md`. In short: one `assist_config` at
+start-up; `assist_gate` when a bot's gate changes; `assist_sense_enabled` / `assist_sense_disabled` around a
+sensing session (a session ends after 40 quiet ticks, so short interruptions do not log);
+`assist_poi_band` when the scorer's band differs from the band of the last line, at most one line per 200
+ticks per bot (a band that flips back inside the gap writes nothing; the line carries `withheld`, the number
+of changes it held back); `assist_sighting` for rare finds (at most 6 per window);
+`assist_sense_summary` once per bot per minute of sensing with rays, milliseconds and counts; and
+`assist_tick_failed` if the coordinator's exception fence ever fires.
+
+## Tests and evidence
+
+- JUnit covers the pure kernels, the adapters' source contracts (no raw world reads outside the one
+  first-hit read, no privileged primitive, no task assignment), the tick coordinator's position between the
+  danger scan and the goal executor, and the wiring in `AIBotMod` and `RuntimeLifecycleCoordinator`.
+- The GameTest and verify harness call `MiningAssistRuntime.setHarnessDefaultOff(true)`, which keeps the mode but
+  turns the harness-off flag on. The gate then refuses every bot, and the hooks do nothing at all, until a
+  test opts a bot in with `MiningAssistRuntime.forceEnable(uuid)` (which also makes the run deterministic).
+  An explicit `AIBOT_MINING_ASSIST` or file mode still wins. The method is named for what the flag means:
+  the design text spells the same call `setHarnessDefault(false)`, which reads inverted, so a harness entry
+  point written from the design must use `setHarnessDefaultOff(true)`. A source-contract test pins it as the
+  first statement of `AIBotHarnessTestMod.onInitialize`.
+- The gate wiring (which origin, whether an audit session is open, TPS) is unit-tested through the pure
+  resolver with fakes and pinned by a source contract on the live lookups, so an edit that ignored the audit
+  session or treated a missing origin as real would fail a test.
+- `scripts/evidence_run.sh` pins the assist to `off` for every scenario. `--assist <mode>` opts in for a local
+  run. The mode is exported as `AIBOT_MINING_ASSIST` and written into both the runtime `config/aibot.json` and
+  the sealed `effective-config.redacted.json`, so `config_hash` covers it, and into the manifest as
+  `mining_assist_mode`. The validator checks that the two agree and refuses a non-`off` mode for the
+  certifying `*_from_zero` Mining First scenarios. `scripts/ci_static_check.sh` fails if any workflow sets a
+  non-`off` mode. A bundle sealed before this feature has neither the manifest key nor the config section and
+  is read as `off`; that legacy leniency is deliberate (a bundle with only one of the two is rejected), and it
+  means the attestation of an old bundle rests on the commit it was produced from.
+
+## Honest limits
+
+- Nothing here has been measured in a live server yet. The estimates of cost (about 40 collider plus 20
+  outline rays per tick) come from the design. The P0 cost gate (four bots, assist on against off, with the
+  `assist_sweep`, `assist_fold` and `assist_poi` maxima) and the `assist_recall_probe` verify scenario have
+  not been run. The shipped default is `sense`, so until the gate has run, a server that sees a tick-time
+  effect should set `miningAssist.mode` to `off` (the only cost of a wrong guess is that sensing logs
+  disappear). Off-line, the sweep's recall is covered by a synthetic-cavern unit test: 240 of 240 single-face
+  ores between 2 and 8 blocks away were sighted after two sweeps (the design asks for at least 90 percent).
+  That test proves the ray geometry, not the live world.
+- A collider ray passes through pressure plates and tripwire (they have no collision shape), so trap recall
+  is limited to blocks such as TNT and dispensers. Plates only show up in the outline decor pass, which feeds
+  the POI window, not the hazard field.
+- The POI scorer gives any modded entity a small score on its own. In a modded pack a modded mob in line of
+  sight can therefore raise a `POSSIBLE` band in the shadow logs. Harmless while nothing acts on it, but the
+  shadow logs should be reviewed before phase P2 does.
+- The placed-blocks record is keyed by dimension id only and lives in the shared config folder, so a block a
+  bot placed in one world is also treated as bot-placed at the same coordinates in another world of the same
+  installation. Weak-evidence rules bound the cost.
+- The occupancy window says what the rays did, not what is there. AIR means "a view ray passed through and no
+  collider or fluid was struck": a ray passes through cells with no collision shape (fire, cobweb, powder
+  snow, pressure plates, tripwire, sweet berry bushes) and over the top of partial-height fluid, so those cells
+  read as AIR. A remembered lava or water cell is put back to FLUID when a ray only grazes it, but a fluid
+  cell no ray has struck yet still reads AIR. A consumer that decides where the bot may walk (a later
+  phase) must re-observe the feet and head cells through `OreScan.observe` rather than trust AIR, or the
+  occupancy needs a separate "transparent, contents unproven" state first.
+- The break peek restarts the sweep at most once per 40 ticks and only for open space no ray has seen. In a
+  cavern-heavy vein the raised rate can still be held for about half the time; `breakthroughs` and
+  `breakthroughs_deferred` in the cost summary say how often.
+- The tick headroom sees each tick's work clamped to 100 ms, so one autosave or GC pause does not latch the
+  ray-halving throttle; several such ticks in a row still do. Read `throttled_out` with that in mind.
+- Sightings are nominations. A future consumer must re-prove the exact cell through the ordinary observation
+  path before acting on one.
+- The openness estimate needs about 16 ticks of sweep after arriving somewhere new before it is valid.
+- Sensing is underground only and only for the five task classes above. The mandatory warden-risk band is
+  scored and logged in P0 but does not stop the bot; that arrives with the POI phase.
+- The placed-blocks record keeps one 8192-cell least-recently-used set per dimension id it has seen, and the
+  sidecar file holds all of them (a full dimension is about 172 KB; a file over 8 MiB is refused on load and
+  the record starts empty). The listed modpack has a handful of dimensions, so this does not bind today; a
+  pack with dynamically created dimensions would need a cap on the dimension count.
+- The remembered hazards of one bot are capped at 4096 cells. When the cap is passed the farthest 256 cells
+  are dropped by a sort of the whole field, a few milliseconds once per 256 newly seen cells; it only occurs
+  next to a very large lava or water body.
+
+## Invariants the code comments cite
+
+The design document is not in this repository, so the invariants that comments, tests and log lines refer
+to by number are restated here (design section 1):
+
+- **I1 Honest sensing.** Perception is first-hit rays clamped to the live perception radius. A ray hit is
+  only a nomination; any action is preceded by an `OreScan.observe*` or `ObservableWorldQuery` re-proof of
+  that exact cell. Unknown is never absent, safe or hazardous.
+- **I2 No new privilege.** No teleport, forced pickup, hidden scan, `StructureAccessor`, `getBlockEntity` or
+  `hasAny`. `castViewRay` never calls `CapabilityRuntime.decide`. The own-cell reads beyond position are
+  exactly two, both at the bot's feet and both pinned to one call in one file by a source contract: the biome
+  id (`PoiDetector`, the F3 equivalent) and the sky-visibility flag (`MiningAssistCoordinator`, the
+  underground test, the same call `DangerWatcher` and `MineValuablesTask` already make). The design text
+  names only the biome; this is the corrected statement. The break peek and the entity evidence reuse the
+  existing `OreScan.observe` and `canObserveEntity` helpers, whose answers follow the active profile like
+  every other mining task's (under `operator` with `hiddenBlockScan` enabled they are as permissive as
+  those tasks are); `castViewRay` itself is profile independent.
+- **I4 Origin and flag gating.** The assist runs only for `MISSION`, `PLAYER_COMMAND`, `PLAYER_PANEL`,
+  `LLM_TOOL` and `JOB` origins, never while `MiningEvidenceAudit.hasSession(uuid)`, and only when the mode
+  allows. The harness defaults it off. With the mode off a hook is one static check.
+- **I5 G1 and G2.** No task assigns tasks; the assist assigns, pauses and resumes nothing. Everything runs
+  on the server thread; the only background work is the sidecar writer, which is handed an immutable string.
+- **I11 Measure before acting.** P0 ships sensing in shadow; acting features ship later behind flags.
+- **I15 Hazard memory is monotone.** Lava is forgotten only by re-observation of the cell as non-fluid (a
+  first hit that read a non-fluid state, or a ray that proves the cell empty as described above), by mission
+  end, by a dimension change, or by capacity eviction. Nothing ages out by time.
+
+I3, I6 to I10 and I12 to I14 concern the detour, the POI stop and the OreDig anchors and arrive with the
+phases that implement them.

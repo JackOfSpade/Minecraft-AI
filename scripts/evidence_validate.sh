@@ -50,6 +50,7 @@ validate_one() {
   local manifest result header row state reason run_id scenario requested actual actual_verified
   local profile mode worktree worktree_end config_hash calculated_config manifest_result manifest_passed manifest_total
   local capabilities llm_enabled config_facts config_profile config_capabilities config_llm
+  local assist_mode config_assist
   local commit_end run_directory run_directory_verified source_snapshot gradle_exit server_port redactions java_home java_runtime_verified
   local log_summary_count log_summary parsed_log_passed parsed_log_total
   local row_scenario row_requested row_actual row_result row_passed row_total row_exit row_summary
@@ -253,8 +254,17 @@ try:
         return result
     with open(sys.argv[1], "r", encoding="utf-8") as handle:
         data = json.load(handle, object_pairs_hook=unique_object)
-    if set(data) != {"schemaVersion", "profile", "operatorCapabilities", "deepseek", "server"}:
+    base_keys = {"schemaVersion", "profile", "operatorCapabilities", "deepseek", "server"}
+    if set(data) != base_keys and set(data) != base_keys | {"miningAssist"}:
         raise ValueError("top-level schema")
+    # Bundles sealed before the mining assist existed carry no miningAssist section ("-").
+    config_assist = "-"
+    if "miningAssist" in data:
+        assist = data["miningAssist"]
+        if not isinstance(assist, dict) or set(assist) != {"mode"} \
+                or assist["mode"] not in ("off", "sense", "detour", "poi", "all"):
+            raise ValueError("mining assist schema")
+        config_assist = assist["mode"]
     caps = data["operatorCapabilities"]
     ordered = ("hiddenBlockScan", "emergencyTeleport", "forcedPickup", "manualTeleport")
     if data.get("schemaVersion") != 1 or set(caps) != set(ordered):
@@ -291,6 +301,7 @@ try:
     print(data["profile"])
     print(",".join(f"{name}={str(caps[name]).lower()}" for name in ordered))
     print("yes" if enabled else "no")
+    print(config_assist)
 except Exception:
     sys.exit(2)
 PY
@@ -301,10 +312,28 @@ PY
   config_profile="$(printf '%s\n' "$config_facts" | sed -n '1p')"
   config_capabilities="$(printf '%s\n' "$config_facts" | sed -n '2p')"
   config_llm="$(printf '%s\n' "$config_facts" | sed -n '3p')"
+  config_assist="$(printf '%s\n' "$config_facts" | sed -n '4p')"
   [[ "$config_profile" == "$profile" && "$config_capabilities" == "$capabilities" && "$config_llm" == "$llm_enabled" ]] || {
     validation_fail effective_config_manifest_mismatch
     return 1
   }
+
+  # Mining assist mode attestation. A bundle that records the mode in its manifest must carry the same
+  # mode in its hashed effective config; a bundle from before the assist existed carries neither (and
+  # counts as off). A certifying Mining First bundle may only ever be off.
+  assist_mode="$(harness_manifest_get "$manifest" mining_assist_mode)"
+  if [[ -n "$assist_mode" ]]; then
+    case "$assist_mode" in off|sense|detour|poi|all) ;; *) validation_fail invalid_mining_assist_mode; return 1 ;; esac
+    [[ "$config_assist" != - ]] || { validation_fail missing_effective_config_mining_assist; return 1; }
+    [[ "$config_assist" == "$assist_mode" ]] || { validation_fail mining_assist_mode_config_mismatch; return 1; }
+  else
+    [[ "$config_assist" == - ]] || { validation_fail effective_config_mining_assist_without_manifest_mode; return 1; }
+    assist_mode=off
+  fi
+  if [[ "$assist_mode" != off ]] && mining_target_for_scenario "$scenario" >/dev/null 2>&1; then
+    validation_fail certifying_bundle_has_mining_assist_mode
+    return 1
+  fi
 
   server_port="$(harness_manifest_get "$manifest" server_port)"
   [[ "$server_port" =~ ^[0-9]+$ && "$server_port" -ge 1024 && "$server_port" -le 65535 ]] || {
@@ -862,6 +891,7 @@ validate_batch() {
 run_self_test() (
   set -euo pipefail
   local fixture mining_fixture downgrade_fixture evidence mining_evidence downgrade_evidence
+  local assist_evidence legacy_evidence assist_status assist_reason assist_hash
   local output downgrade_status batch batch_output link traversal relative
   local -a generated
   fixture="$(mktemp "${TMPDIR:-/tmp}/aibot-evidence-self-test.XXXXXX")"
@@ -907,6 +937,72 @@ run_self_test() (
     exit 1
   fi
 
+  # Mining assist attestation. A default run pins the assist to off in the manifest and in the hashed
+  # effective config; an explicit --assist opt-in is sealed consistently; a manifest that disagrees with
+  # its config, an unknown mode, and bundles sealed before the assist existed are all handled.
+  [[ "$(harness_manifest_get "$evidence/manifest.tsv" mining_assist_mode)" == off ]] \
+    && grep -Fq '"miningAssist": { "mode": "off" }' "$evidence/effective-config.redacted.json" || {
+    printf 'evidence-self-test: default run did not pin the mining assist to off\n' >&2
+    exit 1
+  }
+  set +e
+  output="$("$ROOT/scripts/evidence_run.sh" --scenario evidence_self_test --seed 424242 \
+    --assist yes --fixture-log "$fixture" 2>&1)"
+  assist_status=$?
+  set -e
+  [[ "$assist_status" -eq 2 && "$output" != *'EVIDENCE_DIR='* ]] || {
+    printf 'evidence-self-test: unknown --assist mode was accepted\n' >&2
+    exit 1
+  }
+  output="$("$ROOT/scripts/evidence_run.sh" --scenario evidence_self_test --seed 424242 \
+    --assist sense --fixture-log "$fixture")"
+  assist_evidence="$(printf '%s\n' "$output" | sed -n 's/^EVIDENCE_DIR=//p' | tail -1)"
+  [[ -d "$assist_evidence" ]]
+  generated+=("$assist_evidence")
+  "$ROOT/scripts/evidence_validate.sh" "$assist_evidence" >/dev/null
+  [[ "$(harness_manifest_get "$assist_evidence/manifest.tsv" mining_assist_mode)" == sense ]] \
+    && grep -Fq '"miningAssist": { "mode": "sense" }' "$assist_evidence/effective-config.redacted.json" || {
+    printf 'evidence-self-test: --assist sense was not sealed in manifest and config\n' >&2
+    exit 1
+  }
+  chmod -R u+w "$assist_evidence"
+  sed -i.bak $'s/^mining_assist_mode\tsense$/mining_assist_mode\toff/' "$assist_evidence/manifest.tsv"
+  rm -f -- "$assist_evidence/manifest.tsv.bak"
+  harness_write_checksums "$assist_evidence"
+  harness_write_locked_marker "$assist_evidence"
+  assist_reason="$("$ROOT/scripts/evidence_validate.sh" "$assist_evidence" 2>&1 >/dev/null || true)"
+  [[ "$assist_reason" == *mining_assist_mode_config_mismatch* ]] || {
+    printf 'evidence-self-test: manifest and config disagreeing on the mining assist mode was accepted\n' >&2
+    exit 1
+  }
+  output="$("$ROOT/scripts/evidence_run.sh" --scenario evidence_self_test --seed 424242 --fixture-log "$fixture")"
+  legacy_evidence="$(printf '%s\n' "$output" | sed -n 's/^EVIDENCE_DIR=//p' | tail -1)"
+  [[ -d "$legacy_evidence" ]]
+  generated+=("$legacy_evidence")
+  chmod -R u+w "$legacy_evidence"
+  python3 - "$legacy_evidence/effective-config.redacted.json" <<'PY'
+import json
+import sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+del data["miningAssist"]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\n")
+PY
+  assist_hash="$(harness_sha256 "$legacy_evidence/effective-config.redacted.json")"
+  sed -i.bak $'/^mining_assist_mode\t/d' "$legacy_evidence/manifest.tsv"
+  sed -i.bak $'s/^config_hash\t.*$/config_hash\t'"$assist_hash"$'/' "$legacy_evidence/manifest.tsv"
+  sed -i.bak $'s/^config_sha256\t.*$/config_sha256\t'"$assist_hash"$'/' "$legacy_evidence/manifest.tsv"
+  rm -f -- "$legacy_evidence/manifest.tsv.bak"
+  harness_write_checksums "$legacy_evidence"
+  harness_write_locked_marker "$legacy_evidence"
+  "$ROOT/scripts/evidence_validate.sh" "$legacy_evidence" >/dev/null || {
+    printf 'evidence-self-test: a bundle sealed before the mining assist existed no longer validates\n' >&2
+    exit 1
+  }
+
   printf '%s\n' \
     '[Server thread/INFO]: Seed: [424242]' \
     '[Server thread/INFO]: [AIBot Verify] diamond_stack_64_from_zero RUNNING timeout=18000' \
@@ -931,6 +1027,44 @@ run_self_test() (
   chmod -R u+w "$mining_evidence"
   [[ "$(harness_manifest_get "$mining_evidence/manifest.tsv" verify_timeout_seconds)" == 1200 \
     && "$(harness_manifest_get "$mining_evidence/manifest.tsv" scenario_timeout_ticks)" == 18000 ]]
+
+  # Certifying Mining First scenarios are assist-off: the run refuses --assist, and the validator refuses a
+  # bundle that claims another mode even when its manifest, config and config hash agree.
+  set +e
+  output="$("$ROOT/scripts/evidence_run.sh" --scenario diamond_stack_64_from_zero \
+    --seed 424242 --timeout 1200 --assist sense --fixture-log "$mining_fixture" 2>&1)"
+  assist_status=$?
+  set -e
+  [[ "$assist_status" -eq 2 && "$output" == *'must run with the mining assist off'* \
+    && "$output" != *'EVIDENCE_DIR='* ]] || {
+    printf 'evidence-self-test: certifying scenario accepted --assist sense\n' >&2
+    exit 1
+  }
+  assist_hash="$(harness_sha256 "$mining_evidence/effective-config.redacted.json")"
+  sed -i.bak 's/"mode": "off"/"mode": "sense"/' "$mining_evidence/effective-config.redacted.json"
+  rm -f -- "$mining_evidence/effective-config.redacted.json.bak"
+  sed -i.bak $'s/^mining_assist_mode\toff$/mining_assist_mode\tsense/' "$mining_evidence/manifest.tsv"
+  sed -i.bak $'s/^config_hash\t.*$/config_hash\t'"$(harness_sha256 "$mining_evidence/effective-config.redacted.json")"$'/' \
+    "$mining_evidence/manifest.tsv"
+  sed -i.bak $'s/^config_sha256\t.*$/config_sha256\t'"$(harness_sha256 "$mining_evidence/effective-config.redacted.json")"$'/' \
+    "$mining_evidence/manifest.tsv"
+  rm -f -- "$mining_evidence/manifest.tsv.bak"
+  harness_write_checksums "$mining_evidence"
+  harness_write_locked_marker "$mining_evidence"
+  assist_reason="$("$ROOT/scripts/evidence_validate.sh" "$mining_evidence" 2>&1 >/dev/null || true)"
+  [[ "$assist_reason" == *certifying_bundle_has_mining_assist_mode* ]] || {
+    printf 'evidence-self-test: certifying bundle with a non-off mining assist mode was accepted\n' >&2
+    exit 1
+  }
+  sed -i.bak 's/"mode": "sense"/"mode": "off"/' "$mining_evidence/effective-config.redacted.json"
+  rm -f -- "$mining_evidence/effective-config.redacted.json.bak"
+  sed -i.bak $'s/^mining_assist_mode\tsense$/mining_assist_mode\toff/' "$mining_evidence/manifest.tsv"
+  sed -i.bak $'s/^config_hash\t.*$/config_hash\t'"$assist_hash"$'/' "$mining_evidence/manifest.tsv"
+  sed -i.bak $'s/^config_sha256\t.*$/config_sha256\t'"$assist_hash"$'/' "$mining_evidence/manifest.tsv"
+  rm -f -- "$mining_evidence/manifest.tsv.bak"
+  harness_write_checksums "$mining_evidence"
+  harness_write_locked_marker "$mining_evidence"
+  "$ROOT/scripts/evidence_validate.sh" "$mining_evidence" >/dev/null
   sed -i.bak $'s/^verify_timeout_seconds\t1200$/verify_timeout_seconds\t1199/' \
     "$mining_evidence/manifest.tsv"
   rm -f -- "$mining_evidence/manifest.tsv.bak"

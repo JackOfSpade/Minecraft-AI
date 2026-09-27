@@ -31,7 +31,9 @@ public final class ObservedOccupancy {
     public static final int UNKNOWN = 0;
     /**
      * Observed as a cell a view ray passed through, or a broken/trodden cell. This means "no collider
-     * and no fluid was seen there": torches, grass or cobweb read as AIR too.
+     * and no fluid was seen there": torches, grass or cobweb read as AIR too, and so does a fluid cell whose
+     * partial-height surface a ray only crossed above. Not proof that the cell is empty: a consumer that
+     * needs a walkable cell must re-observe it.
      */
     public static final int AIR = 1;
     /** Observed as the first-hit cell of a solid-collider ray. */
