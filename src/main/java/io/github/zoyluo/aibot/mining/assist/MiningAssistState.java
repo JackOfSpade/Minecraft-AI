@@ -15,8 +15,25 @@ import java.util.UUID;
  */
 public final class MiningAssistState {
     public static final int PENDING_BREAK_CAP = PendingBreakRing.DEFAULT_CAPACITY;
-    /** Sentinel for "never swept". */
+    /**
+     * Sentinel for "never swept". It is {@code Integer.MIN_VALUE}, so a plain {@code tick - stored} subtraction
+     * overflows: never write {@code tick - x > n} for a field that may hold NEVER. Use {@link #staleOrNever}
+     * (or an explicit {@code x != NEVER} test and a {@code long} subtraction).
+     */
     public static final int NEVER = Integer.MIN_VALUE;
+
+    /**
+     * True when {@code thenTick} is {@link #NEVER}, lies in the future of {@code nowTick} (a clock that moved
+     * backwards), or is more than {@code maxAgeTicks} old. The subtraction is done as {@code long}, so it cannot
+     * overflow for the sentinel. This is the one predicate every "is this fact fresh" check of the detour uses
+     * (biome read, POI score, ledger timestamps): a fact that was never recorded is stale, never fresh.
+     */
+    public static boolean staleOrNever(int nowTick, int thenTick, int maxAgeTicks) {
+        if (thenTick == NEVER || nowTick < thenTick) {
+            return true;
+        }
+        return (long) nowTick - (long) thenTick > maxAgeTicks;
+    }
 
     private final UUID botId;
     private final FreeRunStats ring = new FreeRunStats();
@@ -50,6 +67,17 @@ public final class MiningAssistState {
     private long lifetimeRays;
     private long lifetimeSweeps;
     private final SenseStatus status = new SenseStatus();
+
+    // ---- P1 (detour) additions, design 2.4 ---------------------------------------------------------------
+    private final DetourExclusions exclusions = new DetourExclusions();
+    private Object detourOwner;
+    private DetourPhase detourPhase = DetourPhase.IDLE;
+    private int detourPublishedTick = NEVER;
+    private DetourControl detourControl;
+    private int hurtTimeSeen;
+    private double poiStructureScore;
+    private int poiScoreTick = NEVER;
+    private int biomeTick = NEVER;
 
     public MiningAssistState(UUID botId) {
         this.botId = Objects.requireNonNull(botId, "botId");
@@ -353,6 +381,95 @@ public final class MiningAssistState {
         return window;
     }
 
+    // ---------------------------------------------------------------------------------------
+    // P1: detour memory and the published detour tuple (design 2.3 and 2.4)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * The detour's private anti-thrash exclusions (cap 256, TTL). Not {@code EpisodeMemory}, so a busy detour
+     * cannot evict OreDig's own exclusions. Cleared by {@link #resetObservations()} once P1 wires it (the
+     * P1 contract assigns that one-line change to the coordinator integrator).
+     */
+    public DetourExclusions exclusions() {
+        return exclusions;
+    }
+
+    /**
+     * Publishes the live detour: the owning task instance (compared by identity, so it is typed Object and the
+     * assist package does not depend on the task package), its phase, the server tick of this publish, and the
+     * lever the coordinator's net may pull. Called by {@code OreDig.tickOpportunistic} on every tick in which the
+     * engine is not IDLE.
+     */
+    public void publishDetour(Object owner, DetourPhase phase, int serverTick, DetourControl control) {
+        this.detourOwner = owner;
+        this.detourPhase = phase == null ? DetourPhase.IDLE : phase;
+        this.detourPublishedTick = serverTick;
+        this.detourControl = control;
+    }
+
+    /** The engine went idle, or the coordinator's orphan cleanup ran: no detour is published. Keeps {@link #hurtTimeSeen()}. */
+    public void clearDetour() {
+        this.detourOwner = null;
+        this.detourPhase = DetourPhase.IDLE;
+        this.detourPublishedTick = NEVER;
+        this.detourControl = null;
+    }
+
+    /** The task instance that published the detour, or null when none is published. */
+    public Object detourOwner() {
+        return detourOwner;
+    }
+
+    public DetourPhase detourPhase() {
+        return detourPhase;
+    }
+
+    /** Server tick of the last {@link #publishDetour}, or {@link #NEVER}. */
+    public int detourPublishedTick() {
+        return detourPublishedTick;
+    }
+
+    /** The lever of the published detour, or null. */
+    public DetourControl detourControl() {
+        return detourControl;
+    }
+
+    /** The bot's {@code hurtTime} the coordinator saw on its previous run (edge detection of the net); 0 initially. */
+    public int hurtTimeSeen() {
+        return hurtTimeSeen;
+    }
+
+    public void noteHurtTime(int hurtTime) {
+        this.hurtTimeSeen = hurtTime;
+    }
+
+    // ---- POI facts the SAFE gate reads (design 4.4 item 9), filled by the shadow POI pass ------------------
+
+    /** The structure score S of the last shadow POI evaluation, 0 when none ran since the last reset. */
+    public double poiStructureScore() {
+        return poiStructureScore;
+    }
+
+    /** Server tick of the last POI evaluation that stored a score, or {@link #NEVER}. */
+    public int poiScoreTick() {
+        return poiScoreTick;
+    }
+
+    /** Stores the structure score of a POI evaluation done at {@code serverTick}. */
+    public void notePoiScore(int serverTick, double structureScore) {
+        this.poiStructureScore = structureScore;
+        this.poiScoreTick = serverTick;
+    }
+
+    /** Server tick at which the own-cell biome was last read into {@link #biomeId()}, or {@link #NEVER}. */
+    public int biomeTick() {
+        return biomeTick;
+    }
+
+    public void noteBiomeRead(int serverTick) {
+        this.biomeTick = serverTick;
+    }
+
     /** Drops every observation (dimension change, mission end): ring, occupancy, hazards, sightings, POI window, candidates, pending breaks. */
     public void resetObservations() {
         ring.clear();
@@ -371,5 +488,9 @@ public final class MiningAssistState {
         nextPoiEvalTick = NEVER;
         lastPoiBand = PoiScorer.Band.NONE;
         poiBandGate.reset();
+        // P1: a fact about the old world must never read as fresh in the new one (design 4.4 items 8 and 9).
+        biomeTick = NEVER;
+        poiStructureScore = 0.0D;
+        poiScoreTick = NEVER;
     }
 }

@@ -44,9 +44,17 @@ public final class SenseCounters {
     public long poiNanos;
     public long maxPoiNanos;
     public long raysThrottledOut;
+    // ---- P1 detour counters of the window (incremented by OreDigTask.tickOpportunistic, printed by MiningAssistLog) ----
+    public long detourStarts;
+    public long detourBreaks;
+    public long detourSeals;
+    public long detourDropsLost;
+    /** Detours that ended with an abort reason (not "done" or "caps"), rebases included. */
+    public long detourAborts;
+    public long detourRebases;
 
     /** True when nothing at all happened in this window. */
     public boolean isIdle() {
-        return steps == 0 && peekedBreaks == 0 && poiEvaluations == 0;
+        return steps == 0 && peekedBreaks == 0 && poiEvaluations == 0 && detourStarts == 0;
     }
 }
