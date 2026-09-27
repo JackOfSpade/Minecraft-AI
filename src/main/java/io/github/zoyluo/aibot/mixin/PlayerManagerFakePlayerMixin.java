@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 @Mixin(PlayerManager.class)
 public abstract class PlayerManagerFakePlayerMixin {
@@ -20,20 +20,24 @@ public abstract class PlayerManagerFakePlayerMixin {
     @Final
     private MinecraftServer server;
 
-    @Redirect(
-            method = "onPlayerConnect",
-            at = @At(
-                    value = "NEW",
-                    target = "(Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/network/ClientConnection;Lnet/minecraft/server/network/ServerPlayerEntity;Lnet/minecraft/server/network/ConnectedClientData;)Lnet/minecraft/server/network/ServerPlayNetworkHandler;"
-            )
-    )
-    private ServerPlayNetworkHandler aibot$replaceNetworkHandler(MinecraftServer server,
+    /**
+     * Was a {@code @Redirect} on the {@code new ServerPlayNetworkHandler(...)} call itself, which
+     * exclusively claims that one call site. That is incompatible with any other mod hooking the same
+     * vanilla constructor for its own fake players (confirmed: PvP BOT's HeroBot does exactly this, and
+     * its own mixin does not tolerate losing the resulting Mixin conflict -- the whole server refused to
+     * start with both mods installed). {@code @ModifyVariable} instead reads and can replace the local
+     * right after the vanilla call already assigned it, which is a different injection point that never
+     * competes for the constructor call, so any other mod's own redirect of that call keeps working and
+     * this mixin only overrides its result for our own bots.
+     */
+    @ModifyVariable(method = "onPlayerConnect", at = @At("STORE"), ordinal = 0)
+    private ServerPlayNetworkHandler aibot$replaceNetworkHandler(ServerPlayNetworkHandler handler,
                                                                   ClientConnection connection,
                                                                   ServerPlayerEntity player,
                                                                   ConnectedClientData clientData) {
         if (player instanceof AIPlayerEntity fakePlayer) {
             return new AINetworkHandler(this.server, connection, fakePlayer, clientData);
         }
-        return new ServerPlayNetworkHandler(this.server, connection, player, clientData);
+        return handler;
     }
 }
