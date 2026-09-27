@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "pvpbot_inhabitants",
+  "version": "${version}",
+  "name": "PvP BOT Inhabitants",
+  "description": "Populates vanilla and modded registered structures with randomized PvP BOT inhabitants. Standalone addon: does not bundle, copy or modify PvP BOT.",
+  "authors": [],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.spawnbotswrapper.inhabitants.InhabitantsMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.11",
+    "java": ">=21",
+    "fabric-api": "*",
+    "pvp_bot": "*"
+  }
+}
