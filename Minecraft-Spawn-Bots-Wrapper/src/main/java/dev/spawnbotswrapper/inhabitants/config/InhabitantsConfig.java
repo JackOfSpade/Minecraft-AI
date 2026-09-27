@@ -37,6 +37,13 @@ public final class InhabitantsConfig {
     /** Op level needed for the admin commands (0-4). */
     public int commandPermissionLevel = 2;
 
+    /**
+     * Turn off vanilla's Locator Bar gamerule on server start, so inhabitants (indistinguishable from
+     * real players at the protocol level) don't show up as radar-like waypoints under the hunger bar.
+     * Applied once per server start; the player can still turn the gamerule back on manually.
+     */
+    public boolean hideLocatorBar = true;
+
     /** Baseline occupied/abandoned probability and bot count, used unless overridden below. */
     @SerializedName("default")
     public Rule defaults = new Rule();

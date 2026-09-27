@@ -78,11 +78,16 @@ import java.util.UUID;
 public final class PoiCoordinator {
     public static final PoiCoordinator INSTANCE = new PoiCoordinator();
 
-    /** Where a stop's decision came from; persisted (as {@code .name()}) in the "poi_hold_source" BotMemory fact. */
+    /** Where a stop's decision came from. Kept only in memory ({@code PoiRegistry.OpenCase.source()}):
+     * design 2.4/6.4 both say, in bold, "No {@code BotMemory} facts are written," so a restart never reads
+     * this back from persistence -- see {@link #tick}'s rehydration branch, which reconstructs it from the
+     * (already-persisted, MANDATORY-only) {@value #WARDEN_RISK_LABEL} label instead. */
     enum Source { MANDATORY, CERTAIN, FALLBACK }
 
     private static final String HOLD_PLACE_PREFIX = "poi_hold_";
-    private static final String HOLD_SOURCE_FACT = "poi_hold_source";
+    /** {@link PoiDetector#labelFor}'s label for every MANDATORY candidate, and no other band's: a reliable,
+     * already-persisted discriminator for {@link #tick}'s rehydration, so no BotMemory fact is needed. */
+    private static final String WARDEN_RISK_LABEL = "warden_risk";
     /** Design 6.4: "(at most 3 more)" once the per-mission hold/stop cap is reached. */
     private static final int MAX_CERTAIN_NOTIFY_AFTER_CAP = 3;
     /** Design 6.5's "else deadline = now + 300" (no hold: DigDown descent, or a hold that could not start). */
@@ -103,9 +108,13 @@ public final class PoiCoordinator {
     // caseId (not PoiRegistry's own state, which only tracks CONSULTING/STOPPED/DECLINED dedupe entries,
     // and not TaskManager's userPauseEpoch, which tracks pause transitions, not consult identity) so a
     // late PoiAdvisor callback -- arriving after this coordinator's own tick-based deadline already
-    // resolved the case via fallback -- can recognise itself as stale and become a no-op (design 6.5's
-    // "verified by caseId, generation, bot alive"; PoiAdvisor's own generation guard covers reconfigure/
-    // shutdown races, this one covers "a newer case already replaced it").
+    // resolved the case via fallback -- can recognise itself as stale (design 6.5's "verified by caseId,
+    // generation, bot alive"; PoiAdvisor's own generation guard covers reconfigure/shutdown races, this one
+    // covers "a newer case already replaced it") and still honour design 6.6's "late replies never pause":
+    // a late stop becomes a notify-only line, a late continue only fills the cache. The PendingConsult stays
+    // in pendingByCaseId (marked PendingConsult.deadlineResolved) instead of being deleted the moment the
+    // deadline fires, precisely so the eventual real callback can still find its cacheKey/ownsPause/
+    // pauseEpoch -- see checkConsultDeadline's and onAdvisorVerdict's own comments.
     private final Map<Long, PendingConsult> pendingByCaseId = new HashMap<>();
     private final Map<UUID, Long> caseIdByBot = new HashMap<>();
     private long nextCaseId = 1L;
@@ -122,10 +131,13 @@ public final class PoiCoordinator {
     /** One in-flight R4 consult (mining-assist design 6.5). {@code hold}/{@code ownsPause} are almost always
      * equal (a hold that failed to actually pause -- a race, or no active origin -- keeps {@code hold} true
      * for logging but {@code ownsPause} false, since only {@code ownsPause} gates the pause-state-affecting
-     * branches). {@code pauseEpoch} is {@link TaskManager#userPauseEpoch} captured right after the pause. */
+     * branches). {@code pauseEpoch} is {@link TaskManager#userPauseEpoch} captured right after the pause.
+     * {@code deadlineResolved} is set once {@link #checkConsultDeadline} has already applied this case's
+     * fallback: the entry is kept (not removed) so the still-outstanding real callback can honour design
+     * 6.6's late-reply rule instead of finding nothing. */
     private record PendingConsult(long caseId, UUID botId, Candidate candidate, String ledgerKey,
                                   boolean cavernOnly, String cacheKey, boolean hold, boolean ownsPause,
-                                  int pauseEpoch, int deadlineTick) {
+                                  int pauseEpoch, int deadlineTick, boolean deadlineResolved) {
     }
 
     /**
@@ -159,7 +171,11 @@ public final class PoiCoordinator {
                 return;
             }
             String label = marker.get().getKey().substring(HOLD_PLACE_PREFIX.length());
-            String source = mem.recall(HOLD_SOURCE_FACT).orElse(Source.FALLBACK.name());
+            // No BotMemory fact records which Source produced the hold (design 2.4/6.4). noticeText only
+            // branches on MANDATORY vs not, and WARDEN_RISK_LABEL is the one label PoiDetector ever hands a
+            // MANDATORY candidate (never any other band), so it alone is enough to pick the right template;
+            // any non-mandatory guess is equivalent to any other for that branch.
+            String source = label.equals(WARDEN_RISK_LABEL) ? Source.MANDATORY.name() : Source.FALLBACK.name();
             BotMemory.Place place = marker.get().getValue();
             open = new PoiRegistry.OpenCase(label, source, place.dimension(), place.pos());
             PoiRegistry.openCase(id, open);
@@ -187,7 +203,6 @@ public final class PoiCoordinator {
         }
         BotMemory mem = BotMemoryStore.INSTANCE.of(id);
         mem.forgetPlace(HOLD_PLACE_PREFIX + open.label());
-        mem.forget(HOLD_SOURCE_FACT);
         PoiRegistry.closeCase(id);
         BotLog.task(bot, "poi_case_closed", "label", open.label(), "source", open.source());
     }
@@ -253,7 +268,7 @@ public final class PoiCoordinator {
         if (cached != null) {
             PoiPrompt.Decision decision = cached.stop() ? PoiPrompt.Decision.STOP : PoiPrompt.Decision.CONTINUE;
             BotLog.task(bot, "poi_cache_hit", "label", candidate.label(), "advisor_label", cached.label(), "stop", cached.stop());
-            applyDecision(bot, world, candidate, ledgerKey, decision, false, 0, serverTick);
+            applyDecision(bot, world, candidate, ledgerKey, decision, false, 0, serverTick, false);
             return;
         }
 
@@ -339,7 +354,6 @@ public final class PoiCoordinator {
             // Marker BEFORE pausing (design 6.5), so a crash between the two still fails closed on restart.
             mem.markPlace(HOLD_PLACE_PREFIX + candidate.label(), world, candidate.anchor());
             if (TaskManager.INSTANCE.pauseUserIntent(bot, "poi_confirm")) {
-                mem.remember(HOLD_SOURCE_FACT, Source.FALLBACK.name());
                 BotPersistence.INSTANCE.markDirty(world.getServer());
                 pauseEpoch = TaskManager.INSTANCE.userPauseEpoch(bot);
                 ownsPause = true;
@@ -360,7 +374,7 @@ public final class PoiCoordinator {
 
         long caseId = nextCaseId++;
         PendingConsult pending = new PendingConsult(caseId, id, candidate, ledgerKey, cavernOnly, cacheKey,
-                wantsHold, ownsPause, pauseEpoch, deadlineTick);
+                wantsHold, ownsPause, pauseEpoch, deadlineTick, false);
         pendingByCaseId.put(caseId, pending);
         caseIdByBot.put(id, caseId);
         BotLog.task(bot, "poi_consult_started", "label", candidate.label(), "hold", ownsPause,
@@ -373,10 +387,12 @@ public final class PoiCoordinator {
                 reason -> onAdvisorFailure(bot, caseId, reason));
     }
 
-    /** {@link PoiAdvisor}'s success callback (already on the server thread). A missing {@code pending} means
-     * this coordinator's own deadline already resolved the case via {@link #applyFallbackForPending}; the
-     * verdict is still worth caching (design 6.6: "a late continue only fills the cache"), just not applied
-     * to this bot's (no longer ours) pause state or given a second notice. */
+    /** {@link PoiAdvisor}'s success callback (already on the server thread). {@code pending.deadlineResolved()}
+     * true means this coordinator's own deadline already applied this case's fallback via
+     * {@link #applyFallbackForPending}; the verdict is still cached (design 6.6: "a late continue only fills
+     * the cache") and, for a late STOP, still worth a notify-only line ("a late stop after the fallback...
+     * becomes a notify-only line"), via {@link #applyDecision}'s {@code forceLate}. A null {@code pending} is
+     * defensive only (an unknown caseId should not happen; every started consult resolves exactly once). */
     private void onAdvisorVerdict(AIPlayerEntity bot, long caseId, PoiPrompt.Verdict verdict) {
         PoiConsultBudget.release();
         PoiConsultBudget.recordSuccess();
@@ -389,17 +405,19 @@ public final class PoiCoordinator {
         boolean stop = verdict.decision() == PoiPrompt.Decision.STOP;
         PoiCache.put(pending.cacheKey(), stop, verdict.label(), serverTick);
         BotLog.task(bot, "poi_advisor_verdict", "label", pending.candidate().label(), "advisor_label", verdict.label(),
-                "stop", stop, "confidence", verdict.confidence());
+                "stop", stop, "confidence", verdict.confidence(), "already_resolved", pending.deadlineResolved());
         if (bot.isRemoved()) {
             return;
         }
         applyDecision(bot, bot.getEntityWorld(), pending.candidate(), pending.ledgerKey(), verdict.decision(),
-                pending.ownsPause(), pending.pauseEpoch(), serverTick);
+                pending.ownsPause(), pending.pauseEpoch(), serverTick, pending.deadlineResolved());
     }
 
     /** {@link PoiAdvisor}'s failure callback (network, parse, or the 10s wall-clock guard): counts against
      * the breaker and applies the design 6.7 fallback for this candidate, unless the coordinator's own
-     * deadline already beat it to resolving the case. */
+     * deadline already beat it to resolving the case -- a failure carries no verdict to cache or notify, so
+     * a deadline-resolved one is a pure no-op past the log line (applying the fallback a second time would
+     * double-resolve the same candidate). */
     private void onAdvisorFailure(AIPlayerEntity bot, long caseId, String reason) {
         PoiConsultBudget.release();
         int serverTick = MiningAssistRuntime.serverTick(bot);
@@ -409,8 +427,9 @@ public final class PoiCoordinator {
             return;
         }
         caseIdByBot.remove(pending.botId(), caseId);
-        BotLog.task(bot, "poi_advisor_failed", "reason", reason, "label", pending.candidate().label());
-        if (bot.isRemoved()) {
+        BotLog.task(bot, "poi_advisor_failed", "reason", reason, "label", pending.candidate().label(),
+                "already_resolved", pending.deadlineResolved());
+        if (pending.deadlineResolved() || bot.isRemoved()) {
             return;
         }
         applyFallbackForPending(bot, bot.getEntityWorld(), pending, serverTick);
@@ -432,8 +451,14 @@ public final class PoiCoordinator {
         if (serverTick < pending.deadlineTick()) {
             return;
         }
-        pendingByCaseId.remove(caseId);
+        // The bot is no longer "in an open consult" for tick()'s own routing, but the PendingConsult itself
+        // stays (marked deadlineResolved), not removed: the real PoiAdvisor callback is still outstanding and
+        // will arrive later on this same caseId, and design 6.6's late-reply rule needs its cacheKey/
+        // ownsPause/pauseEpoch to honour it (onAdvisorVerdict/onAdvisorFailure do the eventual cleanup).
         caseIdByBot.remove(id, caseId);
+        pendingByCaseId.put(caseId, new PendingConsult(pending.caseId(), pending.botId(), pending.candidate(),
+                pending.ledgerKey(), pending.cavernOnly(), pending.cacheKey(), pending.hold(), pending.ownsPause(),
+                pending.pauseEpoch(), pending.deadlineTick(), true));
         BotLog.task(bot, "poi_consult_deadline", "label", pending.candidate().label());
         applyFallbackForPending(bot, bot.getEntityWorld(), pending, serverTick);
     }
@@ -441,7 +466,8 @@ public final class PoiCoordinator {
     /** Design 6.5 "deadline reached (any state) -> applyFallback()", made hold-aware: a STOP fallback
      * promotes an existing hold-pause in place (never a second {@code IntentController.pause}); a CONTINUE
      * fallback resumes it first. A stale hold (the player already acted) never resumes and never claims a
-     * stop, matching {@link #applyDecision}'s own rule for a genuine late verdict. */
+     * stop, matching {@link #applyDecision}'s own rule for a genuine late verdict. Always {@code
+     * forceLate=false}: this is the case's primary (first) resolution, never itself a late reply. */
     private void applyFallbackForPending(AIPlayerEntity bot, ServerWorld world, PendingConsult pending, int serverTick) {
         Candidate c = pending.candidate();
         MiningAssistConfig cfg = MiningAssistRuntime.config();
@@ -449,16 +475,18 @@ public final class PoiCoordinator {
                 c.habitationLike(), cfg.poi().unavailablePolicy(), cfg.poi().cavernKeylessPolicy());
         applyDecision(bot, world, c, pending.ledgerKey(),
                 decision == PoiDecisionPolicy.Decision.STOP ? PoiPrompt.Decision.STOP : PoiPrompt.Decision.CONTINUE,
-                pending.ownsPause(), pending.pauseEpoch(), serverTick);
+                pending.ownsPause(), pending.pauseEpoch(), serverTick, false);
     }
 
     /**
      * Applies a resolved STOP/CONTINUE decision (a real or cached R4 verdict, or the design 6.7 fallback
-     * matrix's own equivalent of one), shared by every path that can produce one. When {@code ownsPause} is
-     * true and the pause epoch has moved on, or the bot is no longer user-paused at all, the player already
-     * acted during the hold: design 6.5's stale-result rule -- never resume, never claim "Stopped," a
-     * notify-only "Late check" line instead (a late CONTINUE is silent besides the registry/cache bookkeeping
-     * already done by the caller).
+     * matrix's own equivalent of one), shared by every path that can produce one. Design 6.6's "late replies
+     * never pause" rule fires -- notify-only "Late check" line for a stop, silent registry/cache bookkeeping
+     * only for a continue -- whenever either of two independent things happened first: {@code forceLate} is
+     * true (this coordinator's own {@link #checkConsultDeadline} already applied this case's fallback before
+     * this verdict arrived), or {@code ownsPause} is true and the pause epoch has moved on or the bot is no
+     * longer user-paused at all (the player acted during the hold). Either way this decision must never
+     * resume the bot and never claim "Stopped" a second/late time.
      *
      * <p>The notice, ring-slot marker and registry key all use {@code candidate.label()} (the deterministic
      * {@code PoiLabeler} label, the same one the CONSULTING placeholder was recorded under and the one every
@@ -469,22 +497,24 @@ public final class PoiCoordinator {
      * advisor's own label/confidence are still logged for diagnostics.</p>
      */
     private void applyDecision(AIPlayerEntity bot, ServerWorld world, Candidate candidate, String ledgerKey,
-                               PoiPrompt.Decision decision, boolean ownsPause, int pauseEpoch, int serverTick) {
+                               PoiPrompt.Decision decision, boolean ownsPause, int pauseEpoch, int serverTick,
+                               boolean forceLate) {
         UUID id = bot.getUuid();
         String label = candidate.label();
         boolean stop = decision == PoiPrompt.Decision.STOP;
-        boolean stale = ownsPause && (TaskManager.INSTANCE.userPauseEpoch(bot) != pauseEpoch
-                || !TaskManager.INSTANCE.isUserPaused(bot));
+        boolean stale = forceLate || (ownsPause && (TaskManager.INSTANCE.userPauseEpoch(bot) != pauseEpoch
+                || !TaskManager.INSTANCE.isUserPaused(bot)));
         if (stale) {
+            String trigger = forceLate ? "coordinator_deadline" : "player_action";
             if (stop) {
                 PoiRegistry.record(id, candidate.dim(), candidate.anchor(), label, PoiRegistry.State.STOPPED,
                         candidate.structureScore(), serverTick);
                 sendNotice(bot, world, lateCheckText(label, candidate.anchor()));
-                BotLog.task(bot, "poi_late_check", "label", label, "decision", "stop");
+                BotLog.task(bot, "poi_late_check", "label", label, "decision", "stop", "trigger", trigger);
             } else {
                 PoiRegistry.record(id, candidate.dim(), candidate.anchor(), label, PoiRegistry.State.DECLINED,
                         candidate.structureScore(), serverTick);
-                BotLog.task(bot, "poi_late_check", "label", label, "decision", "continue");
+                BotLog.task(bot, "poi_late_check", "label", label, "decision", "continue", "trigger", trigger);
             }
             return;
         }
@@ -502,13 +532,12 @@ public final class PoiCoordinator {
         }
     }
 
-    /** Design 6.5 CONTINUE-with-hold: resumes the paused mission and forgets the hold marker/fact, the exact
+    /** Design 6.5 CONTINUE-with-hold: resumes the paused mission and forgets the hold marker, the exact
      * reverse of {@link #startConsult}'s hold-start bookkeeping. */
     private static void resumeHold(AIPlayerEntity bot, String label, String why) {
         TaskManager.INSTANCE.resumeUserIntent(bot, why);
         BotMemory mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
         mem.forgetPlace(HOLD_PLACE_PREFIX + label);
-        mem.forget(HOLD_SOURCE_FACT);
     }
 
     /** Design 6.6's "Late check" line, for a verdict (real, cached, or fallback) that arrives after the
@@ -620,14 +649,17 @@ public final class PoiCoordinator {
             return;
         }
         MandatoryLatch.record(id, dim, anchor, serverTick);
+        // Literal "warden_risk" (== WARDEN_RISK_LABEL), not the constant: PoiCoordinatorSourceContractTest
+        // pins this exact call text.
         stopNow(bot, world, dim, anchor, "warden_risk", Source.MANDATORY, score.s(), null, serverTick, null, false);
     }
 
     /**
      * Pauses the bot's mission, records the stop in the dedupe registry, opens the case (BotMemory ring slot
-     * plus the resumable {@code poi_hold_<label>} marker and {@code poi_hold_source} fact), and sends the
-     * notice. {@code structureScore} is {@code S} at the moment of the stop (mandatory passes {@code score.s()}
-     * of its own evaluation, since there is no separate "structure score" for a warden-risk trigger).
+     * plus the resumable {@code poi_hold_<label>} marker; no {@code BotMemory} fact -- design 2.4/6.4), and
+     * sends the notice. {@code structureScore} is {@code S} at the moment of the stop (mandatory passes
+     * {@code score.s()} of its own evaluation, since there is no separate "structure score" for a
+     * warden-risk trigger).
      *
      * @param alreadyPaused P3: true when a R4 consult already paused this bot via {@code TaskManager.
      *                      pauseUserIntent} for a hold (design 6.5's {@code ownsPause}) and its own verdict
@@ -661,7 +693,6 @@ public final class PoiCoordinator {
         BotMemory mem = BotMemoryStore.INSTANCE.of(id);
         mem.markPlace("poi_" + slot + "_" + label, world, anchor);
         mem.markPlace(HOLD_PLACE_PREFIX + label, world, anchor);
-        mem.remember(HOLD_SOURCE_FACT, source.name());
         PoiRegistry.openCase(id, new PoiRegistry.OpenCase(label, source.name(), dim, anchor));
         String text = noticeText(descending, source, label, anchor, bot.getBlockPos(), autoDetectedNote, null);
         sendNotice(bot, world, text);
@@ -737,5 +768,35 @@ public final class PoiCoordinator {
 
     private static String anchorStr(BlockPos pos) {
         return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    /**
+     * P3 restart safety: drops this bot's in-flight-consult bookkeeping ({@link #caseIdByBot},
+     * {@link #pendingByCaseId}) and {@link #lastLedgerKeyByBot} cache entry. Called on a genuine bot
+     * unload/restart ({@code MiningAssistRuntime.clearBotUnload}, wired from {@code
+     * RuntimeLifecycleCoordinator.clearTransient}), never on the soft idle-release path -- same reasoning as
+     * {@code MiningAssistRuntime.clearBot} vs {@code clearBotUnload}'s own split.
+     *
+     * <p>Without this, a bot that restarts mid-consult keeps a stale {@code caseIdByBot} entry: {@link #tick}
+     * would then route it into {@link #checkConsultDeadline} instead of design 6.5's "no in-memory case ->
+     * rehydrate from BotMemory, fail closed" restart path, exactly the case that path exists for. The
+     * abandoned {@code pendingByCaseId} entry (if any) is dropped with it: {@link #onAdvisorVerdict}/
+     * {@link #onAdvisorFailure} already treat an unknown caseId as a safe no-op, and applying a pre-restart
+     * verdict to a freshly rehydrated post-restart case would be worse than dropping it.</p>
+     */
+    public void clearBot(UUID botId) {
+        Long caseId = caseIdByBot.remove(botId);
+        if (caseId != null) {
+            pendingByCaseId.remove(caseId);
+        }
+        lastLedgerKeyByBot.remove(botId);
+    }
+
+    /** World unload ({@code MiningAssistRuntime.clearWorldRuntime}, wired from {@code
+     * RuntimeLifecycleCoordinator}'s own {@code clearWorldRuntime}): drops every bot's P3 bookkeeping. */
+    public void clearAll() {
+        pendingByCaseId.clear();
+        caseIdByBot.clear();
+        lastLedgerKeyByBot.clear();
     }
 }

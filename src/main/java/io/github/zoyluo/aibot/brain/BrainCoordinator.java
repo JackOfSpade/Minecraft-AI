@@ -168,6 +168,7 @@ public final class BrainCoordinator {
         conversation.budgetExhaustionReported = false;
         conversation.lastToolRoundFailureCount = 0;
         conversation.initialActionStarted = false;
+        conversation.initialPlanSpoken = false;
         conversation.lastToolRoundMissingRequiredAction = false;
         conversation.lastToolRoundPlanBlockedAction = false;
         conversation.geminiInteractionId = null;
@@ -204,8 +205,11 @@ public final class BrainCoordinator {
             conversation.pendingGeminiFunctionResults = List.of();
         }
         InitialActionGate initialActionGate = initialActionGate(
-                response.toolCalls(), conversation.initialActionStarted);
+                response.toolCalls(), conversation.initialActionStarted || conversation.initialPlanSpoken);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
+        if (!conversation.initialPlanSpoken && containsValidPlan(response.toolCalls())) {
+            conversation.initialPlanSpoken = true;
+        }
         conversation.history.add(ChatMessage.assistant(response.content(), toolCalls));
 
         if (response.wantsToolCalls()) {
@@ -474,6 +478,11 @@ public final class BrainCoordinator {
         return new InitialActionGate(List.copyOf(reordered), false, true);
     }
 
+    /** Whether any call in this round is a valid say(purpose=plan), regardless of order or outcome. */
+    static boolean containsValidPlan(List<ChatToolCall> calls) {
+        return calls != null && calls.stream().anyMatch(call -> isValidSayWithPurpose(call, "plan"));
+    }
+
     static boolean isAnswerOnlyReply(List<ChatToolCall> calls) {
         if (calls == null || calls.isEmpty()) {
             return false;
@@ -604,6 +613,27 @@ public final class BrainCoordinator {
         boolean awaitingCleared = awaitingTask.remove(bot.getUuid()) != null;
         boolean wakeTickCleared = nextGoalWakeTick.remove(bot.getUuid()) != null;
         return awaitingCleared || wakeTickCleared;
+    }
+
+    /** Test-only seam (mirrors {@code PoiAdvisor.setTestTransport}/{@code MiningAssistRuntime.
+     * setTestTpsDegraded}): seeds the {@code awaitingTask} wake source directly, exactly as a real
+     * conversation turn would leave it (see the {@code TaskManager.INSTANCE.getActive(bot).isPresent()}
+     * branch above), without driving a full LLM conversation turn. Lets a GameTest prove that {@code
+     * TaskManager.pauseUserIntent}/{@code resumeUserIntent} -- unlike {@code IntentController.pause}/{@code
+     * resume}, which call {@link #clearIntentWakeSources} -- leave this wake source untouched (mining-assist
+     * design 6.5's stated reason for the P3 POI hold bypassing {@code IntentController}). */
+    public void setAwaitingTaskForTest(AIPlayerEntity bot, boolean awaiting) {
+        if (awaiting) {
+            awaitingTask.put(bot.getUuid(), true);
+        } else {
+            awaitingTask.remove(bot.getUuid());
+        }
+    }
+
+    /** Test-only seam pairing {@link #setAwaitingTaskForTest}: reads the {@code awaitingTask} wake source
+     * back without going through the heavier {@link #status}/conversation machinery. */
+    public boolean isAwaitingTaskForTest(AIPlayerEntity bot) {
+        return Boolean.TRUE.equals(awaitingTask.get(bot.getUuid()));
     }
 
     public void setManualMode(AIPlayerEntity bot, boolean enabled) {
@@ -1138,6 +1168,10 @@ public final class BrainCoordinator {
         private boolean budgetExhaustionReported;
         private int lastToolRoundFailureCount;
         private boolean initialActionStarted;
+        // Distinct from initialActionStarted (which requires the paired action to have actually
+        // succeeded/be active): a plan already spoken this turn should not be demanded again just
+        // because the FOLLOWING action call failed on unrelated grounds (e.g. a bad tool argument).
+        private boolean initialPlanSpoken;
         private boolean lastToolRoundMissingRequiredAction;
         private boolean lastToolRoundPlanBlockedAction;
         private String geminiInteractionId;

@@ -177,7 +177,11 @@ public record AIBotConfig(
                 new Llm("", "https://api.deepseek.com", "deepseek-v4-flash", 8192, 0.3D, 60, 3, 500,
                         Boolean.TRUE, "low"),
                 new Perception(16, 20, 10, 10, false),
-                new Brain(36, 6, 3, false, true, false, 3, true),
+                // verboseReports off by default: the LLM's own say(purpose=plan/status) already narrates
+                // starting/finishing a task in natural language, so the templated "Starting X 0/4." /
+                // "Completed: X N/M." progress lines this flag adds are redundant, debug-phrased chat spam
+                // unless a player explicitly opts back in for blow-by-blow task telemetry.
+                new Brain(36, 6, 3, false, true, false, 3, false),
                 new Watchdog(200),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, 3, true, Map.of(
                         "LIFECYCLE", "INFO",

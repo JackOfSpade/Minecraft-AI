@@ -26,7 +26,11 @@ public class AIPlayerEntity extends ServerPlayerEntity {
 
     @Override
     public void tick() {
-        if (this.getServer().getTicks() % 10 == 0 && this.networkHandler != null) {
+        // A real client resyncs this ~20x/sec via its own movement packets; this bot has no client to
+        // send those, so do it every tick here instead of the old 10-tick throttle (0.5s), which was a
+        // plausible source of visible movement choppiness with no real cost to justify it (cheap,
+        // O(tracked entities) bookkeeping unrelated to pathfinding/mining).
+        if (this.networkHandler != null) {
             this.networkHandler.syncWithPlayerPosition();
             this.getEntityWorld().getChunkManager().updatePosition(this);
         }

@@ -18,6 +18,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.rule.GameRules;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,6 +109,10 @@ public final class InhabitantsMod implements ModInitializer {
     private void onServerStarted(MinecraftServer server) {
         session = new ServerSession(server, shared);
         joinHoldGate.onServerStarted(McClock.of(server), shared.config().get().connection.joinHoldTicks);
+        if (shared.config().get().hideLocatorBar) {
+            shared.guard().run("hide locator bar", () ->
+                    server.getOverworld().getGameRules().setValue(GameRules.LOCATOR_BAR, false, server));
+        }
         LOGGER.info("Server started; the PvP BOT integration is probed on the first tick");
     }
 

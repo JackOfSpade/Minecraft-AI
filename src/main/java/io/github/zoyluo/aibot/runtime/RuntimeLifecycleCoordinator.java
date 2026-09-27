@@ -7,6 +7,7 @@ import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatRecipientRouter;
 import io.github.zoyluo.aibot.brain.PoiAdvisor;
 import io.github.zoyluo.aibot.coordination.IdleCoordinator;
+import io.github.zoyluo.aibot.coordination.PoiCoordinator;
 import io.github.zoyluo.aibot.coordination.TaskBoard;
 import io.github.zoyluo.aibot.craft.RuntimeRecipeIndex;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
@@ -135,6 +136,9 @@ public final class RuntimeLifecycleCoordinator {
         DiagnosticLogger.INSTANCE.clear(bot);
         CapabilityRuntime.clear(bot);
         MiningAssistRuntime.clearBotUnload(bot);
+        // P3: the R4 in-flight-consult bookkeeping is per-bot state too, same restart-safety reasoning as
+        // MiningAssistRuntime.clearBotUnload immediately above (see PoiCoordinator.clearBot's own javadoc).
+        PoiCoordinator.INSTANCE.clearBot(bot.getUuid());
     }
 
     private static void forgetBot(AIPlayerEntity bot) {
@@ -170,6 +174,7 @@ public final class RuntimeLifecycleCoordinator {
         CapabilityRuntime.clearAll();
         MiningEvidenceAudit.clearAll();
         MiningAssistRuntime.clearWorldRuntime();
+        PoiCoordinator.INSTANCE.clearAll();
         TpsGuard.INSTANCE.reset();
         AStarPathfinder.invalidateCache("runtime_world_boundary");
     }

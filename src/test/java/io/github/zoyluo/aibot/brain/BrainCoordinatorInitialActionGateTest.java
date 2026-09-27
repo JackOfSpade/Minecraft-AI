@@ -71,4 +71,27 @@ final class BrainCoordinatorInitialActionGateTest {
         assertFalse(BrainCoordinator.isWorkStartTool("equip_best_tool"));
         assertFalse(BrainCoordinator.isWorkStartTool("remember"));
     }
+
+    @Test
+    void containsValidPlanFindsAPlanRegardlessOfOrderOrOutcome() {
+        assertTrue(BrainCoordinator.containsValidPlan(List.of(
+                new ChatToolCall("plan", "say",
+                        "{\"message\":\"I will clear three grass plants.\",\"purpose\":\"plan\"}"),
+                new ChatToolCall("clear", "clear_grass", "{\"count\":3}"))));
+        assertTrue(BrainCoordinator.containsValidPlan(List.of(
+                new ChatToolCall("assign", "assign_task", "{\"task_type\":\"gather\",\"params\":{}}"),
+                new ChatToolCall("plan", "say",
+                        "{\"message\":\"I will gather wood.\",\"purpose\":\"plan\"}"))));
+    }
+
+    @Test
+    void containsValidPlanIsFalseWithoutAPlanPurposeSay() {
+        assertFalse(BrainCoordinator.containsValidPlan(List.of(
+                new ChatToolCall("clear", "clear_grass", "{\"count\":3}"))));
+        assertFalse(BrainCoordinator.containsValidPlan(List.of(
+                new ChatToolCall("answer", "say",
+                        "{\"message\":\"There is a chest nearby.\",\"purpose\":\"answer\"}"))));
+        assertFalse(BrainCoordinator.containsValidPlan(List.of()));
+        assertFalse(BrainCoordinator.containsValidPlan(null));
+    }
 }
