@@ -41,6 +41,11 @@ public final class FollowTask extends AbstractTask {
     private int nextRepathTick;
     private int nextSwimRepathTick;
     private boolean waiting;
+    // Set only when a full pathfind failed with the target still farther than the direct-walk
+    // fallback range, so we deliberately wait out nextRepathTick instead of retrying an expensive
+    // search every tick. Left false whenever a path/walk is actually issued, so an ordinary short
+    // leg that simply finishes early is never mistaken for this backoff and can re-path immediately.
+    private boolean repathBackoff;
     private BoatFollowTask boatFollow;
     private final BlockMiner shelterExitMiner = new BlockMiner();
     private final Set<BlockPos> rejectedShelterEgress = new HashSet<>();
@@ -78,6 +83,7 @@ public final class FollowTask extends AbstractTask {
         nextRepathTick = 0;
         nextSwimRepathTick = 0;
         waiting = false;
+        repathBackoff = false;
         boatFollow = null;
         shelterExitMiner.cancel(bot);
         rejectedShelterEgress.clear();
@@ -99,6 +105,11 @@ public final class FollowTask extends AbstractTask {
             }
             return;
         }
+
+        // WalkToController only ever touches yaw (it preserves whatever pitch the bot already had),
+        // so without this the bot's head stays frozen at its pre-follow pitch for the whole task --
+        // this is what "looking at the sky" was: nothing here was ever setting a sane pitch.
+        CombatCore.lookAt(bot, target);
 
         // The owner/name lookup above is explicit player authority, not a radius- or
         // line-of-sight-gated entity scan.  If a new instruction cancelled a sealed shelter,
@@ -227,12 +238,14 @@ public final class FollowTask extends AbstractTask {
         // this 3.0-4.5 block range marked active with no controller, which the stuck watcher then
         // interpreted as a failed follow.
         if (distance < START_DISTANCE) {
-            if (pathIdle && walkIdle && elapsed >= nextRepathTick) {
+            // Unlike the full-pathfind branch below, a direct startWalkTo has no expensive-retry
+            // concern, so react to idleness immediately instead of waiting out the periodic timer.
+            if (pathIdle && walkIdle) {
                 bot.getActionPack().startWalkTo(target.getEntityPos());
                 nextRepathTick = elapsed + REPATH_TICKS;
                 waiting = false;
             } else {
-                waiting = pathIdle && walkIdle;
+                waiting = false;
             }
             return;
         }
@@ -241,10 +254,14 @@ public final class FollowTask extends AbstractTask {
         // ordinary perception.  Snapshot that known position for deterministic route replacement;
         // do not substitute an observable-entity query here.
         BlockPos trackedTarget = target.getBlockPos().toImmutable();
-        if (elapsed >= nextRepathTick) {
+        // Besides the periodic retarget schedule, also re-path the instant the controller goes
+        // idle on its own (a short leg toward a close, moving target often finishes well before
+        // nextRepathTick) -- unless we're deliberately backing off a just-failed distant search.
+        if (elapsed >= nextRepathTick || (pathIdle && walkIdle && !repathBackoff)) {
             ActionResult path = bot.getActionPack().startPathTo(trackedTarget);
             nextRepathTick = elapsed + REPATH_TICKS;
             if (!path.isFailed()) {
+                repathBackoff = false;
                 waiting = false;
                 return;
             }
@@ -258,10 +275,12 @@ public final class FollowTask extends AbstractTask {
             }
             if (distance <= MAX_DIRECT_FALLBACK_DISTANCE) {
                 bot.getActionPack().startWalkTo(target.getEntityPos());
+                repathBackoff = false;
                 waiting = false;
                 return;
             }
             bot.getActionPack().stopMovement();
+            repathBackoff = true;
             waiting = true;
             return;
         }

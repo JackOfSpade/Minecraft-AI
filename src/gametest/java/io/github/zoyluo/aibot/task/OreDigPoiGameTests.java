@@ -1434,7 +1434,7 @@ public final class OreDigPoiGameTests {
      * the fallback left it (paused, one {@code poi_stop} line, never resumed), while the cache still gets the
      * real verdict so a later candidate in the same coarse cell benefits from it.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 700)
+    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 3800)
     public void lateVerdictIsNotifyOnly(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(190, -3, 3, -3, 3, 3);
@@ -1497,8 +1497,14 @@ public final class OreDigPoiGameTests {
             if (phase[0] == 2) {
                 // Give the 3s-delayed stub (a genuine CONTINUE, disagreeing with the fallback's STOP) a
                 // further margin to answer, then confirm design 6.6's late-reply rule was actually applied,
-                // not just silently dropped (which would look identical on the stopCount alone).
-                if (p.tick < 450) {
+                // not just silently dropped (which would look identical on the stopCount alone). This
+                // headless GameTest server ticks far faster than the usual 20/s (empirically close to an
+                // order of magnitude faster), so a margin sized for real 20-tick-per-second play (450 ticks
+                // was intended as ~22s, comfortably past the stub's fixed 3s sleep) instead elapses in only
+                // a couple of real seconds here -- racing the wall-clock sleep and tearing the bot down
+                // (maxTicks) before the late verdict can ever arrive. 3000 ticks reliably clears several
+                // real seconds of margin at the pace actually observed, independent of tick rate.
+                if (p.tick < 3000) {
                     return;
                 }
                 List<String> lines = botLog(botName);
