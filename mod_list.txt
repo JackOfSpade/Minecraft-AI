@@ -120,6 +120,15 @@ GAMEPLAY / COMBAT / HUD
 | Compass Bar           | latest compatible 1.21.11 Fabric build |
 | AttributeFix          | 21.11.1                   |
 | Easy Anvils           | 21.11.1                   |
+| Fiw Graves            | v1.1.0 (fabric-1.21.11)   |
+
+Fiw Graves (by Fi3w0) replaces DeathMarker (below): server-side/singleplayer
+grave system, packet-only marker+hologram at your death spot (nothing written
+to the world, so it can't leak or crash-corrupt), 10-minute despawn with
+quick-collect, and an admin loot-backup safety net (`/graves rollback`,
+`/graves restore`) beyond vanilla's normal item despawn. No client jar
+involved, so it isn't exposed to the client-rendering API break that killed
+DeathMarker. https://modrinth.com/mod/fiw-graves
 
 DeathMarker (v1.0.0-1.21-fabric) was removed 2026-09-27: it crashes the client
 on load (NoClassDefFoundError on Fabric API's WorldRenderEvents). Its only
