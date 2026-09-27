@@ -174,7 +174,7 @@ public final class InventoryView implements PanelComponent {
         if (!left && !right) {
             return false;
         }
-        boolean single = left && Screen.hasShiftDown(); // Shift+左键=单个
+        boolean single = left && MinecraftClient.getInstance().isShiftPressed(); // Shift+左键=单个
         boolean half = right;                            // 右键=半堆
 
         // AI 槽:拿出

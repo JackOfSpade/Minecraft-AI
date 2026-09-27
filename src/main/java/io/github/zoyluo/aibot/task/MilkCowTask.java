@@ -80,7 +80,7 @@ public final class MilkCowTask extends AbstractTask {
         if (bot.getActionPack().isPathExecutorIdle()) {
             ActionResult path = bot.getActionPack().startPathTo(cow.getBlockPos());
             if (path.isFailed()) {
-                bot.getActionPack().startWalkTo(cow.getPos());
+                bot.getActionPack().startWalkTo(cow.getEntityPos());
             }
         }
     }

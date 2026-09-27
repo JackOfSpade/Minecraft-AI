@@ -138,7 +138,7 @@ public final class SmeltFurnacePlacementGameTests {
                     "enclosed furnace did not physically produce one iron ingot");
             require(context, InventoryAction.countItem(bot, Items.DIRT) == 64,
                     "full-main offhand exchange lost the displaced selected stack");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -191,7 +191,7 @@ public final class SmeltFurnacePlacementGameTests {
                     "furnace was not placed on the supported EAST side");
             require(context, InventoryAction.countItem(bot, Items.COOKED_MUTTON) == 1,
                     "smelt completed without one physically cooked mutton");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -270,7 +270,7 @@ public final class SmeltFurnacePlacementGameTests {
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 1,
                     "local furnace craft did not consume exactly eight of nine cobblestone");
             io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.remove(bot.getUuid());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -348,7 +348,7 @@ public final class SmeltFurnacePlacementGameTests {
             require(context, InventoryAction.countItem(bot, Items.FURNACE) == 0,
                     "local furnace remained duplicated in inventory after placement");
             io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.remove(bot.getUuid());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }

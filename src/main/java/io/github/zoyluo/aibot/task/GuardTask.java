@@ -171,15 +171,15 @@ public final class GuardTask extends AbstractTask {
 
     private BlockPos resolveGuardPoint(AIPlayerEntity bot) {
         if (!targetPlayerName.isBlank()) {
-            ServerPlayerEntity player = bot.getServer().getPlayerManager().getPlayer(targetPlayerName);
-            return player != null && player.getServerWorld() == bot.getServerWorld() ? player.getBlockPos().toImmutable() : null;
+            ServerPlayerEntity player = bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetPlayerName);
+            return player != null && player.getEntityWorld() == bot.getEntityWorld() ? player.getBlockPos().toImmutable() : null;
         }
         if (fixedPoint != null) {
             return fixedPoint;
         }
         Optional<ServerPlayerEntity> owner = AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getServer().getPlayerManager().getPlayer(uuid));
-        return owner.filter(player -> player.getServerWorld() == bot.getServerWorld())
+                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
+        return owner.filter(player -> player.getEntityWorld() == bot.getEntityWorld())
                 .map(player -> player.getBlockPos().toImmutable())
                 .orElse(guardPoint);
     }

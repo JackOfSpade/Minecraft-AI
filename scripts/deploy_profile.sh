@@ -15,7 +15,7 @@
 # .env (gitignored; template: .env.example): AIBOT_LLM_API_KEY, AIBOT_LLM_BASE_URL, AIBOT_LLM_MODEL.
 # The same variables in the process environment win over the file. The game never reads .env itself.
 #
-# Default profile: %APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.5
+# Default profile: %APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.11
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -40,7 +40,7 @@ done
 
 if [ -z "$PROFILE_DIR" ]; then
   [ -n "${APPDATA:-}" ] || die "APPDATA is not set; pass --profile-dir"
-  PROFILE_DIR="$(cygpath -u "$APPDATA")/.minecraft/profiles/Minecraft-AI-1.21.5"
+  PROFILE_DIR="$(cygpath -u "$APPDATA")/.minecraft/profiles/Minecraft-AI-1.21.11"
 fi
 [ -d "$PROFILE_DIR" ] || die "profile directory not found: $PROFILE_DIR"
 MODS_DIR="$PROFILE_DIR/mods"

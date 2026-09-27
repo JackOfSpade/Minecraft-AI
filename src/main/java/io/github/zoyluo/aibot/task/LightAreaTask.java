@@ -143,7 +143,7 @@ public final class LightAreaTask extends AbstractTask {
     }
 
     private static boolean canPlaceTorchAt(AIPlayerEntity bot, BlockPos pos, int threshold) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos botFeet = bot.getBlockPos();
         if (pos.equals(botFeet) || pos.equals(botFeet.up())) {
             return false;
@@ -154,12 +154,12 @@ public final class LightAreaTask extends AbstractTask {
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
-        if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getServerWorld(), target)) {
+        if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), target)) {
             return target;
         }
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction);
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

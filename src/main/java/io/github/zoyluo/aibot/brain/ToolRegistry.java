@@ -269,7 +269,7 @@ public final class ToolRegistry {
         });
 
         register("set_base", "Remember the bot's current position as the base for stockpiling and resupply tasks.", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace("base", bot.getServerWorld(), bot.getBlockPos());
+            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace("base", bot.getEntityWorld(), bot.getBlockPos());
             return ok("marked_base: " + bot.getBlockPos().toShortString());
         });
 
@@ -611,7 +611,7 @@ public final class ToolRegistry {
             String entityType = requiredString(args, "entity_type");
             Identifier id = Identifier.of(entityType);
             CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "tool_attack_entity");
-            Optional<Entity> target = bot.getServerWorld()
+            Optional<Entity> target = bot.getEntityWorld()
                     .getOtherEntities(bot, bot.getBoundingBox().expand(4.5D),
                             entity -> Registries.ENTITY_TYPE.getId(entity.getType()).equals(id)
                                     && ObservableWorldQuery.canObserveEntity(bot, entity))
@@ -661,7 +661,7 @@ public final class ToolRegistry {
             }
             UUID id = TaskBoard.INSTANCE.postForOwner(ownerUuid.get(), requiredString(args, "kind"),
                     paramsObject(args, "params"), optionalString(args, "role", ""));
-            io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getServer());
+            io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
             return ok("job_posted: " + id);
         });
 
@@ -706,7 +706,7 @@ public final class ToolRegistry {
                     bot, target.get(), BotAuthorizationPolicy.Operation.COMMAND, "tool:tell_bot")) {
                 return fail("target_unavailable");
             }
-            boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), bot.getGameProfile().getName(), requiredString(args, "message"));
+            boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), bot.getGameProfile().name(), requiredString(args, "message"));
             return queued ? ok("message_sent") : fail("target_busy");
         });
 
@@ -740,7 +740,7 @@ public final class ToolRegistry {
                 .property("name", stringSchema("place name, for example home"))
                 .required("name")
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(requiredString(args, "name"), bot.getServerWorld(), bot.getBlockPos());
+            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(requiredString(args, "name"), bot.getEntityWorld(), bot.getBlockPos());
             return ok("marked_place: " + requiredString(args, "name") + " at " + bot.getBlockPos().toShortString());
         });
 
@@ -752,7 +752,7 @@ public final class ToolRegistry {
             if (place.isEmpty()) {
                 return fail("unknown_place: " + requiredString(args, "name"));
             }
-            if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) {
+            if (!bot.getEntityWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) {
                 return fail("place_in_other_dimension: " + place.get().dimension());
             }
             Task task = new MoveTask(bot, place.get().pos());
@@ -768,7 +768,7 @@ public final class ToolRegistry {
             if (face.isEmpty()) {
                 return fail("no_mine_face: no recorded mining face from the previous task");
             }
-            if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(face.get().dimension())) {
+            if (!bot.getEntityWorld().getRegistryKey().getValue().toString().equals(face.get().dimension())) {
                 return fail("mine_face_in_other_dimension");
             }
             java.util.Set<net.minecraft.block.Block> ores = new java.util.HashSet<>();
@@ -1191,7 +1191,7 @@ public final class ToolRegistry {
         Block block = requiredBlock(args, name);
         var state = block.getDefaultState();
         if (state.isAir() || !state.getFluidState().isEmpty() || block.asItem() == Items.AIR
-                || state.getHardness(bot.getServerWorld(), bot.getBlockPos()) < 0.0F) {
+                || state.getHardness(bot.getEntityWorld(), bot.getBlockPos()) < 0.0F) {
             throw new IllegalArgumentException("not_a_breakable_block: " + Registries.BLOCK.getId(block));
         }
         return block;

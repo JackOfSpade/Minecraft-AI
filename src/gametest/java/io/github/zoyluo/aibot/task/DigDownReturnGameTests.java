@@ -282,7 +282,7 @@ public final class DigDownReturnGameTests {
                 start, List.of(start, middle, tail), 8, 2);
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(start));
-        missionCheckpoint.put("started_tick", String.valueOf(bot.getServer().getTicks()));
+        missionCheckpoint.put("started_tick", String.valueOf(bot.getEntityWorld().getServer().getTicks()));
         missionCheckpoint.put("revision", "0");
         missionCheckpoint.put("task_kind", GoalStep.Kind.MINE.name());
         taskCheckpoint.forEach((key, value) ->
@@ -308,7 +308,7 @@ public final class DigDownReturnGameTests {
                         && paused.returnOutcome() == DigDownTask.ReturnOutcome.SAFETY_INTERRUPTED,
                 "pause did not publish the typed safety return debt: " + first.checkpoint());
         require(context, !EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), start, bot.getServer().getTicks()),
+                        bot.getUuid(), start, bot.getEntityWorld().getServer().getTicks()),
                 "safety entry TTL started before its exact return debt was paid");
         TaskManager.INSTANCE.resumeFromPause(bot);
         require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == first
@@ -330,7 +330,7 @@ public final class DigDownReturnGameTests {
                                 "dig_down_safety_interrupted collected=2"),
                         "safety return lost its typed reason: " + first.failureReason());
                 require(context, EpisodeMemory.INSTANCE.isExcluded(
-                                bot.getUuid(), start, bot.getServer().getTicks()),
+                                bot.getUuid(), start, bot.getEntityWorld().getServer().getTicks()),
                         "exact safety settlement did not quarantine the old entry");
             } else {
                 require(context, first.state() == TaskState.RUNNING,
@@ -369,7 +369,7 @@ public final class DigDownReturnGameTests {
             Map<String, String> checkpoint = next.checkpoint();
             if (checkpoint.isEmpty()) {
                 if (current.equals(nextEntry)) {
-                    int now = bot.getServer().getTicks();
+                    int now = bot.getEntityWorld().getServer().getTicks();
                     replacementArrivalTick.compareAndSet(null, now);
                     // Path execution can land after this task's tick, so exactly this arrival
                     // observation may still see the empty relocation cursor. The next observation
@@ -627,7 +627,7 @@ public final class DigDownReturnGameTests {
                             + " end=" + bot.getBlockPos().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 3,
                     "DigDown returned without the requested physical stone drops");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -662,9 +662,9 @@ public final class DigDownReturnGameTests {
                         "dig_down_entry_relocation_gametest").allowed(),
                 "strict GameTest unexpectedly allowed emergency teleport");
         EpisodeMemory.INSTANCE.exclude(bot.getUuid(), failedEntry,
-                bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         require(context, EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), failedEntry, bot.getServer().getTicks()),
+                        bot.getUuid(), failedEntry, bot.getEntityWorld().getServer().getTicks()),
                 "fixture did not remember the observed WALLED entry");
 
         DigDownTask task = new DigDownTask(Blocks.STONE, 1);
@@ -732,7 +732,7 @@ public final class DigDownReturnGameTests {
         Goal goal = new Goal.HaveItem(Items.COBBLESTONE, 3);
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(start));
-        missionCheckpoint.put("started_tick", String.valueOf(bot.getServer().getTicks()));
+        missionCheckpoint.put("started_tick", String.valueOf(bot.getEntityWorld().getServer().getTicks()));
         missionCheckpoint.put("revision", "0");
         missionCheckpoint.put("task_kind", GoalStep.Kind.MINE.name());
         taskCheckpoint.forEach((key, value) -> missionCheckpoint.put("task." + key, value));
@@ -1154,7 +1154,7 @@ public final class DigDownReturnGameTests {
         require(context, bot.getBlockPos().equals(start),
                 "closed horizontal frontier failed away from its exact origin: "
                         + bot.getBlockPos().toShortString());
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), "DigDownHorizontalCorridorGT");
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownHorizontalCorridorGT");
 
         BlockPos frontierStart = context.getAbsolutePos(new BlockPos(8, 5, 8));
         BlockPos frontier = frontierStart.north();
@@ -1208,7 +1208,7 @@ public final class DigDownReturnGameTests {
             require(context, frontierBot.getBlockPos().equals(frontierStart),
                     "horizontal stone delivery completed away from its exact origin");
             AIPlayerManager.INSTANCE.despawn(
-                    frontierBot.getServer(), "DigDownHorizontalFrontierGT");
+                    frontierBot.getEntityWorld().getServer(), "DigDownHorizontalFrontierGT");
             context.complete();
         });
     }
@@ -1500,7 +1500,7 @@ public final class DigDownReturnGameTests {
                         && decoded.rejectedLandingDirections() == 0,
                 "promoted return retained stale water-seal direction ownership: " + promoted);
         task.cancel(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), "DigDownPromotedReturnGT");
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownPromotedReturnGT");
         context.complete();
     }
 
@@ -1513,7 +1513,7 @@ public final class DigDownReturnGameTests {
         Goal goal = new Goal.HaveItem(Items.COBBLESTONE, 3);
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(start));
-        missionCheckpoint.put("started_tick", String.valueOf(bot.getServer().getTicks()));
+        missionCheckpoint.put("started_tick", String.valueOf(bot.getEntityWorld().getServer().getTicks()));
         missionCheckpoint.put("revision", "0");
         missionCheckpoint.put("task_kind", GoalStep.Kind.MINE.name());
 
@@ -1551,7 +1551,7 @@ public final class DigDownReturnGameTests {
         require(context, task.failureReason().equals(
                         "dig_down_net_delivery_shortfall:have=2:required=3"),
                 "wrong net-delivery failure: " + task.failureReason());
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), "DigDownNetDeliveryGT");
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownNetDeliveryGT");
         context.complete();
     }
 
@@ -1638,7 +1638,7 @@ public final class DigDownReturnGameTests {
                     "pillar repair spent mission cobblestone while dirt was available");
 
             executor.abort(bot.getActionPack());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), "DigDownPillarMaterialGT");
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownPillarMaterialGT");
             context.complete();
         });
     }
@@ -1735,7 +1735,7 @@ public final class DigDownReturnGameTests {
     private static void finish(TestContext context, AIPlayerEntity bot, String name) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         GoalExecutor.INSTANCE.unload(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

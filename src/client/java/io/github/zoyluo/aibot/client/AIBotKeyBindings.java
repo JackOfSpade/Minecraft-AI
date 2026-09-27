@@ -5,9 +5,12 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.util.Window;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public final class AIBotKeyBindings {
+    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create(Identifier.of("aibot", "main"));
     private static KeyBinding openPanel;
     private static KeyBinding openActions;
     private static boolean altZeroDown;
@@ -21,12 +24,12 @@ public final class AIBotKeyBindings {
                 "key.aibot.open_panel",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_UNKNOWN,
-                "key.categories.aibot"));
+                CATEGORY));
         openActions = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.aibot.open_actions",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_UNKNOWN,
-                "key.categories.aibot"));
+                CATEGORY));
     }
 
     public static BotPanelScreen.Mode pollToggle(MinecraftClient client) {
@@ -38,7 +41,7 @@ public final class AIBotKeyBindings {
         while (openActions.wasPressed()) {
             actionsPressed = true;
         }
-        long handle = client.getWindow().getHandle();
+        Window handle = client.getWindow();
         boolean altPressed = InputUtil.isKeyPressed(handle, GLFW.GLFW_KEY_LEFT_ALT)
                 || InputUtil.isKeyPressed(handle, GLFW.GLFW_KEY_RIGHT_ALT);
         boolean zeroPressed = InputUtil.isKeyPressed(handle, GLFW.GLFW_KEY_0);

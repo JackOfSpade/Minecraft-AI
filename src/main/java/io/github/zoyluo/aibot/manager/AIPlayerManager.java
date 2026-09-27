@@ -57,7 +57,7 @@ public final class AIPlayerManager {
      * 返回 true=已复活。
      */
     public boolean respawnDeadBot(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         // 情景记忆:死亡入流(用死亡位置=当前位置,在传送地表之前记)。蒸馏规则:同区两死 → 危险区。
         io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.record(bot,
                 io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, bot.getBlockPos(),
@@ -77,10 +77,10 @@ public final class AIPlayerManager {
         } else {
             // Fake players cannot send the vanilla respawn packet. In strict mode this adapter uses
             // the world's normal spawn area instead of teleporting to the death column's surface.
-            respawnWorld = bot.getServer().getOverworld();
+            respawnWorld = bot.getEntityWorld().getServer().getOverworld();
             respawnPos = safeSpawnPosition(
-                    respawnWorld, Vec3d.ofBottomCenter(respawnWorld.getSpawnPos()),
-                    bot.getGameProfile().getName());
+                    respawnWorld, Vec3d.ofBottomCenter(respawnWorld.getSpawnPoint().getPos()),
+                    bot.getGameProfile().name());
             respawnStrategy = "strict_world_spawn";
         }
         bot.setHealth(20.0F);
@@ -174,7 +174,7 @@ public final class AIPlayerManager {
             BotLog.lifecycle(bot, "bot_restored",
                     "pos", LogFields.pos(bot.getBlockPos()),
                     "mode", gameMode.asString(),
-                    "dimension", bot.getWorld().getRegistryKey().getValue(),
+                    "dimension", bot.getEntityWorld().getRegistryKey().getValue(),
                     "fallback", target.fallback());
         });
         return spawned;
@@ -209,7 +209,7 @@ public final class AIPlayerManager {
         // from the authoritative live-player map and repair the derived index so that a
         // visible bot never becomes unaddressable by its owner.
         Optional<AIPlayerEntity> recovered = players.values().stream()
-                .filter(player -> normalizeName(player.getGameProfile().getName()).equals(normalized))
+                .filter(player -> normalizeName(player.getGameProfile().name()).equals(normalized))
                 .findFirst();
         recovered.ifPresent(player -> nameIndex.put(normalized, player.getUuid()));
         return recovered;
@@ -317,7 +317,7 @@ public final class AIPlayerManager {
 
     private static RestoreTarget overworldSpawn(MinecraftServer server) {
         ServerWorld overworld = server.getOverworld();
-        return new RestoreTarget(overworld, Vec3d.ofBottomCenter(overworld.getSpawnPos()), true);
+        return new RestoreTarget(overworld, Vec3d.ofBottomCenter(overworld.getSpawnPoint().getPos()), true);
     }
 
     private static Vec3d safeSpawnPosition(ServerWorld world, Vec3d requested, String name) {

@@ -17,7 +17,7 @@ public final class MilkCowAction {
     }
 
     public static CowEntity nearestCow(AIPlayerEntity bot, double radius) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         return world.getEntitiesByClass(CowEntity.class, bot.getBoundingBox().expand(radius),
                         cow -> cow.isAlive() && !cow.isBaby())
                 .stream()

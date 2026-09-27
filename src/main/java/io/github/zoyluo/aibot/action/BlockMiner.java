@@ -75,7 +75,7 @@ public final class BlockMiner {
         if (target == null) {
             return Status.IDLE;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         // 目标已破(空气/被替换为非目标由调用方判定;这里只认"已不可挖"=空气)。
         BlockState targetState = world.getBlockState(target);
         if (targetState.isAir()) {

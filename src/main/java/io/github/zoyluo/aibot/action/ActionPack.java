@@ -112,7 +112,7 @@ public final class ActionPack {
      */
     public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {
         int reserve = Math.max(0, protectedStoneLikeReserve);
-        int now = player.getServer().getTicks();
+        int now = player.getEntityWorld().getServer().getTicks();
         BlockPos immutableGoal = goal.toImmutable();
         boolean canPillar = PathExecutor.hasPlaceableBlock(player, reserve);
         PathRequestIdentity request = new PathRequestIdentity(
@@ -126,7 +126,7 @@ public final class ActionPack {
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
-        PathfindingResult result = new AStarPathfinder(player, player.getServerWorld(), player.getBlockPos(), goal,
+        PathfindingResult result = new AStarPathfinder(player, player.getEntityWorld(), player.getBlockPos(), goal,
                 DIG_APPROACH_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true, 10.0D).findPath();
         if (!result.success()) {
             lastPathRequest = request;
@@ -213,7 +213,7 @@ public final class ActionPack {
                                      int protectedStoneLikeReserve,
                                      PathExecutor.RouteContract routeContract) {
         int reserve = Math.max(0, protectedStoneLikeReserve);
-        int now = player.getServer().getTicks();
+        int now = player.getEntityWorld().getServer().getTicks();
         BlockPos immutableGoal = goal.toImmutable();
         PathRequestIdentity request = new PathRequestIdentity(
                 immutableGoal, canPillar, allowDigFallback, reserve, routeContract);
@@ -234,7 +234,7 @@ public final class ActionPack {
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
-        ServerWorld world = player.getServerWorld();
+        ServerWorld world = player.getEntityWorld();
         BlockPos from = player.getBlockPos();
         // NAV-OPT 两阶段寻路:先纯步行(禁挖,搜索空间=空气格,收敛快、不会被挖穿邻居撑爆到 SEARCH_LIMIT);
         // 纯步行无解再允许挖穿兜底(隧道/破障),挖穿预算更小以限制被困/地下时的 3D 体积爆搜。
@@ -312,7 +312,7 @@ public final class ActionPack {
      * Constrained routes must never relocate to another block before their full contract is proven.
      */
     public boolean recenterPlayerInCurrentStandableCell(String reason) {
-        ServerWorld world = player.getServerWorld();
+        ServerWorld world = player.getEntityWorld();
         BlockPos current = player.getBlockPos();
         Standability.clearCache();
         if (!Standability.isStandable(world, current)) {
@@ -332,7 +332,7 @@ public final class ActionPack {
     }
 
     public boolean snapPlayerToNearestStandable(String reason) {
-        ServerWorld world = player.getServerWorld();
+        ServerWorld world = player.getEntityWorld();
         BlockPos current = player.getBlockPos();
         Standability.clearCache();
         boolean currentCellStandable = Standability.isStandable(world, current);

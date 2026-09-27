@@ -257,7 +257,7 @@ public final class CreeperDefenseTask extends AbstractTask {
             recentRisks.put(initiallyObservedId, new RiskMemory(
                     initiallyObservedId,
                     initiallyObservedPos,
-                    bot.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(initiallyObservedPos)),
+                    bot.getEntityPos().squaredDistanceTo(Vec3d.ofBottomCenter(initiallyObservedPos)),
                     0));
         }
         RiskSelection risk = refreshRiskSelection(bot).orElse(null);
@@ -601,7 +601,7 @@ public final class CreeperDefenseTask extends AbstractTask {
             // The source position is remembered, but the Bot's own position is always current.
             // Recompute clearance before ranking so movement cannot leave a stale "near/far"
             // ordering across multiple remembered Creepers.
-            memory.distanceSquared = bot.getPos().squaredDistanceTo(
+            memory.distanceSquared = bot.getEntityPos().squaredDistanceTo(
                     Vec3d.ofBottomCenter(memory.pos));
         }
         // Grace expiry alone is not a safety proof. Keep every close, unoccluded memory until the
@@ -669,7 +669,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private static List<VisibleCreeper> observableCreeperSnapshots(AIPlayerEntity bot) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(
                         CreeperEntity.class,
                         bot.getBoundingBox().expand(CREEPER_SCAN_RANGE),
@@ -810,8 +810,8 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (!ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
             return false;
         }
-        var state = bot.getServerWorld().getBlockState(pos);
-        return !state.getCollisionShape(bot.getServerWorld(), pos).isEmpty();
+        var state = bot.getEntityWorld().getBlockState(pos);
+        return !state.getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
     }
 
     private static boolean intersectsBot(AIPlayerEntity bot, BlockPos feet) {
@@ -828,7 +828,7 @@ public final class CreeperDefenseTask extends AbstractTask {
             return false;
         }
         Vec3d rememberedEye = Vec3d.ofCenter(source).add(0.0D, 0.75D, 0.0D);
-        BlockHitResult hit = bot.getServerWorld().raycast(new RaycastContext(
+        BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
                 bot.getEyePos(),
                 rememberedEye,
                 RaycastContext.ShapeType.COLLIDER,
@@ -852,7 +852,7 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (away.lengthSquared() < 1.0E-6D) {
             return;
         }
-        Vec3d displacement = bot.getPos().subtract(awayProgressAnchor);
+        Vec3d displacement = bot.getEntityPos().subtract(awayProgressAnchor);
         double outward = displacement.x * away.x / Math.sqrt(away.lengthSquared())
                 + displacement.z * away.z / Math.sqrt(away.lengthSquared());
         if (outward >= AWAY_PROGRESS_DISTANCE) {
@@ -861,7 +861,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private void resetAwayProgress(AIPlayerEntity bot) {
-        awayProgressAnchor = bot.getPos();
+        awayProgressAnchor = bot.getEntityPos();
         awayProgressElapsed = elapsed;
     }
 
@@ -897,7 +897,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     private double distanceToLastSeenSquared(AIPlayerEntity bot) {
         return lastSeenPos == null
                 ? Double.POSITIVE_INFINITY
-                : bot.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(lastSeenPos));
+                : bot.getEntityPos().squaredDistanceTo(Vec3d.ofBottomCenter(lastSeenPos));
     }
 
     private void completeOwner(AIPlayerEntity bot, String reason) {

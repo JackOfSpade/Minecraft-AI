@@ -848,8 +848,8 @@ public final class UndergroundSafetyGameTests {
         require(context, handled,
                 "real corner overlap was not handled by the safety net");
         require(context, bot.getBlockPos().equals(start)
-                        && bot.getPos().squaredDistanceTo(centered) < 1.0E-12D,
-                "same-cell recovery did not physically recenter the body: " + bot.getPos());
+                        && bot.getEntityPos().squaredDistanceTo(centered) < 1.0E-12D,
+                "same-cell recovery did not physically recenter the body: " + bot.getEntityPos());
         require(context, FakePlayerMotion.isBlockCollisionFree(bot),
                 "same-cell recovery reported success before clearing the body collision");
         require(context, context.getWorld().getBlockState(north).isOf(Blocks.GRASS_BLOCK)
@@ -860,11 +860,11 @@ public final class UndergroundSafetyGameTests {
                         && bot.getActionPack().isMiningIdle(),
                 "corner recovery left the stale route active");
 
-        Vec3d after = bot.getPos();
+        Vec3d after = bot.getEntityPos();
         require(context, !NavSafetyNet.INSTANCE.tickBot(
                         context.getWorld().getServer(), bot),
                 "cleared corner overlap triggered a second false suffocation recovery");
-        require(context, bot.getPos().squaredDistanceTo(after) < 1.0E-12D,
+        require(context, bot.getEntityPos().squaredDistanceTo(after) < 1.0E-12D,
                 "idempotent safety tick moved the already-cleared body");
 
         NavSafetyNet.INSTANCE.clear(bot);
@@ -891,15 +891,15 @@ public final class UndergroundSafetyGameTests {
                         + bot.getBlockPos().toShortString());
         require(context, FakePlayerMotion.isBlockCollisionFree(bot),
                 "fixture body actually intersects dirt_path instead of merely touching its top");
-        Vec3d before = bot.getPos();
+        Vec3d before = bot.getEntityPos();
 
         for (int tick = 0; tick < 3; tick++) {
             require(context, !NavSafetyNet.INSTANCE.tickBot(
                             context.getWorld().getServer(), bot),
                     "normal dirt_path landing was misclassified as suffocation on tick " + tick);
-            require(context, bot.getPos().squaredDistanceTo(before) < 1.0E-12D,
+            require(context, bot.getEntityPos().squaredDistanceTo(before) < 1.0E-12D,
                     "false suffocation recovery moved across adjacent dirt paths: "
-                            + before + " -> " + bot.getPos());
+                            + before + " -> " + bot.getEntityPos());
         }
 
         NavSafetyNet.INSTANCE.clear(bot);
@@ -1233,7 +1233,7 @@ public final class UndergroundSafetyGameTests {
     private static void finish(TestContext context, AIPlayerEntity bot, String name) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         DangerWatcher.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

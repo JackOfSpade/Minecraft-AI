@@ -58,7 +58,7 @@ public final class SurfaceWaterRecoveryGameTests {
                     || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
                 return;
             }
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -108,7 +108,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 "monotonic ascent lost health");
 
         NavSafetyNet.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -133,7 +133,7 @@ public final class SurfaceWaterRecoveryGameTests {
                         + bot.getBlockPos().toShortString());
 
         NavSafetyNet.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 
@@ -205,7 +205,7 @@ public final class SurfaceWaterRecoveryGameTests {
                     "rescue reached the blocked shore without taking the physical EAST detour");
             require(context, bot.isAlive() && bot.getHealth() == bot.getMaxHealth(),
                     "rescue lost health before reaching the dry landing");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -276,7 +276,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 context.throwGameTestException(Text.of("Descend completed without dry footing at "
                         + bot.getBlockPos().toShortString()));
             }
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -344,7 +344,7 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, Standability.isStandable(world, alternate),
                 "alternate handoff is not physically standable");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -434,7 +434,7 @@ public final class SurfaceWaterRecoveryGameTests {
                             && world.getBlockState(landing.down()).isOf(Blocks.STONE),
                     "restarted Descend damaged verified supports");
 
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -492,7 +492,7 @@ public final class SurfaceWaterRecoveryGameTests {
                         && world.getBlockState(landing.down()).isOf(Blocks.STONE),
                 "failed diagonal preflight mutated the corner fixture");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -553,7 +553,7 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, bot.getBlockPos().equals(alternate),
                 "Descend failed to rotate away from the sealed north stair");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -615,7 +615,7 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, bot.getBlockPos().equals(start),
                 "Descend left its supported origin while every landing was unsupported");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -675,7 +675,7 @@ public final class SurfaceWaterRecoveryGameTests {
                         + bot.getBlockPos().toShortString());
 
         task.cancel(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -743,7 +743,7 @@ public final class SurfaceWaterRecoveryGameTests {
                 "fully rejected origin did not fail closed: "
                         + active[0].state() + ":" + active[0].failureReason());
         require(context, EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), start, bot.getServer().getTicks()),
+                        bot.getUuid(), start, bot.getEntityWorld().getServer().getTicks()),
                 "observed walled entry was not retained for the next physical relocation");
         require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
                 "horizontal fallback mined its owned water seal");
@@ -752,7 +752,7 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1,
                 "horizontal fallback consumed the protected workstation");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

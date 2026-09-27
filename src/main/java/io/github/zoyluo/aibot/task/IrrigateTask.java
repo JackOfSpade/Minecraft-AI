@@ -119,7 +119,7 @@ public final class IrrigateTask extends AbstractTask {
             return;
         }
         BlockPos cell = cells.get(digIndex);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         // 坑底必须实心(否则水往下漏);四周由现有地面充当挡水墙。
         if (!digFloorPlaced) {
             BlockState below = world.getBlockState(cell.down());
@@ -186,7 +186,7 @@ public final class IrrigateTask extends AbstractTask {
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos target) {
         for (Direction d : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(d).up();
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

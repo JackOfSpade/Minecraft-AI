@@ -139,7 +139,7 @@ public final class DangerWatcher {
         if (bot.getHealth() <= 0.0F || !bot.isAlive()) {
             BlockPos deathPos = bot.getBlockPos();
             long deathTick = server.getTicks();
-            int visibleHostilesAtDeath = bot.getServerWorld()
+            int visibleHostilesAtDeath = bot.getEntityWorld()
                     .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(8.0D),
                             entity -> entity instanceof HostileEntity && entity.isAlive())
                     .stream()
@@ -157,7 +157,7 @@ public final class DangerWatcher {
             if (recovery.allowed()) {
                 TaskManager.INSTANCE.assign(bot, new RecoverDropsTask(deathPos, deathTick), TaskOrigin.safety("recover_drops"));
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                        bot.getGameProfile().getName() + " respawned and is returning to "
+                        bot.getGameProfile().name() + " respawned and is returning to "
                                 + deathPos.toShortString() + " to recover dropped equipment.");
             } else {
                 BotLog.danger(bot, "drop_recovery_skipped",
@@ -166,7 +166,7 @@ public final class DangerWatcher {
                         "hostiles", visibleHostilesAtDeath,
                         "reason", recovery.reason());
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                        bot.getGameProfile().getName() + " respawned safely at the surface. "
+                        bot.getGameProfile().name() + " respawned safely at the surface. "
                                 + "(Unsafe equipment-recovery route skipped: " + recovery.reason() + ")");
             }
             return true;
@@ -762,10 +762,10 @@ public final class DangerWatcher {
                              BlockPos anchor,
                              TaskState outcome,
                              String reason) {
-        if (anchor == null || bot.getServer() == null) {
+        if (anchor == null || bot.getEntityWorld().getServer() == null) {
             return;
         }
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         BlockPos fixedAnchor = anchor.toImmutable();
         shelterEpisodes.put(bot.getUuid(), new ShelterEpisode(
                 fixedAnchor, now, outcome, reason == null ? "" : reason));
@@ -831,7 +831,7 @@ public final class DangerWatcher {
         // 是"打得划算吗"的算计,绝境没得算:空手也开打,伤害换活命窗口。
         if (repeat >= 2 && bot.hurtTime > 0) {
             trapRecords.remove(bot.getUuid());
-            var hostile = bot.getServerWorld().getEntitiesByClass(
+            var hostile = bot.getEntityWorld().getEntitiesByClass(
                     net.minecraft.entity.mob.HostileEntity.class,
                     bot.getBoundingBox().expand(4.0D), e -> e.isAlive())
                     .stream()
@@ -857,7 +857,7 @@ public final class DangerWatcher {
         nextThreatAttemptTick.put(bot.getUuid(), now + TRAP_BACKOFF_TICKS);
         if (now - rec.lastHelpTick() >= TRAP_HELP_INTERVAL) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                    bot.getGameProfile().getName() + " is trapped at (" + here.getX() + "," + here.getY() + "," + here.getZ()
+                    bot.getGameProfile().name() + " is trapped at (" + here.getX() + "," + here.getY() + "," + here.getZ()
                             + ") and could not escape after repeated safety attempts. Please move me to safe open ground.");
             BotLog.danger(bot, "trapped_backoff", "pos", here.getX() + "," + here.getY() + "," + here.getZ(), "repeat", repeat);
             trapRecords.put(bot.getUuid(), new TrapRecord(here, 0, now));
@@ -873,7 +873,7 @@ public final class DangerWatcher {
         }
         AIBotConfig.Night night = AIBotConfig.get().night();
         if (!night.autoSleep()
-                || bot.getServerWorld().isDay()
+                || bot.getEntityWorld().isDay()
                 || active.isPresent()
                 || bot.getActionPack().hasActiveActions()) {
             return false;
@@ -926,7 +926,7 @@ public final class DangerWatcher {
         if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         if (world.isSkyVisible(feet)
                 || world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) >= 8) {
@@ -957,7 +957,7 @@ public final class DangerWatcher {
             darkStuckRecords.remove(bot.getUuid());
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         boolean darkUnderground = !world.isSkyVisible(feet)
                 && world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) < 8;
@@ -985,7 +985,7 @@ public final class DangerWatcher {
                 "from", feet.getX() + "," + feet.getY() + "," + feet.getZ());
         if (now >= nextEscapeHelpTick.getOrDefault(bot.getUuid(), 0)) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                    bot.getGameProfile().getName() + " was trapped in a dark cave too long and returned to the surface to avoid hostile spawns. The unfinished task will resume later.");
+                    bot.getGameProfile().name() + " was trapped in a dark cave too long and returned to the surface to avoid hostile spawns. The unfinished task will resume later.");
             nextEscapeHelpTick.put(bot.getUuid(), now + TRAP_HELP_INTERVAL);
         }
         return true;
@@ -993,7 +993,7 @@ public final class DangerWatcher {
 
     // teleport 上浮到正上方最近的露天可站点(保命兜底,清 fallDistance)。
     private boolean escapeToSurface(AIPlayerEntity bot) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         int top = world.getBottomY() + world.getHeight();
         for (int dy = 1; feet.getY() + dy < top - 1 && dy <= 120; dy++) {
@@ -1058,7 +1058,7 @@ public final class DangerWatcher {
     }
 
     private static List<LivingEntity> observableActiveHostilePressure(AIPlayerEntity bot) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(
                         LivingEntity.class,
                         bot.getBoundingBox().expand(CombatCore.hostilePressureScanRange()),
@@ -1082,7 +1082,7 @@ public final class DangerWatcher {
             // also sets it. shouldAngerAt() binds persistent/universal anger to this exact bot and
             // remains factual if teleportation temporarily clears the live target reference.
             return enderman.getTarget() == bot
-                    || enderman.shouldAngerAt(bot, bot.getServerWorld());
+                    || enderman.shouldAngerAt(bot, bot.getEntityWorld());
         }
         return true;
     }
@@ -1278,7 +1278,7 @@ public final class DangerWatcher {
         Optional<BlockPos> lava = BlockPos.stream(bot.getBlockPos().add(-2, -1, -2), bot.getBlockPos().add(2, 1, 2))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> {
-                    BlockState state = bot.getServerWorld().getBlockState(pos);
+                    BlockState state = bot.getEntityWorld().getBlockState(pos);
                     return state.getFluidState().isIn(FluidTags.LAVA);
                 })
                 .map(BlockPos::toImmutable)
@@ -1302,7 +1302,7 @@ public final class DangerWatcher {
     // 近处(8 格)是否有可达(有视线)的敌对怪。作为濒死封墙闸的防御性兜底；正常 LOW_HP
     // Threat 已携带 hostile entity。复用同款视线判定，避免把隔墙怪物算作当前压力。
     private static boolean hasReachableHostile(AIPlayerEntity bot) {
-        List<LivingEntity> hostiles = bot.getServerWorld()
+        List<LivingEntity> hostiles = bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(8.0D),
                         entity -> entity instanceof HostileEntity && entity.isAlive()
                                 && ObservableWorldQuery.canObserveEntity(bot, entity));

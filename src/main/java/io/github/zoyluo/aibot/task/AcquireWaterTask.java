@@ -402,8 +402,8 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // supports from inside water makes every FluidHandling.ANY perception ray self-occlude.
         BlockPos wetFeet = bot.getBlockPos();
         boolean touchingWater = bot.isTouchingWater()
-                || bot.getServerWorld().getFluidState(wetFeet).isIn(FluidTags.WATER)
-                || bot.getServerWorld().getFluidState(wetFeet.up()).isIn(FluidTags.WATER);
+                || bot.getEntityWorld().getFluidState(wetFeet).isIn(FluidTags.WATER)
+                || bot.getEntityWorld().getFluidState(wetFeet.up()).isIn(FluidTags.WATER);
         if (touchingWater || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
             returnMiner.cancel(bot);
             ascentTarget = null;
@@ -442,7 +442,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // vanilla mining controller and every rise is one validated adjacent jump.  Once close to
         // surface level the ordinary pathfinder can handle the remaining horizontal approach.
         boolean needsDrySurfaceExit = bot.getBlockPos().getY() < surfaceAnchor.getY()
-                || !hasReusableSurfaceEgress(bot, bot.getServerWorld(), bot.getBlockPos(), true)
+                || !hasReusableSurfaceEgress(bot, bot.getEntityWorld(), bot.getBlockPos(), true)
                 && bot.getBlockPos().getY() < surfaceAnchor.getY() + MAX_SURFACE_OVERSHOOT;
         if (needsDrySurfaceExit && ascendOneStair(bot)) {
             return;
@@ -480,7 +480,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private static BlockPos nearestReachableObservablePlainWaterSource(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         double reach = bot.getBlockInteractionRange();
         int range = Math.min(
@@ -517,7 +517,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private BlockPos reusableSurfaceSearchOrigin(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos current = bot.getBlockPos();
         boolean nearKnownSurface = near(current, surfaceAnchor)
                 && current.getY() >= surfaceAnchor.getY();
@@ -596,7 +596,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
      * lets the caller fall back to ordinary pathfinding.
      */
     private boolean ascendOneStair(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos current = bot.getBlockPos();
         prepareAscentLevel(current);
         if (ascentToolCraft != null) {
@@ -761,7 +761,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // quirk placeAscentFoundation already accounts for below). Publish the equivalent movement
         // packet fact before this precise placement; never do this for a genuinely unsupported pose.
         Standability.clearCache();
-        if (!bot.isOnGround() && Standability.isStandable(bot.getServerWorld(), current)) {
+        if (!bot.isOnGround() && Standability.isStandable(bot.getEntityWorld(), current)) {
             bot.setOnGround(true);
         }
         ActionResult result = BuildAction.placeBlockAt(bot, support);
@@ -816,7 +816,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // though the new cell has a collision-verified support. Publish the equivalent movement
         // packet fact before the bounded sneak shift; never do this for an unsupported pose.
         Standability.clearCache();
-        if (!bot.isOnGround() && Standability.isStandable(bot.getServerWorld(), current)) {
+        if (!bot.isOnGround() && Standability.isStandable(bot.getEntityWorld(), current)) {
             bot.setOnGround(true);
         }
         if (!FakePlayerMotion.shiftToSupportEdge(
@@ -877,7 +877,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // restart can safely rediscover it without checkpointing a speculative route.
         if (!ascentRelocationPathStarted) {
             CarvedRelocationCandidate candidate = inspectCarvedAscentRelocation(
-                    bot, bot.getServerWorld(), current, ascentRelocationTarget);
+                    bot, bot.getEntityWorld(), current, ascentRelocationTarget);
             if (!candidate.accepted()) {
                 failAscentRelocation(bot, current, candidate.reason());
                 return true;
@@ -913,7 +913,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             failAscentRelocation(bot, current, "obstruction_unobservable");
             return;
         }
-        var obstructionState = bot.getServerWorld().getBlockState(obstruction);
+        var obstructionState = bot.getEntityWorld().getBlockState(obstruction);
         if (obstructionState.isToolRequired()) {
             int requiredTier = ToolTier.requiredPickaxeTier(obstructionState.getBlock());
             if (requiredTier <= ToolTier.STONE && !hasHealthyStonePickaxe(bot)) {
@@ -1410,7 +1410,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             return;
         }
         if (ObservableWorldQuery.canObserveCell(bot, waterSource)) {
-            var fluid = bot.getServerWorld().getFluidState(waterSource);
+            var fluid = bot.getEntityWorld().getFluidState(waterSource);
             if (!fluid.isIn(FluidTags.WATER) || !fluid.isStill()) {
                 rejectAndResumeSearch(bot, "source_changed");
                 return;
@@ -1543,7 +1543,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private boolean recoverBlockedSearchSector(AIPlayerEntity bot, String boundary) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos current = bot.getBlockPos();
         Standability.clearCache();
         if (!world.getFluidState(current).isEmpty()
@@ -1657,7 +1657,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private BlockPos nearestObservableWaterSource(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         int range = Math.min(16, Math.max(1, AIBotConfig.get().perception().radius()));
         int minY = Math.max(world.getBottomY(), origin.getY() - range);
@@ -1687,7 +1687,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     }
 
     private static BlockPos findObservableWaterStand(AIPlayerEntity bot, BlockPos source) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         double reach = Math.max(0.0D,
@@ -1742,7 +1742,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
      * ever walking there.
      */
     private static boolean hasVisibleWaterFace(AIPlayerEntity bot, Vec3d eye, BlockPos source) {
-        var hit = bot.getServerWorld().raycast(new RaycastContext(
+        var hit = bot.getEntityWorld().raycast(new RaycastContext(
                 eye,
                 source.toCenterPos(),
                 RaycastContext.ShapeType.OUTLINE,

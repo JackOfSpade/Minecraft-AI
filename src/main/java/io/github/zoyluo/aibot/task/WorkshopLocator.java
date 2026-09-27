@@ -103,7 +103,7 @@ public final class WorkshopLocator {
                 .map(BlockPos::toImmutable)
                 .min(Comparator
                         .comparingLong((BlockPos pos) -> estimatedCompletionTicks(
-                                pos, origin, bot.getServerWorld().getBlockState(pos), input, itemCount))
+                                pos, origin, bot.getEntityWorld().getBlockState(pos), input, itemCount))
                         .thenComparingDouble(pos -> pos.getSquaredDistance(origin)));
     }
 
@@ -119,11 +119,11 @@ public final class WorkshopLocator {
 
     public static boolean isCompatibleFurnace(
             AIPlayerEntity bot, BlockPos pos, Item input, Item output) {
-        BlockState state = bot.getServerWorld().getBlockState(pos);
+        BlockState state = bot.getEntityWorld().getBlockState(pos);
         if (!isCompatibleFurnaceType(state, input)) {
             return false;
         }
-        if (!(bot.getServerWorld().getBlockEntity(pos) instanceof AbstractFurnaceBlockEntity furnace)) {
+        if (!(bot.getEntityWorld().getBlockEntity(pos) instanceof AbstractFurnaceBlockEntity furnace)) {
             return false;
         }
         ItemStack queuedInput = furnace.getStack(0);
@@ -168,7 +168,7 @@ public final class WorkshopLocator {
         return BlockPos.stream(origin.add(-horizontalRadius, -3, -horizontalRadius),
                         origin.add(horizontalRadius, 4, horizontalRadius))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> matches.test(bot.getServerWorld().getBlockState(pos)))
+                .filter(pos -> matches.test(bot.getEntityWorld().getBlockState(pos)))
                 .map(BlockPos::toImmutable)
                 .min(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));
     }

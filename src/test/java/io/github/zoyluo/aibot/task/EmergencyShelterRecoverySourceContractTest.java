@@ -36,7 +36,7 @@ final class EmergencyShelterRecoverySourceContractTest {
         assertTrue(shelter.contains("isFullyRecovered(bot)"));
         assertTrue(shelter.contains("beginRecoveredExit(bot)"));
         assertTrue(shelter.contains("registerOwnedCleanupDebt(bot)"));
-        assertTrue(shelter.contains("expected.equals(bot.getServerWorld().getBlockState(position))"),
+        assertTrue(shelter.contains("expected.equals(bot.getEntityWorld().getBlockState(position))"),
                 "cleanup proof must use exact placed block state, not a material/shape guess");
         assertTrue(watcher.contains("shouldStartLastResortShelter(bot, threat)"));
         assertTrue(watcher.contains("isTwoHitLethalHealth"));

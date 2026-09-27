@@ -59,7 +59,7 @@ public final class OreScan {
      * intentional: production callers cannot accidentally invoke a raw server-world ore flood.
      */
     public static List<BlockPos> veinFrom(AIPlayerEntity bot, BlockPos seed, Set<Block> ores, int cap) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         if (!ObservableWorldQuery.canObserveBlock(bot, seed)) {
             return List.of();
         }
@@ -123,7 +123,7 @@ public final class OreScan {
                 && !ObservableWorldQuery.canObserveBlock(bot, pos)) {
             return Observation.UNKNOWN;
         }
-        return predicate.test(bot.getServerWorld().getBlockState(pos))
+        return predicate.test(bot.getEntityWorld().getBlockState(pos))
                 ? Observation.OBSERVED_PRESENT
                 : Observation.OBSERVED_GONE;
     }
@@ -149,7 +149,7 @@ public final class OreScan {
                 && !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
             return Observation.UNKNOWN;
         }
-        FluidState fluid = bot.getServerWorld().getBlockState(pos).getFluidState();
+        FluidState fluid = bot.getEntityWorld().getBlockState(pos).getFluidState();
         return fluid.isIn(FluidTags.LAVA) || fluid.isIn(FluidTags.WATER)
                 ? Observation.OBSERVED_PRESENT
                 : Observation.OBSERVED_GONE;

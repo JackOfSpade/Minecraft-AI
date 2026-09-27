@@ -10,6 +10,7 @@ import io.github.zoyluo.aibot.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LazyEntityReference;
 import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.EndermanEntity;
@@ -602,8 +603,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         hostile.refreshPositionAndAngles(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 90.0F, 0.0F);
-        hostile.setAngerTime(600);
-        hostile.setAngryAt(target.getUuid());
+        hostile.setAngerEndTime(hostile.getEntityWorld().getTime() + 600L);
+        hostile.setAngryAt(LazyEntityReference.ofUUID(target.getUuid()));
         hostile.setTarget(target);
         require(context, context.getWorld().spawnEntity(hostile),
                 "failed to spawn safety-swap Enderman");
@@ -629,7 +630,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
     private static void finish(TestContext context, AIPlayerEntity bot, String name) {
         DangerWatcher.INSTANCE.clear(bot);
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

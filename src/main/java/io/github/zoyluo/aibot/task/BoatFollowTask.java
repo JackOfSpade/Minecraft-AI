@@ -93,7 +93,7 @@ public final class BoatFollowTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         ServerPlayerEntity target = target(bot).orElse(null);
-        if (target == null || target.getServerWorld() != bot.getServerWorld()) {
+        if (target == null || target.getEntityWorld() != bot.getEntityWorld()) {
             BoatSupport.mountedBoat(bot).ifPresent(BoatAction::stopBoat);
             waiting = true;
             phase = Phase.WAITING;
@@ -232,10 +232,10 @@ public final class BoatFollowTask extends AbstractTask {
 
     private Optional<ServerPlayerEntity> target(AIPlayerEntity bot) {
         if (!targetName.isBlank()) {
-            return Optional.ofNullable(bot.getServer().getPlayerManager().getPlayer(targetName));
+            return Optional.ofNullable(bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetName));
         }
         return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getServer().getPlayerManager().getPlayer(uuid));
+                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
     }
 
     @Override

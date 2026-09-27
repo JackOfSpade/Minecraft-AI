@@ -39,7 +39,7 @@ public final class ReplayRecorder {
         ReplayEvent event = new ReplayEvent(
                 Instant.now().toString(),
                 bot.getUuid().toString(),
-                bot.getGameProfile().getName(),
+                bot.getGameProfile().name(),
                 trim(perceptionDigest),
                 calls == null ? List.of() : calls.stream().map(Call::from).toList(),
                 trim(result));
@@ -81,9 +81,9 @@ public final class ReplayRecorder {
 
     private void write(AIPlayerEntity bot, ReplayEvent event) {
         try {
-            Path dir = bot.getServer().getSavePath(WorldSavePath.ROOT).resolve("aibot").resolve("replay");
+            Path dir = bot.getEntityWorld().getServer().getSavePath(WorldSavePath.ROOT).resolve("aibot").resolve("replay");
             Files.createDirectories(dir);
-            Path file = dir.resolve(safe(bot.getGameProfile().getName()) + "-" + LocalDate.now() + ".jsonl");
+            Path file = dir.resolve(safe(bot.getGameProfile().name()) + "-" + LocalDate.now() + ".jsonl");
             try (Writer writer = Files.newBufferedWriter(file,
                     java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.APPEND)) {

@@ -11,11 +11,13 @@ import io.github.zoyluo.aibot.client.screen.ui.cards.QuickActionCard;
 import io.github.zoyluo.aibot.client.screen.ui.cards.SettingsCard;
 import io.github.zoyluo.aibot.client.screen.ui.cards.StatusCard;
 import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
@@ -149,22 +151,23 @@ public final class BotPanelScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(Click click, boolean doubled) {
         for (PanelComponent card : laidOutCards) {
-            if (card.mouseClicked(mouseX, mouseY, button)) {
+            if (card.mouseClicked(click.x(), click.y(), click.button())) {
                 return true;
             }
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return super.mouseClicked(click, doubled);
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(KeyInput keyInput) {
+        int keyCode = keyInput.key();
         if ((keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) && input != null && input.isFocused()) {
             sendChat();
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(keyInput);
     }
 
     @Override

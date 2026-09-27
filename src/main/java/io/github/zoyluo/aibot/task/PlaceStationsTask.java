@@ -110,7 +110,7 @@ public final class PlaceStationsTask extends AbstractTask {
 
     // bot 周围 1~2 格、尚未用过、且"上方净空 + 脚下实心"的可放置空地。
     private BlockPos findFreeSpot(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         for (int r = 1; r <= 2; r++) {
             for (Direction direction : Direction.Type.HORIZONTAL) {
@@ -157,8 +157,8 @@ public final class PlaceStationsTask extends AbstractTask {
         return BlockPos.stream(origin.add(-STATION_RADIUS, -3, -STATION_RADIUS),
                         origin.add(STATION_RADIUS, 4, STATION_RADIUS))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .anyMatch(pos -> bot.getServerWorld().getBlockState(pos).isOf(Blocks.CHEST)
-                        || bot.getServerWorld().getBlockState(pos).isOf(Blocks.TRAPPED_CHEST));
+                .anyMatch(pos -> bot.getEntityWorld().getBlockState(pos).isOf(Blocks.CHEST)
+                        || bot.getEntityWorld().getBlockState(pos).isOf(Blocks.TRAPPED_CHEST));
     }
 
     public Set<BlockPos> placedPositions() {

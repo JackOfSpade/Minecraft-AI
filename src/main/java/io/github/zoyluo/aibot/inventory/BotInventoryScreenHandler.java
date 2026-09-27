@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.AIBotMod;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.task.TaskManager;
+import net.minecraft.entity.ContainerUser;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -409,7 +410,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
             return player != null
                     && player.getUuid().equals(viewerId)
                     && bot.isAlive()
-                    && player.getWorld() == bot.getWorld()
+                    && player.getEntityWorld() == bot.getEntityWorld()
                     && player.squaredDistanceTo(bot) <= MAX_USE_DISTANCE_SQUARED;
         }
 
@@ -423,22 +424,23 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         }
 
         @Override
-        public void onOpen(PlayerEntity player) {
-            if (!canPlayerUse(player) || !viewers.add(player.getUuid())) {
+        public void onOpen(ContainerUser user) {
+            if (!(user instanceof PlayerEntity player) || !canPlayerUse(player) || !viewers.add(player.getUuid())) {
                 return;
             }
             OpenScreenLeases.open(bot);
-            BotLog.action(bot, "inventory_screen_opened", "viewer", player.getGameProfile().getName());
+            BotLog.action(bot, "inventory_screen_opened", "viewer", player.getGameProfile().name());
         }
 
         @Override
-        public void onClose(PlayerEntity player) {
+        public void onClose(ContainerUser user) {
+            PlayerEntity player = user instanceof PlayerEntity viewer ? viewer : null;
             boolean closed = player != null && viewers.remove(player.getUuid());
             if (closed) {
                 OpenScreenLeases.close(bot);
             }
             if (player != null) {
-                BotLog.action(bot, "inventory_screen_closed", "viewer", player.getGameProfile().getName());
+                BotLog.action(bot, "inventory_screen_closed", "viewer", player.getGameProfile().name());
             }
         }
 

@@ -24,7 +24,7 @@ public final class DigNav {
      * 返回 true=本 tick 有进展(在挖或已迈步);false=该方向受阻(如相邻岩浆),调用方应改道或失败。
      */
     public static boolean digStep(AIPlayerEntity bot, BlockMiner miner, BlockPos target) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         BlockPos step = stepToward(feet, target);
         if (step == null) {
@@ -100,7 +100,7 @@ public final class DigNav {
     // 未观测的隐藏邻位诚实放行,交给挖开瞬间的反应式复查(见 digStep 内的 DONE 分支)兜底,而不是
     // 像旧版那样无门控直读邻位流体状态(能透过没挖过的岩石"看见"岩浆/水)。
     private static boolean adjacentHazardFluid(AIPlayerEntity bot, BlockPos pos) {
-        FluidState here = bot.getServerWorld().getFluidState(pos);
+        FluidState here = bot.getEntityWorld().getFluidState(pos);
         if (here.isIn(FluidTags.LAVA) || here.isIn(FluidTags.WATER)) {
             return true;
         }

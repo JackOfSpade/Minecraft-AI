@@ -36,7 +36,7 @@ public final class LookAction {
     }
 
     public static ActionResult lookHorizontallyAt(AIPlayerEntity player, Vec3d target) {
-        Vec3d current = player.getPos();
+        Vec3d current = player.getEntityPos();
         double dx = target.x - current.x;
         double dz = target.z - current.z;
         float yaw = MathHelper.wrapDegrees((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D));

@@ -145,7 +145,7 @@ public final class FarmTask extends AbstractTask {
     private void survey(AIPlayerEntity bot) {
         targets.clear();
         current = null;
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         boolean hasSeeds = !harvestOnly && InventoryAction.countItem(bot, seed) > 0;
         BlockPos.stream(areaCenter.add(-radius, -1, -radius), areaCenter.add(radius, 1, radius))
                 .map(BlockPos::toImmutable)
@@ -279,7 +279,7 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         basePos = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getServerWorld(), "base")
+                .placeIn(bot.getEntityWorld(), "base")
                 .orElse(null);
         if (basePos == null) {
             note = "deposit_skipped:no_base";
@@ -483,7 +483,7 @@ public final class FarmTask extends AbstractTask {
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction).up();
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

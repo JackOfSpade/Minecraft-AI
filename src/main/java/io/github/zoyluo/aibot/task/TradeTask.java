@@ -94,7 +94,7 @@ public final class TradeTask extends AbstractTask {
         }
         ActionResult result = bot.getActionPack().startPathTo(villager.getBlockPos());
         if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(villager.getPos());
+            bot.getActionPack().startWalkTo(villager.getEntityPos());
         }
         transition(Phase.MOVE_TO_VILLAGER);
     }
@@ -104,7 +104,7 @@ public final class TradeTask extends AbstractTask {
             transition(Phase.FIND_VILLAGER);
             return;
         }
-        LookAction.lookAt(bot, villager.getPos().add(0.0D, villager.getHeight() * 0.5D, 0.0D));
+        LookAction.lookAt(bot, villager.getEntityPos().add(0.0D, villager.getHeight() * 0.5D, 0.0D));
         if (bot.distanceTo(villager) <= TRADE_RANGE) {
             bot.getActionPack().stopAll();
             transition(Phase.TRADE);
@@ -113,7 +113,7 @@ public final class TradeTask extends AbstractTask {
         if (bot.getActionPack().isPathExecutorIdle() && phaseTicks > 20) {
             ActionResult result = bot.getActionPack().startPathTo(villager.getBlockPos());
             if (result.isFailed()) {
-                bot.getActionPack().startWalkTo(villager.getPos());
+                bot.getActionPack().startWalkTo(villager.getEntityPos());
             }
         }
         phaseTicks++;
@@ -124,7 +124,7 @@ public final class TradeTask extends AbstractTask {
             fail("villager_lost");
             return;
         }
-        LookAction.lookAt(bot, villager.getPos().add(0.0D, villager.getHeight() * 0.5D, 0.0D));
+        LookAction.lookAt(bot, villager.getEntityPos().add(0.0D, villager.getHeight() * 0.5D, 0.0D));
         TradeOffer offer = selectOffer(bot).orElse(null);
         if (offer == null) {
             fail("no_affordable_offer");
@@ -156,7 +156,7 @@ public final class TradeTask extends AbstractTask {
     private Optional<VillagerEntity> nearestVillager(AIPlayerEntity bot) {
         double range = Math.min(maxDistance, SEARCH_RANGE);
         Box box = bot.getBoundingBox().expand(range);
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(VillagerEntity.class, box, entity -> entity.isAlive() && !entity.isBaby())
                 .stream()
                 .filter(entity -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, entity))

@@ -72,7 +72,7 @@ public final class KnowledgeBase {
     // ==================== 蒸馏(由 EpisodeLog.record 触发) ====================
 
     public void distill(AIPlayerEntity bot, EpisodeLog.EpisodeEvent event, List<EpisodeLog.EpisodeEvent> all) {
-        this.server = bot.getServer();
+        this.server = bot.getEntityWorld().getServer();
         UUID botId = bot.getUuid();
         BotKnowledge k = of(botId);
         boolean dirty = false;

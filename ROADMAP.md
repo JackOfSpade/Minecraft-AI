@@ -50,7 +50,7 @@ LLM 理解意图
 
 ## 3. 当前基线
 
-- Minecraft `1.21.5`、Fabric Loader `0.18.4`、Java `21`。
+- Minecraft `1.21.11`、Fabric Loader `0.19.5`、Java `21`。
 - 9 类 Goal、63 个 Tool 注册点、34 个具体 Task 状态机。
 - testmod 的 `/aibot verify all` 含 100 个确定性场景；另有 5 个 opt-in 长跑/诊断场景和 4 个真实 LLM 场景；生产 jar 不包含 test/verify 命令。
 - `clean test` 通过，当前有 86 个 JUnit 类、415 个测试；`runGameTest` 共 588 个场景，其中 42 个因 1.21.5 GameTest 框架重写引入的既有并发/时序问题而失败（已单独跟踪排查，并非近期功能改动引入的回归，其余场景通过）。`capability_profile + runtime_control_suite` 在 strict/operator 下均为 7/7；两 JVM restart-resume 精确恢复非默认 checkpoint，并以原 Mission `COMPLETED 4/4` 结束。

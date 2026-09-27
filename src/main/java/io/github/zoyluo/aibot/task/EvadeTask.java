@@ -152,9 +152,9 @@ public final class EvadeTask extends AbstractTask {
         if (source != null
                 && source.isAlive()
                 && ObservableWorldQuery.canObserveEntity(bot, source)) {
-            away = bot.getPos().subtract(source.getPos());
+            away = bot.getEntityPos().subtract(source.getEntityPos());
         } else if (rememberedSource != null) {
-            away = bot.getPos().subtract(Vec3d.ofCenter(rememberedSource));
+            away = bot.getEntityPos().subtract(Vec3d.ofCenter(rememberedSource));
         }
         // Escape is surface displacement, never vertical excavation. An entity-less LOW_HP used
         // to point at the bot's own block center; the only non-zero component was Y=-0.5, which
@@ -177,7 +177,7 @@ public final class EvadeTask extends AbstractTask {
                     normalized.x * cos - normalized.z * sin,
                     0.0D,
                     normalized.x * sin + normalized.z * cos);
-            Vec3d horizontal = bot.getPos().add(direction.multiply(Math.max(1, distance)));
+            Vec3d horizontal = bot.getEntityPos().add(direction.multiply(Math.max(1, distance)));
             BlockPos base = new BlockPos(
                     net.minecraft.util.math.MathHelper.floor(horizontal.x),
                     bot.getBlockPos().getY(),
@@ -197,7 +197,7 @@ public final class EvadeTask extends AbstractTask {
             for (BlockPos candidate : BlockPos.iterate(
                     base.add(-radius, -2, -radius), base.add(radius, 2, radius))) {
                 if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(
-                        bot.getServerWorld(), candidate)) {
+                        bot.getEntityWorld(), candidate)) {
                     return candidate.toImmutable();
                 }
             }

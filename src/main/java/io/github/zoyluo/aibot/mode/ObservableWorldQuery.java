@@ -85,7 +85,7 @@ public final class ObservableWorldQuery {
                 if (eye.squaredDistanceTo(endpoint) > observationRangeSquared) {
                     continue;
                 }
-                BlockHitResult hit = bot.getServerWorld().raycast(new RaycastContext(
+                BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
                         eye, endpoint,
                         RaycastContext.ShapeType.COLLIDER,
                         RaycastContext.FluidHandling.ANY,
@@ -124,7 +124,7 @@ public final class ObservableWorldQuery {
         if (bot.getEyePos().squaredDistanceTo(endpoint) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = bot.getServerWorld().raycast(new RaycastContext(
+        BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
                 bot.getEyePos(), endpoint,
                 RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, bot));
         return hit.getType() == HitResult.Type.BLOCK
@@ -162,7 +162,7 @@ public final class ObservableWorldQuery {
         if (bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = bot.getServerWorld().raycast(new RaycastContext(
+        BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
                 bot.getEyePos(), pos.toCenterPos(),
                 RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, bot));
         return hit.getType() == HitResult.Type.MISS
@@ -239,7 +239,7 @@ public final class ObservableWorldQuery {
         }
         Vec3d eye = bot.getEyePos();
         Vec3d end = eye.add(dx / length * limit, dy / length * limit, dz / length * limit);
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         // Chunk coordinate is the block coordinate shifted right by four bits.
         if (!world.getChunkManager().isChunkLoaded(
                 (int) Math.floor(end.x) >> 4, (int) Math.floor(end.z) >> 4)) {

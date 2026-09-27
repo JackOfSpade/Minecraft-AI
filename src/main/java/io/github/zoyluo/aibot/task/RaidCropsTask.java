@@ -85,7 +85,7 @@ public final class RaidCropsTask extends AbstractTask {
     }
 
     private void scan(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos found = OreProspector.nearest(bot, SCAN_RADIUS, RaidCropsTask::isMatureCrop);
         if (found == null) {
             finishOrFail("no_mature_crops");
@@ -96,7 +96,7 @@ public final class RaidCropsTask extends AbstractTask {
     }
 
     private void goTo(AIPlayerEntity bot) {
-        if (current == null || !isMatureCrop(bot.getServerWorld().getBlockState(current))) {
+        if (current == null || !isMatureCrop(bot.getEntityWorld().getBlockState(current))) {
             phase = Phase.SCAN; // 目标没了(被吃/已收),重扫
             return;
         }
@@ -142,7 +142,7 @@ public final class RaidCropsTask extends AbstractTask {
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos target) {
         for (Direction d : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(d);
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

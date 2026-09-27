@@ -114,7 +114,7 @@ public final class DeathRecoveryMissionGameTests {
                 "death suspension published a terminal result");
 
         TaskManager.INSTANCE.assign(bot,
-                new RecoverDropsTask(bot.getBlockPos(), bot.getServer().getTicks()),
+                new RecoverDropsTask(bot.getBlockPos(), bot.getEntityWorld().getServer().getTicks()),
                 TaskOrigin.safety("gametest_death_recovery"));
         return new Probe(context, botName, bot, activeGoal, queuedGoal, missionId, resultBaseline);
     }
@@ -190,7 +190,7 @@ public final class DeathRecoveryMissionGameTests {
     }
 
     private static void cleanup(Probe probe) {
-        AIPlayerManager.INSTANCE.despawn(probe.bot().getServer(), probe.botName());
+        AIPlayerManager.INSTANCE.despawn(probe.bot().getEntityWorld().getServer(), probe.botName());
     }
 
     private static void require(TestContext context, boolean condition, String message) {

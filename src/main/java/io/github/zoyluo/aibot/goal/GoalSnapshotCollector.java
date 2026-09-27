@@ -69,7 +69,7 @@ public final class GoalSnapshotCollector {
                 ? MiningFoodReserve.units(bot.getInventory()) : 0;
         Optional<StructureReport> structure = Optional.empty();
         if (goal instanceof Goal.Build && resolved.blueprint() != null && resolved.buildAnchor() != null) {
-            structure = Optional.of(StructureVerifier.verify(bot.getServerWorld(), resolved.blueprint(),
+            structure = Optional.of(StructureVerifier.verify(bot.getEntityWorld(), resolved.blueprint(),
                     resolved.buildAnchor(), resolved.buildPlaced(), resolved.buildSkipped()));
         }
         return new GoalSnapshot(inventory, ToolTier.bestPickaxeTier(bot), capabilities,
@@ -132,7 +132,7 @@ public final class GoalSnapshotCollector {
             if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 continue;
             }
-            var state = bot.getServerWorld().getBlockState(pos);
+            var state = bot.getEntityWorld().getBlockState(pos);
             if (state.isOf(Blocks.CRAFTING_TABLE)) {
                 counts.merge("minecraft:crafting_table", 1, Integer::sum);
             } else if (state.isOf(Blocks.FURNACE)) {
@@ -172,7 +172,7 @@ public final class GoalSnapshotCollector {
         List<BlockPos> positions = new ArrayList<>();
         for (BlockPos pos : BlockPos.iterateOutwards(origin, CONTAINER_RADIUS, 6, CONTAINER_RADIUS)) {
             if (ObservableWorldQuery.canObserveBlock(bot, pos)
-                    && bot.getServerWorld().getBlockEntity(pos) instanceof Inventory) {
+                    && bot.getEntityWorld().getBlockEntity(pos) instanceof Inventory) {
                 positions.add(pos.toImmutable());
             }
         }

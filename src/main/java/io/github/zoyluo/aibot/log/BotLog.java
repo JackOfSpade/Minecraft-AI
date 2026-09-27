@@ -104,7 +104,7 @@ public final class BotLog {
     }
 
     private static String nameOf(AIPlayerEntity bot) {
-        return bot == null ? "-" : bot.getGameProfile().getName();
+        return bot == null ? "-" : bot.getGameProfile().name();
     }
 
     /**

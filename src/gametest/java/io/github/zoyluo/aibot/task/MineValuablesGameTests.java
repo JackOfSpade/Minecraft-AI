@@ -28,7 +28,7 @@ public final class MineValuablesGameTests {
         Fixture fixture = fixture(context, "MineValuablesBasicGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos ore = fixture.start().east(2);
-        bot.getServerWorld().setBlockState(ore, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(ore, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
 
         MineValuablesTask task = new MineValuablesTask(3);
         task.start(bot);
@@ -38,7 +38,7 @@ public final class MineValuablesGameTests {
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, bot.getServerWorld().getBlockState(ore).isAir(),
+            require(context, bot.getEntityWorld().getBlockState(ore).isAir(),
                     "mine_valuables completed without actually breaking the visible coal ore");
             require(context, InventoryAction.countItem(bot, Items.COAL) >= 1,
                     "mine_valuables completed without collecting the coal it mined");
@@ -56,8 +56,8 @@ public final class MineValuablesGameTests {
         // own eye-to-face raycasts pass through to reach anything below the floor.
         BlockPos concealingFloor = fixture.start().east(2).down(1);
         BlockPos hiddenOre = fixture.start().east(2).down(2);
-        bot.getServerWorld().setBlockState(visibleOre, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(hiddenOre, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(visibleOre, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(hiddenOre, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         // A stone pickaxe can harvest both coal and iron ore. If the scope-freeze guarantee this
         // test exists to protect were ever broken, the bot would be fully capable of mining the
         // newly-revealed iron ore too -- so a pass here is not an accident of missing tool tier.
@@ -82,21 +82,21 @@ public final class MineValuablesGameTests {
                 // Reveal the previously-hidden ore now, with the task still actively running and
                 // many ticks left (travel + mine + pickup of the visible ore) during which a
                 // scope-freeze regression would have every opportunity to notice and chase it.
-                bot.getServerWorld().setBlockState(concealingFloor, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                bot.getEntityWorld().setBlockState(concealingFloor, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
                 revealed.set(true);
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
-                require(context, bot.getServerWorld().getBlockState(hiddenOre).isOf(Blocks.IRON_ORE),
+                require(context, bot.getEntityWorld().getBlockState(hiddenOre).isOf(Blocks.IRON_ORE),
                         "mine_valuables touched the newly-revealed ore while still running: "
                                 + task.describe());
                 return;
             }
-            require(context, bot.getServerWorld().getBlockState(visibleOre).isAir(),
+            require(context, bot.getEntityWorld().getBlockState(visibleOre).isAir(),
                     "mine_valuables completed without mining the originally visible ore");
             require(context, InventoryAction.countItem(bot, Items.COAL) >= 1,
                     "mine_valuables completed without collecting the originally visible ore's drop");
-            require(context, bot.getServerWorld().getBlockState(hiddenOre).isOf(Blocks.IRON_ORE),
+            require(context, bot.getEntityWorld().getBlockState(hiddenOre).isOf(Blocks.IRON_ORE),
                     "mine_valuables mined the ore that only became visible after the snapshot was taken");
             require(context, InventoryAction.countItem(bot, Items.RAW_IRON) == 0,
                     "mine_valuables collected raw iron it should never have targeted");
@@ -141,7 +141,7 @@ public final class MineValuablesGameTests {
     }
 
     private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

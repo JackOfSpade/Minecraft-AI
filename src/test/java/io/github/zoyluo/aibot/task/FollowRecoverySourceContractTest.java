@@ -39,7 +39,7 @@ final class FollowRecoverySourceContractTest {
                 "cancellation must snapshot the owned exit before its action state is discarded");
         assertTrue(shelter.contains("currentOwned.containsKey(candidate) && currentOwned.containsKey(candidate.up())"));
         assertTrue(shelter.contains("boolean matchesDimension(AIPlayerEntity bot)"));
-        assertTrue(shelter.contains("owned.equals(bot.getServerWorld().getBlockState(position))"));
+        assertTrue(shelter.contains("owned.equals(bot.getEntityWorld().getBlockState(position))"));
         assertTrue(follow.contains("EmergencyShelterTask.pendingExitDebt(bot).orElse(null)"));
         assertTrue(follow.contains("!shelterExitDebt.matchesDimension(bot)"));
         assertTrue(follow.contains("shelterExitDebt.ownsCurrentPlacement(bot, obstruction)"));

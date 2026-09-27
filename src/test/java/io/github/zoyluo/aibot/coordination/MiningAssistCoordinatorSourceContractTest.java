@@ -88,7 +88,7 @@ class MiningAssistCoordinatorSourceContractTest {
             assertFalse(source.contains(token), "the sensor adapters own every world read, found " + token);
         }
         assertEquals(1, count(source, "isSkyVisible("), "the one own-cell read is the underground test (design 2.3 3e)");
-        assertTrue(source.contains("!bot.getServerWorld().isSkyVisible(bot.getBlockPos())"));
+        assertTrue(source.contains("!bot.getEntityWorld().isSkyVisible(bot.getBlockPos())"));
     }
 
     // ---- the exception fence ------------------------------------------------------------------------
@@ -155,7 +155,7 @@ class MiningAssistCoordinatorSourceContractTest {
         int decide = run.indexOf("SensePlan.decide(handled,");
         int task = run.indexOf("isSensedTask(TaskManager.INSTANCE.getActive(bot).orElse(null))");
         int gate = run.indexOf("MiningAssistRuntime.enabledFor(bot, tick)");
-        int sky = run.indexOf("!bot.getServerWorld().isSkyVisible(bot.getBlockPos())");
+        int sky = run.indexOf("!bot.getEntityWorld().isSkyVisible(bot.getBlockPos())");
         assertTrue(decide > 0 && task > decide && gate > task && sky > gate,
                 "handled, then the task class, then the gate, then the sky read");
         assertTrue(run.contains("if (verdict.senses()) {"));

@@ -20,7 +20,7 @@ public final class FarmAction {
     }
 
     public static ActionResult till(AIPlayerEntity bot, BlockPos ground) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (!isTillable(world.getBlockState(ground)) || !world.getBlockState(ground.up()).isAir()) {
             return ActionResult.failed("not_tillable");
         }
@@ -35,7 +35,7 @@ public final class FarmAction {
     }
 
     public static ActionResult plant(AIPlayerEntity bot, BlockPos farmland, Item seed, Block crop) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (!world.getBlockState(farmland).isOf(Blocks.FARMLAND) || !world.getBlockState(farmland.up()).isAir()) {
             return ActionResult.failed("not_empty_farmland");
         }
@@ -53,7 +53,7 @@ public final class FarmAction {
     }
 
     public static ActionResult harvest(AIPlayerEntity bot, BlockPos cropPos) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (!isMature(world, cropPos)) {
             return ActionResult.failed("not_mature");
         }
@@ -64,7 +64,7 @@ public final class FarmAction {
 
     // 灌溉:用水桶在 pos 放一个水源(简化:直接 setBlockState WATER 源 + 背包 WATER_BUCKET→BUCKET)。
     public static ActionResult placeWater(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockState at = world.getBlockState(pos);
         if (!at.isAir() && !at.isOf(Blocks.WATER) && world.getFluidState(pos).isEmpty()) {
             return ActionResult.failed("not_empty"); // 目标被实心方块占,放不了水
@@ -80,7 +80,7 @@ public final class FarmAction {
 
     // 灌溉:从 pos 的水源舀水进空桶(无限水源的"可再生"凭此验证:舀走一格,邻格的源会回填)。
     public static ActionResult fillBucket(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (!isWaterSource(world, pos)) {
             return ActionResult.failed("not_water_source");
         }

@@ -21,16 +21,16 @@ public final class ContainerAction {
     }
 
     public static Optional<Inventory> resolve(AIPlayerEntity bot, BlockPos pos) {
-        BlockState state = bot.getServerWorld().getBlockState(pos);
+        BlockState state = bot.getEntityWorld().getBlockState(pos);
         Block block = state.getBlock();
         if (block instanceof ChestBlock chestBlock) {
-            Inventory inventory = ChestBlock.getInventory(chestBlock, state, bot.getServerWorld(), pos, true);
+            Inventory inventory = ChestBlock.getInventory(chestBlock, state, bot.getEntityWorld(), pos, true);
             if (inventory != null) {
                 generateLoot(bot, inventory);
                 return Optional.of(inventory);
             }
         }
-        if (bot.getServerWorld().getBlockEntity(pos) instanceof Inventory inventory) {
+        if (bot.getEntityWorld().getBlockEntity(pos) instanceof Inventory inventory) {
             generateLoot(bot, inventory);
             return Optional.of(inventory);
         }

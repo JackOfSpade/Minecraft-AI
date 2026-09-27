@@ -1147,7 +1147,7 @@ public final class DescendCheckpointGameTests {
     private static void finish(TestContext context, AIPlayerEntity bot, String name) {
         GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

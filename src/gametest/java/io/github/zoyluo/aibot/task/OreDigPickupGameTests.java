@@ -49,7 +49,7 @@ public final class OreDigPickupGameTests {
         BlockPos start = fixture.start();
         BlockPos ore = start.north();
         BlockPos support = ore.down();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
 
         world.setBlockState(ore, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
         for (int depth = 1; depth <= 5; depth++) {
@@ -112,7 +112,7 @@ public final class OreDigPickupGameTests {
         AIPlayerEntity bot = fixture.bot();
         BlockPos start = fixture.start();
         BlockPos ore = start.east().north().up();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         world.setBlockState(ore, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
         require(context, ObservableWorldQuery.canObserveBlock(bot, ore),
                 "diagonal eye-height coal is not strictly observable");
@@ -162,7 +162,7 @@ public final class OreDigPickupGameTests {
     public void threeAboveOreRequiresReachableHighWorkPoseForNaturalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupHighFaceGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos workPose = start.east().south().up(2);
         BlockPos firstStep = workPose.south().down();
@@ -246,7 +246,7 @@ public final class OreDigPickupGameTests {
     public void twoAboveCardinalOreUsesDropShaftWorkPoseForNaturalPickup(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupTwoAboveGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos ore = start.north().up(2);
         BlockPos oreSupport = ore.down();
@@ -333,7 +333,7 @@ public final class OreDigPickupGameTests {
     public void lowerFloorOreClearsSweptPickupEgressBeforeBreaking(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupLowerLedgeGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos ore = start.north().down();
         BlockPos landingSupport = ore.down();
@@ -390,7 +390,7 @@ public final class OreDigPickupGameTests {
     public void lowerFloorCoalOverOpenShaftGetsPhysicalDropSupport(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupLowerShaftGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos ore = start.north().down();
         BlockPos support = ore.down();
@@ -589,7 +589,7 @@ public final class OreDigPickupGameTests {
     public void denseBonusOreCannotStarveActiveChannelBlock(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBonusChannelGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos channelFeet = fixture.start().north();
         BlockPos channelHead = channelFeet.up();
         world.setBlockState(channelFeet, Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
@@ -638,7 +638,7 @@ public final class OreDigPickupGameTests {
             require(context, remainingCopper == 7,
                     "bonus DONE accounting skipped past the exact 8-block cap: remaining="
                             + remainingCopper);
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
             context.complete();
         });
     }
@@ -647,7 +647,7 @@ public final class OreDigPickupGameTests {
     public void bonusOreMinesSideWallWithoutRemovingCurrentSupport(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreBonusWallBandGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos support = start.down();
         BlockPos sideWall = start.west();
@@ -704,7 +704,7 @@ public final class OreDigPickupGameTests {
     public void visibleLavaRotatesTheBranchInsteadOfAssigningImpossibleEvade(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreLavaRerouteGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         // Keep one source exposed to the south while fixture stone contains its other three sides.
         // The callback clears the one vanilla flow cell before every repeated watcher scan, making
         // this a stable observation instead of a fluid-tick race.
@@ -779,7 +779,7 @@ public final class OreDigPickupGameTests {
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreWatcherLavaClusterGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos lavaA = start.north(2);
         BlockPos lavaB = lavaA.east();
@@ -824,7 +824,7 @@ public final class OreDigPickupGameTests {
     public void directLavaBoundaryAndRestartRetainOreDigOwnership(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreDirectLavaRerouteGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos lava = start.north(2);
         world.setBlockState(lava.north(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -868,7 +868,7 @@ public final class OreDigPickupGameTests {
     public void factualCornerLavaUsesUntriedReverseAndRestartsExactly(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreFactualCornerLavaGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos corner = start.north();
         BlockPos eastBody = corner.east();
@@ -1003,7 +1003,7 @@ public final class OreDigPickupGameTests {
     public void exactTunnelStepAndQueuedHighWorkPoseArePhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreCloseBreakGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos tunnelStep = start.east();
         BlockPos shaft = start.east(2);
@@ -1108,7 +1108,7 @@ public final class OreDigPickupGameTests {
     public void pedestalLandedDropIsPhysicallyRecovered(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePedestalDropGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos ore = start.east(2).up(2);
         BlockPos pedestal = start.east(3).south().up(2);
@@ -1167,7 +1167,7 @@ public final class OreDigPickupGameTests {
     public void restoredObservedHighWorkPoseRoutesWithoutDigging(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseRestartGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos ore = start.up(3);
         BlockPos workPose = ore.down().east();
@@ -1253,7 +1253,7 @@ public final class OreDigPickupGameTests {
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreHighPoseLeaseGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos ore = start.east(14).up(3);
         BlockPos workPose = ore.down().west();
@@ -1308,14 +1308,14 @@ public final class OreDigPickupGameTests {
             task.tick(bot);
 
             if (replanBoundary && !EpisodeMemory.INSTANCE.isExcluded(
-                    bot.getUuid(), ore, bot.getServer().getTicks())) {
+                    bot.getUuid(), ore, bot.getEntityWorld().getServer().getTicks())) {
                 require(context, workPose.equals(bot.getActionPack().activePathGoal()),
                         "remembered route was not accepted as an exact successful replan: "
                                 + bot.getActionPack().activePathGoal());
                 successfulRouteStarts.incrementAndGet();
             }
             if (!EpisodeMemory.INSTANCE.isExcluded(
-                    bot.getUuid(), ore, bot.getServer().getTicks())) {
+                    bot.getUuid(), ore, bot.getEntityWorld().getServer().getTicks())) {
                 require(context, callback <= 96,
                         "successful remembered routes renewed the finite owner lease forever");
                 return;
@@ -1421,7 +1421,7 @@ public final class OreDigPickupGameTests {
     public void queuedHighOreWithoutWorkPoseStaysIntactAndSearchContinues(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreQueuedHighReachGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos shaft = start.east(2);
         BlockPos lowerOre = shaft.up(2);
@@ -1506,7 +1506,7 @@ public final class OreDigPickupGameTests {
     public void queuedOreBeyondVanillaReachIsReleasedWithoutCursorLivelock(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreQueuedBeyondReachGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos shaft = fixture.start().east(2);
         BlockPos unreachableOre = shaft.up(6);
         for (int dy = 2; dy <= 6; dy++) {
@@ -1581,7 +1581,7 @@ public final class OreDigPickupGameTests {
     public void hiddenDiagonalDropUsesExactLRouteWithoutChangingCornerWalls(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupCornerGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos turn = start.west();
         BlockPos dropCell = turn.north();
@@ -1679,7 +1679,7 @@ public final class OreDigPickupGameTests {
         AIPlayerEntity bot = fixture.bot();
         BlockPos pendingOre = fixture.start().east().north().up();
         BlockPos nextOre = fixture.start().north(3).up();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         world.setBlockState(nextOre, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.RAW_IRON));
 
@@ -1736,7 +1736,7 @@ public final class OreDigPickupGameTests {
                 require(context, bot.getStatHandler().getStat(
                                 Stats.PICKED_UP.getOrCreateStat(Items.RAW_IRON)) > pickupBaseline,
                         "second raw iron did not enter through vanilla pickup statistics");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             }
         });
@@ -1748,8 +1748,8 @@ public final class OreDigPickupGameTests {
         AIPlayerEntity bot = fixture.bot();
         BlockPos first = fixture.start().north(4).up();
         BlockPos second = fixture.start().north(5).up();
-        bot.getServerWorld().setBlockState(first, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(second, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(first, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(second, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
 
         assertStrictCapabilities(context, bot);
         int deathBaseline = deathCount(bot);
@@ -1768,7 +1768,7 @@ public final class OreDigPickupGameTests {
             int diamonds = InventoryAction.countItem(bot, Items.DIAMOND);
             Map<String, String> checkpoint = task.checkpoint();
 
-            if (bot.getServerWorld().getBlockState(first).isAir() && diamonds == 0) {
+            if (bot.getEntityWorld().getBlockState(first).isAir() && diamonds == 0) {
                 // ActionPack removes the block before OreDig's next task tick promotes
                 // active_break_pos into pending_pickup_pos. Both are valid ledger states, but
                 // neither may hand control to the second ore.
@@ -1779,7 +1779,7 @@ public final class OreDigPickupGameTests {
                 if (pendingPickupObserved) {
                     sawFirstPendingWithoutPickup.set(true);
                 }
-                require(context, !bot.getServerWorld().getBlockState(second).isAir(),
+                require(context, !bot.getEntityWorld().getBlockState(second).isAir(),
                         "second eye-height ore broke before the first drop entered inventory");
                 require(context, !encode(second).equals(checkpoint.get("active_break_pos")),
                         "second eye-height ore started before the first drop entered inventory");
@@ -1802,7 +1802,7 @@ public final class OreDigPickupGameTests {
                         "second ore mining started before first physical pickup");
                 sawSecondMiningAfterFirstPickup.set(true);
             }
-            if (bot.getServerWorld().getBlockState(second).isAir()) {
+            if (bot.getEntityWorld().getBlockState(second).isAir()) {
                 require(context, diamonds >= 1 && sawFirstPhysicalPickup.get(),
                         "second ore broke before first physical pickup");
             }
@@ -1830,7 +1830,7 @@ public final class OreDigPickupGameTests {
         PickupFixture fixture = spawnMiner(context, "OrePickupFootGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos ore = fixture.start().north(4);
-        bot.getServerWorld().setBlockState(ore, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(ore, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(
                 Items.COBBLESTONE, MiningBudget.EMERGENCY_STONE_LIKE + 1));
 
@@ -1853,7 +1853,7 @@ public final class OreDigPickupGameTests {
                     lastVanillaDropPosition.set(position);
                 });
             }
-            if (bot.getServerWorld().getBlockState(ore).isAir() && diamonds == 0) {
+            if (bot.getEntityWorld().getBlockState(ore).isAir() && diamonds == 0) {
                 Map<String, String> checkpoint = task.checkpoint();
                 boolean activeBreakObserved = encode(ore).equals(checkpoint.get("active_break_pos"));
                 boolean pendingPickupObserved = encode(ore).equals(checkpoint.get("pending_pickup_pos"));
@@ -1873,7 +1873,7 @@ public final class OreDigPickupGameTests {
                         "expected exactly one foot-level diamond, got " + diamonds);
                 Vec3d lastDrop = lastVanillaDropPosition.get();
                 require(context, lastDrop != null
-                                && bot.getPos().squaredDistanceTo(lastDrop) <= 4.0D,
+                                && bot.getEntityPos().squaredDistanceTo(lastDrop) <= 4.0D,
                         "foot-level diamond entered inventory away from the last vanilla drop position");
                 // Vanilla loot has launch velocity and can roll toward the miner, so requiring the
                 // original block cell would reject a genuine collision pickup. The regression
@@ -1890,7 +1890,7 @@ public final class OreDigPickupGameTests {
         PickupFixture fixture = spawnMiner(context, "OrePickupRestartGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos ore = fixture.start().north(4).up();
-        bot.getServerWorld().setBlockState(ore, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(ore, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
 
         assertStrictCapabilities(context, bot);
         int deathBaseline = deathCount(bot);
@@ -1915,7 +1915,7 @@ public final class OreDigPickupGameTests {
             if (!restarted.get()
                     && diamonds == 0
                     && encode(ore).equals(checkpoint.get("pending_pickup_pos"))) {
-                require(context, bot.getServerWorld().getBlockState(ore).isAir(),
+                require(context, bot.getEntityWorld().getBlockState(ore).isAir(),
                         "pickup checkpoint was written before the target ore broke");
                 require(context, "0".equals(checkpoint.get("pending_pickup_inventory")),
                         "pickup checkpoint stored the wrong inventory baseline: " + checkpoint);
@@ -1952,7 +1952,7 @@ public final class OreDigPickupGameTests {
                         displacedDrop.set(drop);
                     }
                     sawDropAfterRestart.set(true);
-                    lastDropAfterRestart.set(drop.getPos());
+                    lastDropAfterRestart.set(drop.getEntityPos());
                 });
             }
             String lastSeen = checkpoint.get("pending_pickup_last_seen_pos");
@@ -1993,7 +1993,7 @@ public final class OreDigPickupGameTests {
                         "restored pickup produced the wrong diamond count: " + diamonds);
                 Vec3d lastDrop = lastDropAfterRestart.get();
                 require(context, lastDrop != null
-                                && bot.getPos().squaredDistanceTo(lastDrop) <= 4.0D,
+                                && bot.getEntityPos().squaredDistanceTo(lastDrop) <= 4.0D,
                         "restored pickup completed away from its observed ItemEntity");
                 finish(context, fixture);
             }
@@ -2004,7 +2004,7 @@ public final class OreDigPickupGameTests {
     public void unreachableVisibleLastSeenFallsBackToReachableBreakCell(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupFallbackGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos breakCell = start.north(3);
         BlockPos unreachableLedge = start.east(2).up(3);
@@ -2058,7 +2058,7 @@ public final class OreDigPickupGameTests {
         AIPlayerEntity bot = fixture.bot();
         BlockPos upper = fixture.start();
         BlockPos dropCell = upper.down();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
 
         // A server-side fake player has no client gravity. Removing its support reproduces the
         // deep-staircase case where a mined ore's ItemEntity settles in the open cell immediately
@@ -2106,7 +2106,7 @@ public final class OreDigPickupGameTests {
     public void elevatedDropUsesLowerAdjacentStandWithoutPillar(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupElevatedGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos dropCell = start.north(2).up();
 
@@ -2162,7 +2162,7 @@ public final class OreDigPickupGameTests {
     public void airborneDropWaitsForLandingAndUsesNaturalRouteWithoutPillar(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePickupAirborneGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos landing = start.east(4).up(4);
 
@@ -2552,7 +2552,7 @@ public final class OreDigPickupGameTests {
     public void rareFullInventoryFailsWithoutCreatingOpenRearDrops(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreInventoryServiceRequiredGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 40));
         InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 64));
@@ -2594,7 +2594,7 @@ public final class OreDigPickupGameTests {
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrdinaryInventoryServiceRequiredGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 40));
         while (!HarvestCore.isInventoryFull(bot)) {
@@ -2706,7 +2706,7 @@ public final class OreDigPickupGameTests {
     public void partialDeliveryRebasesOnlyTheTransientStallWindow(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OrePartialRetryBudgetGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos channel = fixture.start().north();
         world.setBlockState(channel, Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
@@ -2785,7 +2785,7 @@ public final class OreDigPickupGameTests {
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreRarePartialDeliveredGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos channel = fixture.start().north();
         world.setBlockState(channel, Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
 
@@ -2862,7 +2862,7 @@ public final class OreDigPickupGameTests {
         PickupFixture fixture = spawnMiner(context, "OreRareDeliveredGraceGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos untouched = fixture.start().north();
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 untouched, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8));
         InventoryAction.removeItems(bot, Items.IRON_PICKAXE, 1);
@@ -2882,7 +2882,7 @@ public final class OreDigPickupGameTests {
         require(context, restored.state() == TaskState.COMPLETED,
                 "fully delivered restart required a tool or timed out: "
                         + restored.failureReason());
-        require(context, bot.getServerWorld().getBlockState(untouched).isOf(Blocks.DIAMOND_ORE)
+        require(context, bot.getEntityWorld().getBlockState(untouched).isOf(Blocks.DIAMOND_ORE)
                         && InventoryAction.countItem(bot, Items.DIAMOND) == 8,
                 "fully delivered restart broke a ninth ore");
         Map<String, String> committed = restored.checkpoint();
@@ -2924,11 +2924,11 @@ public final class OreDigPickupGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         BlockPos gold = fixture.start().north().up();
         BlockPos east = fixture.start().east();
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 gold, Blocks.GOLD_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 east, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 east.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         Map<String, String> checkpoint = new LinkedHashMap<>(
                 openCheckpoint(fixture.start(), 1, Set.of(Blocks.IRON_ORE)));
@@ -2945,7 +2945,7 @@ public final class OreDigPickupGameTests {
 
         require(context, task.state() == TaskState.RUNNING,
                 "higher-tier non-target ore ended the branch: " + task.failureReason());
-        require(context, bot.getServerWorld().getBlockState(gold).isOf(Blocks.GOLD_ORE),
+        require(context, bot.getEntityWorld().getBlockState(gold).isOf(Blocks.GOLD_ORE),
                 "stone-only iron search destroyed the finite gold obstruction");
         require(context, "48".equals(task.checkpoint().get("steps_left"))
                         && "1".equals(task.checkpoint().get("direction")),
@@ -2966,7 +2966,7 @@ public final class OreDigPickupGameTests {
             TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierProgressedGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos progressed = start.east();
         BlockPos gold = progressed.east().up();
@@ -3086,7 +3086,7 @@ public final class OreDigPickupGameTests {
     public void zeroMovementHigherTierBoundaryStillFailsClosed(TestContext context) {
         PickupFixture fixture = spawnMiner(context, "OreTierZeroRearGT");
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos start = fixture.start();
         BlockPos gold = start.north().up();
         InventoryAction.removeItems(bot, Items.IRON_PICKAXE, 1);
@@ -3701,7 +3701,7 @@ public final class OreDigPickupGameTests {
                             + task.failureReason() + " " + task.checkpoint());
             Map<String, String> live = task.checkpoint();
             boolean targetExcluded = EpisodeMemory.INSTANCE.isExcluded(
-                    bot.getUuid(), ore, bot.getServer().getTicks());
+                    bot.getUuid(), ore, bot.getEntityWorld().getServer().getTicks());
             boolean rerouted = targetExcluded
                     && !"0".equals(live.get("direction"));
             if (rerouted) {
@@ -5799,7 +5799,7 @@ public final class OreDigPickupGameTests {
         PickupFixture fixture = spawnMiner(context, "OreSupportElevatedGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos start = fixture.start();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos supportOre = start.down();
 
         world.setBlockState(supportOre, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
@@ -5846,7 +5846,7 @@ public final class OreDigPickupGameTests {
         InventoryAction.removeItems(bot, Items.IRON_PICKAXE, 1);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         BlockPos gold = fixture.start().north();
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 gold, Blocks.GOLD_ORE.getDefaultState(), Block.NOTIFY_ALL);
 
         BlockMiner miner = new BlockMiner();
@@ -5859,7 +5859,7 @@ public final class OreDigPickupGameTests {
                 "missing_mining_channel_tool:minecraft:iron_pickaxe"
                         .equals(miner.failureReason()),
                 "blocked gold reported the wrong channel tool: " + miner.failureReason());
-        require(context, bot.getServerWorld().getBlockState(gold).isOf(Blocks.GOLD_ORE),
+        require(context, bot.getEntityWorld().getBlockState(gold).isOf(Blocks.GOLD_ORE),
                 "typed channel failure modified the gold obstruction");
         finish(context, fixture);
     }
@@ -5869,7 +5869,7 @@ public final class OreDigPickupGameTests {
         PickupFixture fixture = spawnMiner(context, "OreChannelToolGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos wall = fixture.start().north();
-        bot.getServerWorld().setBlockState(wall, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(wall, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         Map<String, String> checkpoint = new LinkedHashMap<>(openCheckpoint(fixture.start(), 1));
         checkpoint.put("direction", "0");
         checkpoint.put("steps_left", "48");
@@ -5886,7 +5886,7 @@ public final class OreDigPickupGameTests {
                 "missing channel tool was blacklisted or retried instead of failing");
         require(context, "need_mining_channel_tool:minecraft:stone_pickaxe".equals(task.failureReason()),
                 "unexpected channel-tool failure: " + task.failureReason());
-        require(context, bot.getServerWorld().getBlockState(wall).isOf(Blocks.STONE),
+        require(context, bot.getEntityWorld().getBlockState(wall).isOf(Blocks.STONE),
                 "OreDig broke channel rock without a stone pick");
         int ironDamageAfter = bot.getInventory().getMainStacks().stream()
                 .filter(stack -> stack.isOf(Items.IRON_PICKAXE))
@@ -6025,7 +6025,7 @@ public final class OreDigPickupGameTests {
 
     private static BlockPos isolateCheckpointMiner(PickupFixture fixture, int dy) {
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos isolated = fixture.start().up(dy).toImmutable();
         world.setBlockState(
                 isolated.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -6065,12 +6065,12 @@ public final class OreDigPickupGameTests {
 
     private static java.util.Optional<Vec3d> nearestDiamondDropPosition(AIPlayerEntity bot,
                                                                         BlockPos pos) {
-        return nearestDiamondDrop(bot, pos).map(ItemEntity::getPos);
+        return nearestDiamondDrop(bot, pos).map(ItemEntity::getEntityPos);
     }
 
     private static java.util.Optional<ItemEntity> nearestDiamondDrop(AIPlayerEntity bot,
                                                                       BlockPos pos) {
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         ItemEntity.class, new Box(pos).expand(4.0D),
                         entity -> entity.getStack().isOf(Items.DIAMOND))
                 .stream()
@@ -6204,7 +6204,7 @@ public final class OreDigPickupGameTests {
                         == InventoryAction.countItem(fixture.bot(), Items.DIAMOND),
                 "diamond accounting disagrees across inventory observers");
         AIPlayerManager.INSTANCE.despawn(
-                fixture.bot().getServer(), fixture.name());
+                fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

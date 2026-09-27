@@ -170,7 +170,7 @@ public final class FishTask extends AbstractTask {
     private void waitBite(AIPlayerEntity bot) {
         phaseTicks++;
         currentHook(bot).ifPresentOrElse(
-                hook -> LookAction.lookAt(bot, hook.getPos()),
+                hook -> LookAction.lookAt(bot, hook.getEntityPos()),
                 () -> LookAction.lookAt(bot, waterPos.toCenterPos().add(0.0D, 0.15D, 0.0D)));
         Optional<FishingBobberEntity> hook = currentHook(bot);
         if (hook.isEmpty()) {
@@ -189,7 +189,7 @@ public final class FishTask extends AbstractTask {
             fail("need_fishing_rod");
             return;
         }
-        currentHook(bot).ifPresent(hook -> LookAction.lookAt(bot, hook.getPos()));
+        currentHook(bot).ifPresent(hook -> LookAction.lookAt(bot, hook.getEntityPos()));
         inventoryBeforeReel = HarvestCore.totalInventoryCount(bot);
         collectSweepAttempted = false;
         ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
@@ -239,7 +239,7 @@ public final class FishTask extends AbstractTask {
                         origin.add(-SEARCH_RADIUS, -2, -SEARCH_RADIUS),
                         origin.add(SEARCH_RADIUS, 3, SEARCH_RADIUS))
                 .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> bot.getServerWorld().getFluidState(pos).isIn(FluidTags.WATER))
+                .filter(pos -> bot.getEntityWorld().getFluidState(pos).isIn(FluidTags.WATER))
                 .map(BlockPos::toImmutable)
                 .map(pos -> waterChoice(bot, pos))
                 .filter(choice -> choice != null)
@@ -249,7 +249,7 @@ public final class FishTask extends AbstractTask {
     private WaterChoice waterChoice(AIPlayerEntity bot, BlockPos water) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos stand = water.offset(direction);
-            if (Standability.isStandable(bot.getServerWorld(), stand)) {
+            if (Standability.isStandable(bot.getEntityWorld(), stand)) {
                 return new WaterChoice(water, stand);
             }
         }
@@ -261,7 +261,7 @@ public final class FishTask extends AbstractTask {
             return Optional.of(bot.fishHook);
         }
         Box box = bot.getBoundingBox().expand(32.0D);
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(FishingBobberEntity.class, box,
                         hook -> hook.isAlive() && hook.getPlayerOwner() == bot)
                 .stream()

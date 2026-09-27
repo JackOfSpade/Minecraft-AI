@@ -14,7 +14,7 @@ public abstract class AbstractTask implements Task {
             return;
         }
         state = TaskState.RUNNING;
-        startedTick = bot.getServer().getTicks();
+        startedTick = bot.getEntityWorld().getServer().getTicks();
         onStart(bot);
     }
 

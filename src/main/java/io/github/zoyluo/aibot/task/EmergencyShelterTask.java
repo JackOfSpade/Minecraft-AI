@@ -272,7 +272,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (handleEnvironmentalOwnershipConflict(bot)) {
             return;
         }
-        if (surfaceShelter && !bot.getServerWorld().isDay()) {
+        if (surfaceShelter && !bot.getEntityWorld().isDay()) {
             consecutiveDaylightTicks = 0;
         }
         switch (phase) {
@@ -358,11 +358,11 @@ public final class EmergencyShelterTask extends AbstractTask {
     private boolean startRetreatPath(AIPlayerEntity bot, LivingEntity pressure) {
         Vec3d source = pressure == null
                 ? rememberedThreatPos == null ? null : Vec3d.ofCenter(rememberedThreatPos)
-                : pressure.getPos();
+                : pressure.getEntityPos();
         if (source == null) {
             return false;
         }
-        Vec3d away = bot.getPos().subtract(source);
+        Vec3d away = bot.getEntityPos().subtract(source);
         away = new Vec3d(away.x, 0.0D, away.z);
         if (away.lengthSquared() < 0.01D) {
             return false;
@@ -396,7 +396,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private BlockPos findRetreatStandable(AIPlayerEntity bot, Vec3d direction) {
-        Vec3d projected = bot.getPos().add(direction.multiply(PREBUILD_RETREAT_DISTANCE));
+        Vec3d projected = bot.getEntityPos().add(direction.multiply(PREBUILD_RETREAT_DISTANCE));
         BlockPos base = new BlockPos(
                 net.minecraft.util.math.MathHelper.floor(projected.x),
                 bot.getBlockPos().getY(),
@@ -404,7 +404,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         for (int radius = 0; radius <= 4; radius++) {
             for (BlockPos candidate : BlockPos.iterate(
                     base.add(-radius, -2, -radius), base.add(radius, 2, radius))) {
-                if (Standability.isStandable(bot.getServerWorld(), candidate)
+                if (Standability.isStandable(bot.getEntityWorld(), candidate)
                         && !hasFluidAt(bot, candidate)) {
                     return candidate.toImmutable();
                 }
@@ -414,7 +414,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static boolean hasFluidAt(AIPlayerEntity bot, BlockPos feet) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         return !world.getFluidState(feet).isEmpty() || !world.getFluidState(feet.up()).isEmpty();
     }
 
@@ -607,12 +607,12 @@ public final class EmergencyShelterTask extends AbstractTask {
         double centerZ = anchor.getZ() + 0.5D;
         Box centeredBox = bot.getBoundingBox().offset(
                 centerX - bot.getX(), anchor.getY() - bot.getY(), centerZ - bot.getZ());
-        return bot.getServerWorld().isSpaceEmpty(bot, centeredBox);
+        return bot.getEntityWorld().isSpaceEmpty(bot, centeredBox);
     }
 
     private Optional<LivingEntity> placementBlockingHostile(AIPlayerEntity bot, BlockPos target) {
         Box placementBox = new Box(target);
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         LivingEntity.class,
                         placementBox,
                         entity -> entity != bot
@@ -648,7 +648,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             return;
         }
         if (surfaceShelter) {
-            if (!bot.getServerWorld().isDay()) {
+            if (!bot.getEntityWorld().isDay()) {
                 consecutiveDaylightTicks = 0;
             } else if (consecutiveDaylightTicks < DAYLIGHT_GRACE_TICKS) {
                 consecutiveDaylightTicks++;
@@ -804,7 +804,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             return;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(bot.getServerWorld(), egressFeet)) {
+        if (!Standability.isStandable(bot.getEntityWorld(), egressFeet)) {
             if (forcePressureExit) {
                 deferForcedEgress(bot, "shelter_exit_not_standable");
                 return;
@@ -874,7 +874,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private int observableExitPressure(AIPlayerEntity bot) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(
                         LivingEntity.class,
                         new Box(egressFeet).expand(CombatCore.hostilePressureScanRange()),
@@ -959,7 +959,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             return true;
         }
         Standability.clearCache();
-        return Standability.isStandable(bot.getServerWorld(), shelterFeet)
+        return Standability.isStandable(bot.getEntityWorld(), shelterFeet)
                 && FakePlayerMotion.stepToStandable(
                 bot, shelterFeet, "shelter_roof_support_return");
     }
@@ -979,7 +979,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         Standability.clearCache();
         BlockPos here = bot.getBlockPos();
-        if (Standability.isStandable(bot.getServerWorld(), here)) {
+        if (Standability.isStandable(bot.getEntityWorld(), here)) {
             failDisplacedAnchor(bot, "shelter_anchor_displaced");
             return false;
         }
@@ -1013,7 +1013,7 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     static boolean canStartAtCurrentPose(AIPlayerEntity bot) {
         Standability.clearCache();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         // NavSafety owns the complete water-recovery episode. A fixed shelter anchor must not
         // compete for movement or place an enclosure around either a pending rescue waypoint or a
@@ -1046,7 +1046,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         for (int dx = -8; dx <= 8; dx += 4) {
             for (int dz = -8; dz <= 8; dz += 4) {
-                int topY = bot.getServerWorld().getTopY(
+                int topY = bot.getEntityWorld().getTopY(
                         Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
                         origin.getX() + dx,
                         origin.getZ() + dz);
@@ -1223,7 +1223,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static boolean hasBodyFluid(AIPlayerEntity bot) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         return bot.isSubmergedInWater()
                 || !world.getFluidState(feet).isEmpty()
@@ -1309,7 +1309,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static BlockPos selectPlannedEgress(AIPlayerEntity bot, BlockPos feet) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         // Prefer a landing that already exists. Only extend a foundation when no naturally
         // supported two-block doorway is available.
         for (Direction direction : HORIZONTAL) {
@@ -1421,12 +1421,12 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private void rememberPlacement(AIPlayerEntity bot, BlockPos target) {
-        ownedPlacements.put(target.toImmutable(), bot.getServerWorld().getBlockState(target));
+        ownedPlacements.put(target.toImmutable(), bot.getEntityWorld().getBlockState(target));
     }
 
     private boolean ownsCurrentPlacement(AIPlayerEntity bot, BlockPos target) {
         BlockState owned = ownedPlacements.get(target);
-        return owned != null && owned.equals(bot.getServerWorld().getBlockState(target));
+        return owned != null && owned.equals(bot.getEntityWorld().getBlockState(target));
     }
 
     private boolean isEnvelopeSealed(AIPlayerEntity bot) {
@@ -1463,12 +1463,12 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static boolean hasNoCollision(AIPlayerEntity bot, BlockPos pos) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         return world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
     }
 
     private static boolean isOpenCell(AIPlayerEntity bot, BlockPos pos) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockState state = world.getBlockState(pos);
         return state.getFluidState().isEmpty()
                 && state.getCollisionShape(world, pos).isEmpty()
@@ -1476,7 +1476,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static boolean isSafeSupport(AIPlayerEntity bot, BlockPos pos) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockState state = world.getBlockState(pos);
         return state.getFluidState().isEmpty()
                 && !state.getCollisionShape(world, pos).isEmpty()
@@ -1534,7 +1534,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     static boolean hasPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
-            int now = bot.getServer().getTicks();
+            int now = bot.getEntityWorld().getServer().getTicks();
             return PENDING_CLEANUPS.values().stream()
                     .anyMatch(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot)
                             && debt.claimAvailableTo(bot.getUuid(), now));
@@ -1549,7 +1549,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     static Optional<ShelterCleanupDebt> claimPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
-            int now = bot.getServer().getTicks();
+            int now = bot.getEntityWorld().getServer().getTicks();
             ShelterCleanupDebt selected = PENDING_CLEANUPS.values().stream()
                     .filter(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot))
                     .filter(debt -> debt.claimAvailableTo(bot.getUuid(), now))
@@ -1574,7 +1574,7 @@ public final class EmergencyShelterTask extends AbstractTask {
                     || !debt.claimedBy(bot.getUuid())) {
                 return false;
             }
-            debt.claim(bot.getUuid(), bot.getServer().getTicks());
+            debt.claim(bot.getUuid(), bot.getEntityWorld().getServer().getTicks());
             return true;
         }
     }
@@ -1633,7 +1633,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             BlockState expected = debt.remaining.get(position);
             if (expected != null
                     && ObservableWorldQuery.canObserveBlock(bot, position)
-                    && !expected.equals(bot.getServerWorld().getBlockState(position))) {
+                    && !expected.equals(bot.getEntityWorld().getBlockState(position))) {
                 debt.remaining.remove(position);
             }
             debt.discardChangedBlocks(bot);
@@ -1677,7 +1677,7 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static void pruneInvalidCleanupDebts(AIPlayerEntity bot) {
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         for (Map.Entry<UUID, ShelterCleanupDebt> entry : PENDING_CLEANUPS.entrySet()) {
             ShelterCleanupDebt debt = entry.getValue();
             if (debt.isStale(now)) {
@@ -1716,7 +1716,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             BlockPos position = entry.getKey();
             BlockState expected = entry.getValue();
             if (position != null && expected != null
-                    && expected.equals(bot.getServerWorld().getBlockState(position))) {
+                    && expected.equals(bot.getEntityWorld().getBlockState(position))) {
                 exactOwned.put(position.toImmutable(), expected);
             }
         }
@@ -1726,15 +1726,15 @@ public final class EmergencyShelterTask extends AbstractTask {
         ShelterCleanupDebt debt = new ShelterCleanupDebt(
                 UUID.randomUUID(),
                 bot.getUuid(),
-                bot.getServerWorld().getRegistryKey().getValue().toString(),
+                bot.getEntityWorld().getRegistryKey().getValue().toString(),
                 anchor,
                 exactOwned,
-                bot.getServer().getTicks());
+                bot.getEntityWorld().getServer().getTicks());
         PENDING_CLEANUPS.put(debt.id(), debt);
         BotLog.action(bot, "shelter_cleanup_registered",
                 "anchor", anchor,
                 "owned", exactOwned.size(),
-                "owner", bot.getGameProfile().getName());
+                "owner", bot.getGameProfile().name());
     }
 
     /**
@@ -1756,7 +1756,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         for (Map.Entry<BlockPos, BlockState> entry : ownedPlacements.entrySet()) {
             BlockPos position = entry.getKey();
             BlockState state = entry.getValue();
-            if (state.equals(bot.getServerWorld().getBlockState(position))) {
+            if (state.equals(bot.getEntityWorld().getBlockState(position))) {
                 currentOwned.put(position.toImmutable(), state);
             }
         }
@@ -1767,7 +1767,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             return false;
         }
         ExitDebt debt = new ExitDebt(
-                bot.getServerWorld().getRegistryKey().getValue().toString(),
+                bot.getEntityWorld().getRegistryKey().getValue().toString(),
                 shelterFeet,
                 candidates,
                 currentOwned);
@@ -1863,7 +1863,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
 
         boolean matchesDimension(AIPlayerEntity bot) {
-            return dimension.equals(bot.getServerWorld().getRegistryKey().getValue().toString());
+            return dimension.equals(bot.getEntityWorld().getRegistryKey().getValue().toString());
         }
 
         boolean ownsCurrentPlacement(AIPlayerEntity bot, BlockPos position) {
@@ -1871,7 +1871,7 @@ public final class EmergencyShelterTask extends AbstractTask {
                 return false;
             }
             BlockState owned = ownedPlacements.get(position);
-            return owned != null && owned.equals(bot.getServerWorld().getBlockState(position));
+            return owned != null && owned.equals(bot.getEntityWorld().getBlockState(position));
         }
     }
 
@@ -1913,7 +1913,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
 
         boolean matchesDimension(AIPlayerEntity bot) {
-            return dimension.equals(bot.getServerWorld().getRegistryKey().getValue().toString());
+            return dimension.equals(bot.getEntityWorld().getRegistryKey().getValue().toString());
         }
 
         boolean isWithinReasonableRange(AIPlayerEntity bot) {
@@ -1953,17 +1953,17 @@ public final class EmergencyShelterTask extends AbstractTask {
             remaining.entrySet().removeIf(entry ->
                     ObservableWorldQuery.canObserveBlock(bot, entry.getKey())
                             && !entry.getValue().equals(
-                            bot.getServerWorld().getBlockState(entry.getKey())));
+                            bot.getEntityWorld().getBlockState(entry.getKey())));
         }
 
         boolean ownsCurrentPlacement(AIPlayerEntity bot, BlockPos position) {
             BlockState expected = remaining.get(position);
-            return expected != null && expected.equals(bot.getServerWorld().getBlockState(position));
+            return expected != null && expected.equals(bot.getEntityWorld().getBlockState(position));
         }
     }
 
     private static boolean isSealed(AIPlayerEntity bot, BlockPos pos) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         var state = world.getBlockState(pos);
         return !state.isReplaceable()
                 && !state.getCollisionShape(world, pos).isEmpty();

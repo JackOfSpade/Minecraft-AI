@@ -92,7 +92,7 @@ public final class StockpileTask extends AbstractTask {
 
     private void findBase(AIPlayerEntity bot) {
         basePos = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getServerWorld(), "base")
+                .placeIn(bot.getEntityWorld(), "base")
                 .orElse(null);
         if (basePos == null) {
             fail("no_base");
@@ -225,7 +225,7 @@ public final class StockpileTask extends AbstractTask {
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate.toImmutable();
             }
         }

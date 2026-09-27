@@ -79,7 +79,7 @@ public final class IntentController {
         if (origin.notifiesUser()) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", "The current mission is paused. Queued goals are preserved and safety recovery can still run.");
         }
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getServer());
+        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
         return changed;
     }
 
@@ -98,7 +98,7 @@ public final class IntentController {
         if (origin.notifiesUser()) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", "Mission resumed from its paused point.");
         }
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getServer());
+        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
         return changed;
     }
 
@@ -171,7 +171,7 @@ public final class IntentController {
 
     private static void requireServerThread(AIPlayerEntity bot) {
         Objects.requireNonNull(bot, "bot");
-        if (!bot.getServer().isOnThread()) {
+        if (!bot.getEntityWorld().getServer().isOnThread()) {
             throw new IllegalStateException("intent_control_must_run_on_server_thread");
         }
     }

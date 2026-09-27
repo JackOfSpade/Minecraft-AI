@@ -57,7 +57,7 @@ public final class ViewSweeper {
         Vec3d eye = bot.getEyePos();
         BlockPos feet = bot.getBlockPos();
         double radius = SenseBudget.sweepRadius(AIBotConfig.get().perception().radius());
-        String dimension = BotEdits.dimensionKey(bot.getServerWorld());
+        String dimension = BotEdits.dimensionKey(bot.getEntityWorld());
         SweepEngine.Context context = new SweepEngine.Context(
                 eye.x, eye.y, eye.z, feet.getX(), feet.getY(), feet.getZ(), radius, serverTick, dimension,
                 packed -> BotEdits.wasPlaced(dimension, packed));

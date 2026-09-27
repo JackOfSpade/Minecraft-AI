@@ -57,20 +57,20 @@ public final class ChatCaptureListener {
         List<AIPlayerEntity> eligible = AIPlayerManager.INSTANCE.all().stream()
                 .filter(AIPlayerEntity::isAlive)
                 .filter(bot -> BotAuthorizationGate.INSTANCE.canCommand(sender, bot))
-                .sorted(Comparator.comparing(bot -> bot.getGameProfile().getName(), String.CASE_INSENSITIVE_ORDER))
+                .sorted(Comparator.comparing(bot -> bot.getGameProfile().name(), String.CASE_INSENSITIVE_ORDER))
                 .toList();
         Optional<AIPlayerEntity> nearest = eligible.stream()
-                .filter(bot -> bot.getServerWorld() == sender.getServerWorld())
+                .filter(bot -> bot.getEntityWorld() == sender.getEntityWorld())
                 .min(Comparator.comparingDouble(bot -> bot.squaredDistanceTo(sender)));
         UUID nearestId = nearest.map(AIPlayerEntity::getUuid).orElse(null);
 
         return eligible.stream()
                 .map(bot -> {
-                    boolean sameDimension = bot.getServerWorld() == sender.getServerWorld();
+                    boolean sameDimension = bot.getEntityWorld() == sender.getEntityWorld();
                     double distance = sameDimension ? Math.sqrt(bot.squaredDistanceTo(sender)) : -1.0D;
                     return new ChatRecipientRouter.Candidate(
                             bot.getUuid(),
-                            bot.getGameProfile().getName(),
+                            bot.getGameProfile().name(),
                             AIPlayerManager.INSTANCE.role(bot),
                             sameDimension,
                             distance,
@@ -167,7 +167,7 @@ public final class ChatCaptureListener {
                 ? "unknown"
                 : failure.getMessage();
         BotLog.warn(LogCategory.COMM, null, "chat_recipient_routing_failed",
-                "sender", sender.getGameProfile().getName(),
+                "sender", sender.getGameProfile().name(),
                 "reason", reason);
         sender.sendMessage(Text.literal("[AIBot] I couldn't determine which companion you meant. Please try again."), false);
     }
@@ -190,7 +190,7 @@ public final class ChatCaptureListener {
                 sender, bot, BotAuthorizationPolicy.Operation.COMMAND, channel)) {
             return;
         }
-        BotLog.comm(bot, "chat_in", "sender", sender.getGameProfile().getName(), "text", body);
+        BotLog.comm(bot, "chat_in", "sender", sender.getGameProfile().name(), "text", body);
         if (io.github.zoyluo.aibot.runtime.IntentController.INSTANCE.routePlayerControlPhrase(
                 bot, io.github.zoyluo.aibot.runtime.IntentController.ControlOrigin.PLAYER_COMMAND, body)) {
             return;

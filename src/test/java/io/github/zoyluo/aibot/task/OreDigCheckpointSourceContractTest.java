@@ -317,7 +317,7 @@ class OreDigCheckpointSourceContractTest {
                         && capture > targetState,
                 "all visible scan targets must publish a high side pose before nearest selection");
         int finishBreak = source.indexOf("private void finishTargetBreak");
-        int newlyExposedScan = source.indexOf("nearestOre(bot, bot.getServerWorld())", finishBreak);
+        int newlyExposedScan = source.indexOf("nearestOre(bot, bot.getEntityWorld())", finishBreak);
         int stabilize = source.indexOf("stabilizeBrokenTargetDrop(bot, pos)", newlyExposedScan);
         assertTrue(finishBreak >= 0 && newlyExposedScan > finishBreak
                         && stabilize > newlyExposedScan,

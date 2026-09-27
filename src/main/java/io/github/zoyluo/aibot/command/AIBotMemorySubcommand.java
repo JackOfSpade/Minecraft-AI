@@ -114,7 +114,7 @@ public final class AIBotMemorySubcommand {
         if (bot.isEmpty()) {
             return 0;
         }
-        memory(bot.get()).markPlace(place, bot.get().getServerWorld(), bot.get().getBlockPos());
+        memory(bot.get()).markPlace(place, bot.get().getEntityWorld(), bot.get().getBlockPos());
         source.sendFeedback(() -> Text.literal("[AIBot] marked place " + place + " at " + bot.get().getBlockPos().toShortString()), false);
         return 1;
     }
@@ -129,7 +129,7 @@ public final class AIBotMemorySubcommand {
             source.sendError(Text.literal("[AIBot] unknown place: " + place));
             return 0;
         }
-        if (!bot.get().getServerWorld().getRegistryKey().getValue().toString().equals(target.get().dimension())) {
+        if (!bot.get().getEntityWorld().getRegistryKey().getValue().toString().equals(target.get().dimension())) {
             source.sendError(Text.literal("[AIBot] place is in another dimension: " + target.get().dimension()));
             return 0;
         }

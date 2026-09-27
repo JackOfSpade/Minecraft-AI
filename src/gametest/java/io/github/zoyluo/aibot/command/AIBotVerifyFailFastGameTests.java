@@ -69,21 +69,21 @@ public final class AIBotVerifyFailFastGameTests {
             require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                     "typed rejection fixture is not running under strict_survival");
             require(context, AIBotVerifySubcommand.startForGameTest(
-                            bot.getServer().getCommandSource(), bot, feature),
+                            bot.getEntityWorld().getServer().getCommandSource(), bot, feature),
                     "strict strip_mine rejection verifier did not start");
 
-            AIBotVerifySubcommand.tick(bot.getServer());
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             require(context, StripMineTask.STRICT_SURVIVAL_REJECTION.equals(
                             TaskManager.INSTANCE.status(bot).failureReason()),
                     "real StripMineTask did not emit the exact typed rejection");
 
-            AIBotVerifySubcommand.tick(bot.getServer());
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             require(context, AIBotVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
                             .filter(detail -> detail.endsWith(StripMineTask.STRICT_SURVIVAL_REJECTION))
                             .isPresent(),
                     "verifier did not accept the exact typed rejection as coverage PASS");
 
-            AIBotVerifySubcommand.tick(bot.getServer());
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             require(context, !AIBotVerifySubcommand.hasRunForGameTest(bot.getUuid()),
                     "typed rejection verifier remained registered after summary");
         } finally {
@@ -125,13 +125,13 @@ public final class AIBotVerifyFailFastGameTests {
         try {
             String feature = "diamond_stack_64_from_zero";
             require(context, AIBotVerifySubcommand.startForGameTest(
-                    bot.getServer().getCommandSource(), bot, feature), "verifier run did not start");
-            AIBotVerifySubcommand.tick(bot.getServer());
+                    bot.getEntityWorld().getServer().getCommandSource(), bot, feature), "verifier run did not start");
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             require(context, MiningEvidenceAudit.hasSession(bot.getUuid()),
                     "from-zero verifier did not open provenance audit");
 
             bot.interactionManager.changeGameMode(GameMode.CREATIVE);
-            AIBotVerifySubcommand.tick(bot.getServer());
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             require(context, AIBotVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
                             .filter("mining_provenance_non_survival_mode"::equals).isPresent(),
                     "non-survival tick did not fail with typed provenance reason");
@@ -150,10 +150,10 @@ public final class AIBotVerifyFailFastGameTests {
         try {
             String feature = "obsidian_half_stack_32_from_zero";
             require(context, AIBotVerifySubcommand.startForGameTest(
-                    bot.getServer().getCommandSource(), bot, feature), "verifier run did not start");
-            AIBotVerifySubcommand.tick(bot.getServer());
+                    bot.getEntityWorld().getServer().getCommandSource(), bot, feature), "verifier run did not start");
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             MiningEvidenceAudit.recordCapabilityDecision(bot, true);
-            AIBotVerifySubcommand.tick(bot.getServer());
+            AIBotVerifySubcommand.tick(bot.getEntityWorld().getServer());
             require(context, AIBotVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
                             .filter("mining_provenance_privileged_allowed"::equals).isPresent(),
                     "allowed privilege did not fail with typed provenance reason");
@@ -166,7 +166,7 @@ public final class AIBotVerifyFailFastGameTests {
     }
 
     private static void verifyFeature(TestContext context, AIPlayerEntity bot, String feature) {
-        var server = bot.getServer();
+        var server = bot.getEntityWorld().getServer();
         require(context, AIBotVerifySubcommand.startForGameTest(
                 server.getCommandSource(), bot, feature), feature + " verifier run did not start");
 

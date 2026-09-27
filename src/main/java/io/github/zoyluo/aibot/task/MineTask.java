@@ -97,7 +97,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void move(AIPlayerEntity bot) {
-        if (targetPos == null || !bot.getServerWorld().getBlockState(targetPos).isOf(targetBlock)) {
+        if (targetPos == null || !bot.getEntityWorld().getBlockState(targetPos).isOf(targetBlock)) {
             phase = Phase.SEARCHING;
             return;
         }
@@ -112,7 +112,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void mine(AIPlayerEntity bot) {
-        if (targetPos == null || !bot.getServerWorld().getBlockState(targetPos).isOf(targetBlock)) {
+        if (targetPos == null || !bot.getEntityWorld().getBlockState(targetPos).isOf(targetBlock)) {
             miner.cancel(bot);
             pickupTicks = 120;
             phase = Phase.PICKING_UP;
@@ -166,7 +166,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void startMiningTarget(AIPlayerEntity bot) {
-        BlockState state = bot.getServerWorld().getBlockState(targetPos);
+        BlockState state = bot.getEntityWorld().getBlockState(targetPos);
         if (!ToolTier.canHarvestWithInventory(bot, state)) {
             fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(targetBlock));
             return;
@@ -192,7 +192,7 @@ public final class MineTask extends AbstractTask {
 
     private static boolean lavaAdjacent(AIPlayerEntity bot, BlockPos pos) {
         for (Direction direction : Direction.values()) {
-            if (bot.getServerWorld().getFluidState(pos.offset(direction)).isIn(FluidTags.LAVA)) {
+            if (bot.getEntityWorld().getFluidState(pos.offset(direction)).isIn(FluidTags.LAVA)) {
                 return true;
             }
         }

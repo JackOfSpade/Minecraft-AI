@@ -43,7 +43,7 @@ public final class SpeakerViewCollector {
      * that it can see a scene beside the player.
      */
     public static SpeakerView collect(ServerPlayerEntity speaker, AIPlayerEntity companion) {
-        if (speaker == null || companion == null || speaker.getServerWorld() != companion.getServerWorld()) {
+        if (speaker == null || companion == null || speaker.getEntityWorld() != companion.getEntityWorld()) {
             return SpeakerView.unavailable();
         }
 
@@ -62,7 +62,7 @@ public final class SpeakerViewCollector {
         for (double vertical : VERTICAL_SAMPLES) {
             for (double horizontal : HORIZONTAL_SAMPLES) {
                 Vec3d ray = forward.add(right.multiply(horizontal)).add(up.multiply(vertical)).normalize();
-                BlockHitResult hit = speaker.getServerWorld().raycast(new RaycastContext(
+                BlockHitResult hit = speaker.getEntityWorld().raycast(new RaycastContext(
                         eye,
                         eye.add(ray.multiply(VIEW_RANGE)),
                         RaycastContext.ShapeType.COLLIDER,
@@ -72,7 +72,7 @@ public final class SpeakerViewCollector {
                     continue;
                 }
                 BlockPos pos = hit.getBlockPos().toImmutable();
-                BlockState state = speaker.getServerWorld().getBlockState(pos);
+                BlockState state = speaker.getEntityWorld().getBlockState(pos);
                 SampledBlock sampled = new SampledBlock(
                         Registries.BLOCK.getId(state.getBlock()).toString(),
                         pos,

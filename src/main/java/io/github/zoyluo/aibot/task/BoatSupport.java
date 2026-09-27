@@ -74,7 +74,7 @@ final class BoatSupport {
 
     /** Finds a visible local water cell with a dry, supported shore cell from which it can be used. */
     static Optional<LaunchSite> findLaunchSite(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         Standability.clearCache();
         return BlockPos.stream(
@@ -92,7 +92,7 @@ final class BoatSupport {
         if (boat == null || !boat.isAlive()) {
             return Optional.empty();
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos center = boat.getBlockPos();
         Standability.clearCache();
         return BlockPos.stream(center.add(-2, -1, -2), center.add(2, 1, 2))
@@ -107,7 +107,7 @@ final class BoatSupport {
         if (boat == null || !boat.isAlive()) {
             return Optional.empty();
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos center = boat.getBlockPos();
         Standability.clearCache();
         return BlockPos.stream(center.add(-3, -1, -3), center.add(3, 1, 3))
@@ -119,7 +119,7 @@ final class BoatSupport {
     }
 
     static Optional<AbstractBoatEntity> nearbyEmptyBoat(AIPlayerEntity bot) {
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         AbstractBoatEntity.class,
                         bot.getBoundingBox().expand(LOCAL_WATER_SEARCH_RADIUS),
                         boat -> boat.isAlive()
@@ -133,7 +133,7 @@ final class BoatSupport {
         if (id == null) {
             return Optional.empty();
         }
-        Entity entity = bot.getServerWorld().getEntity(id);
+        Entity entity = bot.getEntityWorld().getEntity(id);
         return entity instanceof AbstractBoatEntity boat && boat.isAlive()
                 ? Optional.of(boat) : Optional.empty();
     }

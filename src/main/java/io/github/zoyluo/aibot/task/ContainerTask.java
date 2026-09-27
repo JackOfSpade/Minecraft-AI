@@ -215,7 +215,7 @@ public final class ContainerTask extends AbstractTask {
 
     private static Optional<BlockPos> rememberedContainer(AIPlayerEntity bot) {
         return BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getServerWorld(), "depot", "home", "base", "chest")
+                .placeIn(bot.getEntityWorld(), "depot", "home", "base", "chest")
                 .flatMap(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
                         && ContainerAction.resolve(bot, pos).isPresent()
                         ? Optional.of(pos.toImmutable())
@@ -225,7 +225,7 @@ public final class ContainerTask extends AbstractTask {
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate.toImmutable();
             }
         }

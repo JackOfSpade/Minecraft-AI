@@ -58,7 +58,7 @@ public final class MinePickupGameTests {
         Fixture fixture = spawnMiner(context, "MinePickupDeadlockGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos ore = fixture.start().east(2);
-        bot.getServerWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
 
         assertStrictCapabilities(context, bot);
 
@@ -99,7 +99,7 @@ public final class MinePickupGameTests {
                 // inventory delta true it finds sneaking already dangling, exactly as a real
                 // mid-chase nudge would leave it. Scoped to strictly after the break so it can
                 // never influence the real search/move/mine phases beforehand.
-                if (bot.getServerWorld().getBlockState(ore).isAir()
+                if (bot.getEntityWorld().getBlockState(ore).isAir()
                         && InventoryAction.countItem(bot, Items.RAW_IRON) == 0) {
                     bot.getActionPack().setSneaking(true);
                     observedMidNudgeSneak.set(true);
@@ -173,7 +173,7 @@ public final class MinePickupGameTests {
     }
 
     private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

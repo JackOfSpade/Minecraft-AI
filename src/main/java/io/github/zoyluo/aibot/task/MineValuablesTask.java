@@ -200,7 +200,7 @@ public final class MineValuablesTask extends AbstractTask {
     // ticks via the flat scanIndex cursor so a single tick's raycast cost stays bounded regardless
     // of the requested radius.
     private void scanStep(AIPlayerEntity bot) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         int side = scanSide;
         long total = (long) side * side * side;
         int budget = SCAN_BUDGET_PER_TICK;
@@ -332,7 +332,7 @@ public final class MineValuablesTask extends AbstractTask {
             phase = Phase.SELECTING;
             return;
         }
-        BlockState state = bot.getServerWorld().getBlockState(targetPos);
+        BlockState state = bot.getEntityWorld().getBlockState(targetPos);
         Block block = state.getBlock();
         if (!ToolTier.canHarvestWithInventory(bot, state)) {
             BotLog.action(bot, "mine_valuables_tool_skip", "pos", targetPos.toShortString(),
@@ -430,7 +430,7 @@ public final class MineValuablesTask extends AbstractTask {
             return;
         }
         lastTorchCheckTick = elapsed;
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         if (world.isSkyVisible(feet)) {
             return; // "when not on the surface" -- open sky is left to natural light

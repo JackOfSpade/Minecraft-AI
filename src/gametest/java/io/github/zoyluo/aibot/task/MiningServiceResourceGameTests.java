@@ -56,7 +56,7 @@ public final class MiningServiceResourceGameTests {
         // Reproduce the sealed evidence pose: OreDig has reached the correct BlockPos but its
         // physical walk ended on the forward edge with enough residual velocity to cross into the
         // next cell on the following entity tick.
-        bot.teleport(bot.getServerWorld(), face.getX() + 0.5D, face.getY(),
+        bot.teleport(bot.getEntityWorld(), face.getX() + 0.5D, face.getY(),
                 face.getZ() + 0.95D, Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
         bot.setVelocity(0.0D, 0.0D, 0.85D);
@@ -118,7 +118,7 @@ public final class MiningServiceResourceGameTests {
         Direction direction = Direction.EAST;
         BlockPos entry = face.offset(direction);
         BlockPos sink = face.offset(direction, 2);
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         // Reproduce the seed-3000 coal-vein cavity: the mouth and sink are already open, their
         // floors and far wall are sound, but the head mouth has no persistent adjacent support.
         // A legal seal must therefore place the feet block against the floor before placing the
@@ -203,7 +203,7 @@ public final class MiningServiceResourceGameTests {
         BlockPos unsafeSink = face.east(2);
         BlockPos safeEntry = face.west();
         BlockPos safeSink = face.west(2);
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         // Reproduce the live seed-3000 geometry: the preferred mouth is mineable, but opening it
         // reveals an existing cave instead of a supported two-cell sink.  The opposite side is a
         // normal bounded pocket and must not become active until the unsafe mouth is double-sealed.
@@ -280,7 +280,7 @@ public final class MiningServiceResourceGameTests {
                 "double-geometry fixture did not require a capacity handoff");
 
         BlockPos face = bot.getBlockPos().toImmutable();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         for (Direction direction : new Direction[]{Direction.EAST, Direction.WEST}) {
             BlockPos entry = face.offset(direction);
             BlockPos sink = face.offset(direction, 2);
@@ -369,11 +369,11 @@ public final class MiningServiceResourceGameTests {
                                 && InventoryAction.countItem(bot, Items.DIRT) == 2,
                         "lower-only restart fixture did not reach a valid pre-seal debt: " + live);
                 task.abort(bot);
-                bot.getServerWorld().setBlockState(
+                bot.getEntityWorld().setBlockState(
                         entry, Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
                 require(context, InventoryAction.removeItems(bot, Items.DIRT, 1)
                                 && isSolid(bot, entry)
-                                && bot.getServerWorld().getBlockState(entry.up()).isAir(),
+                                && bot.getEntityWorld().getBlockState(entry.up()).isAir(),
                         "fixture could not reproduce the lower-only physical crash boundary");
                 active[0] = new MiningServiceTask(
                         Set.of(Blocks.DIAMOND_ORE), live, policy,
@@ -746,14 +746,14 @@ public final class MiningServiceResourceGameTests {
         Direction alternate = rejected.getOpposite();
         BlockPos oldEntry = face.offset(rejected);
         BlockPos alternateEntry = face.offset(alternate);
-        bot.getServerWorld().setBlockState(oldEntry,
+        bot.getEntityWorld().setBlockState(oldEntry,
                 Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(oldEntry.up(),
+        bot.getEntityWorld().setBlockState(oldEntry.up(),
                 Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(alternateEntry,
+        bot.getEntityWorld().setBlockState(alternateEntry,
                 Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
         BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(
-                "depot", bot.getServerWorld(), alternateEntry);
+                "depot", bot.getEntityWorld(), alternateEntry);
         Map<String, String> retry = new LinkedHashMap<>(open);
         retry.put("phase", "SEAL_DISPOSAL_POCKET");
         retry.put("pocket_drop_committed", "true");
@@ -811,7 +811,7 @@ public final class MiningServiceResourceGameTests {
         original.abort(bot);
         Direction direction = Direction.valueOf(open.get("pocket_direction"));
         BlockPos entry = face.offset(direction);
-        bot.getServerWorld().setBlockState(entry,
+        bot.getEntityWorld().setBlockState(entry,
                 Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         Map<String, String> hard = new LinkedHashMap<>(open);
         hard.put("budget_used", "4800");
@@ -867,7 +867,7 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.offset(direction);
         BlockPos sink = face.offset(direction, 2);
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
         Map<String, String> hard = new LinkedHashMap<>(open);
@@ -1039,7 +1039,7 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.east();
         BlockPos sink = face.east(2);
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
         MiningCursor cursor = miningCursor(face, 0, 1);
@@ -1062,11 +1062,11 @@ public final class MiningServiceResourceGameTests {
                     && controlledBaseline.get() == null
                     && "CAPTURE_DISPOSAL_BASELINE".equals(before.get("phase"))) {
                 ItemEntity baseline = new ItemEntity(
-                        bot.getServerWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
+                        bot.getEntityWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
                         sink.getZ() + 0.5D, new ItemStack(Items.DIRT, 2));
                 baseline.setVelocity(Vec3d.ZERO);
                 baseline.setPickupDelayInfinite();
-                require(context, bot.getServerWorld().spawnEntity(baseline),
+                require(context, bot.getEntityWorld().spawnEntity(baseline),
                         "three-slot fixture failed to spawn its controlled sink baseline");
                 controlledBaseline.set(baseline);
             }
@@ -1127,7 +1127,7 @@ public final class MiningServiceResourceGameTests {
                                 + freeMainSlots(bot));
                 require(context, baselineRemoved.get() && baselineRebased.get(),
                         "three-slot service skipped the controlled baseline rebase race");
-                bot.getServerWorld().setBlockState(nextOre,
+                bot.getEntityWorld().setBlockState(nextOre,
                         Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 nextBatch[0] = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1);
                 nextBatch[0].start(bot);
@@ -1154,7 +1154,7 @@ public final class MiningServiceResourceGameTests {
                     "junk returned after the next mining batch started");
             require(context, freeMainSlots(bot) > 0,
                     "post-service pickup consumed every reclaimed inventory slot");
-            java.util.List<ItemEntity> sealed = bot.getServerWorld().getEntitiesByClass(
+            java.util.List<ItemEntity> sealed = bot.getEntityWorld().getEntitiesByClass(
                     ItemEntity.class, sinkBox(sink), ItemEntity::isAlive);
             require(context, !sealed.isEmpty(),
                     "disposal ledger had no surviving vanilla ItemEntity in the sealed sink");
@@ -1307,7 +1307,7 @@ public final class MiningServiceResourceGameTests {
                     && !live.getOrDefault("pocket_ledger", "").isBlank()) {
                 active[0].pause(bot);
                 BlockPos away = face.west();
-                bot.teleport(bot.getServerWorld(), away.getX() + 0.5D,
+                bot.teleport(bot.getEntityWorld(), away.getX() + 0.5D,
                         away.getY(), away.getZ() + 0.5D,
                         Set.of(), 0.0F, 0.0F, true);
                 active[0].resume(bot);
@@ -1391,7 +1391,7 @@ public final class MiningServiceResourceGameTests {
                         "unsealed-return fixture committed a ledger without UUID authority");
                 task.abort(bot);
                 BlockPos away = face.west(2);
-                bot.teleport(bot.getServerWorld(), away.getX() + 0.5D,
+                bot.teleport(bot.getEntityWorld(), away.getX() + 0.5D,
                         away.getY(), away.getZ() + 0.5D,
                         Set.of(), 0.0F, 0.0F, true);
                 buildBedrockCage(bot, away);
@@ -1484,7 +1484,7 @@ public final class MiningServiceResourceGameTests {
                     && !live.getOrDefault("pocket_entities", "").isBlank()) {
                 task.pause(bot);
                 BlockPos away = face.west();
-                bot.teleport(bot.getServerWorld(), away.getX() + 0.5D,
+                bot.teleport(bot.getEntityWorld(), away.getX() + 0.5D,
                         away.getY(), away.getZ() + 0.5D,
                         Set.of(), 0.0F, 0.0F, true);
                 task.resume(bot);
@@ -1574,7 +1574,7 @@ public final class MiningServiceResourceGameTests {
                         "typed terminal prebaseline RETURN checkpoint was rejected: " + terminal);
                 task.abort(bot);
                 BlockPos away = face.west();
-                bot.teleport(bot.getServerWorld(), away.getX() + 0.5D,
+                bot.teleport(bot.getEntityWorld(), away.getX() + 0.5D,
                         away.getY(), away.getZ() + 0.5D,
                         Set.of(), 0.0F, 0.0F, true);
                 active[0] = new MiningServiceTask(
@@ -1636,10 +1636,10 @@ public final class MiningServiceResourceGameTests {
         original.abort(bot);
         Direction direction = Direction.valueOf(open.get("pocket_direction"));
         BlockPos entry = face.offset(direction);
-        bot.getServerWorld().setBlockState(entry,
+        bot.getEntityWorld().setBlockState(entry,
                 Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         BlockPos away = face.west();
-        bot.teleport(bot.getServerWorld(), away.getX() + 0.5D,
+        bot.teleport(bot.getEntityWorld(), away.getX() + 0.5D,
                 away.getY(), away.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         MiningServiceTask[] active = {new MiningServiceTask(
@@ -1727,7 +1727,7 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.offset(direction);
         BlockPos sink = face.offset(direction, 2);
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
         Map<String, String> capture = new LinkedHashMap<>(open);
@@ -1736,7 +1736,7 @@ public final class MiningServiceResourceGameTests {
         require(context, MiningServiceTask.inspectCheckpoint(capture).isPresent(),
                 "CAPTURE empty-ledger move fixture was invalid: " + capture);
         BlockPos away = face.west();
-        bot.teleport(bot.getServerWorld(), away.getX() + 0.5D,
+        bot.teleport(bot.getEntityWorld(), away.getX() + 0.5D,
                 away.getY(), away.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         MiningServiceTask[] active = {new MiningServiceTask(
@@ -1830,12 +1830,12 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.offset(direction);
         BlockPos sink = face.offset(direction, 2);
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
 
         ItemEntity tracked = new ItemEntity(
-                bot.getServerWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
+                bot.getEntityWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
                 sink.getZ() + 0.5D, new ItemStack(Items.DIRT, 64));
         tracked.setVelocity(Vec3d.ZERO);
         tracked.setNoGravity(true);
@@ -1856,7 +1856,7 @@ public final class MiningServiceResourceGameTests {
                         && fullyContains(rawSink.expand(0.01D), tracked.getBoundingBox()),
                 "controlled item did not isolate raw containment from query tolerance: "
                         + tracked.getBoundingBox());
-        require(context, bot.getServerWorld().spawnEntity(tracked),
+        require(context, bot.getEntityWorld().spawnEntity(tracked),
                 "failed to spawn controlled raw-sink ledger entity");
 
         Map<String, String> settle = new LinkedHashMap<>(open);
@@ -1976,7 +1976,7 @@ public final class MiningServiceResourceGameTests {
                         "SETTLE fixture did not expose committed ledger lineage: " + live);
                 ItemEntity escaped = java.util.Arrays.stream(identities)
                         .map(java.util.UUID::fromString)
-                        .map(id -> bot.getServerWorld().getEntity(id))
+                        .map(id -> bot.getEntityWorld().getEntity(id))
                         .filter(ItemEntity.class::isInstance)
                         .map(ItemEntity.class::cast)
                         .filter(ItemEntity::isAlive)
@@ -1986,18 +1986,18 @@ public final class MiningServiceResourceGameTests {
                 require(context, escaped != null && escaped.getStack().isOf(Items.DIRT),
                         "SETTLE lineage had no live dirt survivor before escape injection");
                 ItemEntity impostor = new ItemEntity(
-                        bot.getServerWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
+                        bot.getEntityWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
                         sink.getZ() + 0.5D, escaped.getStack().copy());
                 impostor.setVelocity(Vec3d.ZERO);
                 impostor.setPickupDelayInfinite();
-                require(context, bot.getServerWorld().spawnEntity(impostor),
+                require(context, bot.getEntityWorld().spawnEntity(impostor),
                         "failed to spawn SETTLE aggregate impostor");
                 ItemEntity nearerSpoil = new ItemEntity(
-                        bot.getServerWorld(), face.getX() + 0.5D, face.getY() + 0.25D,
+                        bot.getEntityWorld(), face.getX() + 0.5D, face.getY() + 0.25D,
                         face.getZ() + 0.5D, new ItemStack(Items.CLAY_BALL));
                 nearerSpoil.setVelocity(Vec3d.ZERO);
                 nearerSpoil.setPickupDelayInfinite();
-                require(context, bot.getServerWorld().spawnEntity(nearerSpoil),
+                require(context, bot.getEntityWorld().spawnEntity(nearerSpoil),
                         "failed to spawn nearer SETTLE untracked spoil");
                 escaped.refreshPositionAndAngles(
                         entry.getX() + 0.5D, entry.getY() + 0.25D,
@@ -2100,7 +2100,7 @@ public final class MiningServiceResourceGameTests {
                         "tracked-escape fixture did not commit valid identities: " + live);
                 ItemEntity escaped = java.util.Arrays.stream(identities)
                         .map(java.util.UUID::fromString)
-                        .map(id -> bot.getServerWorld().getEntity(id))
+                        .map(id -> bot.getEntityWorld().getEntity(id))
                         .filter(ItemEntity.class::isInstance)
                         .map(ItemEntity.class::cast)
                         .filter(ItemEntity::isAlive)
@@ -2109,18 +2109,18 @@ public final class MiningServiceResourceGameTests {
                 require(context, escaped != null,
                         "all committed tracked entities vanished before escape injection");
                 ItemEntity impostor = new ItemEntity(
-                        bot.getServerWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
+                        bot.getEntityWorld(), sink.getX() + 0.5D, sink.getY() + 0.25D,
                         sink.getZ() + 0.5D, escaped.getStack().copy());
                 impostor.setVelocity(Vec3d.ZERO);
                 impostor.setPickupDelayInfinite();
-                require(context, bot.getServerWorld().spawnEntity(impostor),
+                require(context, bot.getEntityWorld().spawnEntity(impostor),
                         "failed to spawn aggregate-only sink impostor");
                 ItemEntity nearerSpoil = new ItemEntity(
-                        bot.getServerWorld(), face.getX() + 0.5D, face.getY() + 0.25D,
+                        bot.getEntityWorld(), face.getX() + 0.5D, face.getY() + 0.25D,
                         face.getZ() + 0.5D, new ItemStack(Items.CLAY_BALL));
                 nearerSpoil.setVelocity(Vec3d.ZERO);
                 nearerSpoil.setPickupDelayInfinite();
-                require(context, bot.getServerWorld().spawnEntity(nearerSpoil),
+                require(context, bot.getEntityWorld().spawnEntity(nearerSpoil),
                         "failed to spawn nearer untracked opening spoil");
                 escaped.refreshPositionAndAngles(
                         entry.getX() + 0.5D, entry.getY() + 0.25D,
@@ -2184,7 +2184,7 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.east();
         BlockPos sink = face.east(2);
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
         MiningCursor cursor = miningCursor(face, 0, 1);
@@ -2211,9 +2211,9 @@ public final class MiningServiceResourceGameTests {
                         "committed dirt ledger had no persisted lineage root");
                 java.util.UUID real = java.util.UUID.fromString(
                         realEntities.split(",", -1)[0]);
-                require(context, bot.getServerWorld().getEntity(real) instanceof ItemEntity,
+                require(context, bot.getEntityWorld().getEntity(real) instanceof ItemEntity,
                         "committed dirt lineage root vanished before interruption");
-                bot.getServerWorld().getEntity(real).discard();
+                bot.getEntityWorld().getEntity(real).discard();
                 require(context, MiningServiceTask.inspectCheckpoint(live).isPresent(),
                         "factual pre-loss checkpoint stopped decoding");
                 task.abort(bot);
@@ -2450,7 +2450,7 @@ public final class MiningServiceResourceGameTests {
         // GLASS, not CLAY: fast/no-tool to mine and produces no drop of its own, so opening the
         // pocket cannot add extra clay_ball to the synthetic spoil this test tracks below.
         for (BlockPos cell : new BlockPos[]{entry, entry.up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
         MiningCursor cursor = miningCursor(face, 0, 1);
@@ -2469,11 +2469,11 @@ public final class MiningServiceResourceGameTests {
                 // them in the factual work-face corridor long enough to prove that sealing waits
                 // for collection instead of publishing a free-slot promise first.
                 ItemEntity spoil = new ItemEntity(
-                        bot.getServerWorld(), face.getX() + 0.5D, face.getY() + 0.25D,
+                        bot.getEntityWorld(), face.getX() + 0.5D, face.getY() + 0.25D,
                         face.getZ() + 0.5D, new ItemStack(Items.CLAY_BALL, 4));
                 spoil.setVelocity(Vec3d.ZERO);
                 spoil.setPickupDelay(20);
-                require(context, bot.getServerWorld().spawnEntity(spoil),
+                require(context, bot.getEntityWorld().spawnEntity(spoil),
                         "failed to spawn controlled natural clay opening spoil");
                 claySpoil.set(spoil);
             }
@@ -2514,7 +2514,7 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         prepareDisposalPocket(fixture, Direction.WEST);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask.ServicePolicy policy =
@@ -2553,7 +2553,7 @@ public final class MiningServiceResourceGameTests {
                 require(context, isSolid(bot, face.east())
                                 && isSolid(bot, face.east().up()),
                         "preferred ore pocket was not physically sealed before reroute");
-                require(context, bot.getServerWorld().getBlockState(face.east(2))
+                require(context, bot.getEntityWorld().getBlockState(face.east(2))
                                 .isOf(Blocks.DIAMOND_ORE),
                         "preferred pocket mined or replaced its finite ore");
                 int budgetBefore = Integer.parseInt(live.get("budget_used"));
@@ -2580,7 +2580,7 @@ public final class MiningServiceResourceGameTests {
                     "ore pocket completed without exercising restartable reroute state");
             require(context, bot.getBlockPos().equals(face),
                     "ore-reroute disposal did not finish at the exact work face");
-            require(context, bot.getServerWorld().getBlockState(face.east(2))
+            require(context, bot.getEntityWorld().getBlockState(face.east(2))
                             .isOf(Blocks.DIAMOND_ORE),
                     "ore-reroute disposal changed the finite ore block");
             require(context, isSolid(bot, face.east()) && isSolid(bot, face.east().up())
@@ -2611,14 +2611,14 @@ public final class MiningServiceResourceGameTests {
         prepareDisposalPocket(fixture, Direction.EAST);
         prepareDisposalPocket(fixture, Direction.WEST);
         for (BlockPos mouth : new BlockPos[]{face.east(), face.west()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     mouth, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     mouth.up(), Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.west(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
@@ -2641,9 +2641,9 @@ public final class MiningServiceResourceGameTests {
                             .equals(task.failureReason()),
                     "dual-ore disposal failed with the wrong typed reason: "
                             + task.failureReason());
-            require(context, bot.getServerWorld().getBlockState(face.east(2))
+            require(context, bot.getEntityWorld().getBlockState(face.east(2))
                             .isOf(Blocks.DIAMOND_ORE)
-                            && bot.getServerWorld().getBlockState(face.west(2))
+                            && bot.getEntityWorld().getBlockState(face.west(2))
                             .isOf(Blocks.DIAMOND_ORE),
                     "dual-ore disposal changed one of the finite ore blocks");
             require(context, isSolid(bot, face.east()) && isSolid(bot, face.east().up())
@@ -2691,7 +2691,7 @@ public final class MiningServiceResourceGameTests {
             int dirtBeforeRestore = InventoryAction.countItem(bot, Items.DIRT);
             BlockPos rememberedFaceBeforeRestore = face.north(4);
             BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(
-                    "mine_face", bot.getServerWorld(), rememberedFaceBeforeRestore);
+                    "mine_face", bot.getEntityWorld(), rememberedFaceBeforeRestore);
             MiningServiceTask restored = new MiningServiceTask(
                     Set.of(Blocks.DIAMOND_ORE), terminal,
                     MiningServiceTask.ServicePolicy.defaultOre(false),
@@ -2709,7 +2709,7 @@ public final class MiningServiceResourceGameTests {
                             && InventoryAction.countItem(bot, Items.DIRT)
                             == dirtBeforeRestore
                             && BotMemoryStore.INSTANCE.of(bot.getUuid())
-                            .placeIn(bot.getServerWorld(), "mine_face")
+                            .placeIn(bot.getEntityWorld(), "mine_face")
                             .filter(rememberedFaceBeforeRestore::equals).isPresent(),
                     "restart replayed settled disposal work instead of the terminal result: "
                             + restored.state() + ":" + restored.failureReason() + " " + replayed);
@@ -2749,17 +2749,17 @@ public final class MiningServiceResourceGameTests {
         // Use no-drop glass at that mouth so this fixture proves only the second pocket's
         // mouth-ore retirement. A dirt drop still inside vanilla's pickup-delay window is real
         // unresolved opening spoil and must continue to block terminal receipt publication.
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(), Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east().up(), Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         BlockPos preserved = upperOre ? face.west().up() : face.west();
         BlockPos complementaryMouth = upperOre ? face.west() : face.west().up();
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 preserved, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 complementaryMouth,
                 upperOre ? Blocks.GLASS.getDefaultState() : Blocks.AIR.getDefaultState(),
                 Block.NOTIFY_ALL);
@@ -2823,7 +2823,7 @@ public final class MiningServiceResourceGameTests {
                             metadata.terminalFailure())).isPresent(),
                     "closed mouth-ore failure retained or lost terminal authority: "
                             + terminal);
-            require(context, bot.getServerWorld().getBlockState(preserved)
+            require(context, bot.getEntityWorld().getBlockState(preserved)
                             .isOf(Blocks.DIAMOND_ORE)
                             && isSolid(bot, face.west())
                             && isSolid(bot, face.west().up())
@@ -2849,16 +2849,16 @@ public final class MiningServiceResourceGameTests {
         prepareDisposalPocket(fixture, Direction.EAST);
         prepareDisposalPocket(fixture, Direction.WEST);
         for (BlockPos mouth : new BlockPos[]{face.east(), face.west()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     mouth, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     mouth.up(), Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.west(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.west(2).up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
@@ -2877,12 +2877,12 @@ public final class MiningServiceResourceGameTests {
                     .equals(before.get("pocket_failure"))) {
                 BlockPos sink = face.west(2);
                 ItemEntity item = new ItemEntity(
-                        bot.getServerWorld(), sink.getX() + 0.5D, sink.getY() + 1.25D,
+                        bot.getEntityWorld(), sink.getX() + 0.5D, sink.getY() + 1.25D,
                         sink.getZ() + 0.5D, new ItemStack(Items.CLAY_BALL, 4));
                 item.setVelocity(Vec3d.ZERO);
                 item.setNoGravity(true);
                 item.setPickupDelayInfinite();
-                require(context, bot.getServerWorld().spawnEntity(item),
+                require(context, bot.getEntityWorld().spawnEntity(item),
                         "failed to spawn controlled terminal sink entity");
                 require(context, ObservableWorldQuery.canObserveEntity(bot, item),
                         "controlled terminal sink entity was not strictly observable");
@@ -2934,11 +2934,11 @@ public final class MiningServiceResourceGameTests {
         prepareDisposalPocket(fixture, Direction.WEST);
         // Glass opens without producing a delayed disposable block drop that could replenish the
         // deliberately removed seal inventory after the retry marker is checkpointed.
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(), Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east().up(), Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 face.east(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
@@ -3691,16 +3691,16 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         BlockPos remoteDepot = face.east(8);
         String mission = "rare-local-first";
-        bot.getServerWorld().setBlockState(remoteDepot.down(),
+        bot.getEntityWorld().setBlockState(remoteDepot.down(),
                 Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(remoteDepot,
+        bot.getEntityWorld().setBlockState(remoteDepot,
                 Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
         Inventory depot = ContainerAction.resolve(bot, remoteDepot).orElseThrow();
         depot.setStack(0, new ItemStack(Items.EMERALD, 13));
         depot.setStack(1, new ItemStack(Items.GOLD_INGOT, 7));
         depot.markDirty();
         var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
-        memory.markPlace("mining_depot", bot.getServerWorld(), remoteDepot);
+        memory.markPlace("mining_depot", bot.getEntityWorld(), remoteDepot);
         memory.remember("mining_depot_owner", mission);
 
         MiningServiceTask.ServicePolicy policy =
@@ -3730,7 +3730,7 @@ public final class MiningServiceResourceGameTests {
         // both physical seal consumptions, and continued cleanup after the fourth slot is safe.
         BlockPos sink = face.east(2);
         for (BlockPos cell : new BlockPos[]{face.east(), face.east().up(), sink, sink.up()}) {
-            bot.getServerWorld().setBlockState(
+            bot.getEntityWorld().setBlockState(
                     cell, Blocks.GLASS.getDefaultState(), Block.NOTIFY_ALL);
         }
         MiningCursor cursor = miningCursor(face, 0, 7);
@@ -3752,7 +3752,7 @@ public final class MiningServiceResourceGameTests {
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, bot.getServerWorld().getBlockState(remoteDepot).isOf(Blocks.CHEST)
+            require(context, bot.getEntityWorld().getBlockState(remoteDepot).isOf(Blocks.CHEST)
                             && inventoryCount(depot, Items.EMERALD) == 13
                             && inventoryCount(depot, Items.GOLD_INGOT) == 7,
                     "rare local service accessed or mutated the remote owned depot");
@@ -3859,7 +3859,7 @@ public final class MiningServiceResourceGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 2));
         BlockPos face = bot.getBlockPos().toImmutable();
         Map<String, String> checkpoint = validCheckpoint(bot, "0", "0");
-        bot.teleport(bot.getServerWorld(), face.getX() + 1.5D, face.getY(), face.getZ() + 0.5D,
+        bot.teleport(bot.getEntityWorld(), face.getX() + 1.5D, face.getY(), face.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
 
         MiningServiceTask task = new MiningServiceTask(Set.of(Blocks.DIAMOND_ORE), checkpoint);
@@ -3980,7 +3980,7 @@ public final class MiningServiceResourceGameTests {
         MiningServiceTask restored = rareDescentKitTask(mission, cursor, open);
         runServiceToTerminal(restored, bot);
         BlockPos depot = decodeCheckpointPos(restored.checkpoint().get("depot"));
-        require(context, bot.getServerWorld().getBlockState(depot).isOf(Blocks.CHEST)
+        require(context, bot.getEntityWorld().getBlockState(depot).isOf(Blocks.CHEST)
                         && MiningServiceTask.ownedMissionDepot(bot, mission),
                 "OPEN restore did not place and own the exact mission chest");
         require(context, InventoryAction.countItem(bot, Items.CHEST) == 0,
@@ -4005,7 +4005,7 @@ public final class MiningServiceResourceGameTests {
         require(context, "false".equals(
                         beforePlace.get("mission_depot_place_committed"))
                         && InventoryAction.countItem(bot, Items.CHEST) == 1
-                        && bot.getServerWorld().getBlockState(depot).isAir(),
+                        && bot.getEntityWorld().getBlockState(depot).isAir(),
                 "PLACE fixture was not immediately before the physical placement: "
                         + beforePlace);
         original.abort(bot);
@@ -4015,7 +4015,7 @@ public final class MiningServiceResourceGameTests {
         // chest and advance; it may not demand or consume a second chest.
         require(context, InventoryAction.removeItems(bot, Items.CHEST, 1),
                 "fixture could not spend the physically placed chest");
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 depot, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
         MiningServiceTask afterWorldMutation = rareDescentKitTask(
                 mission, cursor, beforePlace);
@@ -4032,7 +4032,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask afterVerifyCrash = rareDescentKitTask(mission, cursor, verify);
         runServiceToTerminal(afterVerifyCrash, bot);
-        require(context, bot.getServerWorld().getBlockState(depot).isOf(Blocks.CHEST)
+        require(context, bot.getEntityWorld().getBlockState(depot).isOf(Blocks.CHEST)
                         && InventoryAction.countItem(bot, Items.CHEST) == 0
                         && MiningServiceTask.ownedMissionDepot(bot, mission),
                 "VERIFY restore did not commit the one physical mission chest exactly once");
@@ -4056,7 +4056,7 @@ public final class MiningServiceResourceGameTests {
         original.abort(bot);
         require(context, InventoryAction.removeItems(bot, Items.CHEST, 1),
                 "owner-mismatch fixture could not spend the checkpoint chest");
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 checkpointDepot, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
         MiningServiceTask placed = rareDescentKitTask(mission, cursor, beforePlace);
         placed.start(bot);
@@ -4065,10 +4065,10 @@ public final class MiningServiceResourceGameTests {
         placed.abort(bot);
 
         BlockPos rememberedDepot = bot.getBlockPos().west();
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 rememberedDepot, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
         var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
-        memory.markPlace("mining_depot", bot.getServerWorld(), rememberedDepot);
+        memory.markPlace("mining_depot", bot.getEntityWorld(), rememberedDepot);
         memory.remember("mining_depot_owner", mission);
         MiningServiceTask restored = rareDescentKitTask(mission, cursor, verify);
         restored.start(bot);
@@ -4079,7 +4079,7 @@ public final class MiningServiceResourceGameTests {
                         .equals(restored.failureReason()),
                 "checkpoint depot B silently replaced the same-owner memory position A: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, memory.placeIn(bot.getServerWorld(), "mining_depot")
+        require(context, memory.placeIn(bot.getEntityWorld(), "mining_depot")
                         .filter(rememberedDepot::equals).isPresent(),
                 "failed owner-position check rewrote durable mission-depot memory");
         cleanup(context, fixture);
@@ -4200,7 +4200,7 @@ public final class MiningServiceResourceGameTests {
                 require(context, bot.getBlockPos().equals(face),
                         "descent kit did not complete at its exact mining workface");
 
-                bot.getServerWorld().setBlockState(
+                bot.getEntityWorld().setBlockState(
                         ore, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 dig[0] = new OreDigTask(Set.of(Blocks.DIAMOND_ORE), 1);
                 // Abort a background task that may have been admitted in the END_SERVER_TICK where
@@ -4218,10 +4218,10 @@ public final class MiningServiceResourceGameTests {
             if (dig[0].state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, bot.getServerWorld().getBlockState(ore).isAir()
+            require(context, bot.getEntityWorld().getBlockState(ore).isAir()
                             && InventoryAction.countItem(bot, Items.DIAMOND) == 1,
                     "post-kit OreDig did not physically break and collect one visible diamond");
-            require(context, bot.getServerWorld().getBlockState(depotPos[0])
+            require(context, bot.getEntityWorld().getBlockState(depotPos[0])
                             .isOf(Blocks.CHEST)
                             && ContainerAction.resolve(bot, depotPos[0]).isPresent()
                             && MiningServiceTask.ownedMissionDepot(bot, mission),
@@ -4438,7 +4438,7 @@ public final class MiningServiceResourceGameTests {
     private static void prepareDisposalPocket(Fixture fixture, Direction direction) {
         AIPlayerEntity bot = fixture.bot();
         BlockPos face = bot.getBlockPos();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos entry = face.offset(direction);
         BlockPos sink = face.offset(direction, 2);
         BlockPos back = face.offset(direction, 3);
@@ -4463,7 +4463,7 @@ public final class MiningServiceResourceGameTests {
     }
 
     private static void buildBedrockCage(AIPlayerEntity bot, BlockPos center) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 world.setBlockState(center.add(dx, -1, dz),
@@ -4489,7 +4489,7 @@ public final class MiningServiceResourceGameTests {
 
     private static int sinkCount(AIPlayerEntity bot, BlockPos sink, net.minecraft.item.Item item) {
         Box raw = sinkBox(sink);
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         ItemEntity.class, raw.expand(0.01D),
                         entity -> entity.isAlive()
                                 && fullyContains(raw, entity.getBoundingBox())).stream()
@@ -4505,9 +4505,9 @@ public final class MiningServiceResourceGameTests {
     }
 
     private static boolean isSolid(AIPlayerEntity bot, BlockPos pos) {
-        var state = bot.getServerWorld().getBlockState(pos);
+        var state = bot.getEntityWorld().getBlockState(pos);
         return !state.isReplaceable()
-                && !state.getCollisionShape(bot.getServerWorld(), pos).isEmpty();
+                && !state.getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
     }
 
     private static void giveStackedItem(AIPlayerEntity bot, net.minecraft.item.Item item, int count) {
@@ -4570,7 +4570,7 @@ public final class MiningServiceResourceGameTests {
         values.put("channel_tools", "false");
         values.put("service_profile", policy.profile().name());
         values.put("service_mission_id", "standalone");
-        values.put("service_dimension", bot.getServerWorld().getRegistryKey()
+        values.put("service_dimension", bot.getEntityWorld().getRegistryKey()
                 .getValue().toString());
         values.put("service_target_count", "0");
         values.put("service_boundary", "0");
@@ -4695,7 +4695,7 @@ public final class MiningServiceResourceGameTests {
 
     private static void cleanup(TestContext context, Fixture fixture) {
         BotMemoryStore.INSTANCE.remove(fixture.bot().getUuid());
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

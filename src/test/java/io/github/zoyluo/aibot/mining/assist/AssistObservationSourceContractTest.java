@@ -75,11 +75,11 @@ class AssistObservationSourceContractTest {
     }
 
     private static final Pattern WORLD_MEMBER = Pattern.compile(
-            "(?:\\bworld|\\bgetServerWorld\\(\\)|\\bgetWorld\\(\\))\\s*\\.\\s*(\\w+)\\s*\\(");
+            "(?:\\bworld|\\bgetServerWorld\\(\\)|\\bgetEntityWorld\\(\\)|\\bgetWorld\\(\\))\\s*\\.\\s*(\\w+)\\s*\\(");
     private static final Pattern WORLD_TYPED_NAME = Pattern.compile(
             "\\b(?:ServerWorld|World|ClientWorld|WorldView|BlockView|WorldAccess|StructureWorldAccess)\\s+(\\w+)");
     private static final Pattern VAR_ALIAS = Pattern.compile(
-            "\\bvar\\s+\\w+\\s*=\\s*[^;]*\\b(?:getServerWorld|getWorld)\\s*\\(");
+            "\\bvar\\s+\\w+\\s*=\\s*[^;]*\\b(?:getServerWorld|getEntityWorld|getWorld)\\s*\\(");
 
     private static String read(Path path) throws IOException {
         return Files.readString(path);
@@ -292,7 +292,7 @@ class AssistObservationSourceContractTest {
         String detector = code(ASSIST.resolve("PoiDetector.java"));
         assertTrue(detector.contains("world.getBiome(feet)"));
         assertTrue(detector.contains("BlockPos feet = bot.getBlockPos();"));
-        assertTrue(code(COORDINATOR).contains("!bot.getServerWorld().isSkyVisible(bot.getBlockPos())"));
+        assertTrue(code(COORDINATOR).contains("!bot.getEntityWorld().isSkyVisible(bot.getBlockPos())"));
     }
 
     @Test

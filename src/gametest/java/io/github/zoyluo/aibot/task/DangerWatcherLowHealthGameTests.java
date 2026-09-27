@@ -15,6 +15,7 @@ import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LazyEntityReference;
 import net.minecraft.entity.LightningEntity;
 import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.mob.CreeperEntity;
@@ -96,7 +97,7 @@ public final class DangerWatcherLowHealthGameTests {
         bot.setHealth(bot.getMaxHealth());
         bot.getHungerManager().setFoodLevel(20);
         BlockPos target = bot.getBlockPos().east();
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 target, Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
 
         ItemStack damagedDiamond = new ItemStack(Items.DIAMOND_PICKAXE);
@@ -121,7 +122,7 @@ public final class DangerWatcherLowHealthGameTests {
                         + " checkpoint=" + task.checkpoint()));
             }
             if (!scannedRawOneSettlement.get()
-                    && bot.getServerWorld().getBlockState(target).isAir()
+                    && bot.getEntityWorld().getBlockState(target).isAir()
                     && rawDurability(diamond) == 1
                     && task.state() == TaskState.RUNNING) {
                 Map<String, String> settlement = task.checkpoint();
@@ -170,7 +171,7 @@ public final class DangerWatcherLowHealthGameTests {
                 "OreDig pickup debt was changed by DangerWatcher");
 
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_pickup_owner_probe_complete");
-        bot.getServerWorld().setBlockState(
+        bot.getEntityWorld().setBlockState(
                 debt, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         OreDigTask activeBreakOwner = new OreDigTask(Set.of(Blocks.IRON_ORE), 1,
                 oreDigCheckpoint(bot.getBlockPos(), null, debt));
@@ -266,7 +267,7 @@ public final class DangerWatcherLowHealthGameTests {
         // A remembered remote base makes an ordinary ResupplyTask eligible to travel. The paused
         // owner branch must ignore it and use only the carried crafting inputs at this exact pose.
         io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .markPlace("base", bot.getServerWorld(), origin.add(4, 0, 4));
+                .markPlace("base", bot.getEntityWorld(), origin.add(4, 0, 4));
         DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof ResupplyTask,
@@ -337,7 +338,7 @@ public final class DangerWatcherLowHealthGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_paused_mining_weapon_boundary"));
         TaskManager.INSTANCE.pauseFor(bot, "gametest_combat_displacement_complete");
         io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .markPlace("base", bot.getServerWorld(), origin.add(4, 0, 4));
+                .markPlace("base", bot.getEntityWorld(), origin.add(4, 0, 4));
 
         DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
 
@@ -614,7 +615,7 @@ public final class DangerWatcherLowHealthGameTests {
                 skeletonFeet.getX() + 0.5D, skeletonFeet.getY(),
                 skeletonFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getWorld().spawnEntity(skeleton);
-        double skeletonDistance = bot.getPos().distanceTo(skeleton.getPos());
+        double skeletonDistance = bot.getEntityPos().distanceTo(skeleton.getEntityPos());
         require(context, skeletonDistance > 6.8D && skeletonDistance < 7.2D
                         && CombatCore.hasLineOfSight(bot, skeleton),
                 "ranged-heal fixture was not a seven-block LOS threat: distance="
@@ -1642,7 +1643,7 @@ public final class DangerWatcherLowHealthGameTests {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_naked_eat_cooldown_seeded");
         skeleton.refreshPositionAndAngles(rangedFeet.getX() + 0.5D, rangedFeet.getY(),
                 rangedFeet.getZ() + 0.5D, 90.0F, 0.0F);
-        double rangedDistance = bot.getPos().distanceTo(skeleton.getPos());
+        double rangedDistance = bot.getEntityPos().distanceTo(skeleton.getEntityPos());
         require(context, rangedDistance > 13.8D && rangedDistance < 14.2D
                         && CombatCore.hasLineOfSight(bot, skeleton),
                 "naked-eat ranged fixture was not a fourteen-block LOS threat: distance="
@@ -2110,12 +2111,12 @@ public final class DangerWatcherLowHealthGameTests {
 
         EndermanEntity enderman = spawnDisabledEnderman(
                 context, bot.getBlockPos().east(2), "other-anger Enderman fixture");
-        enderman.setAngerTime(600);
-        enderman.setAngryAt(bystander.getUuid());
+        enderman.setAngerEndTime(enderman.getEntityWorld().getTime() + 600L);
+        enderman.setAngryAt(LazyEntityReference.ofUUID(bystander.getUuid()));
         enderman.setTarget(bystander);
         require(context, enderman.isAngry()
                         && enderman.getTarget() == bystander
-                        && !enderman.shouldAngerAt(bot, bot.getServerWorld()),
+                        && !enderman.shouldAngerAt(bot, bot.getEntityWorld()),
                 "Enderman fixture was not angry exclusively at the bystander");
         require(context, !DangerWatcher.isActiveHostileThreat(bot, enderman),
                 "anger directed at another entity was attributed to this bot");
@@ -2137,8 +2138,8 @@ public final class DangerWatcherLowHealthGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_provoked_enderman"));
         EndermanEntity enderman = spawnDisabledEnderman(
                 context, bot.getBlockPos().east(8), "provoked Enderman fixture");
-        enderman.setAngerTime(600);
-        enderman.setAngryAt(bot.getUuid());
+        enderman.setAngerEndTime(enderman.getEntityWorld().getTime() + 600L);
+        enderman.setAngryAt(LazyEntityReference.ofUUID(bot.getUuid()));
         enderman.setTarget(bot);
         float initialHealth = enderman.getHealth();
 
@@ -2171,8 +2172,8 @@ public final class DangerWatcherLowHealthGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         EndermanEntity enderman = spawnDisabledEnderman(
                 context, origin.east(3), "direct-combat Enderman fixture");
-        enderman.setAngerTime(600);
-        enderman.setAngryAt(bot.getUuid());
+        enderman.setAngerEndTime(enderman.getEntityWorld().getTime() + 600L);
+        enderman.setAngryAt(LazyEntityReference.ofUUID(bot.getUuid()));
         enderman.setTarget(bot);
         float initialHealth = enderman.getHealth();
 
@@ -2476,9 +2477,9 @@ public final class DangerWatcherLowHealthGameTests {
     }
 
     private static void despawnAndComplete(TestContext context, AIPlayerEntity bot) {
-        String name = bot.getGameProfile().getName();
+        String name = bot.getGameProfile().name();
         DangerWatcher.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

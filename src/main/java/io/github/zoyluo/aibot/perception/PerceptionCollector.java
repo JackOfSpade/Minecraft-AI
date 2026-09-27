@@ -37,7 +37,7 @@ public final class PerceptionCollector {
     public static PerceptionSnapshot collect(AIPlayerEntity bot) {
         long started = System.currentTimeMillis();
         AIBotConfig.Perception config = AIBotConfig.get().perception();
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos center = bot.getBlockPos();
         PerceptionSnapshot.SelfState self = collectSelfState(bot);
 

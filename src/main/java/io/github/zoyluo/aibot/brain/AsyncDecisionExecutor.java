@@ -34,9 +34,9 @@ public final class AsyncDecisionExecutor {
                        GeminiInteractionRequest geminiRequest,
                        BiConsumer<DecisionLease, ChatResponse> onResponse,
                        BiConsumer<DecisionLease, Throwable> onError) {
-        var server = bot.getServer();
+        var server = bot.getEntityWorld().getServer();
         var botId = bot.getUuid();
-        String botName = bot.getGameProfile().getName();
+        String botName = bot.getGameProfile().name();
         executor.submit(() -> {
             long started = System.nanoTime();
             try {

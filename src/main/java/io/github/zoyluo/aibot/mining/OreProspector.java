@@ -52,7 +52,7 @@ public final class OreProspector {
                                    Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
         boolean hiddenScanAllowed = CapabilityRuntime.decide(
                 bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_prospector").allowed();
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         if (hiddenScanAllowed) {
             return nearestRaw(world, origin, range, match, posFilter);
@@ -66,7 +66,7 @@ public final class OreProspector {
                                               int requestedRange,
                                               Predicate<BlockState> match,
                                               Predicate<BlockPos> posFilter) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         int range = Math.min(Math.max(1, requestedRange),
                 Math.max(1, io.github.zoyluo.aibot.AIBotConfig.get().perception().radius()));
         int minY = Math.max(world.getBottomY(), origin.getY() - range);

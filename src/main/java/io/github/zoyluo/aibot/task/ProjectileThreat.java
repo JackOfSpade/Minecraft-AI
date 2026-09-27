@@ -29,7 +29,7 @@ public final class ProjectileThreat {
     }
 
     public static Optional<Incoming> mostImminent(AIPlayerEntity bot) {
-        List<PersistentProjectileEntity> candidates = bot.getServerWorld().getEntitiesByClass(
+        List<PersistentProjectileEntity> candidates = bot.getEntityWorld().getEntitiesByClass(
                 PersistentProjectileEntity.class,
                 bot.getBoundingBox().expand(SCAN_RANGE),
                 projectile -> projectile.isAlive()
@@ -38,7 +38,7 @@ public final class ProjectileThreat {
         Incoming best = null;
         for (PersistentProjectileEntity projectile : candidates) {
             Double ticks = ticksToClosestApproach(
-                    projectile.getPos().subtract(bot.getEyePos()), projectile.getVelocity());
+                    projectile.getEntityPos().subtract(bot.getEyePos()), projectile.getVelocity());
             if (ticks == null) {
                 continue;
             }

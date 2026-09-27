@@ -236,7 +236,7 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
   scored and logged in P0 but does not stop the bot; that arrives with the POI phase.
 - The placed-blocks record keeps one 8192-cell least-recently-used set per dimension id it has seen, and the
   sidecar file holds all of them (a full dimension is about 172 KB; a file over 8 MiB is refused on load and
-  the record starts empty). The listed modpack has a handful of dimensions, so this does not bind today; a
+  the record starts empty). A vanilla-plus-Fabric pack has a handful of dimensions, so this does not bind today; a
   pack with dynamically created dimensions would need a cap on the dimension count.
 - The remembered hazards of one bot are capped at 4096 cells. When the cap is passed the farthest 256 cells
   are dropped by a sort of the whole field, a few milliseconds once per 256 newly seen cells; it only occurs

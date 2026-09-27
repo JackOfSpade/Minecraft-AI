@@ -121,7 +121,7 @@ public final class MiningTorchToolRestoreGameTests {
 
     private static void cleanup(TestContext context, Fixture fixture, BlockMiner miner) {
         miner.cancel(fixture.bot());
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

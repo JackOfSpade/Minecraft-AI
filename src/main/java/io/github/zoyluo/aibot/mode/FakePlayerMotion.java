@@ -35,7 +35,7 @@ public final class FakePlayerMotion {
      */
     public static boolean isBlockCollisionFree(AIPlayerEntity bot) {
         Box interior = bot.getBoundingBox().contract(BODY_COLLISION_EPSILON);
-        return bot.getServerWorld().isBlockSpaceEmpty(bot, interior);
+        return bot.getEntityWorld().isBlockSpaceEmpty(bot, interior);
     }
 
     public static boolean stepTo(AIPlayerEntity bot, BlockPos target, String reason) {
@@ -48,7 +48,7 @@ public final class FakePlayerMotion {
             BotLog.action(bot, "fake_player_step_rejected", "reason", reason, "from", from, "to", target);
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         if (!world.getBlockState(target).getCollisionShape(world, target).isEmpty()
                 || !world.getBlockState(target.up()).getCollisionShape(world, target.up()).isEmpty()) {
             BotLog.action(bot, "fake_player_step_rejected", "reason", "blocked:" + reason,
@@ -80,7 +80,7 @@ public final class FakePlayerMotion {
     /** Adjacent step whose destination must already be a dry, supported player landing. */
     public static boolean stepToStandable(AIPlayerEntity bot, BlockPos target, String reason) {
         Standability.clearCache();
-        if (!Standability.isStandable(bot.getServerWorld(), target)) {
+        if (!Standability.isStandable(bot.getEntityWorld(), target)) {
             BotLog.action(bot, "fake_player_step_rejected", "reason", "no_landing:" + reason,
                     "from", bot.getBlockPos(), "to", target);
             return false;
@@ -103,7 +103,7 @@ public final class FakePlayerMotion {
      * two-cell oscillation in vertical water shafts.
      */
     public static boolean swimStepTo(AIPlayerEntity bot, BlockPos target, String reason) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         if (!world.getFluidState(target).isIn(FluidTags.WATER)
                 && !world.getFluidState(target.up()).isIn(FluidTags.WATER)) {
             BotLog.action(bot, "fake_player_step_rejected", "reason", "not_water:" + reason,
@@ -145,7 +145,7 @@ public final class FakePlayerMotion {
                     "from", bot.getBlockPos(), "anchor", anchorFeet, "direction", direction);
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos support = anchorFeet.down();
         var supportState = world.getBlockState(support);
         if (supportState.getCollisionShape(world, support).isEmpty()
@@ -180,7 +180,7 @@ public final class FakePlayerMotion {
 
     /** Returns a bounded edge shift to the exact center of its original supported cell. */
     public static boolean returnToBlockCenter(AIPlayerEntity bot, BlockPos anchorFeet, String reason) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         double centerX = anchorFeet.getX() + 0.5D;
         double centerZ = anchorFeet.getZ() + 0.5D;
         double dx = bot.getX() - centerX;
@@ -248,7 +248,7 @@ public final class FakePlayerMotion {
         if (!bot.getBlockPos().equals(anchorFeet) || !bot.isOnGround()) {
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         Standability.clearCache();
         if (!Standability.isStandable(world, anchorFeet)) {
             return false;
@@ -290,7 +290,7 @@ public final class FakePlayerMotion {
      */
     public static boolean jumpTo(AIPlayerEntity bot, BlockPos target, String reason) {
         BlockPos from = bot.getBlockPos();
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         int dx = Math.abs(target.getX() - from.getX());
         int dy = target.getY() - from.getY();
         int dz = Math.abs(target.getZ() - from.getZ());
@@ -375,7 +375,7 @@ public final class FakePlayerMotion {
      * rejecting an otherwise valid physical step.
      */
     private static boolean hasLandingEntityCollision(AIPlayerEntity bot, Box landingBox) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         var manager = ((ServerWorldEntityManagerAccessorMixin) (Object) world)
                 .aibot$getEntityManager();
         var cache = ((ServerEntityManagerCacheAccessorMixin) (Object) manager)

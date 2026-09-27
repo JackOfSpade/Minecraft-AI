@@ -39,7 +39,7 @@ public final class BoatAction {
 
     /** Places the currently held boat item into the selected water cell through vanilla item use. */
     public static Placement placeBoatInWater(AIPlayerEntity player, BlockPos water) {
-        ServerWorld world = player.getServerWorld();
+        ServerWorld world = player.getEntityWorld();
         if (!world.getFluidState(water).isIn(net.minecraft.registry.tag.FluidTags.WATER)) {
             return new Placement(Optional.empty(), "target_not_water");
         }
@@ -85,7 +85,7 @@ public final class BoatAction {
         if (player.squaredDistanceTo(boat) > BOARD_REACH * BOARD_REACH) {
             return ActionResult.failed("boat_out_of_reach");
         }
-        LookAction.lookAt(player, boat.getPos().add(0.0D, boat.getHeight() * 0.5D, 0.0D));
+        LookAction.lookAt(player, boat.getEntityPos().add(0.0D, boat.getHeight() * 0.5D, 0.0D));
         ActionResult result = InteractAction.useItemOnEntity(player, boat, Hand.MAIN_HAND);
         if (result.isSuccess()) {
             BotLog.action(player, "boat_board_requested", "boat_id", boat.getUuid());

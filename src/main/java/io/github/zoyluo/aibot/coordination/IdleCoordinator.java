@@ -127,7 +127,7 @@ public final class IdleCoordinator {
     }
 
     private static void markDirty(AIPlayerEntity bot) {
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getServer());
+        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
     }
 
     public static Optional<Task> jobToTask(AIPlayerEntity bot, Job job) {

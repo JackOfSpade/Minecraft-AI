@@ -23,7 +23,7 @@ public final class BotInventoryScreenFactory implements NamedScreenHandlerFactor
 
     @Override
     public Text getDisplayName() {
-        return Text.literal(shortName(bot.getGameProfile().getName()) + " gear");
+        return Text.literal(shortName(bot.getGameProfile().name()) + " gear");
     }
 
     @Override

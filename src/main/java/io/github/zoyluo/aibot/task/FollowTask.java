@@ -88,7 +88,7 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         ServerPlayerEntity target = target(bot).orElse(null);
-        if (target == null || target.getServerWorld() != bot.getServerWorld()) {
+        if (target == null || target.getEntityWorld() != bot.getEntityWorld()) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             stopBoatAndActions(bot);
             waiting = true;
@@ -154,7 +154,7 @@ public final class FollowTask extends AbstractTask {
             waiting = true;
             return;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         if (isSwimCell(world, feet)) {
             NavSafetyNet.INSTANCE.renewFollowSwim(bot);
@@ -191,7 +191,7 @@ public final class FollowTask extends AbstractTask {
     }
 
     private boolean swimStepToward(AIPlayerEntity bot, ServerPlayerEntity target) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos current = bot.getBlockPos();
         double before = bot.squaredDistanceTo(target);
         List<BlockPos> choices = new ArrayList<>(6);
@@ -222,7 +222,7 @@ public final class FollowTask extends AbstractTask {
         // interpreted as a failed follow.
         if (distance < START_DISTANCE) {
             if (pathIdle && walkIdle && elapsed >= nextRepathTick) {
-                bot.getActionPack().startWalkTo(target.getPos());
+                bot.getActionPack().startWalkTo(target.getEntityPos());
                 nextRepathTick = elapsed + REPATH_TICKS;
                 waiting = false;
             } else {
@@ -251,7 +251,7 @@ public final class FollowTask extends AbstractTask {
                 return;
             }
             if (distance <= MAX_DIRECT_FALLBACK_DISTANCE) {
-                bot.getActionPack().startWalkTo(target.getPos());
+                bot.getActionPack().startWalkTo(target.getEntityPos());
                 waiting = false;
                 return;
             }
@@ -308,7 +308,7 @@ public final class FollowTask extends AbstractTask {
             return true;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(bot.getServerWorld(), egress)
+        if (!Standability.isStandable(bot.getEntityWorld(), egress)
                 || !FakePlayerMotion.stepToStandable(bot, egress, "follow_shelter_exit")) {
             rejectedShelterEgress.add(egress);
             activeShelterEgress = null;
@@ -357,7 +357,7 @@ public final class FollowTask extends AbstractTask {
     }
 
     private static boolean hasSafeShelterExitSupport(AIPlayerEntity bot, BlockPos egress) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         var support = world.getBlockState(egress.down());
         return support.getFluidState().isEmpty()
                 && !support.getCollisionShape(world, egress.down()).isEmpty()
@@ -365,7 +365,7 @@ public final class FollowTask extends AbstractTask {
     }
 
     private static boolean isPassableShelterExitCell(AIPlayerEntity bot, BlockPos position) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         var state = world.getBlockState(position);
         return state.getFluidState().isEmpty()
                 && state.getCollisionShape(world, position).isEmpty()
@@ -440,10 +440,10 @@ public final class FollowTask extends AbstractTask {
 
     private Optional<ServerPlayerEntity> target(AIPlayerEntity bot) {
         if (!targetName.isBlank()) {
-            return Optional.ofNullable(bot.getServer().getPlayerManager().getPlayer(targetName));
+            return Optional.ofNullable(bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetName));
         }
         return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getServer().getPlayerManager().getPlayer(uuid));
+                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
     }
 
     @Override

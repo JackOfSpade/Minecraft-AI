@@ -161,7 +161,7 @@ public final class BuildTask extends AbstractTask {
     }
 
     private void planFlatten(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         boolean rawTerrainRead = CapabilityRuntime.decide(
                 bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "build_flatten_plan").allowed();
         flattenTargets.clear();
@@ -214,7 +214,7 @@ public final class BuildTask extends AbstractTask {
         if (!ensureObservableWorkPose(bot, pos, "flatten_clear")) {
             return;
         }
-        if (bot.getServerWorld().getBlockState(pos).isAir()) {
+        if (bot.getEntityWorld().getBlockState(pos).isAir()) {
             Standability.clearCache();
             currentFlattenTarget = null;
             retryTicks = 0;
@@ -235,7 +235,7 @@ public final class BuildTask extends AbstractTask {
         if (!ensureObservableWorkPose(bot, pos, "flatten_fill")) {
             return;
         }
-        if (!bot.getServerWorld().getBlockState(pos).isAir()) {
+        if (!bot.getEntityWorld().getBlockState(pos).isAir()) {
             Standability.clearCache();
             currentFlattenTarget = null;
             retryTicks = 0;
@@ -271,7 +271,7 @@ public final class BuildTask extends AbstractTask {
     private void build(AIPlayerEntity bot) {
         if (nextIndex >= blueprint.placements().size()) {
             var report = StructureVerifier.verify(
-                    bot.getServerWorld(), blueprint, anchor, placedBlocks, skippedBlocks);
+                    bot.getEntityWorld(), blueprint, anchor, placedBlocks, skippedBlocks);
             bot.getActionPack().stopAll();
             if (report.mismatched() > 0 || report.matched() != report.expected()) {
                 fail("structure_incomplete: matched=" + report.matched()
@@ -310,8 +310,8 @@ public final class BuildTask extends AbstractTask {
             clearBlueprintAir(bot, pos);
             return;
         }
-        if (bot.getServerWorld().getBlockState(pos).isOf(block)
-                || (placement.palette() != null && MaterialPalette.matchesBlock(bot.getServerWorld().getBlockState(pos), placement.palette()))) {
+        if (bot.getEntityWorld().getBlockState(pos).isOf(block)
+                || (placement.palette() != null && MaterialPalette.matchesBlock(bot.getEntityWorld().getBlockState(pos), placement.palette()))) {
             nextIndex++;
             return;
         }
@@ -346,7 +346,7 @@ public final class BuildTask extends AbstractTask {
         if (!ensureObservableWorkPose(bot, pos, "build_air")) {
             return;
         }
-        if (bot.getServerWorld().getBlockState(pos).isAir()) {
+        if (bot.getEntityWorld().getBlockState(pos).isAir()) {
             if (buildMiningStarted) {
                 placedBlocks++;
             }
@@ -588,7 +588,7 @@ public final class BuildTask extends AbstractTask {
         return ObservableWorldQuery.canObserveBlock(bot, candidate.down())
                 && ObservableWorldQuery.canObserveCell(bot, candidate)
                 && ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                && Standability.isStandable(bot.getServerWorld(), candidate);
+                && Standability.isStandable(bot.getEntityWorld(), candidate);
     }
 
     private static boolean pathAlreadyConsidersArrived(BlockPos current, BlockPos candidate) {

@@ -383,13 +383,13 @@ public final class AIBotVerifySubcommand {
         }
         UUID botId = bot.get().getUuid();
         if (RUNS.containsKey(botId)) {
-            source.sendError(Text.literal("[AIBot Verify] already running for " + bot.get().getGameProfile().getName()));
+            source.sendError(Text.literal("[AIBot Verify] already running for " + bot.get().getGameProfile().name()));
             return 0;
         }
         VerifyRun run = new VerifyRun(source, botId, features);
         RUNS.put(botId, run);
         source.sendFeedback(() -> Text.literal("[AIBot Verify] started for "
-                + bot.get().getGameProfile().getName()
+                + bot.get().getGameProfile().name()
                 + ": "
                 + String.join(", ", features)), false);
         return 1;
@@ -730,7 +730,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         BlockPos chest = bot.getBlockPos().offset(Direction.NORTH);
-        bot.getServerWorld().setBlockState(chest, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(chest, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
         Task task = ContainerTask.deposit(chest, Items.COBBLESTONE, 3, false);
         return assignTask(bot, "container", task, 200, ignored -> countContainer(bot, chest, Items.COBBLESTONE) >= 3);
@@ -740,7 +740,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         ZombieEntity zombie = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
         if (zombie == null) {
             return Result.fail("combat", "zombie_create_failed");
@@ -756,21 +756,21 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.RED_BED, 1));
-        bot.getServerWorld().setTimeOfDay(13000L);
-        return assignTask(bot, "sleep", new SleepTask(), 260, ignored -> bot.getServerWorld().isDay());
+        bot.getEntityWorld().setTimeOfDay(13000L);
+        return assignTask(bot, "sleep", new SleepTask(), 260, ignored -> bot.getEntityWorld().isDay());
     }
 
     private static Result assignFarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         BlockPos farm = bot.getBlockPos().offset(Direction.EAST);
-        bot.getServerWorld().setBlockState(farm, Blocks.FARMLAND.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(farm.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(farm, Blocks.FARMLAND.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(farm.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 4));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HOE, 1));
         return assignTask(bot, "farm", new FarmTask(farm, 1, Items.WHEAT_SEEDS, Blocks.WHEAT, false, false),
                 300,
-                ignored -> bot.getServerWorld().getBlockState(farm.up()).isOf(Blocks.WHEAT));
+                ignored -> bot.getEntityWorld().getBlockState(farm.up()).isOf(Blocks.WHEAT));
     }
 
     private static Result assignStripMine(AIPlayerEntity bot) {
@@ -779,8 +779,8 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
         Direction direction = Direction.NORTH;
         for (int distance = 1; distance <= 2; distance++) {
-            bot.getServerWorld().setBlockState(bot.getBlockPos().offset(direction, distance), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            bot.getServerWorld().setBlockState(bot.getBlockPos().offset(direction, distance).up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            bot.getEntityWorld().setBlockState(bot.getBlockPos().offset(direction, distance), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            bot.getEntityWorld().setBlockState(bot.getBlockPos().offset(direction, distance).up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         }
         return assignTask(bot, "strip_mine", new StripMineTask(direction, 2, 0, null, java.util.Set.of()),
                 800,
@@ -851,7 +851,7 @@ public final class AIBotVerifySubcommand {
         BlockPos origin = bot.getBlockPos();
         BlockPos obstacle = origin.offset(Direction.NORTH);
         BlockPos goal = origin.offset(Direction.NORTH, 3);
-        bot.getServerWorld().setBlockState(obstacle, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(obstacle, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
         return assignTask(bot, "nav_obstacle", new MoveTask(bot, goal), 400,
                 ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
     }
@@ -861,7 +861,7 @@ public final class AIBotVerifySubcommand {
         BlockPos origin = bot.getBlockPos();
         BlockPos gap = origin.offset(Direction.NORTH);
         BlockPos goal = origin.offset(Direction.NORTH, 3);
-        bot.getServerWorld().setBlockState(gap.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(gap.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         return assignTask(bot, "nav_gap", new MoveTask(bot, goal), 400,
                 ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
     }
@@ -875,7 +875,7 @@ public final class AIBotVerifySubcommand {
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         BlockPos ore = bot.getBlockPos().offset(Direction.NORTH, 2);
-        bot.getServerWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         return assignTask(bot, "mine_exposed", new MineTask(Blocks.IRON_ORE, 1), 800,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
     }
@@ -883,7 +883,7 @@ public final class AIBotVerifySubcommand {
     private static Result verifyPickupBlocked(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos dropPos = bot.getBlockPos().offset(Direction.NORTH);
         world.setBlockState(dropPos.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         ItemEntity drop = new ItemEntity(world, dropPos.getX() + 0.5D, dropPos.getY(), dropPos.getZ() + 0.5D, new ItemStack(Items.COBBLESTONE, 1));
@@ -899,7 +899,7 @@ public final class AIBotVerifySubcommand {
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
         BlockPos ore = bot.getBlockPos().offset(Direction.NORTH, 2);
-        bot.getServerWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         return assignTask(bot, "mine_to_iron", new OreDigTask(java.util.Set.of(Blocks.IRON_ORE), 1),
                 1200,
                 ignored -> InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
@@ -908,7 +908,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignMineIronFromScratch(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin); // 从零链 bot 无装备,y6 怪海会围杀(实测 aborted=被僵尸打死)
         // GOALFIX-GF3:从零到铁链路(木镐→挖石→石镐→挖铁)约需 3 原木 + 3 圆石,给足余量(6/6)避免边界失败。
@@ -937,7 +937,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 北向 +3..+6 砌实心石墙(2 高)+ 铺底,bot 走到 +2 后必须挖通 3 格石头才够到 +6 的铁矿。
         for (int d = 3; d <= 6; d++) {
@@ -965,7 +965,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 脚下:y-1、y-2 铺泥土(表层土),y-3 起向下铺石头柱;模拟"草地下挖到石层"。
         world.setBlockState(origin.down(), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
@@ -986,7 +986,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 脚下 y-1..-4 实心石头,铁矿埋在 y-3 正下方稍偏:bot 必须竖直挖穿石头才够到。
         for (int dy = 1; dy <= 5; dy++) {
@@ -1011,7 +1011,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignMineIronPocket(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 5x5 石墙(4 高)围出狭窄坑,逼出"地形受限"变量。
         for (int dy = 0; dy <= 3; dy++) {
@@ -1050,7 +1050,7 @@ public final class AIBotVerifySubcommand {
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 清掉 y6 环境怪海(会把 bot 围杀,重生背包清空→工具闸报缺镐),只留下面受控 spawn 的 1 只——
         // 本场景测的是"带 1 怪挖矿"的战斗抢占/恢复,不是怪海生存。穿甲提高确定性。
@@ -1081,7 +1081,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveIronIngot(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
@@ -1101,7 +1101,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveGoldIngot(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -16);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         giveDeepMineKit(bot);
@@ -1123,7 +1123,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveObsidian(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
@@ -1147,7 +1147,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignIronExtreme(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
@@ -1170,7 +1170,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignDiamondExtreme(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
@@ -1193,7 +1193,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignFoodExtreme(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
@@ -1222,7 +1222,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveIronPickaxe(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin); // 全链早期无装备,清 y6 怪海
         // 两列 24 木:from_scratch 链含熔炼,燃料烧原木+craft 整木换板的执行漂移可能吃掉补采余量,
@@ -1252,7 +1252,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveFood(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 聚焦"感知择源 → 打猎 → 烤肉"食物核心:给现成前置(熔炉+燃料+剑),不让 Goal.Food 倒推去挖石做炉
         //(dig_down 挖深井会把 bot 困在井底、追不到地表的牛——那是挖矿场景的 bug,单独修)。
@@ -1281,7 +1281,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveFoodFull(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
@@ -1313,7 +1313,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveFoodFarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         // 1) 清掉附近动物+敌对生物:种植择源要"无动物"(否则误判有猎物→打猎),且避免骷髅抢占中止种田。
         clearNearbyMobs(world, origin);
@@ -1358,7 +1358,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignForage(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // 北侧铺一片成熟(age3)甜浆果丛,下垫泥土防"无支撑"被方块更新打掉。浆果概率掉落,铺 15 丛远多于 target 4。
@@ -1385,7 +1385,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignFarmIrrigate(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // floor 层(y-1)铺一片实心泥土,作挖坑的地面 + 2×2 坑四周的挡水墙。
@@ -1408,7 +1408,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignCake(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin); // 先清(含历史污染的牛),再 spawn 干净的 3 头
         InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET, 3));
@@ -1437,7 +1437,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignVillageHarvest(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // 走廊:floor 铺土、上方清 3 高,从 bot 一直通到田。
@@ -1474,12 +1474,12 @@ public final class AIBotVerifySubcommand {
     // 注意:断言只代表"拿到结果",不代表过程不蠢(绕路/卡顿观感仍需实操确认)。
 
     private static BlockPos prepareRealistic(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         world.setTimeOfDay(1000L); // 同 prepareArea:白天开局,隔离夜间反射 flaky
         bot.getActionPack().stopAll();
         clearInventory(bot); // 实操开局=空背包;其余一概不动(不清怪/不铺/不给)
         // real_wheat 会调 randomTickSpeed,这里统一复位,避免场景间泄漏
-        world.getGameRules().get(net.minecraft.world.GameRules.RANDOM_TICK_SPEED).set(3, world.getServer());
+        world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
         surfaceTeleport(bot);
         return bot.getBlockPos();
     }
@@ -1487,11 +1487,11 @@ public final class AIBotVerifySubcommand {
     // Mining First 最终口径比 legacy real_* 更严格：保留 seed 的真实出生位置，不做 surfaceTeleport。
     // 独立 evidence server 每次只跑一个 from_zero 场景，因此无需用传送来清理前一场景的位置污染。
     private static BlockPos prepareMiningFromZero(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         world.setTimeOfDay(1000L);
         bot.getActionPack().stopAll();
         clearInventory(bot);
-        world.getGameRules().get(net.minecraft.world.GameRules.RANDOM_TICK_SPEED).set(3, world.getServer());
+        world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
         return bot.getBlockPos();
     }
 
@@ -1510,7 +1510,7 @@ public final class AIBotVerifySubcommand {
     // 围墙/活埋类场景必须先地表化:在 y6 黑暗地下摆围墙会触发 DangerWatcher"困死陷阱"保命传送
     // (dark_trap_escape),把被测的真实逃生(搭柱/挖墙)直接顶掉(实测 nav_pillar_out aborted)。
     private static void surfaceTeleport(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos at = bot.getBlockPos();
         if (world.isSkyVisible(at)) {
             return;
@@ -1586,8 +1586,8 @@ public final class AIBotVerifySubcommand {
     // 不加速的话自然熟要 20+ 分钟,套件没法跑;这与 perTick 魔法催熟(food_farm)不同档。
     private static Result assignRealWheat(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        ServerWorld world = bot.getServerWorld();
-        world.getGameRules().get(net.minecraft.world.GameRules.RANDOM_TICK_SPEED).set(40, world.getServer());
+        ServerWorld world = bot.getEntityWorld();
+        world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 40, world.getServer());
         final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(实操死一次=大事故)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.BREAD, 2));
         if (!started) {
@@ -1692,7 +1692,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignDiamondStack64Prepared(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         MiningBudget budget = MiningBudget.forQuota(
                 DIAMOND_STACK_TARGET, true, ToolTier.IRON);
         // Prepared 隔离层与 from-zero 使用同一个远征预算源，避免 fixture 手写值落后于
@@ -1809,7 +1809,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 256));        // FLATTEN 挖高填低的填料
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 128));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> plankBlocks = new java.util.HashSet<>();
         for (Item planks : io.github.zoyluo.aibot.craft.RecipeRegistry.PLANKS) {
@@ -1859,7 +1859,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignObsidianHalfStack32Prepared(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // 7×5 下沉源池（35 块）+ 石质池沿：真实水流横跨池面批量转化，收水后逐块开采。
@@ -1908,7 +1908,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignObsidianStack64Prepared(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         for (int dx = 4; dx <= 13; dx++) {
@@ -2001,7 +2001,7 @@ public final class AIBotVerifySubcommand {
     // 单拎出来测,导航挂了能直接定位是"走路"问题而不是采集/合成问题。
     private static Result assignRealNavFar(AIPlayerEntity bot) {
         BlockPos start = prepareRealistic(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         int gx = start.getX() + 120;
         int gz = start.getZ();
         // 用 MOTION_BLOCKING 堆叠图取自然地表落脚 y(含树叶/水面),与"玩家肉眼选个地表点"一致
@@ -2155,7 +2155,7 @@ public final class AIBotVerifySubcommand {
             return Result.fail("cancel_no_resurrection", "active_paused_setup_failed");
         }
         BotMemoryStore.INSTANCE.of(bot.getUuid()).setGoal("verify_cancel", List.of("craft sticks"));
-        TaskManager.INSTANCE.recordFailure(bot, "verify_old_task", "verify_old_failure", bot.getServer().getTicks());
+        TaskManager.INSTANCE.recordFailure(bot, "verify_old_task", "verify_old_failure", bot.getEntityWorld().getServer().getTicks());
         bot.getHungerManager().setFoodLevel(10);
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 1));
         if (EatAction.startEating(bot).isFailed() || !bot.isUsingItem()) {
@@ -2176,7 +2176,7 @@ public final class AIBotVerifySubcommand {
                 || pausedTask.state() != TaskState.CANCELLED) {
             return Result.fail("cancel_no_resurrection", "incomplete_cancel_outcome=" + outcome);
         }
-        int quietUntilTick = bot.getServer().getTicks() + 200;
+        int quietUntilTick = bot.getEntityWorld().getServer().getTicks() + 200;
         boolean[] violated = {false};
         return Result.runningPatient("cancel_no_resurrection", 260,
                 ignored -> {
@@ -2196,7 +2196,7 @@ public final class AIBotVerifySubcommand {
                         && InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 0
                         && InventoryAction.countItem(bot, Items.BREAD) == 1;
                     violated[0] |= !cleanNow;
-                    return bot.getServer().getTicks() >= quietUntilTick && !violated[0];
+                    return bot.getEntityWorld().getServer().getTicks() >= quietUntilTick && !violated[0];
                 });
     }
 
@@ -2506,7 +2506,7 @@ public final class AIBotVerifySubcommand {
     private static void prepareRuntimeControlArea(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        clearNearbyMobs(bot.getServerWorld(), bot.getBlockPos());
+        clearNearbyMobs(bot.getEntityWorld(), bot.getBlockPos());
         bot.setHealth(bot.getMaxHealth());
         bot.getHungerManager().setFoodLevel(20);
         bot.getHungerManager().setSaturationLevel(5.0F);
@@ -2523,7 +2523,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 32)); // 只给原木:114 板必须自己算出来并合成
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> plankBlocks = new java.util.HashSet<>();
@@ -2554,7 +2554,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 128));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> stoneLike = java.util.Set.of(Blocks.COBBLESTONE, Blocks.STONE, Blocks.STONE_BRICKS);
@@ -2581,7 +2581,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignMineGeo(AIPlayerEntity bot, String geo) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
@@ -2775,7 +2775,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoRich(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
@@ -2815,7 +2815,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoBonus(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 6, 8);
@@ -2842,7 +2842,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoStockpile(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 8);
@@ -2881,7 +2881,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoResume(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
@@ -2921,7 +2921,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoGuard(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos(); // 统一画布已是高空,天然水体零干扰
         // 石壁水井:内腔 1x1、深 4,bot 沉底,头顶 3 格水(上不来才算真淹)
         for (int dy = -1; dy <= 4; dy++) {
@@ -2952,7 +2952,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignExploreWood(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // 石板走廊通到 120 格外(dy-1 铺石、dy0..2 清空,与 geo_rich 走廊同构):保证树簇物理可达。
@@ -2985,7 +2985,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoRecover(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_INGOT, 5));
@@ -3167,7 +3167,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_INGOT, 30));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         for (int dy = 0; dy < 6; dy++) {
             world.setBlockState(origin.offset(Direction.WEST, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
@@ -3204,7 +3204,7 @@ public final class AIBotVerifySubcommand {
     }
 
     private static boolean hasBlockNearby(AIPlayerEntity bot, Block block) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         for (BlockPos p : BlockPos.iterate(origin.add(-5, -3, -5), origin.add(5, 3, 5))) {
             if (world.getBlockState(p).isOf(block)) {
@@ -3219,7 +3219,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         BlockPos chestPos = origin.offset(Direction.EAST, 2);
         world.setBlockState(chestPos, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
@@ -3251,7 +3251,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         int targetY = origin.getY() - 20;
         for (int dy = 1; dy <= 25; dy++) {
@@ -3268,7 +3268,7 @@ public final class AIBotVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         for (Direction direction : Direction.Type.HORIZONTAL) {
             for (int dy = 0; dy <= 1; dy++) {
@@ -3291,7 +3291,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoNightSwarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         world.setTimeOfDay(13000L); // 夜:刷的僵尸不被晒死,持续围攻
@@ -3331,7 +3331,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoCliffTree(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // 东侧 dx 4..10 挖一道陡坑:坑口 y0 起向下清 6 格成竖壁,坑底 y-7 铺石地。
@@ -3365,7 +3365,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoObsidianMake(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         // 岩浆位于地面下一格、四周保留石质池沿，贴近自然洞底/地表熔岩池。旧画布把源放在
@@ -3409,7 +3409,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoReplayOre(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59); // 深层环境(Y-59 带),bot 落在 origin
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
@@ -3451,7 +3451,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignGeoDiamondLava(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
@@ -3476,7 +3476,7 @@ public final class AIBotVerifySubcommand {
     private static Result assignAchieveDiamond(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
@@ -3502,7 +3502,7 @@ public final class AIBotVerifySubcommand {
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_HOE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 8));
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin); // 清骷髅/牛:隔离收割逻辑,避免 y6 黑暗骷髅抢占中止目标(实测 aborted)
         net.minecraft.block.BlockState matureWheat =
@@ -3529,7 +3529,7 @@ public final class AIBotVerifySubcommand {
 
     private static Result assignNavDescend(AIPlayerEntity bot) {
         prepareArea(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         BlockPos goal = origin.offset(Direction.NORTH, 3).down(3);
         for (int i = 1; i <= 3; i++) {
@@ -3551,7 +3551,7 @@ public final class AIBotVerifySubcommand {
         surfaceTeleport(bot); // 必须地表化:y6 黑暗地下摆围墙会触发 dark_trap_escape 保命传送顶掉被测逃生(实测 aborted)
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin); // 无装备 bot 被圈在墙内,y6 怪海进来就是死局;清掉隔离被测的逃生逻辑
         // 先把活动空间清大:墙顶(y+3)之上还要 2 格头部空间才翻得过去,墙外到目标也要有落脚地——
@@ -3588,7 +3588,7 @@ public final class AIBotVerifySubcommand {
         surfaceTeleport(bot); // 地表化,防 y6 黑暗触发 dark_trap_escape 保命传送干扰被测脱困
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin); // 脱困后 bot 残血,y6 怪海一箭就翻车;清掉保证测的是脱困本身
         world.setBlockState(origin, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -3599,7 +3599,7 @@ public final class AIBotVerifySubcommand {
 
     // bot 脚位+头位是否都无碰撞体(=没卡在方块里)。活埋脱困的核检条件:挖出来才算真脱困。
     private static boolean bodyFree(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
         return world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
@@ -3615,11 +3615,11 @@ public final class AIBotVerifySubcommand {
         surfaceTeleport(bot); // 地表化,防黑暗反射干扰"干净认输"判定
         prepareArea(bot);
         clearInventory(bot);
-        clearNearbyMobs(bot.getServerWorld(), bot.getBlockPos()); // 防怪把 bot 打死造成"假干净失败"(死亡中止≠主动认输)
+        clearNearbyMobs(bot.getEntityWorld(), bot.getBlockPos()); // 防怪把 bot 打死造成"假干净失败"(死亡中止≠主动认输)
         // 目标放到世界高度上限之外:resolveEndpoint 会把"够不到的目标"降级到附近可站点(这是导航的
         // 容错 feature)——up(80) 在开阔地表会被降级成脚下、1t 假完成(实测 should_have_failed)。
         // 超出 build limit 的点周围不存在任何可站点,降级也无解,才能逼出"干净认输"路径。
-        ServerWorld unreachableWorld = bot.getServerWorld();
+        ServerWorld unreachableWorld = bot.getEntityWorld();
         int topLimit = unreachableWorld.getBottomY() + unreachableWorld.getHeight();
         BlockPos goal = new BlockPos(bot.getBlockPos().getX(), topLimit + 10, bot.getBlockPos().getZ());
         // 不走 assignTask(它只会包出常规 running 语义):直接 assign + 反向 Result,语义是"应当失败"。
@@ -3635,7 +3635,7 @@ public final class AIBotVerifySubcommand {
     }
 
     private static void prepareArea(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         world.setTimeOfDay(1000L); // 设白天:套件后段入夜,夜间睡觉反射抢占场景任务(实测 farm_irrigate 偶发 aborted)
         // 套件里多场景顺序跑,bot 位置会从上个场景带过来(打猎走远等)→ 假设"干净出生点"的场景会错位
         //(food_suite 实测:farm_wheat 时 bot 漂到 9,-2,预置成熟麦没 survey 到、被当空地种 → FAIL)。
@@ -3729,7 +3729,7 @@ public final class AIBotVerifySubcommand {
     // (慢+地形/岩浆不可控),不如直接把 bot 传送到矿层、在那儿清出+围好实心石立方:descend 步因 bot 已达深度而空过,
     // 测试聚焦"在矿层找矿→挖→(熔炼)"。再给齐口粮/火把/护甲跳过深矿的食物/照明前置。返回深层原点。
     private static BlockPos prepareDeepArea(AIPlayerEntity bot, int depthY) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         bot.getActionPack().stopAll();
         bot.teleport(world, 0.5D, depthY, 0.5D, java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
         BlockPos origin = bot.getBlockPos();

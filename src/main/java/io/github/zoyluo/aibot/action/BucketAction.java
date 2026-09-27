@@ -30,7 +30,7 @@ public final class BucketAction {
 
     /** Fill one empty bucket from an observable still-water source. */
     public static ActionResult fillWaterSource(AIPlayerEntity bot, BlockPos source) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         if (!withinReach(bot, source) || !bot.canInteractWithBlockAt(source, 0.0D)) {
             return ActionResult.failed("water_source_out_of_reach");
         }
@@ -69,7 +69,7 @@ public final class BucketAction {
      */
     public static ActionResult placeWater(AIPlayerEntity bot, BlockPos support, Direction face) {
         BlockPos destination = support.offset(face);
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         if (!ObservableWorldQuery.canObserveCell(bot, destination)) {
             return ActionResult.failed("water_placement_not_visible");
         }
@@ -131,7 +131,7 @@ public final class BucketAction {
         double reach = bot.getBlockInteractionRange();
         Vec3d start = bot.getEyePos();
         Vec3d end = start.add(bot.getRotationVec(1.0F).multiply(reach));
-        return bot.getServerWorld().raycast(new RaycastContext(
+        return bot.getEntityWorld().raycast(new RaycastContext(
                 start,
                 end,
                 RaycastContext.ShapeType.OUTLINE,

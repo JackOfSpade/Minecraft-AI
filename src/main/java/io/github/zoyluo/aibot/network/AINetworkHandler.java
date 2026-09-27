@@ -1,8 +1,8 @@
 package io.github.zoyluo.aibot.network;
 
+import io.netty.channel.ChannelFutureListener;
 import net.minecraft.network.ClientConnection;
 import net.minecraft.network.DisconnectionInfo;
-import net.minecraft.network.PacketCallbacks;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ConnectedClientData;
@@ -23,10 +23,8 @@ public class AINetworkHandler extends ServerPlayNetworkHandler {
     }
 
     @Override
-    public void send(Packet<?> packet, PacketCallbacks callbacks) {
-        if (callbacks != null) {
-            callbacks.onSuccess();
-        }
+    public void send(Packet<?> packet, ChannelFutureListener callbacks) {
+        DeliveredPackets.complete(callbacks);
     }
 
     @Override

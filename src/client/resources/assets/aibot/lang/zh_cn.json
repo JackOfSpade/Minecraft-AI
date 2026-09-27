@@ -1,5 +1,5 @@
 {
-  "key.categories.aibot": "AIBot",
+  "key.category.aibot.main": "AIBot",
   "key.aibot.open_panel": "打开 AIBot 面板",
   "key.aibot.open_actions": "打开 AIBot 功能区",
   "screen.aibot.panel": "AIBot 控制面板",

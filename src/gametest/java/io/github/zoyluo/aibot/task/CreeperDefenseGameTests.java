@@ -58,7 +58,7 @@ public final class CreeperDefenseGameTests {
                         && creeper.getLerpedFuseTime(1.0F) > 0.0F,
                 "late-fuse fixture did not retain a live finite explosion clock");
 
-        Vec3d before = bot.getPos();
+        Vec3d before = bot.getEntityPos();
         int materialBefore = MaterialPalette.countEmergencyShelterBlocks(bot);
         require(context, DangerWatcher.INSTANCE.scanBot(
                         context.getWorld().getServer(), bot),
@@ -74,7 +74,7 @@ public final class CreeperDefenseGameTests {
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "late-fuse scan did not preserve exactly one mission frame");
 
-        boolean physicallyStepped = bot.getPos().squaredDistanceTo(before) >= 0.80D;
+        boolean physicallyStepped = bot.getEntityPos().squaredDistanceTo(before) >= 0.80D;
         boolean physicallyPlacedCore = MaterialPalette.countEmergencyShelterBlocks(bot)
                 < materialBefore && hasPlacedOakLogNear(bot, origin);
         require(context, physicallyStepped || physicallyPlacedCore,
@@ -459,7 +459,7 @@ public final class CreeperDefenseGameTests {
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = 0; dy <= 1; dy++) {
-                    if (bot.getServerWorld().getBlockState(
+                    if (bot.getEntityWorld().getBlockState(
                             origin.add(dx, dy, dz)).isOf(Blocks.OAK_LOG)) {
                         return true;
                     }
@@ -470,8 +470,8 @@ public final class CreeperDefenseGameTests {
     }
 
     private static boolean isPhysicalBarrierCell(AIPlayerEntity bot, BlockPos pos) {
-        var state = bot.getServerWorld().getBlockState(pos);
-        return !state.getCollisionShape(bot.getServerWorld(), pos).isEmpty();
+        var state = bot.getEntityWorld().getBlockState(pos);
+        return !state.getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
     }
 
     private static boolean phase(Task task, String expected) {
@@ -503,7 +503,7 @@ public final class CreeperDefenseGameTests {
         }
         DangerWatcher.INSTANCE.clear(bot);
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

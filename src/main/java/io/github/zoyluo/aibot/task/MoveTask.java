@@ -72,7 +72,7 @@ public final class MoveTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         // 越界目标快速认输:y 超出世界范围(虚空下/建筑上限外)物理不可达,任何走/挖都是空转
         //(实测朝 y330 目标"挖天"耗满 2400t 不认输——空转是实操里最隐蔽的故障形态)。
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         int bottom = world.getBottomY();
         int top = bottom + world.getHeight();
         if (goal.getY() < bottom || goal.getY() >= top) {
@@ -247,7 +247,7 @@ public final class MoveTask extends AbstractTask {
      * 距离钳 ≤40:保证每一段都落在 A* 步行预算(10k 节点)稳定可解的范围内——分段正是为此。
      */
     private BlockPos pickWaypoint(AIPlayerEntity bot, BlockPos target) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         double bx = bot.getX();
         double bz = bot.getZ();
         double dxGoal = target.getX() + 0.5D - bx;

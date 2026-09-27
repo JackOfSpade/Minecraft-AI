@@ -411,7 +411,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             fail("descend_invalid_checkpoint");
             return;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         // Vanilla falling-block updates run after task decisions. A stair that was clear when the
         // bot entered it can therefore become occupied before the next task tick. Resolve the
@@ -760,7 +760,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     private void initializeSafeLandingHistory(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         if (!isDryStandable(world, feet)) {
             return;
@@ -963,7 +963,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (pendingLandingTarget == null || !bot.getBlockPos().equals(pendingLandingTarget)) {
             return false;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         Standability.clearCache();
         boolean wet = bot.isSubmergedInWater()

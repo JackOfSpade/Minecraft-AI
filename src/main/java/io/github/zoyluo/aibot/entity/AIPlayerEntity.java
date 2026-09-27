@@ -26,9 +26,9 @@ public class AIPlayerEntity extends ServerPlayerEntity {
 
     @Override
     public void tick() {
-        if (this.server.getTicks() % 10 == 0 && this.networkHandler != null) {
+        if (this.getServer().getTicks() % 10 == 0 && this.networkHandler != null) {
             this.networkHandler.syncWithPlayerPosition();
-            this.getServerWorld().getChunkManager().updatePosition(this);
+            this.getEntityWorld().getChunkManager().updatePosition(this);
         }
 
         try {
@@ -51,6 +51,11 @@ public class AIPlayerEntity extends ServerPlayerEntity {
 
     public ActionPack getActionPack() {
         return actionPack;
+    }
+
+    /** {@code Entity#getServer()} is gone in 1.21.11 and the base class keeps its server private. */
+    public MinecraftServer getServer() {
+        return this.getEntityWorld().getServer();
     }
 
     /**

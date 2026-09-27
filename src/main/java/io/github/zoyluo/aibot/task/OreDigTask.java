@@ -388,12 +388,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     // EpisodeMemory 薄包装:排除"够不到/挖空"的矿(TTL 30s 自动复活),goal 级生命周期跨 replan 存活。
     private void excludeOre(AIPlayerEntity bot, BlockPos pos) {
-        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), pos, bot.getServer().getTicks(), EpisodeMemory.TTL_SHORT);
+        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), pos, bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_SHORT);
         forgetRememberedHighWorkPose(pos);
     }
 
     private boolean oreExcluded(AIPlayerEntity bot, BlockPos pos) {
-        return EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), pos, bot.getServer().getTicks());
+        return EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), pos, bot.getEntityWorld().getServer().getTicks());
     }
 
     /**
@@ -439,7 +439,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         int rejectedDirection = stripDirIndex;
         int remainingSteps = stripStepsLeft;
         if (!rerouteBlindBranchAtObservedBoundary(
-                bot, bot.getServerWorld(), "lava", lavaPos)) {
+                bot, bot.getEntityWorld(), "lava", lavaPos)) {
             // The branch cannot leave this observed boundary without walking old territory or
             // opening an unproven body column. Keep ownership here and let the typed task failure
             // drive the normal mission replan instead of assigning an underground EvadeTask.
@@ -589,7 +589,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                                      int distance) {
         for (int step = 1; step <= distance; step++) {
             BlockPos candidate = origin.offset(rear, step);
-            if (!Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return false;
             }
         }
@@ -633,7 +633,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static boolean isNarrowMiningGate(AIPlayerEntity bot,
                                                BlockPos gate,
                                                Direction forward) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (!isDryOpen(world, gate) || !isDryOpen(world, gate.up())
                 || !isSolidSafe(world, gate.down()) || !isSolidSafe(world, gate.up(2))) {
             return false;
@@ -684,21 +684,21 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         for (BlockPos center : new BlockPos[]{feet, feet.up()}) {
             if (OreScan.observeDangerFluid(bot, center)
                     == OreScan.Observation.OBSERVED_PRESENT
-                    && bot.getServerWorld().getFluidState(center).isIn(FluidTags.LAVA)) {
+                    && bot.getEntityWorld().getFluidState(center).isIn(FluidTags.LAVA)) {
                 return true;
             }
             for (Direction direction : Direction.values()) {
                 BlockPos adjacent = center.offset(direction);
                 if (OreScan.observeDangerFluid(bot, adjacent)
                         == OreScan.Observation.OBSERVED_PRESENT
-                        && bot.getServerWorld().getFluidState(adjacent).isIn(FluidTags.LAVA)) {
+                        && bot.getEntityWorld().getFluidState(adjacent).isIn(FluidTags.LAVA)) {
                     return true;
                 }
             }
         }
         return OreScan.observeDangerFluid(bot, feet.down())
                 == OreScan.Observation.OBSERVED_PRESENT
-                && bot.getServerWorld().getFluidState(feet.down()).isIn(FluidTags.LAVA);
+                && bot.getEntityWorld().getFluidState(feet.down()).isIn(FluidTags.LAVA);
     }
 
     @Override
@@ -793,7 +793,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         // R6 入口地标:开挖处自动 mark(goto_place mine_entry 一步回来;玩家问'矿洞在哪'也答得出)。
         io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .markPlace("mine_entry", bot.getServerWorld(), bot.getBlockPos());
+                .markPlace("mine_entry", bot.getEntityWorld(), bot.getBlockPos());
     }
 
     @Override
@@ -845,7 +845,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 ? pending.rear() : null;
         if (!restoringFace && exactRear != null) {
             if (!canRetainUnpublishedBlindAdvance(
-                    bot, bot.getServerWorld(), feet, exactRear)) {
+                    bot, bot.getEntityWorld(), feet, exactRear)) {
                 Direction direction = STRIP_DIRS[stripDirIndex];
                 BlockPos factualRear = publishStripProgress(bot, direction);
                 if (stripStepsLeft <= 0) {
@@ -870,7 +870,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // R6/R7 作业面地标:任务结束处=下次续挖起点。矿种一并 remember,resume_mining 免问。
     private void markMineFace(AIPlayerEntity bot) {
         var mem = io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
-        mem.markPlace("mine_face", bot.getServerWorld(), bot.getBlockPos());
+        mem.markPlace("mine_face", bot.getEntityWorld(), bot.getBlockPos());
         String ores = targetOres.stream()
                 .map(b -> net.minecraft.registry.Registries.BLOCK.getId(b).toString())
                 .sorted()
@@ -880,7 +880,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         // Falling sand/gravel is updated after the task tick that opened a tunnel cell.  The cell
         // can therefore look clear long enough for the fake player to enter, then become occupied
@@ -1064,9 +1064,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // a deterministic starvation case in seed 3000.
         boolean minerBusy = miner.target() != null || hasStagedBlindFootWork(bot);
         if (bonusOre == null && !minerBusy && bonusMined < BONUS_CAP
-                && bot.getServer().getTicks() - lastBonusScanTick >= SCAN_INTERVAL
+                && bot.getEntityWorld().getServer().getTicks() - lastBonusScanTick >= SCAN_INTERVAL
                 && !HarvestCore.isInventoryFull(bot)) {
-            lastBonusScanTick = bot.getServer().getTicks();
+            lastBonusScanTick = bot.getEntityWorld().getServer().getTicks();
             bonusOre = scanBonusOre(bot, world);
             if (bonusOre != null) {
                 clearStripMovementOwnership();
@@ -1211,7 +1211,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // 每 SCAN_INTERVAL 重扫:发现显著更近(<0.6×当前距)且未排除的目标矿就改投——就近开挖,
             // 自然绕开远矿的抖动死角。不打断正在挖的矿(miningNow),阈值 0.6 防同距反复横跳。
             boolean miningNow = miningTarget;
-            int nowRe = bot.getServer().getTicks();
+            int nowRe = bot.getEntityWorld().getServer().getTicks();
             if (!miningNow && nowRe - lastReLockTick >= SCAN_INTERVAL) {
                 lastReLockTick = nowRe;
                 BlockPos nearer = nearestOre(bot, world);
@@ -1368,7 +1368,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
 
         // 3) 无锁定矿:扫描最近目标矿(限频)。
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         if (now - lastScanTick < SCAN_INTERVAL) {
             return;
         }
@@ -3192,7 +3192,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private BlockMiner.Status beginTargetMine(AIPlayerEntity bot, BlockPos pos) {
         MiningEvidenceAudit.observeDiamondOreBeforeBreak(
-                bot, pos, bot.getServerWorld().getBlockState(pos).getBlock());
+                bot, pos, bot.getEntityWorld().getBlockState(pos).getBlock());
         if (activeTargetBreakPos == null || !activeTargetBreakPos.equals(pos)) {
             activeTargetBreakPos = pos.toImmutable();
             activeTargetBreakInventory = HarvestCore.countInventoryItems(bot, targetDrops);
@@ -3269,7 +3269,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // Removing a lower vein member can expose a high side staircase for only the short physical
         // pickup window. Record every newly visible target pose now, before chasing the randomized
         // ItemEntity can settle the bot under the remaining ore and occlude that staircase again.
-        nearestOre(bot, bot.getServerWorld());
+        nearestOre(bot, bot.getEntityWorld());
         stabilizeBrokenTargetDrop(bot, pos);
         MiningEvidenceAudit.recordDiamondOreBreak(bot, pos);
         int safeBaseline = inventoryBeforeBreak >= 0
@@ -3291,7 +3291,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!needsTargetDropSupport(bot, ore)) {
             return;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos support = ore.down();
         if (!ObservableWorldQuery.canObserveCell(bot, support)) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
@@ -3453,7 +3453,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // envelope is the authoritative settled-pose invariant here: it rejects the transient
         // upper cell from an elevated pickup while accepting a physically supported shaft floor.
         boolean settledOnStandablePose = io.github.zoyluo.aibot.pathfinding.Standability.isStandable(
-                bot.getServerWorld(), bot.getBlockPos());
+                bot.getEntityWorld(), bot.getBlockPos());
         if (pendingPickupGainTick >= 0
                 && totalBudget() - pendingPickupGainTick >= 5
                 && settledOnStandablePose
@@ -3531,7 +3531,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (anchor == null) {
             return false;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         int standY = bot.getBlockPos().getY();
         for (int checked = 0; checked < PICKUP_SWEEP_OFFSETS.length; checked++) {
             int[] offset = PICKUP_SWEEP_OFFSETS[
@@ -4976,7 +4976,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     // 探矿:近处扫不到矿时,在 PROSPECT_RANGE 大范围(只扫已加载区块)定位最近的目标矿;限频护 TPS。
     private BlockPos prospect(AIPlayerEntity bot, ServerWorld world) {
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         if (now - lastProspectTick < PROSPECT_INTERVAL) {
             return null;
         }
@@ -5100,7 +5100,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
                         || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())
                         || !io.github.zoyluo.aibot.pathfinding.Standability.isStandable(
-                                bot.getServerWorld(), candidate)) {
+                                bot.getEntityWorld(), candidate)) {
                     continue;
                 }
                 ActionResult result = bot.getActionPack().startPathTo(

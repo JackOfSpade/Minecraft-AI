@@ -36,7 +36,7 @@ public final class SiteFinder {
         if (!hiddenScanAllowed) {
             return findObservableSite(bot, footprintX, footprintZ, searchRadius, lenient);
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         BlockPos best = null;
         double bestScore = Double.MAX_VALUE;
@@ -223,7 +223,7 @@ public final class SiteFinder {
                                                     int z,
                                                     int preferredY,
                                                     int verticalRange) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         int range = Math.max(0, verticalRange);
         for (int delta = 0; delta <= range; delta++) {
             int high = preferredY + delta;

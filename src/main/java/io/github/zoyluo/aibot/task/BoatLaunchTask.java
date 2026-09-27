@@ -146,11 +146,11 @@ public final class BoatLaunchTask extends AbstractTask {
     }
 
     private void approachShore(AIPlayerEntity bot) {
-        if (launchSite == null || !BoatSupport.isWater(bot.getServerWorld(), launchSite.water())) {
+        if (launchSite == null || !BoatSupport.isWater(bot.getEntityWorld(), launchSite.water())) {
             phase = Phase.FIND_WATER;
             return;
         }
-        double distanceSquared = bot.getPos().squaredDistanceTo(launchSite.shore().toCenterPos());
+        double distanceSquared = bot.getEntityPos().squaredDistanceTo(launchSite.shore().toCenterPos());
         if (distanceSquared <= 2.25D) {
             bot.getActionPack().stopAll();
             phase = Phase.LAUNCH;
@@ -172,7 +172,7 @@ public final class BoatLaunchTask extends AbstractTask {
     }
 
     private void launch(AIPlayerEntity bot) {
-        if (launchSite == null || !BoatSupport.isWater(bot.getServerWorld(), launchSite.water())) {
+        if (launchSite == null || !BoatSupport.isWater(bot.getEntityWorld(), launchSite.water())) {
             phase = Phase.FIND_WATER;
             return;
         }

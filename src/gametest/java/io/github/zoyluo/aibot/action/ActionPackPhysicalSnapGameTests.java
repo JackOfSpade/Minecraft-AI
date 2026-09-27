@@ -66,10 +66,10 @@ public final class ActionPackPhysicalSnapGameTests {
             require(context, bot.getBlockPos().equals(anchor),
                     "residual walk velocity moved the centered player to "
                             + bot.getBlockPos().toShortString());
-            require(context, bot.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(anchor))
+            require(context, bot.getEntityPos().squaredDistanceTo(Vec3d.ofBottomCenter(anchor))
                             < 1.0E-6D,
                     "centered player drifted before the next service transaction");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -97,13 +97,13 @@ public final class ActionPackPhysicalSnapGameTests {
         // normalized merely because it is off centre.
         bot.teleport(world, anchor.getX() + 0.65D, anchor.getY(),
                 anchor.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        Vec3d safeOffset = bot.getPos();
+        Vec3d safeOffset = bot.getEntityPos();
         require(context, FakePlayerMotion.isBlockCollisionFree(bot),
                 "safe-offset fixture unexpectedly collided");
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_safe_fractional_pose"),
                 "safe fractional stand was rejected");
-        require(context, bot.getPos().squaredDistanceTo(safeOffset) < 1.0E-12D,
+        require(context, bot.getEntityPos().squaredDistanceTo(safeOffset) < 1.0E-12D,
                 "safe fractional stand was unnecessarily recentered");
 
         // Seed-3000 equivalent: the lower corner still floors to the standable anchor column, but
@@ -119,18 +119,18 @@ public final class ActionPackPhysicalSnapGameTests {
                         "gametest_corner_overlap"),
                 "standable corner overlap did not recover physically");
         Vec3d centered = Vec3d.ofBottomCenter(anchor);
-        require(context, bot.getPos().squaredDistanceTo(centered) < 1.0E-12D
+        require(context, bot.getEntityPos().squaredDistanceTo(centered) < 1.0E-12D
                         && FakePlayerMotion.isBlockCollisionFree(bot),
                 "corner snap returned before reaching a collision-free centre");
 
-        Vec3d after = bot.getPos();
+        Vec3d after = bot.getEntityPos();
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_corner_overlap_idempotent"),
                 "already-cleared centre was rejected");
-        require(context, bot.getPos().squaredDistanceTo(after) < 1.0E-12D,
+        require(context, bot.getEntityPos().squaredDistanceTo(after) < 1.0E-12D,
                 "idempotent snap moved an already-cleared centre");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -149,7 +149,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, anchor.getX() + 0.95D, anchor.getY(),
                 anchor.getZ() + 0.95D, Set.of(), 0.0F, 0.0F, true);
-        Vec3d before = bot.getPos();
+        Vec3d before = bot.getEntityPos();
 
         var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
         require(context, cow != null, "failed to create centre-occupying cow");
@@ -162,13 +162,13 @@ public final class ActionPackPhysicalSnapGameTests {
         require(context, !FakePlayerMotion.returnToBlockCenter(
                         bot, anchor, "gametest_occupied_center"),
                 "centre return entered a living entity");
-        require(context, bot.getPos().squaredDistanceTo(before) < 1.0E-12D,
+        require(context, bot.getEntityPos().squaredDistanceTo(before) < 1.0E-12D,
                 "rejected occupied centre return still moved the bot");
         require(context, cow.isAlive(),
                 "rejected centre return removed the occupying entity");
 
         cow.discard();
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -217,7 +217,7 @@ public final class ActionPackPhysicalSnapGameTests {
                         && Math.abs(bot.getY() - (second.getY() + 0.025D)) < 1.0E-6D,
                 "rejected airborne jump still changed the player pose");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -255,7 +255,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 "rejected occupied jump changed its natural support");
 
         cow.discard();
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -281,7 +281,7 @@ public final class ActionPackPhysicalSnapGameTests {
         require(context, HarvestCore.pickupStandPos(bot, drop).equals(drop),
                 "same-level pickup did not select the exact drop cell");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -308,7 +308,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        Vec3d startPose = bot.getPos();
+        Vec3d startPose = bot.getEntityPos();
         int pickupBaseline = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.BEEF);
 
         // Reproduce the failed narrow-ridge loot pose: the 0.25-wide item is mostly over an
@@ -337,7 +337,7 @@ public final class ActionPackPhysicalSnapGameTests {
             require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.BEEF)
                             > pickupBaseline,
                     "edge drop entered inventory without vanilla pickup credit");
-            require(context, bot.getPos().squaredDistanceTo(startPose) > 0.01D,
+            require(context, bot.getEntityPos().squaredDistanceTo(startPose) > 0.01D,
                     "edge drop was collected without at least 0.1 blocks of physical movement");
             require(context, !bot.getBlockPos().equals(unsupportedDropCell),
                     "edge pickup entered the unsupported drop cell: "
@@ -345,7 +345,7 @@ public final class ActionPackPhysicalSnapGameTests {
             require(context, world.getBlockState(unsupportedDropCell.down()).isAir(),
                     "edge pickup manufactured support beneath the drop");
             require(context, !drop.isAlive(), "picked beef entity remained in the world");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -365,7 +365,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, stand.getX() + 0.5D, stand.getY(), stand.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        Vec3d startPose = bot.getPos();
+        Vec3d startPose = bot.getEntityPos();
         int pickupBaseline = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OAK_LOG);
 
         ItemEntity drop = new ItemEntity(world,
@@ -388,7 +388,7 @@ public final class ActionPackPhysicalSnapGameTests {
             if (InventoryAction.countItem(bot, Items.OAK_LOG) < 1) {
                 HarvestCore.approachDropPhysically(bot, drop);
                 if (!nudgeObserved.get()
-                        && bot.getPos().squaredDistanceTo(startPose) > 0.01D) {
+                        && bot.getEntityPos().squaredDistanceTo(startPose) > 0.01D) {
                     nudgeObserved.set(true);
                     drop.resetPickupDelay();
                 }
@@ -402,7 +402,7 @@ public final class ActionPackPhysicalSnapGameTests {
                             > pickupBaseline,
                     "same-cell edge pickup did not publish vanilla pickup credit");
             require(context, !drop.isAlive(), "picked same-cell edge drop remained alive");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -472,7 +472,7 @@ public final class ActionPackPhysicalSnapGameTests {
                     "fixture never exercised the active route before failing");
             require(context, bot.getActionPack().isMiningIdle(),
                     "failed-closed surface replan left a mining action active");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -515,7 +515,7 @@ public final class ActionPackPhysicalSnapGameTests {
                         + bot.getBlockPos().toShortString());
         require(context, bot.getBlockPos().getY() >= invalid.getY(),
                 "constrained admission crossed its minimumY");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -555,7 +555,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 "goal-only cooldown retained the old route contract");
         require(context, goal.equals(bot.getActionPack().activePathGoal()),
                 "replacement did not own the exact active goal");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -595,7 +595,7 @@ public final class ActionPackPhysicalSnapGameTests {
                         && singletonResult.reason().contains("terminal_goal_not_exact"),
                 "singleton constrained path accepted adjacent terminal: "
                         + singletonResult.reason());
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -740,7 +740,7 @@ public final class ActionPackPhysicalSnapGameTests {
                             + finished.reason());
             require(context, bot.getBlockPos().equals(goal),
                     "terminal return lease was not exercised at the exact goal");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -779,7 +779,7 @@ public final class ActionPackPhysicalSnapGameTests {
         require(context, Standability.isStandable(world, bot.getBlockPos()),
                 "physical recovery ended on a non-standable cell");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -822,7 +822,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 "failed exact-reserve planning changed mission inventory");
         require(context, world.getBlockState(start).isAir(),
                 "failed exact-reserve planning placed a support block");
-        AIPlayerManager.INSTANCE.despawn(exact.getServer(), exactName);
+        AIPlayerManager.INSTANCE.despawn(exact.getEntityWorld().getServer(), exactName);
 
         prepareOnePillarExit(world, start);
         String surplusName = "R" + reserve + "Plus";
@@ -863,7 +863,7 @@ public final class ActionPackPhysicalSnapGameTests {
                             + " actual=" + InventoryAction.countItem(surplus, Items.COBBLESTONE));
             require(context, ticks.get() > 1,
                     "path completed without executing the planned physical pillar");
-            AIPlayerManager.INSTANCE.despawn(surplus.getServer(), surplusName);
+            AIPlayerManager.INSTANCE.despawn(surplus.getEntityWorld().getServer(), surplusName);
             context.complete();
         });
     }

@@ -304,7 +304,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // B:bot 在地下(头顶不见天)且附近找不到可达资源时,上浮到正上方最近的"露天可站点",再重试采集。
     // teleport 上浮(会清 fallDistance);已在露天则不动。是"集中采集"之外的兜底,极少触发。
     private boolean trySurface(AIPlayerEntity bot) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         if (world.isSkyVisible(feet)) {
             return false;
@@ -334,7 +334,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // 到达后由 SURVEY 近处(16 格)接管精确采集。限频(PROSPECT_INTERVAL)护 TPS。
     // 本次没结果(限频未到 / 范围内真没该资源)返回 false,交 roam 盲目换片兜底(可走到探测范围外)。
     private boolean prospectAndApproach(AIPlayerEntity bot) {
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         if (now - lastProspectTick < PROSPECT_INTERVAL) {
             return false;
         }
@@ -346,7 +346,7 @@ public final class GatherQuotaTask extends AbstractTask {
             EpisodeMemory.INSTANCE.exclude(botId, lastProspectFound, now, EpisodeMemory.TTL_UNREACHABLE);
             lastProspectFound = null;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos found = OreProspector.nearest(bot, PROSPECT_RANGE,
                 state -> harvestBlocks.contains(state.getBlock()),
                 pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, now));
@@ -441,7 +441,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (++roamCount > MAX_ROAMS) {
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         int[][] dirs = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
         int start = Math.floorMod(roamCount, dirs.length);
@@ -456,7 +456,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 BlockPos ground = findGroundAt(world, feet.getX() + d[0] * dist, feet.getZ() + d[1] * dist);
                 if (ground == null
                         || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), ground, bot.getServer().getTicks())
+                        bot.getUuid(), ground, bot.getEntityWorld().getServer().getTicks())
                         || (avoidTrail && EpisodeMemory.INSTANCE.nearTrail(
                         bot.getUuid(), "gather", ground, 10.0D))) {
                     continue;
@@ -516,12 +516,12 @@ public final class GatherQuotaTask extends AbstractTask {
         if (exploreHops >= EXPLORE_MAX_HOPS) {
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         exploreHint = null;
         boolean aimed = false;
         // 记忆导向:语义知识库(跨会话)里最近的同类资源点 → 直奔(哪怕中途轻扫先截胡也赚)。
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         for (Block block : harvestBlocks) {
             var known = io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE.nearestResource(
                     bot.getUuid(), Registries.BLOCK.getId(block).toString(), feet, KNOWN_RESOURCE_RANGE,
@@ -575,7 +575,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // 不比当前远 10%+(防偏角扇形越带越偏)。第一个 startPathTo 不失败的候选即采用(寻路成功即已出发);
     // 同步 A* 实跑封顶 EXPLORE_PATH_ATTEMPTS 次防单 tick 长卡。
     private BlockPos pickExploreWaypoint(AIPlayerEntity bot) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         double bx = bot.getX();
         double bz = bot.getZ();
         double maxHintDistSq = Double.MAX_VALUE;
@@ -592,7 +592,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 BlockPos candidate = findGroundAt(world, (int) Math.floor(bx + dist * cos), (int) Math.floor(bz + dist * sin));
                 if (candidate == null || !isDryColumn(world, candidate)
                         || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), candidate, bot.getServer().getTicks())) {
+                        bot.getUuid(), candidate, bot.getEntityWorld().getServer().getTicks())) {
                     continue;
                 }
                 if (exploreHint != null && candidate.getSquaredDistance(exploreHint) > maxHintDistSq) {
@@ -637,7 +637,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         // ② 途中轻扫(每 EXPLORE_SCAN_INTERVAL tick,16 格):看到目标方块就收手,交回 SURVEY 精确采集。
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         if (now - lastExploreScanTick >= EXPLORE_SCAN_INTERVAL) {
             lastExploreScanTick = now;
             BlockPos seen = OreProspector.nearest(bot, 16,
@@ -693,7 +693,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         // F1:大半径扫描限频,避免每 tick 扫 48 格立方体拖 TPS。
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         if (searchRadius > SEARCH_RADIUS && now - lastScanTick < LARGE_SCAN_THROTTLE_TICKS) {
             return;
         }
@@ -750,7 +750,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (exploreHops > 0 && exploredSinceFind) {
             io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.record(bot,
                     io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, targetPos,
-                    Registries.BLOCK.getId(bot.getServerWorld().getBlockState(targetPos).getBlock()).toString());
+                    Registries.BLOCK.getId(bot.getEntityWorld().getBlockState(targetPos).getBlock()).toString());
             exploredSinceFind = false;
             BotLog.action(bot, "gather_explore_found",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ(),
@@ -798,7 +798,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (bot.isTouchingWater()) {
             bot.getActionPack().stopAll();
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
             BotLog.action(bot, "gather_goto_water_bail",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ());
             targetPos = null;
@@ -819,7 +819,7 @@ public final class GatherQuotaTask extends AbstractTask {
             if (elapsed - gotoStuckTick >= GOTO_STUCK_LIMIT) {
                 bot.getActionPack().stopAll();
                 EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                        bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                        bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
                 BotLog.action(bot, "gather_goto_unstick",
                         "pos", hereNow.toShortString(), "on_ground", bot.isOnGround());
                 gotoStuckPos = null;
@@ -837,7 +837,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 // toward an exact-break target.
                 bot.getActionPack().stopAll();
                 EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                        bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                        bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
                 BotLog.action(bot, name() + "_target_unreachable", "pos", targetPos.toShortString(),
                         "block", exactBreakTargetLabel);
                 targetPos = null;
@@ -864,7 +864,7 @@ public final class GatherQuotaTask extends AbstractTask {
             }
             // 步行+挖掘接近都到不了 → 拉黑换树(survey posFilter 不再重锁;治乒乓死循环)。
             if (++gotoFailStreak >= GOTO_FAIL_EXCLUDE) {
-                EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos, bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos, bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
                 BotLog.action(bot, "gather_target_excluded",
                         "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ(),
                         "fails", gotoFailStreak);
@@ -888,7 +888,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (elapsed - harvestStartedTick > HARVEST_LIMIT) {
             bot.getActionPack().stopAll();
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
             BotLog.action(bot, "gather_harvest_timeout", "pos", targetPos.toShortString());
             targetPos = null;
             clearPickupLedger();
@@ -1087,15 +1087,15 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         if (targetPos != null) {
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         }
         if (roamTarget != null) {
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), roamTarget,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         }
         if (exploreTarget != null) {
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), exploreTarget,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         }
         roamTarget = null;
         exploreTarget = null;
@@ -1119,7 +1119,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         EpisodeMemory.INSTANCE.exclude(bot.getUuid(), exploreHint,
-                bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         BotLog.action(bot, "gather_known_hint_excluded",
                 "pos", exploreHint.toShortString(), "reason", reason);
         exploreHint = null;
@@ -1192,7 +1192,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private boolean isHarvestBlock(AIPlayerEntity bot, BlockPos pos) {
-        return harvestBlocks.contains(bot.getServerWorld().getBlockState(pos).getBlock());
+        return harvestBlocks.contains(bot.getEntityWorld().getBlockState(pos).getBlock());
     }
 
     // 觅食野食族:浆果 / 西瓜片(都是野生即取、可直接吃);采任一凑数(哪个近采哪个)。

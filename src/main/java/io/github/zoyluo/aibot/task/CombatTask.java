@@ -231,7 +231,7 @@ public final class CombatTask extends AbstractTask {
             }
             return false;
         }
-        Vec3d faceTowards = incoming != null ? incoming.projectile().getPos() : fusingCreeper.getPos();
+        Vec3d faceTowards = incoming != null ? incoming.projectile().getEntityPos() : fusingCreeper.getEntityPos();
         LookAction.lookAt(bot, faceTowards);
         if (!bot.isUsingItem() || bot.getActiveHand() != Hand.OFF_HAND) {
             InteractAction.useItemInAir(bot, Hand.OFF_HAND);
@@ -249,7 +249,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private static LivingEntity nearbyImminentCreeper(AIPlayerEntity bot) {
-        return bot.getServerWorld().getEntitiesByClass(CreeperEntity.class,
+        return bot.getEntityWorld().getEntitiesByClass(CreeperEntity.class,
                         bot.getBoundingBox().expand(SHIELD_CREEPER_FUSE_RANGE),
                         creeper -> creeper.isAlive()
                                 && ObservableWorldQuery.canObserveEntity(bot, creeper)
@@ -623,7 +623,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private List<LivingEntity> observableActiveHostiles(AIPlayerEntity bot) {
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                 LivingEntity.class,
                 bot.getBoundingBox().expand(CombatCore.hostilePressureScanRange()),
                 entity -> entity != bot
@@ -807,8 +807,8 @@ public final class CombatTask extends AbstractTask {
         if (!ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
             return false;
         }
-        return !bot.getServerWorld().getBlockState(pos)
-                .getCollisionShape(bot.getServerWorld(), pos).isEmpty();
+        return !bot.getEntityWorld().getBlockState(pos)
+                .getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
     }
 
     private void abandonPeekaboo(AIPlayerEntity bot, String reason) {

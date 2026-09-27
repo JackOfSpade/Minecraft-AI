@@ -81,7 +81,7 @@ public final class HuntCrossRegionGameTests {
             require(context, "CLOSED_COLLECTED".equals(
                             task.checkpoint().get("transaction_state")),
                     "OPEN checkpoint was not covered by a CLOSED receipt");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -132,7 +132,7 @@ public final class HuntCrossRegionGameTests {
             require(context, "CLOSED_COLLECTED".equals(
                             task.checkpoint().get("transaction_state")),
                     "OPEN checkpoint was not covered by a CLOSED receipt");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -181,7 +181,7 @@ public final class HuntCrossRegionGameTests {
             require(context, task.describe().contains("phase=ACQUIRE")
                             || task.describe().contains("phase=ROAM"),
                     "successor hunt did not resume acquisition: " + task.describe());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -248,7 +248,7 @@ public final class HuntCrossRegionGameTests {
                 require(context, cowDamaged,
                         "distant prey hunt died before reaching the herd: "
                                 + task.failureReason());
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
                 return;
             }
@@ -257,7 +257,7 @@ public final class HuntCrossRegionGameTests {
             }
             require(context, InventoryAction.countItem(bot, Items.BEEF) >= 1 || cowDamaged,
                     "distant prey hunt collected no raw meat");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -311,7 +311,7 @@ public final class HuntCrossRegionGameTests {
             require(context, !io.github.zoyluo.aibot.mode.ObservableWorldQuery
                             .canObserveEntityWithin(bot, walledCow, 64),
                     "terrain stopped hiding prey at prey-sight range");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -425,7 +425,7 @@ public final class HuntCrossRegionGameTests {
                             + task.failureReason());
             require(context, world.getServer().getTicks() - assignedTick.get() <= 3,
                     "restored pickup received a fresh recovery deadline");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -472,7 +472,7 @@ public final class HuntCrossRegionGameTests {
         context.runAtEveryTick(() -> {
             String description = task.describe();
             if (!unloaded.get() && description.contains("phase=APPROACH")) {
-                Vec3d preyPos = original.getPos();
+                Vec3d preyPos = original.getEntityPos();
                 original.remove(Entity.RemovalReason.UNLOADED_TO_CHUNK);
                 var reloaded = EntityType.CHICKEN.create(world, SpawnReason.COMMAND);
                 require(context, reloaded != null, "failed to recreate unloaded chicken");
@@ -510,7 +510,7 @@ public final class HuntCrossRegionGameTests {
             require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.CHICKEN)
                             > pickupBaseline,
                     "reloaded hunt did not collect meat through vanilla pickup");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -603,7 +603,7 @@ public final class HuntCrossRegionGameTests {
             require(context, bot.getBlockPos().getX() >= start.getX() + 4,
                     "hunt never physically advanced onto the retry ridge: "
                             + bot.getBlockPos().toShortString());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -684,7 +684,7 @@ public final class HuntCrossRegionGameTests {
                                 && world.getBlockState(wall.add(dx, 1, 0)).isOf(Blocks.STONE),
                         "hidden-drop route dug through its occluding wall");
             }
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -766,7 +766,7 @@ public final class HuntCrossRegionGameTests {
             require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.MUTTON)
                             > pickedMuttonBaseline,
                     "mutton inventory changed without a vanilla physical pickup statistic");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -865,7 +865,7 @@ public final class HuntCrossRegionGameTests {
                     "wet prey UUID was not retained through dry-ground recovery");
             require(context, sheep.isAlive(),
                     "hunt immediately retargeted and killed the same sheep after water rescue");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -926,7 +926,7 @@ public final class HuntCrossRegionGameTests {
             }
             require(context, task.state() == TaskState.RUNNING,
                     "fresh surface hunt did not continue into acquisition");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -983,7 +983,7 @@ public final class HuntCrossRegionGameTests {
             require(context, bot.getBlockPos().equals(start),
                     "rejected deep hunt moved before establishing a surface fact: "
                             + bot.getBlockPos().toShortString());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1037,7 +1037,7 @@ public final class HuntCrossRegionGameTests {
                             + bot.getBlockPos().toShortString());
             require(context, InventoryAction.countItem(bot, Items.CHICKEN) == 1,
                     "quota-return fixture lost its physical raw meat");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1130,7 +1130,7 @@ public final class HuntCrossRegionGameTests {
             }
             require(context, InventoryAction.countItem(bot, Items.CHICKEN) == 0,
                     "below-floor chicken entered inventory");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1245,7 +1245,7 @@ public final class HuntCrossRegionGameTests {
             require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.BEEF)
                             == pickupBaseline,
                     "one-way beef changed vanilla pickup statistics");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1386,7 +1386,7 @@ public final class HuntCrossRegionGameTests {
             require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.CHICKEN)
                             > pickupBaseline,
                     "moving-prey meat did not enter through vanilla pickup statistics");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1521,7 +1521,7 @@ public final class HuntCrossRegionGameTests {
                             && acquireObserved.get(),
                     "fixture did not prove the pickup-stat competition");
             task.cancel(bot, "gametest_pickup_stat_debt_settled");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1595,7 +1595,7 @@ public final class HuntCrossRegionGameTests {
                 return;
             }
             task.cancel(bot, "gametest_external_death_reacquired");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1695,7 +1695,7 @@ public final class HuntCrossRegionGameTests {
                             && InventoryAction.countItem(bot, Items.BEEF) > inventoryBaseline,
                     "fresh cow beef was not physically collected");
             task.cancel(bot, "gametest_old_drop_ignored");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1780,7 +1780,7 @@ public final class HuntCrossRegionGameTests {
             require(context, !task.failureReason().startsWith("hunt_drop_unrecovered"),
                     "zero-raw credited kill became a false pickup debt");
             task.cancel(bot, "gametest_cooked_drop_reacquired");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1861,7 +1861,7 @@ public final class HuntCrossRegionGameTests {
                     "hunt meat did not enter through vanilla pickup statistics");
             require(context, bot.getBlockPos().getX() >= start.getX() + 12,
                     "hunt never crossed the initial perception region: " + bot.getBlockPos().toShortString());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1883,7 +1883,7 @@ public final class HuntCrossRegionGameTests {
         HuntSearchCursor cursor = HuntSearchCursor.initial();
         BlockPos anchor = bot.getBlockPos();
         boolean established = cursor.setSurfaceAnchorIfAbsent(
-                bot.getServerWorld().getRegistryKey().getValue().toString(),
+                bot.getEntityWorld().getRegistryKey().getValue().toString(),
                 anchor.getX(), anchor.getY(), anchor.getZ());
         if (!established) {
             throw new IllegalStateException("failed to establish Hunt GameTest surface anchor");

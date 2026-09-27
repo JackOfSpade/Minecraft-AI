@@ -44,7 +44,7 @@ public final class HarvestCore {
         return firstWalkReachable(bot, origin,
                 BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
                         .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                        .filter(pos -> bot.getServerWorld().getBlockState(pos).isOf(targetBlock))
+                        .filter(pos -> bot.getEntityWorld().getBlockState(pos).isOf(targetBlock))
                         .map(BlockPos::toImmutable)
                         .map(pos -> targetChoice(bot, pos))
                         .filter(choice -> choice != null));
@@ -80,7 +80,7 @@ public final class HarvestCore {
                 BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
                         .filter(pos -> canObserveHarvestTarget(
                                 bot, pos, allowObservableCellFallback))
-                        .filter(pos -> targetBlocks.contains(bot.getServerWorld().getBlockState(pos).getBlock()))
+                        .filter(pos -> targetBlocks.contains(bot.getEntityWorld().getBlockState(pos).getBlock()))
                         .filter(pos -> posFilter == null || posFilter.test(pos))
                         .map(BlockPos::toImmutable)
                         .map(pos -> targetChoice(bot, pos))
@@ -88,7 +88,7 @@ public final class HarvestCore {
     }
 
     public static void startMining(AIPlayerEntity bot, BlockPos targetPos) {
-        ToolSelector.equipBestTool(bot, bot.getServerWorld().getBlockState(targetPos));
+        ToolSelector.equipBestTool(bot, bot.getEntityWorld().getBlockState(targetPos));
         MiningAction.startMining(bot, targetPos, Direction.getFacing(bot.getEyePos().subtract(targetPos.toCenterPos())));
     }
 
@@ -97,7 +97,7 @@ public final class HarvestCore {
     }
 
     public static Optional<ItemEntity> nearestDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(ItemEntity.class, bot.getBoundingBox().expand(radius),
                         entity -> !entity.getStack().isEmpty() && matches(entity.getStack(), items)
                                 && ObservableWorldQuery.canObserveEntity(bot, entity))
@@ -114,7 +114,7 @@ public final class HarvestCore {
             return false;
         }
         Box box = bot.getBoundingBox().expand(maxH, maxV, maxH);
-        List<ItemEntity> drops = bot.getServerWorld().getEntitiesByClass(ItemEntity.class, box,
+        List<ItemEntity> drops = bot.getEntityWorld().getEntitiesByClass(ItemEntity.class, box,
                 entity -> !entity.getStack().isEmpty()
                         && matches(entity.getStack(), items)
                         && ObservableWorldQuery.canObserveEntity(bot, entity)
@@ -201,7 +201,7 @@ public final class HarvestCore {
         if (!isDropPhysicallySupported(bot, drop)) {
             return false;
         }
-        return approachKnownPickupCell(bot, drop.getBlockPos(), drop.getPos(), false);
+        return approachKnownPickupCell(bot, drop.getBlockPos(), drop.getEntityPos(), false);
     }
 
     /**
@@ -226,7 +226,7 @@ public final class HarvestCore {
         int horizontal = Math.abs(shaftBase.getX() - current.getX())
                 + Math.abs(shaftBase.getZ() - current.getZ());
         if (vertical == -1 && horizontal == 0
-                && Standability.isStandable(bot.getServerWorld(), shaftBase)) {
+                && Standability.isStandable(bot.getEntityWorld(), shaftBase)) {
             bot.getActionPack().descendInto(shaftBase);
             return true;
         }
@@ -255,7 +255,7 @@ public final class HarvestCore {
                 bounds.maxX,
                 bounds.minY,
                 bounds.maxZ);
-        return bot.getServerWorld().findSupportingBlockPos(drop, supportProbe).isPresent();
+        return bot.getEntityWorld().findSupportingBlockPos(drop, supportProbe).isPresent();
     }
 
     /**
@@ -288,7 +288,7 @@ public final class HarvestCore {
                 + Math.abs(stand.getZ() - current.getZ());
 
         if (vertical == -1 && horizontal == 0
-                && Standability.isStandable(bot.getServerWorld(), stand)) {
+                && Standability.isStandable(bot.getEntityWorld(), stand)) {
             // Server-side fake players receive no client gravity. Enter the adjacent open cell
             // explicitly; ActionPack validates this as a single physical fake-client step.
             bot.getActionPack().descendInto(stand);
@@ -443,12 +443,12 @@ public final class HarvestCore {
         // that is useful for an elevated drop on a pedestal, but it cannot close an ordinary
         // one-block horizontal gap reliably under vanilla pickup collision.
         if (itemPos.getY() == current.getY()
-                && Standability.isStandable(bot.getServerWorld(), itemPos)) {
+                && Standability.isStandable(bot.getEntityWorld(), itemPos)) {
             return itemPos.toImmutable();
         }
         BlockPos below = itemPos.down();
         if (itemPos.getY() == current.getY() + 1
-                && Standability.isStandable(bot.getServerWorld(), below)) {
+                && Standability.isStandable(bot.getEntityWorld(), below)) {
             // A launch-drifted drop one block above and one block sideways can be visible while
             // the nearest generic candidate is the current lower-ring cell. Nudging inside that
             // cell never crosses the horizontal block boundary, so the item can survive until the
@@ -472,7 +472,7 @@ public final class HarvestCore {
                 below.west()
         };
         for (BlockPos candidate : candidates) {
-            if (!Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 continue;
             }
             double distance = candidate.getSquaredDistance(current);
@@ -500,7 +500,7 @@ public final class HarvestCore {
         if (bot == null || itemPos == null) {
             return null;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         for (int depth = 0; depth <= PICKUP_DRY_SHAFT_DEPTH; depth++) {
             BlockPos cell = itemPos.down(depth);
             if (!ObservableWorldQuery.canObserveCell(bot, cell)
@@ -551,7 +551,7 @@ public final class HarvestCore {
         if (stand == null || bot.getBlockPos().equals(stand)) {
             return true; // 够得着直接挖 / 已在站位,无需寻路
         }
-        return new AStarPathfinder(bot, bot.getServerWorld(), bot.getBlockPos(), stand,
+        return new AStarPathfinder(bot, bot.getEntityWorld(), bot.getBlockPos(), stand,
                 REACH_MAX_NODES, REACH_MAX_MILLIS, false, false).findPath().success();
     }
 
@@ -570,7 +570,7 @@ public final class HarvestCore {
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction);
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

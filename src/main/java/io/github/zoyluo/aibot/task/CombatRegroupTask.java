@@ -85,7 +85,7 @@ public final class CombatRegroupTask extends AbstractTask {
     }
 
     private void strikeAnyAdjacentHostile(AIPlayerEntity bot) {
-        bot.getServerWorld().getEntitiesByClass(LivingEntity.class,
+        bot.getEntityWorld().getEntitiesByClass(LivingEntity.class,
                         bot.getBoundingBox().expand(MELEE_STRIKE_RANGE + 1.0D),
                         entity -> entity instanceof MobEntity mob
                                 && mob.isAlive()

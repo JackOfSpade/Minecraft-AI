@@ -14,11 +14,13 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
+import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Unit;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
+import java.util.Locale;
 import java.util.OptionalInt;
 
 public final class SleepTask extends AbstractTask {
@@ -122,7 +124,7 @@ public final class SleepTask extends AbstractTask {
             fail("selected_item_not_bed");
             return;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockState foot = bedBlock.getDefaultState()
                 .with(HorizontalFacingBlock.FACING, placement.facing())
                 .with(BedBlock.PART, BedPart.FOOT);
@@ -142,7 +144,7 @@ public final class SleepTask extends AbstractTask {
     }
 
     private void walkToBed(AIPlayerEntity bot) {
-        if (bedPos == null || !(bot.getServerWorld().getBlockState(bedPos).getBlock() instanceof BedBlock)) {
+        if (bedPos == null || !(bot.getEntityWorld().getBlockState(bedPos).getBlock() instanceof BedBlock)) {
             phase = Phase.FIND_BED;
             return;
         }
@@ -166,16 +168,37 @@ public final class SleepTask extends AbstractTask {
     private void sleep(AIPlayerEntity bot) {
         Either<PlayerEntity.SleepFailureReason, Unit> result = bot.trySleep(bedPos);
         if (result.left().isPresent()) {
-            fail("sleep_failed:" + result.left().get().name().toLowerCase());
+            fail("sleep_failed:" + failureName(result.left().get()));
             return;
         }
         sleepWaitTicks = 0;
         phase = Phase.WAIT_MORNING;
     }
 
+    /** SleepFailureReason stopped being an enum in 1.21.11: name the known constants, else use the message key. */
+    private static String failureName(PlayerEntity.SleepFailureReason reason) {
+        if (reason == PlayerEntity.SleepFailureReason.TOO_FAR_AWAY) {
+            return "too_far_away";
+        }
+        if (reason == PlayerEntity.SleepFailureReason.OBSTRUCTED) {
+            return "obstructed";
+        }
+        if (reason == PlayerEntity.SleepFailureReason.NOT_SAFE) {
+            return "not_safe";
+        }
+        if (reason == PlayerEntity.SleepFailureReason.OTHER) {
+            return "other_problem";
+        }
+        if (reason.message().getContent() instanceof TranslatableTextContent translatable) {
+            String key = translatable.getKey();
+            return key.substring(key.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+        }
+        return "unknown";
+    }
+
     private void waitMorning(AIPlayerEntity bot) {
         sleepWaitTicks++;
-        if (bot.getServerWorld().isDay()) {
+        if (bot.getEntityWorld().isDay()) {
             if (bot.isSleeping()) {
                 bot.wakeUp();
             }
@@ -199,7 +222,7 @@ public final class SleepTask extends AbstractTask {
         return BlockPos.stream(center.add(-radius, -3, -radius), center.add(radius, 3, radius))
                 .map(BlockPos::toImmutable)
                 .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> bot.getServerWorld().getBlockState(pos).getBlock() instanceof BedBlock)
+                .filter(pos -> bot.getEntityWorld().getBlockState(pos).getBlock() instanceof BedBlock)
                 .min((left, right) -> Double.compare(left.getSquaredDistance(origin), right.getSquaredDistance(origin)))
                 .orElse(null);
     }
@@ -210,9 +233,9 @@ public final class SleepTask extends AbstractTask {
 
     private static BlockPos rememberedBed(AIPlayerEntity bot) {
         return BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getServerWorld(), "bed", "home", "base")
+                .placeIn(bot.getEntityWorld(), "bed", "home", "base")
                 .map(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
-                        && bot.getServerWorld().getBlockState(pos).getBlock() instanceof BedBlock
+                        && bot.getEntityWorld().getBlockState(pos).getBlock() instanceof BedBlock
                         ? pos.toImmutable()
                         : findBedNear(bot, pos, 4))
                 .orElse(null);
@@ -245,7 +268,7 @@ public final class SleepTask extends AbstractTask {
     }
 
     private static boolean canPlaceBedAt(AIPlayerEntity bot, BlockPos foot, BlockPos head) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos botFeet = bot.getBlockPos();
         if (foot.equals(botFeet) || foot.equals(botFeet.up()) || head.equals(botFeet) || head.equals(botFeet.up())) {
             return false;
@@ -269,7 +292,7 @@ public final class SleepTask extends AbstractTask {
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction);
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

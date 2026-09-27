@@ -26,7 +26,7 @@ public final class CapabilityRuntime {
                 config.profile(), config.operatorCapabilities(), capability);
         MiningEvidenceAudit.recordCapabilityDecision(bot, decision.allowed());
         String normalizedContext = context == null ? "" : context;
-        int now = bot.getServer().getTicks();
+        int now = bot.getEntityWorld().getServer().getTicks();
         AuditKey key = new AuditKey(bot.getUuid(), capability, normalizedContext, decision.allowed());
         Integer next = NEXT_LOG_TICK.get(key);
         boolean alwaysAudit = capability == PrivilegedCapability.MANUAL_TELEPORT

@@ -32,7 +32,7 @@ public final class EpisodeLog {
 
     public void record(AIPlayerEntity bot, Type type, BlockPos pos, String detail) {
         Deque<EpisodeEvent> deque = events.computeIfAbsent(bot.getUuid(), k -> new ArrayDeque<>());
-        EpisodeEvent event = new EpisodeEvent(bot.getServer().getTicks(), type,
+        EpisodeEvent event = new EpisodeEvent(bot.getEntityWorld().getServer().getTicks(), type,
                 pos.toImmutable(), detail == null ? "" : detail);
         synchronized (deque) {
             deque.addLast(event);

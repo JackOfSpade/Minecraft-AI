@@ -11,11 +11,11 @@ public final class InteractAction {
     }
 
     public static ActionResult attackEntity(AIPlayerEntity player, Entity target) {
-        Vec3d targetCenter = target.getPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
+        Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
         LookAction.lookAt(player, targetCenter);
         player.attack(target);
         player.swingHand(Hand.MAIN_HAND);
-        player.resetLastAttackedTicks();
+        player.resetTicksSinceLastAttack();
         player.updateLastActionTime();
         BotLog.action(player, "attack", "target_type", target.getType(), "target_id", target.getId());
         return ActionResult.SUCCESS;
@@ -29,7 +29,7 @@ public final class InteractAction {
     public static ActionResult useItemInAir(AIPlayerEntity player, Hand hand) {
         net.minecraft.util.ActionResult result = player.interactionManager.interactItem(
                 player,
-                player.getServerWorld(),
+                player.getEntityWorld(),
                 player.getStackInHand(hand),
                 hand);
         return result.isAccepted() ? ActionResult.SUCCESS : ActionResult.failed("interact_item_" + result.getClass().getSimpleName());

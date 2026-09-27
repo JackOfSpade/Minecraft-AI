@@ -208,7 +208,7 @@ final class ShelterCleanupTask extends AbstractTask {
         for (int dy = -1; dy <= 1; dy++) {
             for (Direction direction : Direction.Type.HORIZONTAL) {
                 BlockPos candidate = target.offset(direction).up(dy);
-                if (!Standability.isStandable(bot.getServerWorld(), candidate)) {
+                if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
                     continue;
                 }
                 double distance = candidate.getSquaredDistance(target);

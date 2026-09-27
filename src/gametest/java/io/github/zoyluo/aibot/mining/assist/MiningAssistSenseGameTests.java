@@ -158,7 +158,7 @@ public final class MiningAssistSenseGameTests {
             }
             // The log lines are written by a background thread: give them a moment, then check the record a
             // reviewer would read ("did the sensor run, and what did it believe it saw").
-            List<String> lines = botLog(bot.getGameProfile().getName());
+            List<String> lines = botLog(bot.getGameProfile().name());
             if (lines == null || !hasSpawnLine(lines)) {
                 LOG.info("[assist-gametest] visible_ore log check skipped (per-bot log unavailable)");
                 h.pass();
@@ -413,7 +413,7 @@ public final class MiningAssistSenseGameTests {
                 h.require(!section.startsWith("assist_"), "an un-forced bot recorded assist profiler section " + section);
             }
             h.require(!BotEdits.wasDug(bot, coal), "an un-forced bot's break was recorded in the assist dug ring");
-            List<String> lines = botLog(bot.getGameProfile().getName());
+            List<String> lines = botLog(bot.getGameProfile().name());
             if (lines != null && hasSpawnLine(lines)) {
                 List<String> events = new ArrayList<>(assistEvents(lines));
                 // With another forced bot elsewhere the gate is consulted (and logs its refusal); nothing else may appear.
@@ -900,7 +900,7 @@ public final class MiningAssistSenseGameTests {
             }
             for (AIPlayerEntity bot : bots) {
                 h.require(TaskManager.INSTANCE.getActive(bot).isPresent(),
-                        bot.getGameProfile().getName() + " lost its mining task during the cost run");
+                        bot.getGameProfile().name() + " lost its mining task during the cost run");
             }
             if (!warmed[0] && p.tick - p.assignedAt >= warmupTicks) {
                 // The first sweep step and the first POI evaluation of a JVM that has never run them are class-loading and
@@ -923,7 +923,7 @@ public final class MiningAssistSenseGameTests {
             double sweepAvgSum = 0.0D;
             double worstMax = 0.0D;
             for (AIPlayerEntity bot : bots) {
-                String name = bot.getGameProfile().getName();
+                String name = bot.getGameProfile().name();
                 MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
                 h.require(state != null, name + " has no assist state after the run");
                 h.require(state.lifetimeRays() >= (long) (runTicks - 20) * MiningAssistConfig.Sense.DEFAULT_RAYS_PER_TICK,
@@ -952,7 +952,7 @@ public final class MiningAssistSenseGameTests {
                     "the coordinator's exception fence fired during the cost run");
             List<String> failures = new ArrayList<>();
             for (AIPlayerEntity bot : bots) {
-                List<String> lines = botLog(bot.getGameProfile().getName());
+                List<String> lines = botLog(bot.getGameProfile().name());
                 if (lines != null && hasSpawnLine(lines)) {
                     failures.addAll(assistEvents(lines).stream().filter(e -> e.equals("assist_tick_failed")).toList());
                 }
@@ -1085,7 +1085,7 @@ public final class MiningAssistSenseGameTests {
         AIPlayerEntity bot = h.spawn("AssistLifeGT", room, 0, 0);
         h.enableAssist(bot);
         UUID id = bot.getUuid();
-        String name = bot.getGameProfile().getName();
+        String name = bot.getGameProfile().name();
         Progress p = new Progress();
         MineTask[] task = new MineTask[1];
         int[] stage = {0};
@@ -1386,7 +1386,7 @@ public final class MiningAssistSenseGameTests {
         AIPlayerEntity bot = h.spawn("AssistClockGT", room, 0, 0);
         h.enableAssist(bot);
         UUID id = bot.getUuid();
-        String name = bot.getGameProfile().getName();
+        String name = bot.getGameProfile().name();
         Progress p = new Progress();
         int[] stage = {0};
         int[] stageStart = {0};
@@ -1646,7 +1646,7 @@ public final class MiningAssistSenseGameTests {
          * the sensor treats such rays as unknown, which is exactly what the run should then show.
          */
         boolean settle(AIPlayerEntity bot, Progress p) {
-            ServerWorld world = bot.getServerWorld();
+            ServerWorld world = bot.getEntityWorld();
             BlockPos feet = bot.getBlockPos();
             if (world.isSkyVisible(feet)) {
                 require(p.tick < 200, "the sealed fixture never became underground by the world's sky test");
@@ -1687,7 +1687,7 @@ public final class MiningAssistSenseGameTests {
          * the record of every capability decision the bot made from the bot's own log and requires that none was allowed.
          */
         void assertNoAllowedCapabilityDecision(AIPlayerEntity bot) {
-            List<String> lines = botLog(bot.getGameProfile().getName());
+            List<String> lines = botLog(bot.getGameProfile().name());
             if (lines == null || !hasSpawnLine(lines)) {
                 return;
             }
@@ -1696,8 +1696,8 @@ public final class MiningAssistSenseGameTests {
                     .count();
             long denied = lines.stream().filter(l -> l.contains("event=capability_decision")).count() - allowed;
             LOG.info("[assist-gametest] capability decisions for {}: allowed={} denied_lines={}",
-                    bot.getGameProfile().getName(), allowed, denied);
-            require(allowed == 0, "a privileged capability was ALLOWED for " + bot.getGameProfile().getName() + " during the run");
+                    bot.getGameProfile().name(), allowed, denied);
+            require(allowed == 0, "a privileged capability was ALLOWED for " + bot.getGameProfile().name() + " during the run");
         }
 
         void require(boolean condition, String message) {
@@ -1787,9 +1787,9 @@ public final class MiningAssistSenseGameTests {
         BlockPos relative = destination.subtract(bot.getBlockPos());
         h.require(result.isSuccess(), "the bot could not place " + item + " at " + destination.toShortString()
                 + " (" + relative.toShortString() + " from the bot, cell now "
-                + bot.getServerWorld().getBlockState(destination) + ", below "
-                + bot.getServerWorld().getBlockState(destination.down()) + "): " + result.reason());
-        ServerWorld world = bot.getServerWorld();
+                + bot.getEntityWorld().getBlockState(destination) + ", below "
+                + bot.getEntityWorld().getBlockState(destination.down()) + "): " + result.reason());
+        ServerWorld world = bot.getEntityWorld();
         h.require(!world.getBlockState(destination).isAir(), "placement of " + item + " left air at " + destination.toShortString());
         h.require(BotEdits.wasPlaced(world, destination),
                 "BotEdits did not record the bot's own placement of " + item + " at " + destination.toShortString());

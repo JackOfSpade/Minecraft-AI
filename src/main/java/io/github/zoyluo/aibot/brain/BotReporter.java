@@ -32,7 +32,7 @@ public final class BotReporter {
         }
         ReportState state = new ReportState(status.name(), status.description(), 25);
         states.put(bot.getUuid(), state);
-        report(bot, state, "Starting " + summary(status) + ".", bot.getServer().getTicks(), true);
+        report(bot, state, "Starting " + summary(status) + ".", bot.getEntityWorld().getServer().getTicks(), true);
     }
 
     public void onStatus(MinecraftServer server, AIPlayerEntity bot, TaskStatus status) {

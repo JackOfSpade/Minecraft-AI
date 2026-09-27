@@ -44,8 +44,8 @@ final class CombatRegroupGuard {
 
     static Optional<ServerPlayerEntity> resolveOwner(AIPlayerEntity bot) {
         return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(ownerId -> bot.getServer().getPlayerManager().getPlayer(ownerId))
-                .filter(player -> player.isAlive() && player.getServerWorld() == bot.getServerWorld());
+                .map(ownerId -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(ownerId))
+                .filter(player -> player.isAlive() && player.getEntityWorld() == bot.getEntityWorld());
     }
 
     static boolean shouldRegroup(AIPlayerEntity bot, boolean currentlyRegrouping) {

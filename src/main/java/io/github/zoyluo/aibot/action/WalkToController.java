@@ -44,9 +44,9 @@ public final class WalkToController {
         }
 
         var player = pack.player();
-        ServerWorld world = player.getServerWorld();
+        ServerWorld world = player.getEntityWorld();
         AIBotConfig.Nav nav = AIBotConfig.get().nav();
-        Vec3d current = player.getPos();
+        Vec3d current = player.getEntityPos();
         double dx = target.x - current.x;
         double dz = target.z - current.z;
         double horizontalDistance = Math.sqrt(dx * dx + dz * dz);

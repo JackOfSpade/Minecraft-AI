@@ -81,7 +81,7 @@ public final class MiningCheckpointMissionGameTests {
                     return;
                 }
                 BlockPos face = bot.getBlockPos().toImmutable();
-                var world = bot.getServerWorld();
+                var world = bot.getEntityWorld();
                 world.setBlockState(
                         face.north(), Blocks.GRAVEL.getDefaultState(), Block.NOTIFY_LISTENERS);
                 world.setBlockState(
@@ -149,7 +149,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.status() + ":" + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "trapped branch retained an active mission after terminal failure");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 115) {
                 context.throwGameTestException(Text.of(
@@ -255,7 +255,7 @@ public final class MiningCheckpointMissionGameTests {
                 require(context, result.goal().equals(goal)
                                 && result.status() == GoalResult.Status.COMPLETED,
                         "retried ore mission ended as " + result.status() + ":" + result.reason());
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 165) {
                 context.throwGameTestException(Text.of("retried ore mission did not complete"));
@@ -386,7 +386,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && hasUsableStonePickaxe(bot),
                         "ordinary bootstrap resupply changed mission/cursor/budget: "
                                 + checkpointSummary(checkpoint));
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
                 return;
             }
@@ -530,7 +530,7 @@ public final class MiningCheckpointMissionGameTests {
                                 .filter(missionId::equals).isPresent(),
                         "mission depot owner fact changed before descent");
                 BlockPos depotPos = memory.placeIn(
-                                bot.getServerWorld(), "mining_depot")
+                                bot.getEntityWorld(), "mining_depot")
                         .orElseThrow(() -> new IllegalStateException(
                                 "missing mission depot place"));
                 Inventory depot = ContainerAction.resolve(bot, depotPos).orElseThrow(
@@ -539,7 +539,7 @@ public final class MiningCheckpointMissionGameTests {
                         require(context, InventoryAction.countItem(bot, item)
                                         + countItem(depot, item) == expected,
                                 "final capacity boundary lost/duplicated " + item));
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 280) {
@@ -622,17 +622,17 @@ public final class MiningCheckpointMissionGameTests {
                     for (int dx = -2; dx <= 2; dx++) {
                         for (int dz = -2; dz <= 2; dz++) {
                             BlockPos cell = face.add(dx, 0, dz);
-                            bot.getServerWorld().setBlockState(cell.down(),
+                            bot.getEntityWorld().setBlockState(cell.down(),
                                     Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                            bot.getServerWorld().setBlockState(cell,
+                            bot.getEntityWorld().setBlockState(cell,
                                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-                            bot.getServerWorld().setBlockState(cell.up(),
+                            bot.getEntityWorld().setBlockState(cell.up(),
                                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
                         }
                     }
-                    bot.getServerWorld().setBlockState(face.north(),
+                    bot.getEntityWorld().setBlockState(face.north(),
                             Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                    bot.getServerWorld().setBlockState(face.north().up(),
+                    bot.getEntityWorld().setBlockState(face.north().up(),
                             Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
                     Map<String, String> controlled = new LinkedHashMap<>(checkpoint);
                     String encodedFace = face.getX() + "," + face.getY() + "," + face.getZ();
@@ -673,7 +673,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && hasUsableStonePickaxe(bot),
                             "second ordinary batch repair escaped its finite mission budget: "
                                     + checkpointSummary(checkpoint));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                     return;
                 }
@@ -764,7 +764,7 @@ public final class MiningCheckpointMissionGameTests {
                 require(context, resumed.get()
                                 && result.status() == GoalResult.Status.COMPLETED,
                         "small channel retry ended as " + result.status() + ":" + result.reason());
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 500) {
                 context.throwGameTestException(Text.of(
@@ -818,7 +818,7 @@ public final class MiningCheckpointMissionGameTests {
             require(context, result.goal().equals(goal), "wrong goal completed");
             require(context, result.status() == GoalResult.Status.COMPLETED,
                     "restored mining mission ended as " + result.status() + ":" + result.reason());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), bot.getGameProfile().getName());
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), bot.getGameProfile().name());
             context.complete();
         });
     }
@@ -885,7 +885,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && InventoryAction.countItem(bot, Items.DIAMOND) == 8,
                         "fully-delivered ledger did not commit exactly once: "
                                 + result.status() + ":" + result.reason());
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
@@ -924,7 +924,7 @@ public final class MiningCheckpointMissionGameTests {
                             + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "wrong-count OreDig checkpoint retained an active mission");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -956,7 +956,7 @@ public final class MiningCheckpointMissionGameTests {
                     "satisfied restore bypassed invalid OreDig checkpoint: " + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "invalid OreDig checkpoint restored an active mission");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -988,7 +988,7 @@ public final class MiningCheckpointMissionGameTests {
                     "satisfied restore bypassed invalid mining namespace: " + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "invalid mining namespace restored an active mission");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1116,7 +1116,7 @@ public final class MiningCheckpointMissionGameTests {
                             && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "boundary-zero restore discarded an ordinary active-break ledger: "
                             + result.reason());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
             context.complete();
         });
     }
@@ -1141,7 +1141,7 @@ public final class MiningCheckpointMissionGameTests {
                                     + result.reason());
                     require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "wrong-mission ordinary service restored an active plan");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                 });
     }
@@ -1174,7 +1174,7 @@ public final class MiningCheckpointMissionGameTests {
                                     .noneMatch(key -> key.startsWith("mining.")),
                             "first ordinary service without mining namespace did not restore: "
                                     + checkpointSummary(after));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                 });
     }
@@ -1229,7 +1229,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
                             "failed fresh plan discarded an exact interrupted service: "
                                     + checkpointSummary(after));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                 });
     }
@@ -1272,7 +1272,7 @@ public final class MiningCheckpointMissionGameTests {
                                     + checkpointSummary(after));
                     require(context, GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
                             "terminal handoff restore published a premature result");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                 });
     }
@@ -1366,7 +1366,7 @@ public final class MiningCheckpointMissionGameTests {
                     TaskManager.INSTANCE.abort(bot);
                     TaskManager.INSTANCE.assign(bot, new HoldTask(),
                             TaskOrigin.safety("gametest_terminal_failure_capture_window"));
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
                     MissionRuntimeRecord capturedBeforeHandler =
                             GoalExecutor.INSTANCE.captureRuntime(bot);
                     require(context, capturedBeforeHandler.active() != null
@@ -1414,7 +1414,7 @@ public final class MiningCheckpointMissionGameTests {
                             "repeated capture changed terminal receipt budget or replan count");
 
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     MissionRuntimeRecord replanned =
                             GoalExecutor.INSTANCE.captureRuntime(bot);
@@ -1443,7 +1443,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !closedPrimary.equals(namespace(
                                     restored.active().checkpoint(), "mining.")),
                             "restart replayed failed primary service or its stale cursor");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -1478,7 +1478,7 @@ public final class MiningCheckpointMissionGameTests {
                             && failure.equals(afterTick.active().checkpoint().get(
                             "settled_service.0.failure")),
                     "successful slot attestation pruned the durable guard");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
             context.complete();
         });
     }
@@ -1526,7 +1526,7 @@ public final class MiningCheckpointMissionGameTests {
                     "repair fixture did not restore the typed terminal receipt");
 
             TaskManager.INSTANCE.abort(bot);
-            GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+            GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
             MissionRuntimeRecord onRepair = GoalExecutor.INSTANCE.captureRuntime(bot);
             require(context, onRepair.active() != null
                             && TaskManager.INSTANCE.getActive(bot)
@@ -1570,19 +1570,19 @@ public final class MiningCheckpointMissionGameTests {
                         "guarded service lost its mission before PREPARE");
                 Map<BlockPos, net.minecraft.block.BlockState> worldBefore =
                         snapshotGuardGeometry(bot, before.active().checkpoint());
-                Vec3d positionBefore = bot.getPos();
+                Vec3d positionBefore = bot.getEntityPos();
                 InventorySnapshot inventoryBefore = snapshotInventory(bot);
 
                 service.tick(bot);
                 require(context, service.state() == TaskState.FAILED
                                 && failure.equals(service.failureReason())
-                                && bot.getPos().squaredDistanceTo(positionBefore) < 0.000001D
+                                && bot.getEntityPos().squaredDistanceTo(positionBefore) < 0.000001D
                                 && inventoryBefore.matches(bot)
                                 && worldBefore.equals(snapshotGuardGeometry(
                                 bot, before.active().checkpoint())),
                         "guard hit moved the bot or mutated its pocket geometry");
                 TaskManager.INSTANCE.abort(bot);
-                GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
                 GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElse(null);
                 require(context, result != null
                                 && failure.equals(result.reason())
@@ -1593,7 +1593,7 @@ public final class MiningCheckpointMissionGameTests {
                         "guard hit entered generic replan or lost the typed reason: "
                                 + (result == null ? "missing" : result.reason()));
                 restartedOnRepair.set(false);
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
                 return;
             }
@@ -1622,12 +1622,12 @@ public final class MiningCheckpointMissionGameTests {
                     "mining_service_disposal_ore_preserved:minecraft:diamond_ore";
             MiningServiceTask.DisposalReplayGuard guard =
                     new MiningServiceTask.DisposalReplayGuard(
-                            bot.getServerWorld().getRegistryKey().getValue().toString(),
+                            bot.getEntityWorld().getRegistryKey().getValue().toString(),
                             geometry, failure);
             fillWithGlassUntilFreeSlots(bot, 0);
             Map<BlockPos, net.minecraft.block.BlockState> worldBefore =
                     snapshotGeometry(bot, geometry);
-            Vec3d positionBefore = bot.getPos();
+            Vec3d positionBefore = bot.getEntityPos();
             InventorySnapshot inventoryBefore = snapshotInventory(bot);
 
             MiningServiceTask foreign = new MiningServiceTask(
@@ -1639,7 +1639,7 @@ public final class MiningCheckpointMissionGameTests {
             foreign.tick(bot);
             require(context, foreign.state() == TaskState.FAILED
                             && failure.equals(foreign.failureReason())
-                            && bot.getPos().squaredDistanceTo(positionBefore) < 0.000001D
+                            && bot.getEntityPos().squaredDistanceTo(positionBefore) < 0.000001D
                             && inventoryBefore.matches(bot)
                             && worldBefore.equals(snapshotGeometry(bot, geometry)),
                     "foreign service escaped or mutated the shared physical guard");
@@ -1656,7 +1656,7 @@ public final class MiningCheckpointMissionGameTests {
                             rotatedService.checkpoint()),
                     "90-degree cursor rotation was incorrectly blocked by the old axis");
             rotatedService.abort(bot);
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1740,7 +1740,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && TaskManager.INSTANCE.getActive(bot).isEmpty(),
                         "guard decoder accepted " + variant + ": "
                                 + (result == null ? "missing" : result.reason()));
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
             }
 
             GuardFixture cursorless = settleBoundaryZeroGuard(
@@ -1766,7 +1766,7 @@ public final class MiningCheckpointMissionGameTests {
                             .equals(cursorlessResult.reason()),
                     "cursor-less terminal receipt passed strict service decode");
             AIPlayerManager.INSTANCE.despawn(
-                    cursorlessBot.getServer(), cursorless.name());
+                    cursorlessBot.getEntityWorld().getServer(), cursorless.name());
             context.complete();
         });
     }
@@ -1785,13 +1785,13 @@ public final class MiningCheckpointMissionGameTests {
             BlockPos oldFace = decodePos(rotated.get(
                     "settled_service.0.work_face"));
             BlockPos unrelatedFace = oldFace.east();
-            unrelated.bot().getServerWorld().setBlockState(unrelatedFace,
+            unrelated.bot().getEntityWorld().setBlockState(unrelatedFace,
                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-            unrelated.bot().getServerWorld().setBlockState(unrelatedFace.up(),
+            unrelated.bot().getEntityWorld().setBlockState(unrelatedFace.up(),
                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-            unrelated.bot().getServerWorld().setBlockState(unrelatedFace.down(),
+            unrelated.bot().getEntityWorld().setBlockState(unrelatedFace.down(),
                     Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-            unrelated.bot().teleport(unrelated.bot().getServerWorld(),
+            unrelated.bot().teleport(unrelated.bot().getEntityWorld(),
                     unrelatedFace.getX() + 0.5D, unrelatedFace.getY(),
                     unrelatedFace.getZ() + 0.5D, Set.of(),
                     0.0F, 0.0F, true);
@@ -1813,7 +1813,7 @@ public final class MiningCheckpointMissionGameTests {
                             "settled_service.count")),
                     "unrelated non-pocket active service was rejected or cleared guard");
             AIPlayerManager.INSTANCE.despawn(
-                    unrelated.bot().getServer(), unrelated.name());
+                    unrelated.bot().getEntityWorld().getServer(), unrelated.name());
 
             GuardFixture pocket = settleBoundaryZeroGuard(
                     context, "GuardRestorePocketGT", failure);
@@ -1840,7 +1840,7 @@ public final class MiningCheckpointMissionGameTests {
                     "guarded active pocket was not quarantined byte-exact");
             GoalExecutor.INSTANCE.cancelAll(pocket.bot());
             AIPlayerManager.INSTANCE.despawn(
-                    pocket.bot().getServer(), pocket.name());
+                    pocket.bot().getEntityWorld().getServer(), pocket.name());
 
             GuardFixture duplicate = settleBoundaryZeroGuard(
                     context, "GuardRestoreCrashWindowGT", failure);
@@ -1866,7 +1866,7 @@ public final class MiningCheckpointMissionGameTests {
                             duplicate.bot()).isEmpty(),
                     "exact crash-window receipt was not merged idempotently");
             AIPlayerManager.INSTANCE.despawn(
-                    duplicate.bot().getServer(), duplicate.name());
+                    duplicate.bot().getEntityWorld().getServer(), duplicate.name());
 
             GuardFixture driftedDuplicate = settleBoundaryZeroGuard(
                     context, "GuardRestoreDriftedCrashWindowGT", failure);
@@ -1877,7 +1877,7 @@ public final class MiningCheckpointMissionGameTests {
                             failure), "task."),
                     GoalStep.Kind.MINING_SERVICE);
             BlockPos driftedFace = decodePos(driftedReceipt.get("task.work_face"));
-            var driftedNether = driftedDuplicate.bot().getServer().getWorld(
+            var driftedNether = driftedDuplicate.bot().getEntityWorld().getServer().getWorld(
                     net.minecraft.world.World.NETHER);
             require(context, driftedNether != null, "fixture has no Nether world");
             TaskManager.INSTANCE.cancelIntentTasks(
@@ -1897,7 +1897,7 @@ public final class MiningCheckpointMissionGameTests {
                             driftedDuplicate.bot()),
                     "cross-dimension exact merge continued its parent plan");
             AIPlayerManager.INSTANCE.despawn(
-                    driftedDuplicate.bot().getServer(), driftedDuplicate.name());
+                    driftedDuplicate.bot().getEntityWorld().getServer(), driftedDuplicate.name());
 
             GuardFixture conflict = settleBoundaryZeroGuard(
                     context, "GuardRestoreConflictGT", failure);
@@ -1921,7 +1921,7 @@ public final class MiningCheckpointMissionGameTests {
                             .equals(conflictResult.reason()),
                     "conflicting same-geometry authority was accepted");
             AIPlayerManager.INSTANCE.despawn(
-                    conflict.bot().getServer(), conflict.name());
+                    conflict.bot().getEntityWorld().getServer(), conflict.name());
             context.complete();
         });
     }
@@ -1946,7 +1946,7 @@ public final class MiningCheckpointMissionGameTests {
             Map<String, String> terminal = terminalServiceCheckpoint(
                     original.active().checkpoint(), failure);
             BlockPos face = decodePos(terminal.get("task.work_face"));
-            var nether = bot.getServer().getWorld(net.minecraft.world.World.NETHER);
+            var nether = bot.getEntityWorld().getServer().getWorld(net.minecraft.world.World.NETHER);
             require(context, nether != null, "fixture has no Nether world");
             TaskManager.INSTANCE.cancelIntentTasks(
                     bot, "gametest_cross_dimension_receipt");
@@ -1961,12 +1961,12 @@ public final class MiningCheckpointMissionGameTests {
                             && failure.equals(receipt.failureReason()),
                     "dimension drift replaced the terminal receipt reason");
             TaskManager.INSTANCE.abort(bot);
-            GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+            GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
             GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElse(null);
             require(context, result != null && failure.equals(result.reason())
                             && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "cross-dimension receipt did not terminate with original reason");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1994,7 +1994,7 @@ public final class MiningCheckpointMissionGameTests {
                     bot, "gametest_dimension_suspend_restore");
             GoalExecutor.INSTANCE.unload(bot);
             BlockPos face = decodePos(pocketTask.get("work_face"));
-            var nether = bot.getServer().getWorld(net.minecraft.world.World.NETHER);
+            var nether = bot.getEntityWorld().getServer().getWorld(net.minecraft.world.World.NETHER);
             require(context, nether != null, "fixture has no Nether world");
             bot.teleport(nether, face.getX() + 0.5D, face.getY(),
                     face.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
@@ -2024,11 +2024,11 @@ public final class MiningCheckpointMissionGameTests {
                             && GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
                     "suspended submit started a second task or changed the pocket ledger");
 
-            var overworld = bot.getServer().getWorld(net.minecraft.world.World.OVERWORLD);
+            var overworld = bot.getEntityWorld().getServer().getWorld(net.minecraft.world.World.OVERWORLD);
             require(context, overworld != null, "fixture has no Overworld");
             bot.teleport(overworld, face.getX() + 0.5D, face.getY(),
                     face.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-            GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+            GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
             MissionRuntimeRecord resumed = GoalExecutor.INSTANCE.captureRuntime(bot);
             require(context, resumed.active() != null
                             && TaskManager.INSTANCE.getActive(bot)
@@ -2040,7 +2040,7 @@ public final class MiningCheckpointMissionGameTests {
                             && resumed.queue().getFirst().toGoal()
                             .filter(queuedGoal::equals).isPresent(),
                     "pocket did not resume with its ledger after returning dimension");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
             context.complete();
         });
     }
@@ -2098,7 +2098,7 @@ public final class MiningCheckpointMissionGameTests {
                                 fixture.bot()).isEmpty(),
                         variant + " task_kind bypassed or changed pocket authority");
                 AIPlayerManager.INSTANCE.despawn(
-                        fixture.bot().getServer(), fixture.name());
+                        fixture.bot().getEntityWorld().getServer(), fixture.name());
             }
 
             GuardFixture conflict = settleBoundaryZeroGuard(
@@ -2140,7 +2140,7 @@ public final class MiningCheckpointMissionGameTests {
                     "semantic pocket conflict was terminated, mutated, or escaped quarantine");
             GoalExecutor.INSTANCE.cancelAll(conflict.bot());
             AIPlayerManager.INSTANCE.despawn(
-                    conflict.bot().getServer(), conflict.name());
+                    conflict.bot().getEntityWorld().getServer(), conflict.name());
             context.complete();
         });
     }
@@ -2194,7 +2194,7 @@ public final class MiningCheckpointMissionGameTests {
                         "guard-only restore guessed a non-causal reason: "
                                 + (result == null ? "none" : result.reason()));
                 AIPlayerManager.INSTANCE.despawn(
-                        bot.getServer(), fixture.name());
+                        bot.getEntityWorld().getServer(), fixture.name());
             }
             context.complete();
         });
@@ -2241,7 +2241,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && failure.equals(receipt.failureReason()),
                             "capacity receipt did not restore its typed result");
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     MissionRuntimeRecord onRepair =
                             GoalExecutor.INSTANCE.captureRuntime(bot);
@@ -2319,7 +2319,7 @@ public final class MiningCheckpointMissionGameTests {
                         "capacity service did not restore at its guarded face");
                 Map<BlockPos, net.minecraft.block.BlockState> worldBefore =
                         snapshotGuardGeometry(bot, guardedService);
-                Vec3d positionBefore = bot.getPos();
+                Vec3d positionBefore = bot.getEntityPos();
                 InventorySnapshot inventoryBefore = snapshotInventory(bot);
                 service.tick(bot);
                 require(context, service.state() == TaskState.FAILED
@@ -2327,11 +2327,11 @@ public final class MiningCheckpointMissionGameTests {
                                 && worldBefore.equals(snapshotGuardGeometry(
                                 bot, guardedService))
                                 && inventoryBefore.matches(bot)
-                                && bot.getPos().squaredDistanceTo(
+                                && bot.getEntityPos().squaredDistanceTo(
                                 positionBefore) < 0.000001D,
                         "capacity guard mutated geometry or lost its reason");
                 TaskManager.INSTANCE.abort(bot);
-                GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
                 GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElse(null);
                 require(context, result != null
                                 && failure.equals(result.reason())
@@ -2339,7 +2339,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && TaskManager.INSTANCE.getActive(bot).isEmpty(),
                         "capacity guard fell through to generic replan");
                 awaitingRepairedParent.set(false);
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
                 return;
             }
@@ -2434,7 +2434,7 @@ public final class MiningCheckpointMissionGameTests {
                         service, wrongClosedCursor),
                 "failed service cleanup accepted a different closed cursor");
         serviceTask.abort(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -2503,7 +2503,7 @@ public final class MiningCheckpointMissionGameTests {
                                     + checkpointSummary(after));
                     require(context, GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
                             "protected rare auxiliary restore published a terminal result");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -2587,7 +2587,7 @@ public final class MiningCheckpointMissionGameTests {
                                     + checkpointSummary(after));
                     require(context, GoalExecutor.INSTANCE.lastResult(bot).isEmpty(),
                             "closed auxiliary commit published a premature result");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -2715,7 +2715,7 @@ public final class MiningCheckpointMissionGameTests {
                             "non-pocket service did not publish its typed failure: "
                                     + service.state() + ":" + service.failureReason());
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     MissionRuntimeRecord replanned =
                             GoalExecutor.INSTANCE.captureRuntime(bot);
@@ -2745,7 +2745,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && protectedRare.equals(namespace(
                                     restored.active().checkpoint(), "mining.")),
                             "restart replayed failed auxiliary service or lost rare cursor");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -2859,7 +2859,7 @@ public final class MiningCheckpointMissionGameTests {
                             "capacity service did not fail typed: "
                                     + service.state() + ":" + service.failureReason());
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     MissionRuntimeRecord replanned =
                             GoalExecutor.INSTANCE.captureRuntime(bot);
@@ -2922,7 +2922,7 @@ public final class MiningCheckpointMissionGameTests {
                             "delivered rare batch did not commit: "
                                     + oreTask.state() + ":" + oreTask.failureReason());
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     GoalResult settledResult = GoalExecutor.INSTANCE.lastResult(bot)
                             .orElse(null);
@@ -2944,7 +2944,7 @@ public final class MiningCheckpointMissionGameTests {
                                     settled.get("rare_resource_retries_used")),
                             "rare commit did not settle the durable mining namespace: "
                                     + checkpointSummary(settled));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -3046,7 +3046,7 @@ public final class MiningCheckpointMissionGameTests {
                             "continuation service did not publish its typed timeout: "
                                     + service.state() + ":" + service.failureReason());
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     MissionRuntimeRecord continued = GoalExecutor.INSTANCE.captureRuntime(bot);
                     require(context, continued.active() != null
@@ -3067,7 +3067,7 @@ public final class MiningCheckpointMissionGameTests {
                     assertAuxiliaryContinuationOrPromotion(
                             context, restored.active().checkpoint(), protectedRare,
                             closedAux, ironFingerprint);
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -3173,7 +3173,7 @@ public final class MiningCheckpointMissionGameTests {
                             "inter-batch service did not complete from ready inventory: "
                                     + service.state() + ":" + service.failureReason());
                     TaskManager.INSTANCE.abort(bot);
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
                     MissionRuntimeRecord continued = GoalExecutor.INSTANCE.captureRuntime(bot);
                     require(context, continued.active() != null
@@ -3194,7 +3194,7 @@ public final class MiningCheckpointMissionGameTests {
                     assertAuxiliaryContinuationOrPromotion(
                             context, restored.active().checkpoint(), protectedRare,
                             closedAux, ironFingerprint);
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -3331,7 +3331,7 @@ public final class MiningCheckpointMissionGameTests {
                 require(context, auxiliary.get("face").equals(
                                 checkpoint.get("task.work_face")),
                         "capacity service work face is not auxiliary-parent exact");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 230) {
@@ -3368,7 +3368,7 @@ public final class MiningCheckpointMissionGameTests {
                                     + result.reason());
                     require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "wrong-family ordinary namespace restored an active plan");
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                 });
     }
@@ -3413,7 +3413,7 @@ public final class MiningCheckpointMissionGameTests {
                             + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "satisfied goal retained an orphaned physical ledger");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -3454,7 +3454,7 @@ public final class MiningCheckpointMissionGameTests {
                             + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "mismatched ordinary ledgers restored an active plan");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -3498,7 +3498,7 @@ public final class MiningCheckpointMissionGameTests {
                             + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "standalone mining ledger restored an active plan");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -3550,7 +3550,7 @@ public final class MiningCheckpointMissionGameTests {
                             + result.reason());
             require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "wrong rare service target restored an active mission");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -3607,7 +3607,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "orphaned boundary-eight service restored an active mission");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 450) {
@@ -3670,7 +3670,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && "0".equals(checkpoint.get("task.service_boundary")),
                         "retry did not insert the fresh boundary-zero rare service: "
                                 + checkpointSummary(checkpoint));
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 350) {
@@ -3717,17 +3717,17 @@ public final class MiningCheckpointMissionGameTests {
                     for (int dx = -2; dx <= 2; dx++) {
                         for (int dz = -2; dz <= 2; dz++) {
                             BlockPos cell = face.add(dx, 0, dz);
-                            bot.getServerWorld().setBlockState(cell.down(),
+                            bot.getEntityWorld().setBlockState(cell.down(),
                                     Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                            bot.getServerWorld().setBlockState(cell,
+                            bot.getEntityWorld().setBlockState(cell,
                                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-                            bot.getServerWorld().setBlockState(cell.up(),
+                            bot.getEntityWorld().setBlockState(cell.up(),
                                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
                         }
                     }
-                    bot.getServerWorld().setBlockState(face.north(),
+                    bot.getEntityWorld().setBlockState(face.north(),
                             Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                    bot.getServerWorld().setBlockState(face.north().up(),
+                    bot.getEntityWorld().setBlockState(face.north().up(),
                             Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
                     Map<String, String> controlled = new LinkedHashMap<>(checkpoint);
                     String encodedFace = face.getX() + "," + face.getY() + "," + face.getZ();
@@ -3805,7 +3805,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && hasUsableStonePickaxe(bot),
                             "rare channel service did not resume the exact OreDig batch: "
                                     + checkpointSummary(checkpoint));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                     context.complete();
                     return;
                 }
@@ -3871,17 +3871,17 @@ public final class MiningCheckpointMissionGameTests {
                     for (int dx = -2; dx <= 2; dx++) {
                         for (int dz = -2; dz <= 2; dz++) {
                             BlockPos cell = face.add(dx, 0, dz);
-                            bot.getServerWorld().setBlockState(cell.down(),
+                            bot.getEntityWorld().setBlockState(cell.down(),
                                     Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                            bot.getServerWorld().setBlockState(cell,
+                            bot.getEntityWorld().setBlockState(cell,
                                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-                            bot.getServerWorld().setBlockState(cell.up(),
+                            bot.getEntityWorld().setBlockState(cell.up(),
                                     Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
                         }
                     }
-                    bot.getServerWorld().setBlockState(face.north(),
+                    bot.getEntityWorld().setBlockState(face.north(),
                             Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                    bot.getServerWorld().setBlockState(face.north().up(),
+                    bot.getEntityWorld().setBlockState(face.north().up(),
                             Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_LISTENERS);
 
                     MissionRuntimeRecord epochOne = withOreResourceState(runtime, 0, 1, 1);
@@ -3943,7 +3943,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "same-batch epoch-one channel failure retained an active mission");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 560) {
                 context.throwGameTestException(Text.of(
@@ -3993,7 +3993,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "same-batch epoch-one torch failure scheduled another service");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
@@ -4064,7 +4064,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && "0".equals(checkpoint.get("task.service_boundary")),
                         "margin draw did not insert the fresh boundary-zero rare service: "
                                 + checkpointSummary(checkpoint));
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 560) {
@@ -4134,7 +4134,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "exhausted margin timeout retained an active mission");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 560) {
                 context.throwGameTestException(Text.of(
@@ -4216,10 +4216,10 @@ public final class MiningCheckpointMissionGameTests {
                     BlockPos center = bot.getBlockPos().toImmutable();
                     for (BlockPos pos : BlockPos.iterate(
                             center.add(-8, -3, -8), center.add(8, 3, 8))) {
-                        if (bot.getServerWorld().getBlockState(pos).isOf(Blocks.TORCH)
-                                || bot.getServerWorld().getBlockState(pos)
+                        if (bot.getEntityWorld().getBlockState(pos).isOf(Blocks.TORCH)
+                                || bot.getEntityWorld().getBlockState(pos)
                                 .isOf(Blocks.WALL_TORCH)) {
-                            bot.getServerWorld().setBlockState(
+                            bot.getEntityWorld().setBlockState(
                                     pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
                         }
                     }
@@ -4242,7 +4242,7 @@ public final class MiningCheckpointMissionGameTests {
                             "second batch did not start with a fresh epoch-zero debit: "
                                     + checkpointSummary(checkpoint));
                     BlockPos center = bot.getBlockPos().toImmutable();
-                    require(context, bot.getServerWorld().getLightLevel(
+                    require(context, bot.getEntityWorld().getLightLevel(
                                     net.minecraft.world.LightType.BLOCK, center) < 8,
                             "boundary service did not settle block light before the second batch");
                     MissionRuntimeRecord exhausted = withOreResourceState(
@@ -4272,7 +4272,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && "0".equals(checkpoint.get("mining.torch_placements")),
                         "second batch could not independently advance from epoch zero to one: "
                                 + checkpointSummary(checkpoint));
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 760) {
@@ -4341,7 +4341,7 @@ public final class MiningCheckpointMissionGameTests {
                 require(context, checkpoint.get("mining.face").equals(
                                 checkpoint.get("task.work_face")),
                         "inventory service was not bound to the failed OreDig cursor");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 350) {
@@ -4397,7 +4397,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "second inventory failure retained an active mission");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 350) {
                 context.throwGameTestException(Text.of(
@@ -4464,7 +4464,7 @@ public final class MiningCheckpointMissionGameTests {
                             "small rare capacity service changed OreDig " + suffix + ": "
                                     + checkpointSummary(checkpoint));
                 }
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 110) {
@@ -4495,7 +4495,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "undebited capacity parent restored or reported the wrong reason: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4520,7 +4520,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "missing capacity parent restored or reported the wrong reason: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4548,7 +4548,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "capacity watermark ahead of delivered restored or reported wrong: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4573,7 +4573,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "orphaned capacity watermark restored or reported wrong: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4599,7 +4599,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "capacity service restored with a stale delivered watermark: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4626,7 +4626,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "capacity service restored with a stale face watermark: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4651,7 +4651,7 @@ public final class MiningCheckpointMissionGameTests {
                                     && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                             "capacity parent restored with service count above target: "
                                     + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4687,7 +4687,7 @@ public final class MiningCheckpointMissionGameTests {
                                     "capacity_parent_services_used")),
                             "legacy capacity parent did not bind conservative watermarks: "
                                     + checkpointSummary(after));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4740,14 +4740,14 @@ public final class MiningCheckpointMissionGameTests {
                     require(context, missionTask.state() == TaskState.COMPLETED,
                             "capacity retry did not reach its factual terminal state: "
                                     + missionTask.state());
-                    TaskManager.INSTANCE.tickAll(bot.getServer());
+                    TaskManager.INSTANCE.tickAll(bot.getEntityWorld().getServer());
                     require(context, TaskManager.INSTANCE.getActive(bot).isEmpty(),
                             "TaskManager retained the completed capacity retry");
 
                     HoldingSafetyTask safety = new HoldingSafetyTask();
                     TaskManager.INSTANCE.assign(bot, safety,
                             TaskOrigin.safety("gametest_capacity_completion_safety"));
-                    GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+                    GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
                     require(context, GoalExecutor.INSTANCE.hasActivePlan(bot)
                                     && GoalExecutor.INSTANCE.lastResult(bot).isEmpty()
                                     && TaskManager.INSTANCE.getActive(bot).orElse(null) == safety,
@@ -4784,7 +4784,7 @@ public final class MiningCheckpointMissionGameTests {
                             "closed capacity commit was rejected or replayed after restart: "
                                     + (result == null ? "missing" : result.status()
                                     + ":" + result.reason()));
-                    AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                     context.complete();
                 });
     }
@@ -4873,7 +4873,7 @@ public final class MiningCheckpointMissionGameTests {
 
                 BlockPos face = decodePos(after.get("task.work_face"));
                 BlockPos cage = face.north(4);
-                bot.teleport(bot.getServerWorld(), cage.getX() + 0.5D,
+                bot.teleport(bot.getEntityWorld(), cage.getX() + 0.5D,
                         cage.getY(), cage.getZ() + 0.5D,
                         Set.of(), 0.0F, 0.0F, true);
                 buildBedrockCage(bot, cage);
@@ -4906,7 +4906,7 @@ public final class MiningCheckpointMissionGameTests {
                             && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                     "active pocket lost its original fail-closed result: "
                             + result.status() + ":" + result.reason());
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -4958,7 +4958,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + result.reason());
                 require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "used small-rare capacity debit retained an active mission");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 115) {
                 context.throwGameTestException(Text.of(
@@ -5042,7 +5042,7 @@ public final class MiningCheckpointMissionGameTests {
                             "work-face capacity service changed OreDig " + suffix + ": "
                                     + checkpointSummary(checkpoint));
                 }
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 130) {
@@ -5107,7 +5107,7 @@ public final class MiningCheckpointMissionGameTests {
                                 && !GoalExecutor.INSTANCE.hasActivePlan(bot),
                         "capacity service-count cap reported the wrong terminal result: "
                                 + result.reason());
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (context.getTick() > 120) {
                 context.throwGameTestException(Text.of(
@@ -5183,7 +5183,7 @@ public final class MiningCheckpointMissionGameTests {
                             "repeat capacity service changed OreDig " + suffix + ": "
                                     + checkpointSummary(checkpoint));
                 }
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 145) {
@@ -5276,7 +5276,7 @@ public final class MiningCheckpointMissionGameTests {
                             "tail retry changed OreDig " + suffix + ": "
                                     + checkpointSummary(checkpoint));
                 }
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 135) {
@@ -5362,7 +5362,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + checkpointSummary(checkpoint));
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
                 GoalExecutor.INSTANCE.unload(bot);
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (GoalExecutor.INSTANCE.lastResult(bot).isPresent()
                     || context.getTick() > 285) {
@@ -5572,7 +5572,7 @@ public final class MiningCheckpointMissionGameTests {
                     require(context, remoteDepot.getStack(slot).isEmpty(),
                             "local-first rare service mutated remote depot slot " + slot);
                 }
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             } else if (context.getTick() > 750) {
                 context.throwGameTestException(Text.of("restored two-batch mission did not complete"));
@@ -5687,7 +5687,7 @@ public final class MiningCheckpointMissionGameTests {
                     "legacy checkpoint did not rewrite hunt progress watermarks: "
                             + checkpointSummary(migratedCheckpoint));
 
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -5842,7 +5842,7 @@ public final class MiningCheckpointMissionGameTests {
                         && failure.equals(receipt.failureReason()),
                 "guard fixture did not restore terminal receipt");
         TaskManager.INSTANCE.abort(bot);
-        GoalExecutor.INSTANCE.tickBot(bot.getServer(), bot);
+        GoalExecutor.INSTANCE.tickBot(bot.getEntityWorld().getServer(), bot);
 
         MissionRuntimeRecord guarded = GoalExecutor.INSTANCE.captureRuntime(bot);
         require(context, guarded.active() != null
@@ -5933,7 +5933,7 @@ public final class MiningCheckpointMissionGameTests {
             MiningServiceTask.DisposalGeometry geometry) {
         Map<BlockPos, net.minecraft.block.BlockState> snapshot = new LinkedHashMap<>();
         snapshot.put(geometry.workFace(),
-                bot.getServerWorld().getBlockState(geometry.workFace()));
+                bot.getEntityWorld().getBlockState(geometry.workFace()));
         for (BlockPos entry : java.util.List.of(
                 geometry.firstEntry(), geometry.secondEntry())) {
             int dx = entry.getX() - geometry.workFace().getX();
@@ -5941,7 +5941,7 @@ public final class MiningCheckpointMissionGameTests {
             BlockPos sink = entry.add(dx, 0, dz);
             for (BlockPos pos : java.util.List.of(
                     entry, entry.up(), sink, sink.up())) {
-                snapshot.put(pos, bot.getServerWorld().getBlockState(pos));
+                snapshot.put(pos, bot.getEntityWorld().getBlockState(pos));
             }
         }
         return Map.copyOf(snapshot);
@@ -6313,7 +6313,7 @@ public final class MiningCheckpointMissionGameTests {
     private static void prepareDisposalPocket(AIPlayerEntity bot,
                                               BlockPos face,
                                               Direction direction) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos entry = face.offset(direction);
         BlockPos sink = face.offset(direction, 2);
         BlockPos back = face.offset(direction, 3);
@@ -6341,7 +6341,7 @@ public final class MiningCheckpointMissionGameTests {
     }
 
     private static void buildBedrockCage(AIPlayerEntity bot, BlockPos center) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 world.setBlockState(center.add(dx, -1, dz),
@@ -6456,7 +6456,7 @@ public final class MiningCheckpointMissionGameTests {
         Box bounds = new Box(
                 sink.getX(), sink.getY(), sink.getZ(),
                 sink.getX() + 1.0D, sink.getY() + 2.0D, sink.getZ() + 1.0D);
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         ItemEntity.class, bounds.expand(0.01D),
                         entity -> entity.isAlive() && entity.getStack().isOf(item)
                                 && entity.getBoundingBox().minX >= bounds.minX

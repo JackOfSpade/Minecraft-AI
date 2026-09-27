@@ -84,7 +84,7 @@ public final class BreedTask extends AbstractTask {
     }
 
     private void findPair(AIPlayerEntity bot) {
-        List<AnimalEntity> candidates = bot.getServerWorld()
+        List<AnimalEntity> candidates = bot.getEntityWorld()
                 .getEntitiesByClass(AnimalEntity.class, bot.getBoundingBox().expand(SEARCH_RANGE),
                         animal -> animal.isAlive()
                                 && animal.getType().equals(type)
@@ -139,7 +139,7 @@ public final class BreedTask extends AbstractTask {
         feed(bot, second, Phase.DONE);
         if (state == TaskState.RUNNING && phase == Phase.DONE) {
             if (first != null && second != null && first.canBreedWith(second)) {
-                first.breed(bot.getServerWorld(), second);
+                first.breed(bot.getEntityWorld(), second);
             }
             bredPairs++;
             first = null;
@@ -159,7 +159,7 @@ public final class BreedTask extends AbstractTask {
     }
 
     private static void lookAt(AIPlayerEntity bot, AnimalEntity animal) {
-        Vec3d target = animal.getPos().add(0.0D, animal.getHeight() * 0.5D, 0.0D);
+        Vec3d target = animal.getEntityPos().add(0.0D, animal.getHeight() * 0.5D, 0.0D);
         LookAction.lookAt(bot, target);
     }
 

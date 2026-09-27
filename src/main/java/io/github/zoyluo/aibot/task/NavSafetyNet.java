@@ -96,7 +96,7 @@ public final class NavSafetyNet {
             clearFollowSwim(bot);
             return;
         }
-        followSwimLeaseUntil.put(bot.getUuid(), bot.getServer().getTicks() + FOLLOW_SWIM_LEASE_TICKS);
+        followSwimLeaseUntil.put(bot.getUuid(), bot.getEntityWorld().getServer().getTicks() + FOLLOW_SWIM_LEASE_TICKS);
         // A prior rescue is for an accidental water entry.  An actively renewed, high-air swim
         // follow is a different, short-lived intent and must not inherit that old controller.
         waterRescueShore.remove(bot.getUuid());
@@ -121,7 +121,7 @@ public final class NavSafetyNet {
         if (!bot.isAlive()) {
             return false;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
 
         // 0) 窒息/卡方块:玩家身体盒真实侵入实体碰撞体时,优先**向上**钻出地表。

@@ -144,7 +144,7 @@ public final class CraftTask extends AbstractTask {
         // Publish that fact before this precise placement; never do this for a genuinely
         // unsupported pose.
         Standability.clearCache();
-        if (!bot.isOnGround() && Standability.isStandable(bot.getServerWorld(), bot.getBlockPos())) {
+        if (!bot.isOnGround() && Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())) {
             bot.setOnGround(true);
         }
         ActionResult result = BuildAction.placeBlockAt(bot, placePos);
@@ -219,7 +219,7 @@ public final class CraftTask extends AbstractTask {
             finishReclaim(bot);
             return;
         }
-        BlockState state = bot.getServerWorld().getBlockState(selfPlacedTablePos);
+        BlockState state = bot.getEntityWorld().getBlockState(selfPlacedTablePos);
         if (state.isOf(Blocks.CRAFTING_TABLE)) {
             if (tableReclaimMiner.target() == null) {
                 // The table only has somewhere to land if a slot is free; the craft that just
@@ -417,8 +417,8 @@ public final class CraftTask extends AbstractTask {
      */
     private static boolean isOpenPlacementCell(AIPlayerEntity bot, BlockPos candidate) {
         return ObservableWorldQuery.canObserveCell(bot, candidate)
-                && bot.getServerWorld().getBlockState(candidate).isAir()
-                && bot.getServerWorld().isSpaceEmpty(bot, new net.minecraft.util.math.Box(candidate));
+                && bot.getEntityWorld().getBlockState(candidate).isAir()
+                && bot.getEntityWorld().isSpaceEmpty(bot, new net.minecraft.util.math.Box(candidate));
     }
 
     private static String describeIngredient(RecipeRegistry.Ingredient ingredient, int count) {

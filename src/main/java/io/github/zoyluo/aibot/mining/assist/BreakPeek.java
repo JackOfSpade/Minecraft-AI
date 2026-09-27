@@ -50,7 +50,7 @@ public final class BreakPeek {
         long started = System.nanoTime();
         BlockPos feet = bot.getBlockPos();
         ObservedOccupancy occupancy = state.occupancy(feet.getX(), feet.getY(), feet.getZ());
-        String dimension = BotEdits.dimensionKey(bot.getServerWorld());
+        String dimension = BotEdits.dimensionKey(bot.getEntityWorld());
         state.enterDimension(dimension);
         LongPredicate placed = packed -> BotEdits.wasPlaced(dimension, packed);
         boolean lush = state.lush();

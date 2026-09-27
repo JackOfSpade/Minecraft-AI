@@ -564,7 +564,7 @@ public final class MiningHostileRecoveryGameTests {
         }
         DangerWatcher.INSTANCE.clear(fixture.bot());
         TaskManager.INSTANCE.cancelIntentTasks(fixture.bot(), "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

@@ -80,9 +80,9 @@ public final class AcquireWaterTaskGameTests {
                         "empty bucket was not consumed by vanilla interaction");
                 require(context, bot.getBlockPos().getSquaredDistance(fixture.start()) >= 9.0D,
                         "bot acquired out-of-view water without physical travel");
-                require(context, !bot.getServerWorld().getFluidState(fixture.water()).isIn(FluidTags.WATER),
+                require(context, !bot.getEntityWorld().getFluidState(fixture.water()).isIn(FluidTags.WATER),
                         "source block was not drained by the bucket interaction");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
                 context.complete();
             }
         });
@@ -220,7 +220,7 @@ public final class AcquireWaterTaskGameTests {
                     "exact stand did not perform one vanilla bucket exchange");
             require(context, world.getFluidState(source).isEmpty(),
                     "exact stand did not physically drain the source block");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -325,7 +325,7 @@ public final class AcquireWaterTaskGameTests {
                     "support-assisted ascent did not physically fill the bucket");
             require(context, bot.getBlockPos().getY() >= surfaceAnchor.getY(),
                     "support-assisted ascent filled water below the proven surface exit");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -403,7 +403,7 @@ public final class AcquireWaterTaskGameTests {
                     "foundation bridge reached the surface below the requested anchor height: "
                             + bot.getBlockPos());
             task.cancel(bot, "gametest_foundation_bridge_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -454,7 +454,7 @@ public final class AcquireWaterTaskGameTests {
                 "ascent mined a hidden direction before handing off shallow water");
         NavSafetyNet.INSTANCE.clear(bot);
         task.cancel(bot, "gametest_shallow_water_handoff_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -510,7 +510,7 @@ public final class AcquireWaterTaskGameTests {
         require(context, restored.state() == TaskState.COMPLETED,
                 "completed return aquifer did not restore from the physical water bucket: "
                         + restored.failureReason());
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -558,7 +558,7 @@ public final class AcquireWaterTaskGameTests {
                         && world.getFluidState(source).isIn(FluidTags.WATER),
                 "occluded source was read or collected through its solid screen");
         task.cancel(bot, "gametest_hidden_return_aquifer_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -704,7 +704,7 @@ public final class AcquireWaterTaskGameTests {
             require(context, InventoryAction.countItem(bot, Items.BUCKET) == 1,
                     "relocation consumed the empty bucket before reaching the surface");
             task.cancel(bot, "gametest_fluid_relocation_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -872,7 +872,7 @@ public final class AcquireWaterTaskGameTests {
             require(context, restartedAfterHead.get(),
                     "carved relocation completed without crossing the head-only restart boundary");
             task.cancel(bot, "gametest_carved_fluid_relocation_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1038,7 +1038,7 @@ public final class AcquireWaterTaskGameTests {
                 require(context, retriedRelocation.get(),
                         "ascent reached the riser without retrying the interrupted relocation");
                 task.cancel(bot, "gametest_pause_relocation_complete");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
                 return;
             }
@@ -1125,7 +1125,7 @@ public final class AcquireWaterTaskGameTests {
                 require(context, before.equals(relocation) || before.equals(relocation.up()),
                         "settled ascent skipped the adjacent riser: " + before + " -> " + now);
                 task.cancel(bot, "gametest_pause_settlement_complete");
-                AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
                 context.complete();
                 return;
             }
@@ -1178,7 +1178,7 @@ public final class AcquireWaterTaskGameTests {
                     "displaced SEARCH retained position-dependent path failures: "
                             + task.checkpoint());
             task.cancel(bot, "gametest_search_pause_cooldown_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), fixture.name());
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
             context.complete();
         });
     }
@@ -1247,7 +1247,7 @@ public final class AcquireWaterTaskGameTests {
         require(context, bot.getActionPack().isPathExecutorIdle(),
                 "SEARCH transition retained RETURN_SURFACE movement ownership");
         task.cancel(bot, "gametest_return_teardown_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -1341,7 +1341,7 @@ public final class AcquireWaterTaskGameTests {
                     "deep return did not end with one water bucket");
             require(context, !world.getFluidState(water).isIn(FluidTags.WATER),
                     "deep return did not drain the physical source");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1425,7 +1425,7 @@ public final class AcquireWaterTaskGameTests {
                     "freshly crafted stone pick did not physically clear the copper obstruction");
             require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
                     "tool-replenished return did not physically fill the bucket");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1496,7 +1496,7 @@ public final class AcquireWaterTaskGameTests {
                     "return ascent spent the reserved iron pick on a low-tier obstruction");
             require(context, InventoryAction.countItem(bot, Items.STONE_PICKAXE) == 1,
                     "missing-tool failure changed the exhausted stone pick");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1598,7 +1598,7 @@ public final class AcquireWaterTaskGameTests {
                     "surface-exit search completed without checkpoint restart coverage");
             require(context, "DONE".equals(task.checkpoint().get("phase")),
                     "surface-exit completion did not persist the terminal phase");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1667,7 +1667,7 @@ public final class AcquireWaterTaskGameTests {
                             && "0".equals(after.get("path_attempts")),
                     "overhang surface latch changed across restart: before=" + checkpoint
                             + " after=" + after);
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -1689,7 +1689,7 @@ public final class AcquireWaterTaskGameTests {
             int tick = ticks.getAndIncrement();
             BlockPos forced = (tick & 1) == 0 ? fixture.start() : fixture.start().north();
             bot.getActionPack().stopAll();
-            bot.teleport(bot.getServerWorld(),
+            bot.teleport(bot.getEntityWorld(),
                     forced.getX() + 0.5D, forced.getY(), forced.getZ() + 0.5D,
                     Set.of(), 0.0F, 0.0F, true);
             task.tick(bot);
@@ -1844,7 +1844,7 @@ public final class AcquireWaterTaskGameTests {
                     "expanded route did not complete the vanilla bucket exchange");
             require(context, world.getFluidState(water).isEmpty(),
                     "expanded route did not drain the factual source block");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -2223,7 +2223,7 @@ public final class AcquireWaterTaskGameTests {
                     "live blocked-sector recovery did not survive restart: before="
                             + checkpoint + " after=" + after);
             restored.cancel(bot, "gametest_blocked_sector_complete");
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
@@ -2259,7 +2259,7 @@ public final class AcquireWaterTaskGameTests {
         require(context, "RETURN_SURFACE".equals(checkpoint.get("phase"))
                         && "false".equals(checkpoint.get("surface_exit")),
                 "deep skylight was incorrectly latched as surface: " + checkpoint);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -2302,7 +2302,7 @@ public final class AcquireWaterTaskGameTests {
         require(context, "RETURN_SURFACE".equals(checkpoint.get("phase"))
                         && "false".equals(checkpoint.get("surface_exit")),
                 "one-cell sky pocket was incorrectly latched as reusable surface: " + checkpoint);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 
@@ -2322,7 +2322,7 @@ public final class AcquireWaterTaskGameTests {
                 "invalid water restore published an invented successor checkpoint");
         require(context, InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 1,
                 "failed restore mutated the inventory");
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 
@@ -2347,7 +2347,7 @@ public final class AcquireWaterTaskGameTests {
                 "contradictory water restore published an invented successor checkpoint");
         require(context, InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 1,
                 "failed contradictory restore mutated the empty bucket");
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 
@@ -2376,7 +2376,7 @@ public final class AcquireWaterTaskGameTests {
                 "legacy false-latch restore published an invented migrated checkpoint");
         require(context, InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 1,
                 "failed legacy restore mutated the empty bucket");
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 
@@ -2689,7 +2689,7 @@ public final class AcquireWaterTaskGameTests {
     }
 
     private static void cleanupDry(TestContext context, DryFixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

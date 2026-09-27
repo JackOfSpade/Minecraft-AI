@@ -180,7 +180,7 @@ public final class DiagnosticLogger {
         try {
             CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "diagnostic_nearby");
             Box box = bot.getBoundingBox().expand(24.0D);
-            List<LivingEntity> ents = bot.getServerWorld().getEntitiesByClass(
+            List<LivingEntity> ents = bot.getEntityWorld().getEntitiesByClass(
                     LivingEntity.class, box,
                     e -> e.isAlive() && e != bot && ObservableWorldQuery.canObserveEntity(bot, e));
             int animals = 0;
@@ -226,7 +226,7 @@ public final class DiagnosticLogger {
 
     private Sample sampleOf(AIPlayerEntity bot) {
         Sample s = new Sample();
-        s.name = bot.getGameProfile().getName();
+        s.name = bot.getGameProfile().name();
         s.x = (int) Math.floor(bot.getX());
         s.y = (int) Math.floor(bot.getY());
         s.z = (int) Math.floor(bot.getZ());
@@ -247,9 +247,9 @@ public final class DiagnosticLogger {
         try {
             s.submerged = bot.isSubmergedInWater();
             BlockPos at = bot.getBlockPos();
-            s.inLava = bot.getServerWorld().getBlockState(at).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)
-                    || bot.getServerWorld().getBlockState(at.down()).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA);
-            s.light = bot.getServerWorld().getLightLevel(at);
+            s.inLava = bot.getEntityWorld().getBlockState(at).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)
+                    || bot.getEntityWorld().getBlockState(at.down()).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA);
+            s.light = bot.getEntityWorld().getLightLevel(at);
         } catch (RuntimeException ignored) {
             // 世界访问失败时保持默认,不影响其它字段
         }

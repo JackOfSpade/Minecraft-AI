@@ -8,6 +8,9 @@ import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.Operation;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import net.minecraft.command.permission.Permission;
+import net.minecraft.command.permission.PermissionLevel;
+import net.minecraft.command.permission.PermissionPredicate;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -50,8 +53,8 @@ public final class BotAuthorizationGate {
                                                       String channel) {
         Optional<AIPlayerEntity> bot = resolveForPlayer(player, botName);
         if (bot.isEmpty()) {
-            auditMissing(Actor.player(player.getUuid(), player.hasPermissionLevel(OPERATOR_LEVEL)),
-                    player.getGameProfile().getName(), botName, operation, channel);
+            auditMissing(Actor.player(player.getUuid(), hasLevel(player.getPermissions(), OPERATOR_LEVEL)),
+                    player.getGameProfile().name(), botName, operation, channel);
             return Optional.empty();
         }
         if (!authorize(player, bot.get(), operation, channel)) {
@@ -76,10 +79,10 @@ public final class BotAuthorizationGate {
                              AIPlayerEntity bot,
                              Operation operation,
                              String channel) {
-        Actor actor = Actor.player(player.getUuid(), player.hasPermissionLevel(OPERATOR_LEVEL));
+        Actor actor = Actor.player(player.getUuid(), hasLevel(player.getPermissions(), OPERATOR_LEVEL));
         Decision decision = policy.evaluate(actor, target(bot), operation);
         if (!decision.allowed()) {
-            auditDenied(actor, player.getGameProfile().getName(), bot, operation, channel, decision);
+            auditDenied(actor, player.getGameProfile().name(), bot, operation, channel, decision);
         }
         return decision.allowed();
     }
@@ -90,7 +93,7 @@ public final class BotAuthorizationGate {
      * and state are neither exposed to the model nor logged as spurious authorization failures.
      */
     public boolean canCommand(ServerPlayerEntity player, AIPlayerEntity bot) {
-        Actor actor = Actor.player(player.getUuid(), player.hasPermissionLevel(OPERATOR_LEVEL));
+        Actor actor = Actor.player(player.getUuid(), hasLevel(player.getPermissions(), OPERATOR_LEVEL));
         return policy.evaluate(actor, target(bot), Operation.COMMAND).allowed();
     }
 
@@ -101,7 +104,7 @@ public final class BotAuthorizationGate {
         Actor actor = Actor.bot(actorBot.getUuid(), AIPlayerManager.INSTANCE.ownerOf(actorBot).orElse(null));
         Decision decision = policy.evaluate(actor, target(targetBot), operation);
         if (!decision.allowed()) {
-            auditDenied(actor, actorBot.getGameProfile().getName(), targetBot, operation, channel, decision);
+            auditDenied(actor, actorBot.getGameProfile().name(), targetBot, operation, channel, decision);
         }
         return decision.allowed();
     }
@@ -147,7 +150,7 @@ public final class BotAuthorizationGate {
         // Use it only as a recovery path when the derived name index is briefly stale,
         // and still require the requested name to match before returning the bot.
         return AIPlayerManager.INSTANCE.botOf(player.getUuid())
-                .filter(bot -> bot.getGameProfile().getName().equalsIgnoreCase(botName));
+                .filter(bot -> bot.getGameProfile().name().equalsIgnoreCase(botName));
     }
 
     private Optional<AIPlayerEntity> resolveForPlayer(ServerPlayerEntity player, String botName) {
@@ -155,12 +158,17 @@ public final class BotAuthorizationGate {
                 AIPlayerManager.INSTANCE::botOf, AIPlayerManager.INSTANCE::getByName);
     }
 
+    /** The 1.21.11 replacement of {@code hasPermissionLevel(int)}: "at least this vanilla op level". */
+    private static boolean hasLevel(PermissionPredicate permissions, int level) {
+        return permissions.hasPermission(new Permission.Level(PermissionLevel.fromLevel(level)));
+    }
+
     private Actor actor(ServerCommandSource source) {
         ServerPlayerEntity player = source.getPlayer();
         if (player != null) {
-            return Actor.player(player.getUuid(), source.hasPermissionLevel(OPERATOR_LEVEL));
+            return Actor.player(player.getUuid(), hasLevel(source.getPermissions(), OPERATOR_LEVEL));
         }
-        return source.hasPermissionLevel(TRUSTED_CONSOLE_LEVEL) ? Actor.console() : Actor.unknown();
+        return hasLevel(source.getPermissions(), TRUSTED_CONSOLE_LEVEL) ? Actor.console() : Actor.unknown();
     }
 
     private BotTarget target(AIPlayerEntity bot) {
@@ -178,7 +186,7 @@ public final class BotAuthorizationGate {
                 "actor_uuid", safe(actor.actorUuid()),
                 "actor_name", actorName == null ? "-" : actorName,
                 "bot_uuid", bot.getUuid(),
-                "bot_name", bot.getGameProfile().getName(),
+                "bot_name", bot.getGameProfile().name(),
                 "operation", operation,
                 "channel", cleanChannel(channel),
                 "reason", decision.reason());

@@ -78,10 +78,10 @@ public final class TaskManager {
             TaskStatus failed = TaskStatus.from(task);
             lastStatus.put(uuid, failed);
             if (failed.state() == TaskState.FAILED) {
-                recordFailure(bot, task.name(), failed.failureReason(), bot.getServer().getTicks());
+                recordFailure(bot, task.name(), failed.failureReason(), bot.getEntityWorld().getServer().getTicks());
             }
             if (publishStatus) {
-                BotReporter.INSTANCE.onStatus(bot.getServer(), bot, failed);
+                BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, failed);
             }
             BotLog.error(bot, "task_start_failed", startFailure, "name", task.name());
             throw startFailure;
@@ -106,7 +106,7 @@ public final class TaskManager {
             current.abort(bot);
             lastStatus.put(bot.getUuid(), TaskStatus.from(current));
             if (publishStatus) {
-                BotReporter.INSTANCE.onStatus(bot.getServer(), bot, TaskStatus.from(current));
+                BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, TaskStatus.from(current));
             }
         }
     }
@@ -149,7 +149,7 @@ public final class TaskManager {
         lastFailure.remove(uuid);
         pendingFailure.remove(uuid);
         lastStatus.put(uuid, TaskStatus.idle());
-        BotReporter.INSTANCE.onStatus(bot.getServer(), bot, TaskStatus.idle());
+        BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, TaskStatus.idle());
     }
 
     /** User-intent cancellation: clear active and paused work without creating a failure/replan. */
@@ -184,11 +184,11 @@ public final class TaskManager {
         if (representative != null) {
             TaskStatus cancelled = TaskStatus.from(representative);
             lastStatus.put(uuid, cancelled);
-            BotReporter.INSTANCE.onStatus(bot.getServer(), bot, cancelled);
+            BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, cancelled);
             BotLog.task(bot, "task_cancelled", "name", representative.name(), "reason", reason);
         } else if (hadFailure || hadPendingFailure) {
             lastStatus.put(uuid, TaskStatus.idle());
-            BotReporter.INSTANCE.onStatus(bot.getServer(), bot, TaskStatus.idle());
+            BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, TaskStatus.idle());
         }
         return representative != null || hadFailure || hadPendingFailure;
     }
@@ -247,7 +247,7 @@ public final class TaskManager {
         stack.push(current, preservedOrigin);
         TaskStatus status = TaskStatus.from(current);
         lastStatus.put(bot.getUuid(), status);
-        BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
+        BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, status);
         BotLog.task(bot, "task_paused", "name", current.name(), "why", why,
                 "origin", preservedOrigin.kind(), "stack_depth", stack.size());
     }
@@ -272,7 +272,7 @@ public final class TaskManager {
         task.resume(bot);
         TaskStatus status = TaskStatus.from(task);
         lastStatus.put(bot.getUuid(), status);
-        BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
+        BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, status);
         if (stack.isEmpty()) {
             executionStacks.remove(uuid, stack);
         }

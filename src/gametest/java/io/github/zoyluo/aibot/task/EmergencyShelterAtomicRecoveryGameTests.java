@@ -1231,7 +1231,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     private static void finish(TestContext context, AIPlayerEntity bot, String name) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         DangerWatcher.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

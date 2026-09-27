@@ -14,6 +14,7 @@ import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskStatus;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.command.permission.LeveledPermissionPredicate;
 import net.minecraft.server.command.CommandOutput;
 import net.minecraft.server.command.ServerCommandSource;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -96,7 +97,7 @@ public final class ToolRegistryMiningGameTests {
         try {
             RecordingCommandOutput output = new RecordingCommandOutput();
             ServerCommandSource playerSource = fixture.bot().getCommandSource()
-                    .withLevel(4)
+                    .withPermissions(LeveledPermissionPredicate.OWNERS)
                     .withOutput(output);
 
             runRejectedCommand(context, fixture, playerSource, output,
@@ -145,7 +146,7 @@ public final class ToolRegistryMiningGameTests {
                                            RecordingCommandOutput output,
                                            String command) {
         output.clear();
-        fixture.bot().getServer().getCommandManager().executeWithPrefix(playerSource, command);
+        fixture.bot().getEntityWorld().getServer().getCommandManager().parseAndExecute(playerSource, command);
         require(context, output.messages().stream().anyMatch(message ->
                         message.contains(StripMineTask.STRICT_SURVIVAL_REJECTION)),
                 command + " did not publish the typed rejection: " + output.messages());
@@ -168,7 +169,7 @@ public final class ToolRegistryMiningGameTests {
         SentinelTask sentinel = new SentinelTask();
         TaskOrigin origin = TaskOrigin.of(TaskOrigin.Kind.VERIFY, "strip_mine_strict_gate_sentinel");
         TaskManager.INSTANCE.assign(bot, sentinel, origin);
-        ActionResult action = bot.getActionPack().startWalkTo(bot.getPos().add(2.0D, 0.0D, 0.0D));
+        ActionResult action = bot.getActionPack().startWalkTo(bot.getEntityPos().add(2.0D, 0.0D, 0.0D));
         require(context, action.isInProgress(), "sentinel walk action did not start");
 
         long reportSequence = BotReporter.INSTANCE.taskReportSequence(bot);

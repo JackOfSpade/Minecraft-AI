@@ -71,7 +71,7 @@ public final class AIBotSnapshotSubcommand {
             source.sendError(Text.literal("[AIBot Snapshot] unavailable in strict_survival; enable operator hiddenBlockScan explicitly"));
             return 0;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos center = bot.getBlockPos();
 
         StringBuilder code = new StringBuilder();
@@ -126,7 +126,7 @@ public final class AIBotSnapshotSubcommand {
                 center.getX(), center.getZ());
         long seed = world.getSeed();
         return "// === AIBot terrain snapshot ===\n"
-                + "// bot=" + bot.getGameProfile().getName()
+                + "// bot=" + bot.getGameProfile().name()
                 + "  center=" + center.getX() + "," + center.getY() + "," + center.getZ()
                 + "  yaw=" + Math.round(bot.getYaw()) + "  pitch=" + Math.round(bot.getPitch()) + "\n"
                 + "// dimension=" + world.getRegistryKey().getValue()

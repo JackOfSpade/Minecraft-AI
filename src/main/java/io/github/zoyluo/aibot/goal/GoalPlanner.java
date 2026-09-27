@@ -148,7 +148,7 @@ public final class GoalPlanner {
         }
         for (int dx = -8; dx <= 8; dx += 4) {
             for (int dz = -8; dz <= 8; dz += 4) {
-                int topY = bot.getServerWorld().getTopY(
+                int topY = bot.getEntityWorld().getTopY(
                         Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
                         origin.getX() + dx,
                         origin.getZ() + dz);
@@ -1085,7 +1085,7 @@ public final class GoalPlanner {
         private boolean ensureStockpile(Goal.Stockpile g, int depth, Set<String> visiting) {
             net.minecraft.util.math.BlockPos base = resumeContext == null
                     ? io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE
-                            .of(bot.getUuid()).placeIn(bot.getServerWorld(), "base").orElse(bot.getBlockPos())
+                            .of(bot.getUuid()).placeIn(bot.getEntityWorld(), "base").orElse(bot.getBlockPos())
                     : resumeContext.origin();
             GoalSnapshotCollector.Context stockpileContext = resumeContext == null
                     ? GoalSnapshotCollector.Context.at(base)
@@ -1135,7 +1135,7 @@ public final class GoalPlanner {
             Map<Item, Integer> exactNeeds = new LinkedHashMap<>();
             for (BlueprintSchema.BlockPlacement placement : schema.placements()) {
                 if (resumeContext != null && resumeContext.buildAnchor() != null
-                        && StructureVerifier.matches(bot.getServerWorld(), resumeContext.buildAnchor(), placement)) {
+                        && StructureVerifier.matches(bot.getEntityWorld(), resumeContext.buildAnchor(), placement)) {
                     continue;
                 }
                 if ("minecraft:air".equals(placement.blockId())) {

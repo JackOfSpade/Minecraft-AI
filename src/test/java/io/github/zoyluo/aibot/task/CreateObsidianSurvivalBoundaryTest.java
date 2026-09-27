@@ -62,7 +62,7 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("isSafePickupCollisionCell"),
                 "exact pickup microsteps must validate their final collision cell");
         assertTrue(task.contains("create_obsidian_pickup_no_progress_endpoint"));
-        assertTrue(task.contains("!Standability.isStandable(bot.getServerWorld(), target)"),
+        assertTrue(task.contains("!Standability.isStandable(bot.getEntityWorld(), target)"),
                 "pickup pathing must reject a raw non-standable endpoint before A* can snap it");
         assertTrue(task.contains("resolved.equals(current)"),
                 "pickup pathing must reject a resolved no-op endpoint");

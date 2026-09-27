@@ -12,11 +12,15 @@ import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.task.TaskManager;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.StackWithSlot;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.storage.NbtReadView;
+import net.minecraft.storage.NbtWriteView;
+import net.minecraft.storage.ReadView;
+import net.minecraft.util.ErrorReporter;
 import net.minecraft.util.WorldSavePath;
 
 import java.io.IOException;
@@ -193,8 +197,8 @@ public final class BotPersistence {
 
     public static BotRecord capture(AIPlayerEntity bot) {
         return new BotRecord(
-                bot.getGameProfile().getName(),
-                bot.getWorld().getRegistryKey().getValue().toString(),
+                bot.getGameProfile().name(),
+                bot.getEntityWorld().getRegistryKey().getValue().toString(),
                 bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), bot.getPitch(),
                 bot.interactionManager.getGameMode().asString(),
                 bot.getHealth(), bot.getHungerManager().getFoodLevel(),
@@ -204,9 +208,9 @@ public final class BotPersistence {
     }
 
     public static String encodeInventory(ServerPlayerEntity player) {
-        NbtCompound root = new NbtCompound();
-        root.put(INVENTORY_KEY, player.getInventory().writeNbt(new NbtList()));
-        return root.toString();
+        NbtWriteView view = NbtWriteView.create(ErrorReporter.EMPTY, player.getRegistryManager());
+        player.getInventory().writeData(view.getListAppender(INVENTORY_KEY, StackWithSlot.CODEC));
+        return view.getNbt().toString();
     }
 
     public static void applyInventory(ServerPlayerEntity player, String snbt) {
@@ -215,9 +219,9 @@ public final class BotPersistence {
         }
         try {
             NbtCompound root = StringNbtReader.readCompound(snbt);
-            NbtList inventory = root.getListOrEmpty(INVENTORY_KEY);
+            ReadView view = NbtReadView.create(ErrorReporter.EMPTY, player.getRegistryManager(), root);
             PlayerInventory playerInventory = player.getInventory();
-            playerInventory.readNbt(inventory);
+            playerInventory.readData(view.getTypedListView(INVENTORY_KEY, StackWithSlot.CODEC));
             playerInventory.markDirty();
         } catch (Exception exception) {
             BotLog.error(player instanceof AIPlayerEntity bot ? bot : null, "bot_inventory_restore_failed", exception);

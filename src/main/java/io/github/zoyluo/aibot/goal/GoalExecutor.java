@@ -274,7 +274,7 @@ public final class GoalExecutor {
             return false;
         }
         UUID missionId = restore == null ? UUID.randomUUID() : restore.missionId();
-        int startedTick = restore == null ? bot.getServer().getTicks() : restore.startedTick();
+        int startedTick = restore == null ? bot.getEntityWorld().getServer().getTicks() : restore.startedTick();
         Optional<CapacityParentNamespace> decodedCapacityParent = restore == null
                 ? Optional.empty()
                 : CapacityParentNamespace.decode(restore.capacityParentNamespace());
@@ -386,8 +386,8 @@ public final class GoalExecutor {
         if (restoredHunt.filter(metadata ->
                 hasSameDimensionOpenHuntTimeRollback(
                         metadata,
-                        bot.getServerWorld().getRegistryKey().getValue().toString(),
-                        bot.getServerWorld().getTime())
+                        bot.getEntityWorld().getRegistryKey().getValue().toString(),
+                        bot.getEntityWorld().getTime())
                 || !metadata.open()
                 && !trustedClosedHuntPickupReceipt(bot, metadata)).isPresent()) {
             queued.removeFirstOccurrence(goal);
@@ -403,7 +403,7 @@ public final class GoalExecutor {
                 MiningServiceTask.inspectCheckpoint(restoredServiceCheckpoint);
         boolean mergedSettledTerminalReceipt = false;
         String mergedSettledTerminalFailure = "";
-        String liveServiceDimension = bot.getServerWorld().getRegistryKey()
+        String liveServiceDimension = bot.getEntityWorld().getRegistryKey()
                 .getValue().toString();
         if (!restoredServiceCheckpoint.isEmpty() && (restoredService.isEmpty()
                 || !liveServiceDimension.equals(
@@ -1493,7 +1493,7 @@ public final class GoalExecutor {
             active.snapY = sp0.getY();
             active.snapZ = sp0.getZ();
             active.snapTargetCount = goalTargetCount(bot, goal);
-            active.snapDimension = bot.getServerWorld().getRegistryKey()
+            active.snapDimension = bot.getEntityWorld().getRegistryKey()
                     .getValue().toString();
             active.snapHuntRawMeat = rawMeatCount(bot);
             active.snapHuntVisitedSectors = active.huntSearchCursor.visitedCount();
@@ -1537,7 +1537,7 @@ public final class GoalExecutor {
             }
             String requiredDimension = dimensionSuspended.get(bot.getUuid());
             if (requiredDimension != null && !requiredDimension.equals(
-                    bot.getServerWorld().getRegistryKey().getValue().toString())) {
+                    bot.getEntityWorld().getRegistryKey().getValue().toString())) {
                 return true;
             }
             Optional<Task> recovery = TaskManager.INSTANCE.getActive(bot);
@@ -1867,10 +1867,10 @@ public final class GoalExecutor {
         int pickupStat = bot.getStatHandler().getStat(Stats.PICKED_UP, expected);
         return trustedClosedHuntPickupReceipt(
                 metadata,
-                bot.getServerWorld().getRegistryKey().getValue().toString(),
+                bot.getEntityWorld().getRegistryKey().getValue().toString(),
                 inventory,
                 pickupStat,
-                bot.getServerWorld().getTime());
+                bot.getEntityWorld().getTime());
     }
 
     public boolean hasActivePlan(AIPlayerEntity bot) {
@@ -2006,7 +2006,7 @@ public final class GoalExecutor {
         BotLog.lifecycle(bot, "mission_dimension_suspended",
                 "mission_id", runtime.active().missionId(),
                 "required_dimension", requiredDimension,
-                "live_dimension", bot.getServerWorld().getRegistryKey()
+                "live_dimension", bot.getEntityWorld().getRegistryKey()
                         .getValue().toString());
         markDirty(bot);
         return true;
@@ -2140,7 +2140,7 @@ public final class GoalExecutor {
             return;
         }
         Optional<String> pocketDimension = activePocketServiceDimension(runtime);
-        String liveDimension = bot.getServerWorld().getRegistryKey()
+        String liveDimension = bot.getEntityWorld().getRegistryKey()
                 .getValue().toString();
         if (pocketDimension.filter(required -> !required.equals(liveDimension)).isPresent()) {
             UUID uuid = bot.getUuid();
@@ -2846,7 +2846,7 @@ public final class GoalExecutor {
         }
         int restoredStartedTick = checkpoint.containsKey("started_tick")
                 ? nonNegativeInt(checkpoint.get("started_tick"))
-                : bot.getServer().getTicks();
+                : bot.getEntityWorld().getServer().getTicks();
         GoalStep.Kind taskCheckpointKind = decodeStepKind(checkpoint.get("task_kind")).orElse(null);
         Map<String, String> taskCheckpoint = new java.util.LinkedHashMap<>();
         Map<String, String> miningCheckpoint = new java.util.LinkedHashMap<>();
@@ -3937,7 +3937,7 @@ public final class GoalExecutor {
                     "reason", reason,
                     "face", authority.geometry().workFace().toShortString(),
                     "entries", plan.settledServiceTombstones.size());
-            if (!bot.getServerWorld().getRegistryKey().getValue().toString()
+            if (!bot.getEntityWorld().getRegistryKey().getValue().toString()
                     .equals(settledMetadata.serviceDimension())) {
                 finishActive(bot, plan, evaluate(bot, plan), reason,
                         false, true, GoalResult.Status.FAILED);
@@ -4066,7 +4066,7 @@ public final class GoalExecutor {
         int curTarget = goalTargetCount(bot, plan.goal);
         int currentHuntRawMeat = rawMeatCount(bot);
         int currentHuntVisitedSectors = plan.huntSearchCursor.visitedCount();
-        String currentDimension = bot.getServerWorld().getRegistryKey()
+        String currentDimension = bot.getEntityWorld().getRegistryKey()
                 .getValue().toString();
         boolean madeProgress = madeReplanProgress(
                 plan.current == null ? null : plan.current.kind(),
@@ -4778,7 +4778,7 @@ public final class GoalExecutor {
     // 优化2:目标最近(withinTicks 内)是否整体失败过——供 ActionDispatcher 拦截大脑失败后的手动逐格挖矿。
     public boolean recentlyFailed(AIPlayerEntity bot, int withinTicks) {
         Integer t = lastGoalFailTick.get(bot.getUuid());
-        return t != null && bot.getServer().getTicks() - t < withinTicks;
+        return t != null && bot.getEntityWorld().getServer().getTicks() - t < withinTicks;
     }
 
     // B:用户发来新消息时清空原始目标记忆(允许用户正常更换目标);由 BrainCoordinator 在收到用户消息时调用。
@@ -5579,7 +5579,7 @@ public final class GoalExecutor {
         if (goal instanceof Goal.Stockpile) {
             net.minecraft.util.math.BlockPos base = io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE
                     .of(bot.getUuid())
-                    .placeIn(bot.getServerWorld(), "base")
+                    .placeIn(bot.getEntityWorld(), "base")
                     .orElse(bot.getBlockPos());
             return GoalSnapshotCollector.Context.at(base);
         }
@@ -5615,13 +5615,13 @@ public final class GoalExecutor {
                 evaluation,
                 reason,
                 plan.startedTick,
-                bot.getServer().getTicks(),
+                bot.getEntityWorld().getServer().getTicks(),
                 plan.skippedSteps,
                 plan.lastStructure);
         publishResult(bot, result);
         userGoal.remove(bot.getUuid());
         if (status == GoalResult.Status.FAILED || status == GoalResult.Status.PARTIAL) {
-            lastGoalFailTick.put(bot.getUuid(), bot.getServer().getTicks());
+            lastGoalFailTick.put(bot.getUuid(), bot.getEntityWorld().getServer().getTicks());
         }
         if (advanceQueue) {
             advanceQueue(bot);
@@ -5652,7 +5652,7 @@ public final class GoalExecutor {
         }
         publishResult(bot, new GoalResult(
                 resultSequence.incrementAndGet(), missionId, goal, status, evaluation, reason,
-                startedTick, bot.getServer().getTicks(),
+                startedTick, bot.getEntityWorld().getServer().getTicks(),
                 skippedSteps == null ? List.of() : List.copyOf(skippedSteps), null));
     }
 
@@ -5681,7 +5681,7 @@ public final class GoalExecutor {
     }
 
     private static void markDirty(AIPlayerEntity bot) {
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getServer());
+        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
     }
 
     private static String resultMessage(GoalResult.Status status, GoalEvaluation evaluation, String reason) {
@@ -6211,7 +6211,7 @@ public final class GoalExecutor {
     private static Optional<SettledServiceAuthority> liveServiceAuthority(
             AIPlayerEntity bot, MiningServiceTask.RestoreMetadata metadata) {
         if (bot == null || metadata == null
-                || !bot.getServerWorld().getRegistryKey().getValue().toString()
+                || !bot.getEntityWorld().getRegistryKey().getValue().toString()
                 .equals(metadata.serviceDimension())) {
             return Optional.empty();
         }

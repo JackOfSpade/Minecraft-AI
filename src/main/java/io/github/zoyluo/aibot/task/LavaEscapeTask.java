@@ -71,7 +71,7 @@ public final class LavaEscapeTask extends AbstractTask {
             return;
         }
 
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         // 持续上浮:岩浆里按住跳缓慢上升。
         bot.getActionPack().setJumping(true);
 

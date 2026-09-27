@@ -307,7 +307,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         // replacement or checkpoint restart promote that unrelated quantity into mission credit.
         collected = restoredCollected;
         if (activeBreakPos != null
-                && !bot.getServerWorld().getBlockState(activeBreakPos).isOf(Blocks.OBSIDIAN)) {
+                && !bot.getEntityWorld().getBlockState(activeBreakPos).isOf(Blocks.OBSIDIAN)) {
             promoteActiveBreakToPickup(bot);
             if (waterSource != null) {
                 // The break may have committed immediately before the restart. Keep the live
@@ -403,7 +403,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             fail(timeoutReason());
             return;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
 
         HarvestCore.forcePickupNearbyAnyOf(bot, Set.of(Items.OBSIDIAN), 4.0D, 4.0D);
         int inventoryTotal = Math.max(0,
@@ -489,9 +489,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 miner.cancel(bot);
                 bot.getActionPack().stopAll();
                 BlockPos current = bot.getBlockPos();
-                if (!bot.getServerWorld().getFluidState(current).isEmpty()
-                        || !bot.getServerWorld().getFluidState(current.up()).isEmpty()
-                        || !Standability.isStandable(bot.getServerWorld(), current)) {
+                if (!bot.getEntityWorld().getFluidState(current).isEmpty()
+                        || !bot.getEntityWorld().getFluidState(current.up()).isEmpty()
+                        || !Standability.isStandable(bot.getEntityWorld(), current)) {
                     fail("create_obsidian_service_boundary_unsafe_pose:"
                             + current.toShortString());
                 }
@@ -558,7 +558,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void approachWater(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (waterTarget == null || !isStillWater(world, waterTarget)) {
             waterTarget = null;
             enter(Phase.FIND_WATER);
@@ -774,7 +774,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void search(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos current = bot.getBlockPos().toImmutable();
 
         // Only actual forward displacement consumes the durable cursor. Excavating a wall does
@@ -929,7 +929,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * when the just-reached face is below the configured block-light threshold.
      */
     private boolean lightSearchTrail(AIPlayerEntity bot, BlockPos previousFace) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (combinedSearchLight(world, bot.getBlockPos()) >= searchLightThreshold()) {
             return true;
         }
@@ -940,7 +940,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean searchLightingReady(AIPlayerEntity bot) {
-        if (combinedSearchLight(bot.getServerWorld(), bot.getBlockPos()) >= searchLightThreshold()) {
+        if (combinedSearchLight(bot.getEntityWorld(), bot.getBlockPos()) >= searchLightThreshold()) {
             return true;
         }
         if (!hasSearchLightingResource(bot)) {
@@ -965,7 +965,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean placeSearchTorch(AIPlayerEntity bot, BlockPos target) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         int torchSlot = InventoryAction.findItem(bot, Items.TORCH).orElse(-1);
         if (torchSlot < 0) {
             fail("create_obsidian_search_missing_torch");
@@ -1086,7 +1086,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private void approachLavaView(AIPlayerEntity bot) {
         if (lavaClue == null
                 || !ObservableWorldQuery.canObserveCell(bot, lavaClue)
-                || !bot.getServerWorld().getFluidState(lavaClue).isIn(FluidTags.LAVA)) {
+                || !bot.getEntityWorld().getFluidState(lavaClue).isIn(FluidTags.LAVA)) {
             lavaClue = null;
             enterScan(bot);
             return;
@@ -1176,7 +1176,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void approachLava(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (lavaTarget == null || !isStillLava(world, lavaTarget)) {
             resetForNextScan(bot);
             return;
@@ -1217,7 +1217,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void pour(AIPlayerEntity bot) {
-        if (lavaTarget == null || !isStillLava(bot.getServerWorld(), lavaTarget)) {
+        if (lavaTarget == null || !isStillLava(bot.getEntityWorld(), lavaTarget)) {
             resetForNextScan(bot);
             return;
         }
@@ -1248,7 +1248,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void waitForFormation(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (lavaTarget != null && world.getBlockState(lavaTarget).isOf(Blocks.OBSIDIAN)) {
             obsidian = lavaTarget;
             obsidianStandHint = standPos;
@@ -1286,14 +1286,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (pickupPos != null) {
             rememberVisiblePendingObsidianDrop(bot);
         }
-        if (waterSource != null && isStillWater(bot.getServerWorld(), waterSource)) {
+        if (waterSource != null && isStillWater(bot.getEntityWorld(), waterSource)) {
             if (InventoryAction.countItem(bot, Items.BUCKET) <= 0) {
                 fail("create_obsidian_bucket_lost_after_pour");
                 return;
             }
             if (bot.getBlockPos().getY() < waterSource.getY()
                     || (bot.getBlockPos().getY() == waterSource.getY()
-                    && !bot.getServerWorld().getFluidState(bot.getBlockPos()).isEmpty())) {
+                    && !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty())) {
                 // Fake players have no client buoyancy. After collecting in the protected hole,
                 // make one collision-validated adjacent rise so the eye is above the flowing
                 // sheet and the retained source face becomes ray-visible again.
@@ -1303,8 +1303,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 return;
             }
             if (obsidianStandHint != null
-                    && bot.getServerWorld().getFluidState(obsidianStandHint).isEmpty()
-                    && bot.getServerWorld().getFluidState(obsidianStandHint.up()).isEmpty()
+                    && bot.getEntityWorld().getFluidState(obsidianStandHint).isEmpty()
+                    && bot.getEntityWorld().getFluidState(obsidianStandHint.up()).isEmpty()
                     && !bot.getBlockPos().equals(obsidianStandHint)
                     && isAdjacentMicroStep(bot.getBlockPos(), obsidianStandHint)) {
                 // Leave the water column while it still provides the legitimate upward movement,
@@ -1354,7 +1354,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (phaseAge() > RECOVERY_LIMIT) {
             BotLog.action(bot, "create_obsidian_water_recovery_timeout",
                     "water", waterSource == null ? "none" : waterSource.toShortString());
-            if (waterSource != null && isStillWater(bot.getServerWorld(), waterSource)) {
+            if (waterSource != null && isStillWater(bot.getEntityWorld(), waterSource)) {
                 fail("create_obsidian_water_recovery_failed pos=" + waterSource.toShortString());
             } else if (waterBucketBaseline >= 0
                     && InventoryAction.countItem(bot, Items.WATER_BUCKET) < waterBucketBaseline) {
@@ -1404,7 +1404,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             // cycle and can burn the whole 153,600-tick task budget (F4); rotate the barren clue
             // out through the bounded reject ledger instead. Rejection only acts on an observed
             // still-lava cell — occlusion must not turn into a false negative.
-            if (bot.getServerWorld().getFluidState(lastPourClue).isIn(FluidTags.LAVA)
+            if (bot.getEntityWorld().getFluidState(lastPourClue).isIn(FluidTags.LAVA)
                     && ObservableWorldQuery.canObserveCell(bot, lastPourClue)) {
                 rejectLava(lastPourClue);
                 BotLog.action(bot, "create_obsidian_barren_pour_rejected",
@@ -1432,7 +1432,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void approachObsidian(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (obsidian == null) {
             resetForNextScan(bot);
             return;
@@ -1542,7 +1542,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void protectObsidian(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (obsidian == null || !world.getBlockState(obsidian).isOf(Blocks.OBSIDIAN)) {
             resetForNextScan(bot);
             return;
@@ -1603,7 +1603,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void mine(AIPlayerEntity bot) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         if (obsidian == null) {
             resetForNextScan(bot);
             return;
@@ -1900,7 +1900,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         Vec3d transactionOrigin = pickupPos.toCenterPos();
         Box search = new Box(pickupPos).expand(8.0D, 4.0D, 8.0D);
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         ItemEntity.class,
                         search,
                         entity -> entity.isAlive()
@@ -1909,7 +1909,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 .stream()
                 .min(Comparator
                         .comparingDouble((ItemEntity entity) ->
-                                entity.getPos().squaredDistanceTo(transactionOrigin))
+                                entity.getEntityPos().squaredDistanceTo(transactionOrigin))
                         .thenComparingDouble(entity -> entity.distanceTo(bot)));
     }
 
@@ -1937,7 +1937,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 below,
                 below.north(), below.east(), below.south(), below.west()
         };
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         for (BlockPos candidate : candidates) {
             if (!ObservableWorldQuery.canObserveCell(bot, candidate)
                     || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
@@ -2013,7 +2013,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 : new BlockPos[]{first, second};
         for (BlockPos candidate : candidates) {
             Standability.clearCache();
-            if (!Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 continue;
             }
             bot.getActionPack().stopAll();
@@ -2025,7 +2025,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static boolean isSafePickupCollisionCell(AIPlayerEntity bot, BlockPos target) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockState feet = world.getBlockState(target);
         BlockState head = world.getBlockState(target.up());
         BlockState below = world.getBlockState(target.down());
@@ -2078,7 +2078,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      */
     private boolean canYieldForService(AIPlayerEntity bot) {
         BlockPos current = bot.getBlockPos();
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         return phase == Phase.SCAN
                 && waterTarget == null
                 && waterSource == null
@@ -2690,7 +2690,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         BlockPos current = bot.getBlockPos();
         Standability.clearCache();
-        if (current.equals(target) || !Standability.isStandable(bot.getServerWorld(), target)) {
+        if (current.equals(target) || !Standability.isStandable(bot.getEntityWorld(), target)) {
             BotLog.action(bot, "create_obsidian_pickup_no_progress_endpoint",
                     "reason", current.equals(target) ? "current_cell" : "non_standable",
                     "target", target.toShortString());
@@ -2744,8 +2744,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return false;
         }
         BlockPos current = bot.getBlockPos();
-        return !bot.getServerWorld().getFluidState(current).isIn(FluidTags.LAVA)
-                && !bot.getServerWorld().getFluidState(current.up()).isIn(FluidTags.LAVA);
+        return !bot.getEntityWorld().getFluidState(current).isIn(FluidTags.LAVA)
+                && !bot.getEntityWorld().getFluidState(current.up()).isIn(FluidTags.LAVA);
     }
 
     private int phaseAge() {
@@ -2768,8 +2768,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (expectedStand == null || bot.getBlockPos().getSquaredDistance(expectedStand) > 1.0D) {
             return false;
         }
-        if (!Standability.isStandable(bot.getServerWorld(), bot.getBlockPos())
-                || !bot.getServerWorld().getFluidState(bot.getBlockPos()).isEmpty()) {
+        if (!Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())
+                || !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty()) {
             return false;
         }
         if (avoidLava && hasObservableAdjacentLava(bot, bot.getBlockPos())) {
@@ -2787,8 +2787,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                       boolean avoidLava) {
         if (expectedStand == null || plan == null
                 || bot.getBlockPos().getSquaredDistance(expectedStand) > 1.0D
-                || !Standability.isStandable(bot.getServerWorld(), bot.getBlockPos())
-                || !bot.getServerWorld().getFluidState(bot.getBlockPos()).isEmpty()) {
+                || !Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())
+                || !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty()) {
             return false;
         }
         if (avoidLava && hasObservableAdjacentLava(bot, bot.getBlockPos())) {
@@ -2807,8 +2807,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                                     BlockPos target) {
         if (expectedStand == null || target == null
                 || bot.getBlockPos().getSquaredDistance(expectedStand) > 1.0D
-                || !Standability.isStandable(bot.getServerWorld(), bot.getBlockPos())
-                || !bot.getServerWorld().getFluidState(bot.getBlockPos()).isEmpty()
+                || !Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())
+                || !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty()
                 || hasObservableAdjacentLava(bot, bot.getBlockPos())) {
             return false;
         }
@@ -2818,8 +2818,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
     private static boolean isCurrentDirectMinePose(AIPlayerEntity bot, BlockPos target) {
         BlockPos current = bot.getBlockPos();
-        return Standability.isStandable(bot.getServerWorld(), current)
-                && bot.getServerWorld().getFluidState(current).isEmpty()
+        return Standability.isStandable(bot.getEntityWorld(), current)
+                && bot.getEntityWorld().getFluidState(current).isEmpty()
                 && !hasObservableAdjacentLava(bot, current)
                 && isDirectlyUsable(bot, target, true);
     }
@@ -2848,7 +2848,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                           BlockPos target,
                                           PourPlan plan,
                                           boolean avoidLava) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (int dy = -2; dy <= 3; dy++) {
@@ -2917,9 +2917,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private static boolean isSafeStand(AIPlayerEntity bot, BlockPos candidate, boolean avoidLava) {
         if (candidate == null
                 || !observableStandCell(bot, candidate)
-                || !Standability.isStandable(bot.getServerWorld(), candidate)
-                || !bot.getServerWorld().getFluidState(candidate).isEmpty()
-                || !bot.getServerWorld().getFluidState(candidate.up()).isEmpty()) {
+                || !Standability.isStandable(bot.getEntityWorld(), candidate)
+                || !bot.getEntityWorld().getFluidState(candidate).isEmpty()
+                || !bot.getEntityWorld().getFluidState(candidate.up()).isEmpty()) {
             return false;
         }
         return !avoidLava || !hasObservableAdjacentLava(bot, candidate);
@@ -2982,10 +2982,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!ObservableWorldQuery.canObserveBlock(bot, plan.support())) {
             return false;
         }
-        BlockState support = bot.getServerWorld().getBlockState(plan.support());
+        BlockState support = bot.getEntityWorld().getBlockState(plan.support());
         return !support.isAir()
                 && support.getFluidState().isEmpty()
-                && !support.getCollisionShape(bot.getServerWorld(), plan.support()).isEmpty()
+                && !support.getCollisionShape(bot.getEntityWorld(), plan.support()).isEmpty()
                 && canReceiveWater(bot, plan.destination());
     }
 
@@ -2993,13 +2993,13 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!ObservableWorldQuery.canObserveCell(bot, destination)) {
             return false;
         }
-        BlockState state = bot.getServerWorld().getBlockState(destination);
+        BlockState state = bot.getEntityWorld().getBlockState(destination);
         return state.getFluidState().isEmpty()
                 && (state.isAir() || state.canBucketPlace(Fluids.WATER));
     }
 
     private static boolean hasObservableAdjacentLava(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         for (Direction direction : Direction.values()) {
             BlockPos adjacent = pos.offset(direction);
             if (ObservableWorldQuery.canObserveCell(bot, adjacent)
@@ -3011,7 +3011,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static boolean hasObservableAdjacentFluid(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         for (Direction direction : Direction.values()) {
             BlockPos adjacent = pos.offset(direction);
             if (ObservableWorldQuery.canObserveCell(bot, adjacent)
@@ -3023,7 +3023,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static boolean hasObservableNearbyLava(AIPlayerEntity bot, BlockPos pos, int radius) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
@@ -3046,7 +3046,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private static Set<BlockPos> observableLavaForWaterPlacement(AIPlayerEntity bot,
                                                                   BlockPos waterDestination,
                                                                   BlockPos requiredLava) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         Set<BlockPos> result = new LinkedHashSet<>();
         if (waterDestination == null || !canPrePlacementWaterOccupy(bot, waterDestination)) {
             return Set.of();
@@ -3112,7 +3112,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!ObservableWorldQuery.canObserveCell(bot, pos)) {
             return false;
         }
-        BlockState state = bot.getServerWorld().getBlockState(pos);
+        BlockState state = bot.getEntityWorld().getBlockState(pos);
         return state.getFluidState().isIn(FluidTags.WATER)
                 || state.getFluidState().isEmpty()
                 && (state.isAir() || state.canBucketPlace(Fluids.WATER));
@@ -3143,7 +3143,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private static BlockPos nearestObservableCell(AIPlayerEntity bot,
                                                   Predicate<BlockState> match,
                                                   Predicate<BlockPos> posFilter) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         int range = Math.min(PROSPECT_RANGE, Math.max(1, AIBotConfig.get().perception().radius()));
         int minY = Math.max(world.getBottomY(), origin.getY() - range);

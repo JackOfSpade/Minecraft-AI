@@ -57,14 +57,14 @@ public final class BuildAction {
             return ActionResult.failed("support_out_of_reach_or_sight");
         }
         BlockPos destination = against.offset(face);
-        var before = player.getServerWorld().getBlockState(destination);
+        var before = player.getEntityWorld().getBlockState(destination);
         net.minecraft.util.ActionResult result = player.interactionManager.interactBlock(
                 player,
-                player.getServerWorld(),
+                player.getEntityWorld(),
                 stack,
                 hand,
                 hit);
-        var after = player.getServerWorld().getBlockState(destination);
+        var after = player.getEntityWorld().getBlockState(destination);
         if (result.isAccepted() && !after.equals(before)) {
             player.swingHand(hand);
             player.updateLastActionTime();
@@ -194,17 +194,17 @@ public final class BuildAction {
             return ActionResult.failed("not_block_item");
         }
         var item = stack.getItem();
-        var existing = player.getServerWorld().getBlockState(pos);
+        var existing = player.getEntityWorld().getBlockState(pos);
         // 可替换格(流体源/草丛等)放行:封岩浆就是对浆格直接放块,原版玩家合法操作。
         if (!existing.isAir() && !existing.isReplaceable()) {
             return ActionResult.failed("target_not_air");
         }
         var placementState = blockItem.getBlock().getDefaultState();
-        if (!placementState.canPlaceAt(player.getServerWorld(), pos)
-                || !player.getServerWorld().canPlace(placementState, pos, ShapeContext.of(player))) {
+        if (!placementState.canPlaceAt(player.getEntityWorld(), pos)
+                || !player.getEntityWorld().canPlace(placementState, pos, ShapeContext.of(player))) {
             return ActionResult.failed("target_blocked_or_unsupported");
         }
-        if (!player.getServerWorld().setBlockState(pos, placementState, 3)) {
+        if (!player.getEntityWorld().setBlockState(pos, placementState, 3)) {
             return ActionResult.failed("world_mutation_rejected");
         }
         if (!player.getAbilities().creativeMode) {

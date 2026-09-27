@@ -35,7 +35,7 @@ public final class MiningController {
 
     public ActionResult tick(ActionPack pack) {
         AIPlayerEntity player = pack.player();
-        var world = player.getServerWorld();
+        var world = player.getEntityWorld();
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) {
             resetProgress(player);
@@ -102,7 +102,7 @@ public final class MiningController {
                 face,
                 World.MAX_Y,
                 -1);
-        player.getServerWorld().setBlockBreakingInfo(player.getId(), pos, -1);
+        player.getEntityWorld().setBlockBreakingInfo(player.getId(), pos, -1);
         started = false;
         targetState = null;
         progress = 0.0F;
@@ -118,7 +118,7 @@ public final class MiningController {
                     World.MAX_Y,
                     -1);
         }
-        player.getServerWorld().setBlockBreakingInfo(player.getId(), pos, -1);
+        player.getEntityWorld().setBlockBreakingInfo(player.getId(), pos, -1);
         started = false;
         targetState = null;
         progress = 0.0F;

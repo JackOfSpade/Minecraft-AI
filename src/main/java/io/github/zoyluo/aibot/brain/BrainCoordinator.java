@@ -104,7 +104,7 @@ public final class BrainCoordinator {
             return handleMessage(bot, "player", text);
         }
         return handleMessage(bot,
-                sender.getGameProfile().getName(),
+                sender.getGameProfile().name(),
                 text,
                 SpeakerViewCollector.collect(sender, bot).toJson(),
                 0);
@@ -119,7 +119,7 @@ public final class BrainCoordinator {
             return handleMessage(bot, "player", text);
         }
         return handleMessage(bot,
-                sender.getGameProfile().getName(),
+                sender.getGameProfile().name(),
                 text,
                 SpeakerViewCollector.collect(sender, bot).toJson(),
                 routingModelCallCost);
@@ -148,7 +148,7 @@ public final class BrainCoordinator {
         // A fresh instruction also gets a fresh LLM context. This avoids old tool calls and
         // goals biasing the planner toward a request the player has already replaced.
         conversation.history.clear();
-        conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().getName())));
+        conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name())));
         if (supersededDecision) {
             BotLog.comm(bot, "decision_superseded",
                     "epoch", lease.epoch(),
@@ -643,7 +643,7 @@ public final class BrainCoordinator {
             return false;
         }
         if (conversation.history.isEmpty()) {
-            conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().getName())));
+            conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name())));
         }
         conversation.continuationTaskPolls = 0;
         if (conversation.callBudget.exhausted()) {
@@ -658,7 +658,7 @@ public final class BrainCoordinator {
         }
         if (hasGoal && maybeInjectGoalContinuation(bot, conversation, "There is no active task, but the long-term goal is unfinished. Continue the current step and assign a high-level task when needed.")) {
             awaitingTask.remove(bot.getUuid());
-            nextGoalWakeTick.put(bot.getUuid(), bot.getServer().getTicks() + 200);
+            nextGoalWakeTick.put(bot.getUuid(), bot.getEntityWorld().getServer().getTicks() + 200);
             trimHistory(conversation);
             submit(bot, conversation, conversation.decision.beginEpoch());
             return true;
@@ -717,8 +717,8 @@ public final class BrainCoordinator {
         }
         String concise = text.length() > 240 ? text.substring(0, 240) : text;
         sendPanelChat(bot, "bot", concise);
-        bot.getServer().getPlayerManager().broadcast(
-                Text.literal("<" + bot.getGameProfile().getName() + "> ").append(Text.literal(concise)), false);
+        bot.getEntityWorld().getServer().getPlayerManager().broadcast(
+                Text.literal("<" + bot.getGameProfile().name() + "> ").append(Text.literal(concise)), false);
     }
 
     public int conversationCount() {
@@ -820,7 +820,7 @@ public final class BrainCoordinator {
     }
 
     private void scheduleContinuation(AIPlayerEntity bot, BotConversation conversation, DecisionLease waitingLease) {
-        var server = bot.getServer();
+        var server = bot.getEntityWorld().getServer();
         CompletableFuture.delayedExecutor(TpsGuard.INSTANCE.continuationDelaySeconds(), TimeUnit.SECONDS).execute(() ->
                 server.execute(() -> {
                     if (conversations.get(waitingLease.botId()) != conversation
@@ -1074,7 +1074,7 @@ public final class BrainCoordinator {
         if (!hasGoal) {
             return false;
         }
-        return bot.getServer().getTicks() >= nextGoalWakeTick.getOrDefault(bot.getUuid(), 0);
+        return bot.getEntityWorld().getServer().getTicks() >= nextGoalWakeTick.getOrDefault(bot.getUuid(), 0);
     }
 
     private static String perceptionDigest(PerceptionSnapshot snapshot) {

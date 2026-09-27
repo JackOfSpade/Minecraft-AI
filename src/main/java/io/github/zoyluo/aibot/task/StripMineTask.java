@@ -275,7 +275,7 @@ public final class StripMineTask extends AbstractTask {
         descentStepsPlanned = 0;
         BlockPos miningOrigin = origin;
         if (shouldDescendToOreLayer(bot)) {
-            int targetY = Math.max(bot.getServerWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
+            int targetY = Math.max(bot.getEntityWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
             descentStepsPlanned = Math.max(0, origin.getY() - targetY);
             // FLOW-1:斜楼梯下挖——每级 横移1格 + 下降1格(1:1),形成可回头走的阶梯,
             // 而非竖直直坠。每级 DESCEND 步会挖 stand + 其上方 2 格(身位),其下方为实心地面。
@@ -304,7 +304,7 @@ public final class StripMineTask extends AbstractTask {
         if (!autoDescend || veinOnly || targetOres.stream().noneMatch(OreScan::isOreBlock)) {
             return false;
         }
-        int targetY = Math.max(bot.getServerWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
+        int targetY = Math.max(bot.getEntityWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
         if (origin.getY() <= targetY + 2) {
             return false;
         }
@@ -318,8 +318,8 @@ public final class StripMineTask extends AbstractTask {
             if (Math.abs(pos.getY() - center.getY()) > 3) {
                 continue;
             }
-            if (OreScan.isOre(bot.getServerWorld().getBlockState(pos), targetOres)
-                    && isExposed(bot.getServerWorld(), pos)
+            if (OreScan.isOre(bot.getEntityWorld().getBlockState(pos), targetOres)
+                    && isExposed(bot.getEntityWorld(), pos)
                     && io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 return true;
             }
@@ -362,15 +362,15 @@ public final class StripMineTask extends AbstractTask {
             move(bot);
             return;
         }
-        if (!safeStandTarget(bot.getServerWorld(), currentStep.stand())) {
+        if (!safeStandTarget(bot.getEntityWorld(), currentStep.stand())) {
             fail("unsafe_tunnel_target: " + shortPos(currentStep.stand()));
             return;
         }
         blocksToMine.clear();
-        addIfSolid(bot.getServerWorld(), currentStep.stand());
-        addIfSolid(bot.getServerWorld(), currentStep.stand().up());
+        addIfSolid(bot.getEntityWorld(), currentStep.stand());
+        addIfSolid(bot.getEntityWorld(), currentStep.stand().up());
         if (currentStep.kind() == StepKind.DESCEND) {
-            addIfSolid(bot.getServerWorld(), currentStep.stand().up(2));
+            addIfSolid(bot.getEntityWorld(), currentStep.stand().up(2));
         }
         if (blocksToMine.isEmpty()) {
             phase = Phase.SCAN_VEIN;
@@ -388,13 +388,13 @@ public final class StripMineTask extends AbstractTask {
                 return;
             }
         }
-        if (bot.getServerWorld().getBlockState(currentMiningBlock).isAir()) {
+        if (bot.getEntityWorld().getBlockState(currentMiningBlock).isAir()) {
             Standability.clearCache();
             currentMiningBlock = null;
             tunnelBlocksMined++;
             return;
         }
-        if (OreScan.adjacentHazard(bot.getServerWorld(), currentMiningBlock)) {
+        if (OreScan.adjacentHazard(bot.getEntityWorld(), currentMiningBlock)) {
             fail("hazard_near: " + shortPos(currentMiningBlock));
             return;
         }
@@ -433,17 +433,17 @@ public final class StripMineTask extends AbstractTask {
                 return;
             }
         }
-        if (bot.getServerWorld().getBlockState(currentVeinBlock).isAir()) {
+        if (bot.getEntityWorld().getBlockState(currentVeinBlock).isAir()) {
             Standability.clearCache();
             currentVeinBlock = null;
             veinBlocksMined++;
             return;
         }
-        if (!OreScan.isOre(bot.getServerWorld().getBlockState(currentVeinBlock), targetOres)) {
+        if (!OreScan.isOre(bot.getEntityWorld().getBlockState(currentVeinBlock), targetOres)) {
             currentVeinBlock = null;
             return;
         }
-        if (OreScan.adjacentHazard(bot.getServerWorld(), currentVeinBlock)) {
+        if (OreScan.adjacentHazard(bot.getEntityWorld(), currentVeinBlock)) {
             note = "skip_hazard_ore:" + shortPos(currentVeinBlock);
             currentVeinBlock = null;
             return;
@@ -481,7 +481,7 @@ public final class StripMineTask extends AbstractTask {
         if (!AIBotConfig.get().mining().placeTorches()
                 || distanceCompleted == 0
                 || distanceCompleted % 8 != 0
-                || bot.getServerWorld().getLightLevel(net.minecraft.world.LightType.BLOCK, bot.getBlockPos()) >= 8) {
+                || bot.getEntityWorld().getLightLevel(net.minecraft.world.LightType.BLOCK, bot.getBlockPos()) >= 8) {
             phase = Phase.MOVE;
             return;
         }
@@ -616,7 +616,7 @@ public final class StripMineTask extends AbstractTask {
             return depotChest;
         }
         return BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getServerWorld(), "depot", "home", "base", "chest")
+                .placeIn(bot.getEntityWorld(), "depot", "home", "base", "chest")
                 .flatMap(pos -> ContainerAction.resolve(bot, pos).isPresent()
                         ? Optional.of(pos.toImmutable())
                         : ContainerTask.nearestContainerNear(bot, pos, 4))
@@ -633,7 +633,7 @@ public final class StripMineTask extends AbstractTask {
         BlockPos.stream(center.add(-radius, -radius, -radius), center.add(radius, radius, radius))
                 .map(BlockPos::toImmutable)
                 .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> OreScan.isOre(bot.getServerWorld().getBlockState(pos), targetOres))
+                .filter(pos -> OreScan.isOre(bot.getEntityWorld().getBlockState(pos), targetOres))
                 .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())))
                 .findFirst()
                 .ifPresent(seed -> OreScan.veinFrom(bot, seed, targetOres, MAX_VEIN_BLOCKS)
@@ -650,8 +650,8 @@ public final class StripMineTask extends AbstractTask {
         BlockPos base = bot.getBlockPos();
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos pos = base.offset(direction);
-            if (bot.getServerWorld().getBlockState(pos).isAir()
-                    && !bot.getServerWorld().getBlockState(pos.down()).isAir()) {
+            if (bot.getEntityWorld().getBlockState(pos).isAir()
+                    && !bot.getEntityWorld().getBlockState(pos.down()).isAir()) {
                 return Optional.of(pos.toImmutable());
             }
         }
@@ -681,7 +681,7 @@ public final class StripMineTask extends AbstractTask {
         Standability.clearCache();
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction);
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate.toImmutable();
             }
         }

@@ -64,7 +64,7 @@ public final class CombatCore {
     /** Observable, reachable ranged attackers around the bot -- used to decide when cover/peekaboo
      *  tactics are warranted instead of plain kiting. */
     public static List<LivingEntity> rangedThreatsAround(AIPlayerEntity bot, double range) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(range),
                         entity -> entity != bot
                                 && entity.isAlive()
@@ -76,7 +76,7 @@ public final class CombatCore {
     /** Counts live hostiles whose current AI target is this bot -- the "aggro count" used to decide
      *  when a swarmed bot should fall back toward its owning player. */
     public static int countAggroedHostiles(AIPlayerEntity bot, double range) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(MobEntity.class, bot.getBoundingBox().expand(range),
                         mob -> mob.isAlive() && mob.getTarget() == bot)
                 .size();
@@ -132,7 +132,7 @@ public final class CombatCore {
     }
 
     public static Optional<LivingEntity> nearestTarget(AIPlayerEntity bot, EntityType<?> targetType, double range) {
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(range),
                         entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot)
                 .stream()
@@ -142,7 +142,7 @@ public final class CombatCore {
 
     public static Optional<LivingEntity> nearestHostileAround(AIPlayerEntity bot, BlockPos center, double range) {
         Box box = new Box(center).expand(range);
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, box,
                         entity -> entity instanceof HostileEntity && entity.isAlive() && entity != bot)
                 .stream()
@@ -158,7 +158,7 @@ public final class CombatCore {
     // 够不到(隔墙/隔隧道)。raycast 只检测方块、不含实体,正好判断"有没有墙挡着"。被挡的怪近战打不到、
     // 远程射不到、苦力怕炸不到,不应触发/维持战斗(实测 bug:被方块阻隔的怪让 bot 一直"正在战斗")。
     public static boolean hasLineOfSight(AIPlayerEntity bot, LivingEntity mob) {
-        HitResult hit = bot.getServerWorld().raycast(new RaycastContext(
+        HitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
                 bot.getEyePos(), mob.getEyePos(),
                 RaycastContext.ShapeType.COLLIDER,
                 RaycastContext.FluidHandling.NONE,
@@ -167,14 +167,14 @@ public final class CombatCore {
     }
 
     public static void lookAt(AIPlayerEntity bot, LivingEntity target) {
-        Vec3d targetCenter = target.getPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
+        Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
         LookAction.lookAt(bot, targetCenter);
     }
 
     public static void startApproach(AIPlayerEntity bot, LivingEntity target) {
         ActionResult result = bot.getActionPack().startPathTo(target.getBlockPos());
         if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(target.getPos());
+            bot.getActionPack().startWalkTo(target.getEntityPos());
         }
     }
 

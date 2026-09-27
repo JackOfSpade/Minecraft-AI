@@ -380,7 +380,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private static boolean isFactualSurfaceAnchor(AIPlayerEntity bot, BlockPos feet) {
-        return Standability.isStandable(bot.getServerWorld(), feet)
+        return Standability.isStandable(bot.getEntityWorld(), feet)
                 && GoalPlanner.canAcquireSurfaceResources(bot);
     }
 
@@ -482,7 +482,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         BlockPos destination = new BlockPos(anchor.x(), anchor.y(), anchor.z());
         Standability.clearCache();
         if (bot.getBlockPos().getSquaredDistance(destination) <= 4.0D
-                && Standability.isStandable(bot.getServerWorld(), bot.getBlockPos())) {
+                && Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())) {
             bot.getActionPack().stopAll();
             phase = Phase.ACQUIRE;
             lastProgressTick = elapsed;
@@ -512,7 +512,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private static String dimension(AIPlayerEntity bot) {
-        return bot.getServerWorld().getRegistryKey().getValue().toString();
+        return bot.getEntityWorld().getRegistryKey().getValue().toString();
     }
 
     private int surfaceFloorY(AIPlayerEntity bot) {
@@ -576,7 +576,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return false;
         }
         BlockPos feet = prey.getBlockPos();
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         // 猎物落点验证与猎物视线同距:看得见动物却看不到它踩的格子,远距目标会在第一步
         // 就被 no_round_trip 拒掉,视觉与安全链自相矛盾。
         if (feet.getY() < surfaceFloorY(bot)
@@ -625,7 +625,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 continue;
             }
             SurfaceRouteProof outbound = provePreyApproachRoute(
-                    bot, bot.getServerWorld(), current, candidate, floorY, null);
+                    bot, bot.getEntityWorld(), current, candidate, floorY, null);
             if (outbound == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -634,7 +634,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 continue;
             }
             SurfaceRouteProof dropRecovery = proveRoundTripSurfaceRoute(
-                    bot.getServerWorld(), candidate, preyCell, floorY);
+                    bot.getEntityWorld(), candidate, preyCell, floorY);
             if (dropRecovery == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -662,7 +662,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 candidate.getX() + 0.5D,
                 candidate.getY(),
                 candidate.getZ() + 0.5D);
-        return pose.squaredDistanceTo(prey.getPos())
+        return pose.squaredDistanceTo(prey.getEntityPos())
                 <= ATTACK_POSE_RANGE * ATTACK_POSE_RANGE;
     }
 
@@ -681,7 +681,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return false;
         }
         Standability.clearCache();
-        return Standability.isStandable(bot.getServerWorld(), candidate);
+        return Standability.isStandable(bot.getEntityWorld(), candidate);
     }
 
     private boolean attackPoseMatchesTarget(AIPlayerEntity bot, LivingEntity prey) {
@@ -742,7 +742,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         unsafePreyRejectedUntil.put(prey.getUuid(), rejectedUntil);
         EpisodeMemory.INSTANCE.exclude(
                 bot.getUuid(), prey.getBlockPos(),
-                bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         BotLog.action(bot, "hunt_unsafe_prey_rejected",
                 "prey", prey.getUuid(),
                 "at", prey.getBlockPos().toShortString(),
@@ -782,7 +782,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 phase == Phase.PICKUP || phase == Phase.RETURN_SURFACE;
         if (roamTarget != null) {
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), roamTarget,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         }
         if (target != null && target.isAlive()) {
             int rejectedUntil = elapsed + WET_PREY_REJECTION_TICKS;
@@ -815,7 +815,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             fail("hunt_search_capacity_exhausted sectors=" + searchCursor.visitedCount());
             return RoamResult.RETRY;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         String dimension = dimension(bot);
         long claimedOrdinal;
@@ -840,7 +840,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                         || searchCursor.contains(
                         dimension, ground.getX(), ground.getZ())
                         || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), ground, bot.getServer().getTicks())
+                        bot.getUuid(), ground, bot.getEntityWorld().getServer().getTicks())
                         || EpisodeMemory.INSTANCE.nearTrail(
                                 bot.getUuid(), "hunt", ground, 10.0D)) {
                     continue;
@@ -852,7 +852,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 if (!hasRoundTripSurfaceRoute(
                         world, feet, ground, surfaceFloorY(bot))) {
                     EpisodeMemory.INSTANCE.exclude(bot.getUuid(), ground,
-                            bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                            bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
                     BotLog.action(bot, "hunt_roam_one_way_rejected",
                             "from", feet.toShortString(), "to", ground.toShortString());
                     continue;
@@ -1045,7 +1045,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private static SurfacePathStart startExactSurfacePath(
             AIPlayerEntity bot, BlockPos destination, int minimumY,
             BlockPos returnAnchor, boolean digFallbackOutbound) {
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         SurfaceRouteProof proof = digFallbackOutbound
                 ? provePreyApproachRoute(bot, world, origin, destination, minimumY, returnAnchor)
@@ -1118,7 +1118,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private void excludeRoamTarget(AIPlayerEntity bot) {
         if (roamTarget != null) {
             EpisodeMemory.INSTANCE.exclude(bot.getUuid(), roamTarget,
-                    bot.getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
         }
     }
 
@@ -1329,7 +1329,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         pickupExpectedRawMeat = targetExpectedRawMeat;
         pickupInventoryBaseline = targetExpectedMeatBaseline;
         pickupRawMeatStatBaseline = targetExpectedMeatPickupBaseline;
-        pickupStartedWorldTime = bot.getServerWorld().getTime();
+        pickupStartedWorldTime = bot.getEntityWorld().getTime();
         pickupDimension = dimension(bot);
         pickupDropUnits.clear();
         pickupDropUnits.putAll(creditedDropUnits);
@@ -1353,7 +1353,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         BlockPos killOrigin = target.getBlockPos().toImmutable();
-        List<ItemEntity> freshDrops = bot.getServerWorld().getEntitiesByClass(
+        List<ItemEntity> freshDrops = bot.getEntityWorld().getEntitiesByClass(
                 ItemEntity.class,
                 bot.getBoundingBox().expand(16.0D),
                 entity -> entity.isAlive()
@@ -1361,7 +1361,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                         && entity.getStack().isOf(targetExpectedRawMeat)
                         && entity.getItemAge() >= 0
                         && entity.getItemAge() <= 3
-                        && entity.getPos().squaredDistanceTo(Vec3d.ofCenter(killOrigin))
+                        && entity.getEntityPos().squaredDistanceTo(Vec3d.ofCenter(killOrigin))
                         <= PICKUP_DROP_ORIGIN_RADIUS_SQUARED
                         && ObservableWorldQuery.canObserveEntity(bot, entity));
         for (ItemEntity drop : freshDrops) {
@@ -1388,7 +1388,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (age < 0L) {
             checkpointDirty = true;
             fail("hunt_pickup_time_rollback:started=" + pickupStartedWorldTime
-                    + ":current=" + bot.getServerWorld().getTime());
+                    + ":current=" + bot.getEntityWorld().getTime());
             return;
         }
         pickupGrace = (int) Math.min(Integer.MAX_VALUE, age);
@@ -1408,7 +1408,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 BlockPos stand = safeObservedDropStand(bot, drop);
                 if (stand != null) {
                     pickupMovementActive = approachPickupStand(
-                            bot, stand, drop.getPos());
+                            bot, stand, drop.getEntityPos());
                 } else if (pickupGrace == 3 || pickupGrace % 40 == 0) {
                     BotLog.action(bot, "hunt_drop_one_way_rejected",
                             "drop", drop.getBlockPos().toShortString(),
@@ -1498,7 +1498,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (pickupExpectedRawMeat == null || pickupOrigin == null) {
             return Optional.empty();
         }
-        List<ItemEntity> observed = bot.getServerWorld().getEntitiesByClass(
+        List<ItemEntity> observed = bot.getEntityWorld().getEntitiesByClass(
                 ItemEntity.class,
                 bot.getBoundingBox().expand(16.0D),
                 entity -> entity.isAlive()
@@ -1548,12 +1548,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (itemAge < 0 || itemAge > transactionAge + 3) {
             return false;
         }
-        return drop.getPos().squaredDistanceTo(Vec3d.ofCenter(pickupOrigin))
+        return drop.getEntityPos().squaredDistanceTo(Vec3d.ofCenter(pickupOrigin))
                 <= PICKUP_DROP_ORIGIN_RADIUS_SQUARED;
     }
 
     private long pickupAge(AIPlayerEntity bot) {
-        return pickupAgeAt(pickupStartedWorldTime, bot.getServerWorld().getTime());
+        return pickupAgeAt(pickupStartedWorldTime, bot.getEntityWorld().getTime());
     }
 
     static long pickupAgeAt(long startedWorldTime, long currentWorldTime) {
@@ -1631,7 +1631,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 || destination.getY() < surfaceFloorY(bot)) {
             return false;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         Standability.clearCache();
         if (!Standability.isStandable(world, destination)) {
             return false;
@@ -1683,7 +1683,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         wetPreyRejectedUntil.entrySet().removeIf(entry -> entry.getValue() <= elapsed);
         unsafePreyRejectedUntil.entrySet().removeIf(entry -> entry.getValue() <= elapsed);
         Box box = bot.getBoundingBox().expand(SEARCH_RANGE);
-        return bot.getServerWorld()
+        return bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, box,
                         entity -> entity.isAlive() && entity != bot && isHuntable(entity))
                 .stream()
@@ -1692,7 +1692,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 .filter(entity -> !wetPreyRejectedUntil.containsKey(entity.getUuid()))
                 .filter(entity -> !unsafePreyRejectedUntil.containsKey(entity.getUuid()))
                 .filter(entity -> !EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), entity.getBlockPos(), bot.getServer().getTicks()))
+                        bot.getUuid(), entity.getBlockPos(), bot.getEntityWorld().getServer().getTicks()))
                 .min(Comparator.comparingDouble(bot::distanceTo))
                 .orElse(null);
     }
@@ -1705,7 +1705,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (pickupOrigin == null) {
             return false;
         }
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         for (int checked = 0; checked < PICKUP_SWEEP_OFFSETS.length; checked++) {
             int[] offset = PICKUP_SWEEP_OFFSETS[
                     Math.floorMod(pickupSweepCursor++, PICKUP_SWEEP_OFFSETS.length)];
@@ -1774,7 +1774,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             checkpointDirty = true;
             return;
         }
-        long now = bot.getServerWorld().getTime();
+        long now = bot.getEntityWorld().getTime();
         if (now < restored.pickupStartedWorldTime()) {
             fail("hunt_pickup_time_rollback:started=" + restored.pickupStartedWorldTime()
                     + ":current=" + now);
@@ -2047,7 +2047,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     /** 周围是否有可猎动物——供饥饿链判断"值不值得派猎食任务",避免没动物时空派必失败。 */
     public static boolean hasPreyNearby(AIPlayerEntity bot) {
-        return !bot.getServerWorld()
+        return !bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(SEARCH_RANGE),
                         entity -> entity.isAlive() && entity != bot && isHuntable(entity))
                 .stream()

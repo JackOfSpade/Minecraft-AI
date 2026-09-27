@@ -104,7 +104,7 @@ public final class PathExecutor {
                     return failRuntimeContract(pack, "terminal_below_minimum_y");
                 }
                 Standability.clearCache();
-                if (!Standability.isStandable(pack.player().getServerWorld(), current)
+                if (!Standability.isStandable(pack.player().getEntityWorld(), current)
                         || !FakePlayerMotion.isBlockCollisionFree(pack.player())) {
                     return failRuntimeContract(pack, "terminal_not_standable");
                 }
@@ -130,7 +130,7 @@ public final class PathExecutor {
         }
 
         Node next = path.get(index);
-        String danger = DangerCheck.scan(pack.player().getServerWorld(), next.pos());
+        String danger = DangerCheck.scan(pack.player().getEntityWorld(), next.pos());
         if (danger != null) {
             BotLog.warn(LogCategory.PATH, pack.player(), "path_danger", "at_node", LogFields.pos(next.pos()), "reason", danger);
             cleanup(pack);
@@ -233,7 +233,7 @@ public final class PathExecutor {
         jumpAttemptTicks++;
         double dx = (target.getX() + 0.5D) - player.getX();
         double dz = (target.getZ() + 0.5D) - player.getZ();
-        LookAction.lookHorizontallyAt(player, player.getPos().add(dx, 0.0D, dz));
+        LookAction.lookHorizontallyAt(player, player.getEntityPos().add(dx, 0.0D, dz));
         pack.setForward(1.0F);
         pack.setStrafing(0.0F);
         pack.setSprinting(false);
@@ -292,7 +292,7 @@ public final class PathExecutor {
         double dz = (target.getZ() + 0.5D) - player.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         if (horizontal > 0.05D) {
-            LookAction.lookHorizontallyAt(player, player.getPos().add(dx, 0.0D, dz));
+            LookAction.lookHorizontallyAt(player, player.getEntityPos().add(dx, 0.0D, dz));
             pack.setForward(1.0F);
         } else {
             pack.setForward(0.0F);
@@ -340,8 +340,8 @@ public final class PathExecutor {
             // 穿山双格挖:脚位挖完后头位仍有碰撞(实心山体内部每步如此)→ 再挖头位,人才进得去。
             // 配合 NeighborEnumerator.hasHeadroom 的"头位可挖即可"放宽,挖掘寻路从贴地刨坑升级为穿山打洞。
             BlockPos headPos = next.pos().up();
-            if (!pack.player().getServerWorld().getBlockState(headPos)
-                    .getCollisionShape(pack.player().getServerWorld(), headPos).isEmpty()) {
+            if (!pack.player().getEntityWorld().getBlockState(headPos)
+                    .getCollisionShape(pack.player().getEntityWorld(), headPos).isEmpty()) {
                 Direction headFace = faceFromPlayer(pack, headPos);
                 LookAction.lookAtBlock(pack.player(), headPos, headFace);
                 subMiner = new MiningController(headPos, headFace);
@@ -398,7 +398,7 @@ public final class PathExecutor {
         pack.jumpOnce();
         pillarAttemptTicks++;
         double rise = player.getY() - placeSlot.getY();
-        if (rise > 0.5D && rise < 1.2D && player.getServerWorld().getBlockState(placeSlot).isAir()) {
+        if (rise > 0.5D && rise < 1.2D && player.getEntityWorld().getBlockState(placeSlot).isAir()) {
             BuildAction.placeBlockAt(player, placeSlot);
             return ActionResult.IN_PROGRESS;
         }
@@ -448,8 +448,8 @@ public final class PathExecutor {
             return commitAdvance(pack, index + 1);
         }
         BlockPos placeSlot = target.down();
-        if (player.getServerWorld().getBlockState(placeSlot)
-                .getCollisionShape(player.getServerWorld(), placeSlot).isEmpty()) {
+        if (player.getEntityWorld().getBlockState(placeSlot)
+                .getCollisionShape(player.getEntityWorld(), placeSlot).isEmpty()) {
             int slot = findPlaceableBlock(player, protectedStoneLikeReserve);
             if (slot < 0) {
                 return handleStuck(pack, "bridge_no_block");
@@ -490,7 +490,7 @@ public final class PathExecutor {
     }
 
     private ActionResult checkProgress(ActionPack pack, Node next) {
-        Vec3d current = pack.player().getPos();
+        Vec3d current = pack.player().getEntityPos();
         if (lastPos != null && current.distanceTo(lastPos) < 0.03D) {
             stuckTicks++;
         } else {
@@ -559,7 +559,7 @@ public final class PathExecutor {
         if (dy < -1 || dy > 1) {
             return false;
         }
-        return lineClearForStringPull(pack.player().getServerWorld(), from, target);
+        return lineClearForStringPull(pack.player().getEntityWorld(), from, target);
     }
 
     private static boolean lineClearForStringPull(net.minecraft.server.world.ServerWorld world, BlockPos from, BlockPos target) {
@@ -622,7 +622,7 @@ public final class PathExecutor {
 
     private ActionResult handleStuck(ActionPack pack, String reason) {
         if (replanGate.tryAcquire()) {
-            int now = pack.player().getServer().getTicks();
+            int now = pack.player().getEntityWorld().getServer().getTicks();
             if (now - lastReplanTick < REPLAN_COOLDOWN_TICKS) {
                 cleanup(pack);
                 return ActionResult.failed(reason + "; replan_throttled");
@@ -658,11 +658,11 @@ public final class PathExecutor {
             AStarPathfinder.invalidateCache("runtime_path_obstruction");
             AStarPathfinder finder = routeContract.constrained()
                     ? new AStarPathfinder(
-                    pack.player(), pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal,
+                    pack.player(), pack.player().getEntityWorld(), pack.player().getBlockPos(), originalGoal,
                     CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                     false, false)
                     : new AStarPathfinder(
-                    pack.player(), pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal,
+                    pack.player(), pack.player().getEntityWorld(), pack.player().getBlockPos(), originalGoal,
                     canPillar, allowDig);
             PathfindingResult fresh = routeContract.constrained()
                     ? finder.findPathUncachedAtOrAbove(routeContract.minimumY())
@@ -713,7 +713,7 @@ public final class PathExecutor {
     private PathfindingResult proveConstrainedReturnRoute(
             ActionPack pack, BlockPos returnAnchor) {
         return new AStarPathfinder(
-                pack.player(), pack.player().getServerWorld(), originalGoal, returnAnchor,
+                pack.player(), pack.player().getEntityWorld(), originalGoal, returnAnchor,
                 CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                 false, false).findPathUncachedAtOrAbove(routeContract.minimumY());
     }
@@ -734,7 +734,7 @@ public final class PathExecutor {
             return ActionResult.SUCCESS;
         }
         PathfindingResult proof = new AStarPathfinder(
-                pack.player(), pack.player().getServerWorld(), current, routeContract.returnAnchor(),
+                pack.player(), pack.player().getEntityWorld(), current, routeContract.returnAnchor(),
                 CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                 false, false).findPathUncachedAtOrAbove(routeContract.minimumY());
         RouteValidation validation =

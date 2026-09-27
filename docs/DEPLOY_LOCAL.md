@@ -1,7 +1,7 @@
 # Deploying to a local Minecraft profile
 
 `scripts/deploy_profile.sh` builds the mod and installs it into a launcher profile (default
-`%APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.5`), applies the LLM settings and makes sure logging
+`%APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.11`), applies the LLM settings and makes sure logging
 is on. Run it from Git Bash with the game closed:
 
 ```bash

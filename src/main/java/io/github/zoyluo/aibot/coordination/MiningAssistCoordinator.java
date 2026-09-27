@@ -82,7 +82,7 @@ public final class MiningAssistCoordinator {
         SensePlan.Verdict verdict = SensePlan.decide(handled,
                 () -> isSensedTask(TaskManager.INSTANCE.getActive(bot).orElse(null)),
                 () -> MiningAssistRuntime.enabledFor(bot, tick),
-                () -> !bot.getServerWorld().isSkyVisible(bot.getBlockPos()));
+                () -> !bot.getEntityWorld().isSkyVisible(bot.getBlockPos()));
         if (verdict.senses()) {
             sense(bot, tick);
         } else if (!verdict.neutral()) {
@@ -101,7 +101,7 @@ public final class MiningAssistCoordinator {
 
     private static void sense(AIPlayerEntity bot, int tick) {
         MiningAssistConfig config = MiningAssistRuntime.config();
-        ServerWorld world = bot.getServerWorld();
+        ServerWorld world = bot.getEntityWorld();
         MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
         if (state == null) {
             state = MiningAssistRegistry.getOrCreate(bot);

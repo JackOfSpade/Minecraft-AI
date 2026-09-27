@@ -155,7 +155,7 @@ public final class BuildActionEdgeVisibilityGameTests {
                     "low-radius placement consumed a physical block");
         } finally {
             setConfig(original);
-            AIPlayerManager.INSTANCE.despawn(bot.getServer(), "BuildLowPerception");
+            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "BuildLowPerception");
         }
         context.complete();
     }
@@ -312,7 +312,7 @@ public final class BuildActionEdgeVisibilityGameTests {
     }
 
     private static void cleanup(TestContext context, AIPlayerEntity bot, String name) {
-        AIPlayerManager.INSTANCE.despawn(bot.getServer(), name);
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
     }
 

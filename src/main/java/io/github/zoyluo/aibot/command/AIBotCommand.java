@@ -118,7 +118,7 @@ public final class AIBotCommand {
                 .filter(bot -> BotAuthorizationGate.INSTANCE.canView(source, bot))
                 .toList();
         String names = bots.stream()
-                .map(player -> player.getGameProfile().getName() + "(" + AIPlayerManager.INSTANCE.role(player) + ")")
+                .map(player -> player.getGameProfile().name() + "(" + AIPlayerManager.INSTANCE.role(player) + ")")
                 .collect(Collectors.joining(", "));
         source.sendFeedback(() -> Text.literal("[AIBot] " + bots.size() + " bot(s): " + names), false);
         return bots.size();

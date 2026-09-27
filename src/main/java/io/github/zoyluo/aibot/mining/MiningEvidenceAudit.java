@@ -151,7 +151,7 @@ public final class MiningEvidenceAudit {
         }
         for (BlockPos candidate : session.obsidianTransactions.openWaterPlacementCandidates()) {
             if (ObservableWorldQuery.canObserveCell(bot, candidate)
-                    && bot.getServerWorld().getBlockState(candidate).isOf(Blocks.OBSIDIAN)) {
+                    && bot.getEntityWorld().getBlockState(candidate).isOf(Blocks.OBSIDIAN)) {
                 session.obsidianTransactions.recordConversion(candidate);
             }
         }

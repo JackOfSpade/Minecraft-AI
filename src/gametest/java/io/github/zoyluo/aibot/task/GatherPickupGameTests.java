@@ -28,7 +28,7 @@ public final class GatherPickupGameTests {
         Fixture fixture = fixture(context, "GatherPickupStatGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         BlockPos first = fixture.start().east(3);
-        bot.getServerWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG));
         int pickupBaseline = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OAK_LOG);
 
@@ -64,8 +64,8 @@ public final class GatherPickupGameTests {
         AIPlayerEntity bot = fixture.bot();
         BlockPos first = fixture.start().east(2);
         BlockPos second = fixture.start().east(5);
-        bot.getServerWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getServerWorld().setBlockState(second, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(second, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
@@ -86,7 +86,7 @@ public final class GatherPickupGameTests {
             }
             if (discarded.get()
                     && task.describe().contains("phase=HARVEST")
-                    && bot.getServerWorld().getBlockState(second).isOf(Blocks.OAK_LOG)) {
+                    && bot.getEntityWorld().getBlockState(second).isOf(Blocks.OAK_LOG)) {
                 localRetryHarvestStarted.set(true);
             }
             if (discarded.get() && !localRetryHarvestStarted.get()
@@ -96,7 +96,7 @@ public final class GatherPickupGameTests {
                         "one real pickup miss bypassed the local retry budget: " + task.describe());
             }
             if (!localRetryHarvestStarted.get()
-                    || !bot.getServerWorld().getBlockState(second).isAir()) {
+                    || !bot.getEntityWorld().getBlockState(second).isAir()) {
                 return;
             }
             require(context, discarded.get(), "real-miss fixture never activated");
@@ -116,7 +116,7 @@ public final class GatherPickupGameTests {
         Fixture fixture = fixture(context, "GatherResumeHarvestGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         BlockPos log = fixture.start().east(3);
-        bot.getServerWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
@@ -143,7 +143,7 @@ public final class GatherPickupGameTests {
                 resumed.set(true);
                 return;
             }
-            if (!bot.getServerWorld().getBlockState(log).isAir()) {
+            if (!bot.getEntityWorld().getBlockState(log).isAir()) {
                 return;
             }
             require(context, task.state() == TaskState.RUNNING
@@ -159,7 +159,7 @@ public final class GatherPickupGameTests {
         Fixture fixture = fixture(context, "GatherResumeReselectGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         BlockPos log = fixture.start().east(3);
-        bot.getServerWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
@@ -171,7 +171,7 @@ public final class GatherPickupGameTests {
             }
             task.pause(bot);
             BlockPos displaced = fixture.start().west(2);
-            bot.teleport(bot.getServerWorld(),
+            bot.teleport(bot.getEntityWorld(),
                     displaced.getX() + 0.5D, displaced.getY(), displaced.getZ() + 0.5D,
                     Set.of(), bot.getYaw(), bot.getPitch(), true);
             require(context, !HarvestCore.canReach(bot, log),
@@ -183,7 +183,7 @@ public final class GatherPickupGameTests {
                     "displaced resume retained stale HARVEST: " + task.describe());
             require(context, bot.getActionPack().isMiningIdle(),
                     "displaced resume started an out-of-reach mining controller");
-            require(context, bot.getServerWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
+            require(context, bot.getEntityWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
                     "resume fixture unexpectedly consumed the remote target");
             finish(context, fixture);
         });
@@ -194,7 +194,7 @@ public final class GatherPickupGameTests {
         Fixture fixture = fixture(context, "GatherHarvestLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         BlockPos log = fixture.start().east(3);
-        bot.getServerWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
@@ -208,7 +208,7 @@ public final class GatherPickupGameTests {
                     return;
                 }
                 BlockPos remote = fixture.start().west(2);
-                bot.teleport(bot.getServerWorld(),
+                bot.teleport(bot.getEntityWorld(),
                         remote.getX() + 0.5D, remote.getY(), remote.getZ() + 0.5D,
                         Set.of(), bot.getYaw(), bot.getPitch(), true);
                 require(context, !HarvestCore.canReach(bot, log),
@@ -225,7 +225,7 @@ public final class GatherPickupGameTests {
             require(context, task.state() == TaskState.RUNNING
                             && task.describe().contains("phase=SURVEY"),
                     "expired atomic harvest did not return to survey: " + task.describe());
-            require(context, bot.getServerWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
+            require(context, bot.getEntityWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
                     "out-of-reach fixture unexpectedly broke the target");
             finish(context, fixture);
         });
@@ -236,7 +236,7 @@ public final class GatherPickupGameTests {
         Fixture fixture = fixture(context, "GatherResumeLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         BlockPos log = fixture.start().east(3);
-        bot.getServerWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
@@ -266,7 +266,7 @@ public final class GatherPickupGameTests {
             require(context, task.state() == TaskState.RUNNING
                             && task.describe().contains("phase=SURVEY"),
                     "interrupted atomic harvest did not expire into survey: " + task.describe());
-            require(context, bot.getServerWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
+            require(context, bot.getEntityWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
                     "interrupted fixture unexpectedly broke the target");
             finish(context, fixture);
         });
@@ -296,7 +296,7 @@ public final class GatherPickupGameTests {
     }
 
     private static ItemEntity nearestOakDrop(AIPlayerEntity bot, BlockPos center, double radius) {
-        return bot.getServerWorld().getEntitiesByClass(
+        return bot.getEntityWorld().getEntitiesByClass(
                         ItemEntity.class, new Box(center).expand(radius),
                         entity -> entity.getStack().isOf(Items.OAK_LOG))
                 .stream()
@@ -314,7 +314,7 @@ public final class GatherPickupGameTests {
     }
 
     private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getServer(), fixture.name());
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
         context.complete();
     }
 

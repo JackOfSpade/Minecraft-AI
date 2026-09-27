@@ -111,7 +111,7 @@ public final class ChatRecipientRouter {
                 ChatMessage.system(systemPrompt()),
                 ChatMessage.user(userPayload(sender, message, snapshot)));
         ToolDefinition routingTool = routingTool(snapshot);
-        MinecraftServer server = sender.getServer();
+        MinecraftServer server = sender.getEntityWorld().getServer();
         try {
             worker.submit(() -> {
                 try {
@@ -162,7 +162,7 @@ public final class ChatRecipientRouter {
     }
 
     private static String userPayload(ServerPlayerEntity sender, String message, List<Candidate> candidates) {
-        return routingPayload(sender.getGameProfile().getName(), message, candidates);
+        return routingPayload(sender.getGameProfile().name(), message, candidates);
     }
 
     static String routingPayload(String playerName, String message, List<Candidate> candidates) {

@@ -113,7 +113,7 @@ public final class AIBotServerNetworking {
             if (!bot.getUuid().equals(entry.getValue())) {
                 continue;
             }
-            ServerPlayerEntity viewer = bot.getServer().getPlayerManager().getPlayer(entry.getKey());
+            ServerPlayerEntity viewer = bot.getEntityWorld().getServer().getPlayerManager().getPlayer(entry.getKey());
             if (viewer == null) {
                 subscriptions.remove(entry.getKey(), entry.getValue());
                 continue;
@@ -124,7 +124,7 @@ public final class AIBotServerNetworking {
                 continue;
             }
             if (ServerPlayNetworking.canSend(viewer, BotChatS2C.ID)) {
-                ServerPlayNetworking.send(viewer, new BotChatS2C(bot.getGameProfile().getName(), role, text));
+                ServerPlayNetworking.send(viewer, new BotChatS2C(bot.getGameProfile().name(), role, text));
             }
         }
     }
@@ -146,7 +146,7 @@ public final class AIBotServerNetworking {
         if (ServerPlayNetworking.canSend(player, BotSnapshotS2C.ID)) {
             ServerPlayNetworking.send(player, snapshot(target));
         }
-        sendSystem(player, target.getGameProfile().getName(), "已订阅 " + target.getGameProfile().getName());
+        sendSystem(player, target.getGameProfile().name(), "已订阅 " + target.getGameProfile().name());
     }
 
     private void handleCommand(ServerPlayerEntity player, BotCommandC2S payload) {
@@ -179,7 +179,7 @@ public final class AIBotServerNetworking {
             case "reports" -> BotRuntimeOptions.INSTANCE.setVerboseReportsEnabled(target, payload.value());
             default -> throw new IllegalArgumentException("unknown_option: " + payload.key());
         }
-        sendSystem(player, target.getGameProfile().getName(), "设置已更新: " + payload.key() + "=" + payload.value());
+        sendSystem(player, target.getGameProfile().name(), "设置已更新: " + payload.key() + "=" + payload.value());
     }
 
     // 面板传送：server thread 内执行；授权在解析目标后、任何坐标修改前完成。
@@ -194,19 +194,19 @@ public final class AIBotServerNetworking {
         if (!io.github.zoyluo.aibot.mode.CapabilityRuntime.decide(
                 target, io.github.zoyluo.aibot.mode.PrivilegedCapability.MANUAL_TELEPORT,
                 "network_manual_teleport").allowed()) {
-            sendSystem(player, target.getGameProfile().getName(),
+            sendSystem(player, target.getGameProfile().name(),
                     "当前运行模式禁止面板传送；请显式启用 operator/manualTeleport。");
             return;
         }
         if (payload.direction() == BotTeleportC2S.TO_AI) {
             // 玩家 → AI 附近 10 格内可站立方块。
-            net.minecraft.server.world.ServerWorld world = target.getServerWorld();
+            net.minecraft.server.world.ServerWorld world = target.getEntityWorld();
             io.github.zoyluo.aibot.pathfinding.Standability.findNearestStandable(world, target.getBlockPos(), 10, 8, 8)
                     .ifPresent(p -> player.teleport(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
                             java.util.Set.of(), player.getYaw(), player.getPitch(), true));
         } else if (payload.direction() == BotTeleportC2S.RECALL_AI) {
             // AI → 玩家附近 10 格内可站立方块(先停手头动作再传)。
-            net.minecraft.server.world.ServerWorld world = player.getServerWorld();
+            net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
             io.github.zoyluo.aibot.pathfinding.Standability.findNearestStandable(world, player.getBlockPos(), 10, 8, 8)
                     .ifPresent(p -> {
                         target.getActionPack().stopAll();
@@ -214,7 +214,7 @@ public final class AIBotServerNetworking {
                                 java.util.Set.of(), target.getYaw(), target.getPitch(), true);
                     });
         } else {
-            sendSystem(player, target.getGameProfile().getName(), "无效的传送方向。");
+            sendSystem(player, target.getGameProfile().name(), "无效的传送方向。");
         }
     }
 
@@ -266,7 +266,7 @@ public final class AIBotServerNetworking {
                 playerInv.markDirty();
             }
         } else {
-            sendSystem(player, target.getGameProfile().getName(), "无效的物品移动方向。");
+            sendSystem(player, target.getGameProfile().name(), "无效的物品移动方向。");
             return;
         }
         // 立即回推一帧快照(含双方背包),UI 不必等 10-tick 周期刷新。
@@ -327,7 +327,7 @@ public final class AIBotServerNetworking {
             case "reset" -> {
                 RuntimeLifecycleCoordinator.INSTANCE.resetBot(
                         bot, IntentController.ControlOrigin.PLAYER_PANEL, "panel_brain_reset");
-                sendSystem(player, bot.getGameProfile().getName(), "大脑已重置。");
+                sendSystem(player, bot.getGameProfile().name(), "大脑已重置。");
             }
             default -> throw new IllegalArgumentException("unknown_action: " + payload.action());
         }
@@ -387,7 +387,7 @@ public final class AIBotServerNetworking {
                 .map(Enum::name)
                 .toList();
         return new BotSnapshotS2C(
-                bot.getGameProfile().getName(),
+                bot.getGameProfile().name(),
                 bot.getHealth(),
                 bot.getMaxHealth(),
                 bot.getHungerManager().getFoodLevel(),

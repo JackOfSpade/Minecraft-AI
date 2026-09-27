@@ -223,7 +223,7 @@ public final class SmeltTask extends AbstractTask {
         if (furnacePos == null) {
             // 局部扫不到 → 问记忆:我自己放过的炉在哪(同维度+方块仍是熔炉才认,被拆即作废)
             var remembered = io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE
-                    .of(bot.getUuid()).placeIn(bot.getServerWorld(), "furnace");
+                    .of(bot.getUuid()).placeIn(bot.getEntityWorld(), "furnace");
             if (remembered.isPresent()
                     && !rejectedFurnaces.contains(remembered.get())
                     && remembered.get().isWithinDistance(bot.getBlockPos(), 96.0D)) {
@@ -445,7 +445,7 @@ public final class SmeltTask extends AbstractTask {
         BlockPos origin = bot.getBlockPos();
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = origin.offset(direction);
-            if (!bot.getServerWorld().getBlockState(candidate).isAir()) {
+            if (!bot.getEntityWorld().getBlockState(candidate).isAir()) {
                 continue;
             }
             foundAir = true;
@@ -462,7 +462,7 @@ public final class SmeltTask extends AbstractTask {
             // R2 修:炉位入记忆——挖矿走远后 nearestFurnace(局部扫描)找不回自己放的炉,
             // missing furnace 整链报废(real_diamond 实测:第一炉用完,挖第二批铁回来炉'丢了')。
             io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
-                    .markPlace("furnace", bot.getServerWorld(), furnacePos);
+                    .markPlace("furnace", bot.getEntityWorld(), furnacePos);
             phase = Phase.LOADING;
             return;
         }
@@ -597,14 +597,14 @@ public final class SmeltTask extends AbstractTask {
                 || !WorkshopLocator.isCompatibleFurnace(bot, furnacePos, input, output)) {
             return null;
         }
-        return bot.getServerWorld().getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace ? furnace : null;
+        return bot.getEntityWorld().getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace ? furnace : null;
     }
 
     private boolean isBurning(AIPlayerEntity bot) {
         if (furnacePos == null) {
             return false;
         }
-        var state = bot.getServerWorld().getBlockState(furnacePos);
+        var state = bot.getEntityWorld().getBlockState(furnacePos);
         return state.contains(AbstractFurnaceBlock.LIT) && state.get(AbstractFurnaceBlock.LIT);
     }
 
@@ -620,7 +620,7 @@ public final class SmeltTask extends AbstractTask {
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getServerWorld(), candidate)) {
+            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate.toImmutable();
             }
         }
@@ -629,7 +629,7 @@ public final class SmeltTask extends AbstractTask {
 
     // 被围时:挖掉一个水平相邻的可破坏方块,腾出放熔炉的空位。返回 false=四周无可破坏方块(如基岩/流体)。
     private boolean clearSpaceForFurnace(AIPlayerEntity bot) {
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = origin.offset(direction);
@@ -677,7 +677,7 @@ public final class SmeltTask extends AbstractTask {
 
     private static void fetchFuelFromBase(AIPlayerEntity bot, int smeltCount) {
         BlockPos base = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getServerWorld(), "base")
+                .placeIn(bot.getEntityWorld(), "base")
                 .orElse(null);
         if (base == null) {
             return;

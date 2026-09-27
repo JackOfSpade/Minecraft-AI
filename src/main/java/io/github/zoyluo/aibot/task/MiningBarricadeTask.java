@@ -90,7 +90,7 @@ public final class MiningBarricadeTask extends AbstractTask {
             return;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(bot.getServerWorld(), retreatFeet)) {
+        if (!Standability.isStandable(bot.getEntityWorld(), retreatFeet)) {
             fail("mining_barricade_retreat_not_standable");
             return;
         }
@@ -207,7 +207,7 @@ public final class MiningBarricadeTask extends AbstractTask {
         if (bot == null || pos == null) {
             return false;
         }
-        var world = bot.getServerWorld();
+        var world = bot.getEntityWorld();
         BlockState state = world.getBlockState(pos);
         return !state.isReplaceable() && !state.getCollisionShape(world, pos).isEmpty();
     }

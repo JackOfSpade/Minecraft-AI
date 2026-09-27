@@ -65,7 +65,7 @@ public final class BotEdits {
         if (bot == null) {
             return;
         }
-        notePlaced(bot.getServerWorld(), pos);
+        notePlaced(bot.getEntityWorld(), pos);
     }
 
     /** A bot placed a block at {@code pos} in {@code world}. Origin independent: safety seals count too. */
