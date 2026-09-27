@@ -9,7 +9,12 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.scoreboard.AbstractTeam;
+import net.minecraft.scoreboard.Scoreboard;
+import net.minecraft.scoreboard.Team;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
@@ -72,6 +77,34 @@ public final class ProfileApplier implements ProfileApplication {
     @Override
     public void mark(ServerPlayerEntity bot) {
         bot.addCommandTag(MARKER_TAG);
+        hideNametag(bot);
+    }
+
+    /**
+     * Vanilla nametags render through terrain up to a distance (a long-standing vanilla behaviour, not
+     * something this addon or PvP BOT introduces), which reads as a wallhack for a structure meant to feel
+     * inhabited rather than radar-tagged. There is no vanilla per-entity, line-of-sight-gated nametag: the
+     * only real lever is the scoreboard team {@code nametagVisibility} rule, which is binary (on the whole
+     * team or off), so inhabitants get it turned fully off. Team membership is keyed by name and saved with
+     * the scoreboard, so this needs doing only once per bot -- it is not lost across a restart or a new
+     * entity instance for the same name, unlike the command tag it rides alongside.
+     * <p>
+     * Best-effort like the rest of {@code mark}: an entity not yet fully in a world (its {@code World} or
+     * {@code MinecraftServer} reference still null) is left for a later call rather than throwing.
+     */
+    private static void hideNametag(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getEntityWorld();
+        MinecraftServer server = world == null ? null : world.getServer();
+        if (server == null) {
+            return;
+        }
+        Scoreboard scoreboard = server.getScoreboard();
+        Team team = scoreboard.getTeam(MARKER_TAG);
+        if (team == null) {
+            team = scoreboard.addTeam(MARKER_TAG);
+            team.setNameTagVisibilityRule(AbstractTeam.VisibilityRule.NEVER);
+        }
+        scoreboard.addScoreHolderToTeam(bot.getGameProfile().name(), team);
     }
 
     private static boolean applyLoadout(ServerPlayerEntity bot, BotProfile.Loadout loadout, boolean clear, List<String> warnings) {

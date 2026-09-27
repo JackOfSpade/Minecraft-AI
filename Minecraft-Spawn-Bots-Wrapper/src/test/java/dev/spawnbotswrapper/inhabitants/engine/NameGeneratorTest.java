@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class NameGeneratorTest {
 
     private static final Pattern SHAPE = Pattern.compile("[A-Za-z0-9_]{3,16}");
+    /** Two capitalised words (greedy lowercase runs cannot cross an uppercase letter) then digits. */
+    private static final Pattern TWO_WORDS_THEN_DIGITS = Pattern.compile("^([A-Z][a-z]*)([A-Z][a-z]*)([0-9]*)$");
     private static final List<String> PREFIXES = List.of("Inh", "", "A", "Abcdefgh", "Bot_", "x_y", "9", "Long_Prefix_That_Is_Cut");
 
     @Test
@@ -41,13 +44,22 @@ class NameGeneratorTest {
     }
 
     @Test
-    void theEightCharacterPrefixLeavesRoomForARealWordAndASuffix() {
+    void theEightCharacterPrefixLeavesRoomForAtLeastOneRealWordAndSometimesTwo() {
         NameGenerator gen = new NameGenerator("Abcdefgh");
-        String name = gen.candidate(5, 0);
-        assertTrue(name.startsWith("Abcdefgh_"));
-        assertTrue(name.length() <= 16);
-        // word (>= 3 letters) + suffix (>= 3 chars) after "Abcdefgh_" (9 chars) => 15..16 characters
-        assertTrue(name.length() >= 9 + 3 + 3, name);
+        boolean sawTwoWords = false;
+        for (int attempt = 0; attempt < 200; attempt++) {
+            String name = gen.candidate(5, attempt);
+            assertTrue(name.startsWith("Abcdefgh_"), name);
+            assertTrue(name.length() <= 16, name);
+            // "Abcdefgh_" (9 chars) + at least one >= 3-letter word => at least 12 characters, always.
+            assertTrue(name.length() >= 9 + 3, name);
+            if (TWO_WORDS_THEN_DIGITS.matcher(name.substring(9)).matches()) {
+                sawTwoWords = true;
+            }
+        }
+        // A high digit roll degrades this tight a budget to one word sometimes (by design: widening
+        // must be able to shrink the word part to grow the digit tail), but not on every attempt.
+        assertTrue(sawTwoWords, "never saw two-word mode across 200 attempts");
     }
 
     @Test
@@ -57,13 +69,16 @@ class NameGeneratorTest {
     }
 
     @Test
-    void defaultPrefixGivesWordAndFourCharacterTail() {
+    void aConfiguredPrefixProducesTwoWordsAndAnOptionalDigitTail() {
         NameGenerator gen = new NameGenerator("Inh");
-        String name = gen.candidate(123, 0);
-        assertTrue(name.startsWith("Inh_"), name);
-        String tail = name.substring(4);
-        // <Word><digit><3 x base36>
-        assertTrue(Pattern.matches("[A-Z][a-z]+[0-9][0-9a-z]{3}", tail), tail);
+        for (int attempt = 0; attempt < 200; attempt++) {
+            String name = gen.candidate(123, attempt);
+            assertTrue(name.startsWith("Inh_"), name);
+            String tail = name.substring(4);
+            Matcher m = TWO_WORDS_THEN_DIGITS.matcher(tail);
+            assertTrue(m.matches(), tail);
+            assertNotEquals(m.group(1), m.group(2), "the two words must be distinct: " + tail);
+        }
     }
 
     @Test
@@ -77,12 +92,28 @@ class NameGeneratorTest {
     }
 
     @Test
-    void randomTailStartsWithADigitSoItCanNeverSpellAWord() {
-        NameGenerator gen = new NameGenerator("Inh");
+    void theDigitTailIsAlwaysAtTheEndSoItCanNeverSplitAWordInTwo() {
+        NameGenerator gen = new NameGenerator("");
         for (int i = 0; i < 2000; i++) {
             String name = gen.candidate(i * 31L, 0);
-            String tail = name.substring(4).replaceFirst("^[A-Z][a-z]+", "");
-            assertTrue(Character.isDigit(tail.charAt(0)), name);
+            Matcher m = TWO_WORDS_THEN_DIGITS.matcher(name);
+            assertTrue(m.matches(), name);
+            // Once the digit run starts, nothing but digits follows -- proven by the anchored regex
+            // itself; this test exists to pin that the tail is a *suffix*, not interleaved.
+            String digits = m.group(3);
+            assertTrue(name.endsWith(digits));
+        }
+    }
+
+    @Test
+    void bothWordsInAPairAreAlwaysDistinct() {
+        NameGenerator gen = new NameGenerator("");
+        SplitMix64 seeds = new SplitMix64(2024);
+        for (int i = 0; i < 5000; i++) {
+            String name = gen.candidate(seeds.nextLong(), 0);
+            Matcher m = TWO_WORDS_THEN_DIGITS.matcher(name);
+            assertTrue(m.matches(), name);
+            assertNotEquals(m.group(1), m.group(2), name);
         }
     }
 
@@ -148,7 +179,7 @@ class NameGeneratorTest {
     }
 
     @Test
-    void stubbornCollisionsWidenTheSuffixInsteadOfGivingUp() {
+    void stubbornCollisionsWidenTheDigitTailInsteadOfGivingUp() {
         NameGenerator gen = new NameGenerator("Inh");
         long seed = 4242;
         // reject the first 200 candidates outright
@@ -170,20 +201,20 @@ class NameGeneratorTest {
     @Test
     void wordListIsBigDistinctAsciiAndHasShortWordsForLongPrefixes() {
         assertTrue(NameGenerator.wordCount() >= 60);
-        // every generated name carries a word from the list; collect the words over many seeds
+        // every generated name carries two words from the list; collect them over many seeds
         Set<String> words = new HashSet<>();
         NameGenerator gen = new NameGenerator("");
-        Pattern wordThenDigit = Pattern.compile("^([A-Z][a-z]+)[0-9]");
         for (int i = 0; i < 20_000; i++) {
-            java.util.regex.Matcher m = wordThenDigit.matcher(gen.candidate(i, 0));
-            assertTrue(m.find());
+            Matcher m = TWO_WORDS_THEN_DIGITS.matcher(gen.candidate(i, 0));
+            assertTrue(m.matches());
             words.add(m.group(1));
+            words.add(m.group(2));
         }
         assertTrue(words.size() >= 55, "only " + words.size() + " distinct words");
         long shortWords = words.stream().filter(w -> w.length() <= 4).count();
         assertTrue(shortWords >= 8, "need short words for long prefixes, have " + shortWords);
         for (String w : words) {
-            assertTrue(Pattern.matches("[A-Z][a-z]{2,7}", w), "unexpected word shape: " + w);
+            assertTrue(Pattern.matches("[A-Z][a-z]{2,6}", w), "unexpected word shape: " + w);
         }
     }
 

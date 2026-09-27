@@ -15,7 +15,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -192,7 +191,6 @@ class PopulationEngineRollTest {
         assertArrayEquals(new int[]{32, 60, 48, 32 + 47, 80, 48 + 47}, r.bounds);
         assertEquals(0, r.attempts);
 
-        Pattern shape = Pattern.compile("Inh_[A-Za-z]+[0-9][0-9a-z]{3}");
         Set<String> names = new HashSet<>();
         for (int i = 0; i < 4; i++) {
             BotRecord b = r.bots.get(i);
@@ -201,7 +199,7 @@ class PopulationEngineRollTest {
             assertEquals(BotState.PLANNED, b.state);
             assertEquals(0, b.spawnAttempts);
             assertNull(b.profile);
-            assertTrue(shape.matcher(b.name).matches(), b.name);
+            assertTrue(NameGenerator.isValid(b.name), b.name);
             assertTrue(names.add(b.name.toLowerCase(Locale.ROOT)), "duplicate name " + b.name);
         }
         // and all of it is already on "disk"
@@ -247,6 +245,7 @@ class PopulationEngineRollTest {
     void namesAreUniqueAcrossStructuresAndAlwaysValid() {
         Rig rig = new Rig(new InMemoryStorage(false), 11);
         rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+        rig.cfg.spawning.namePrefix = "Inh"; // this test's own "Inh_" check wants an explicit prefix, not the shipped default
         holdSpawns(rig);
         for (int i = 0; i < 1500; i++) {
             rig.engine.submit(Rig.structure("minecraft:desert_pyramid", i, i * 3));
@@ -271,7 +270,7 @@ class PopulationEngineRollTest {
 
         long structureSeed = StableHash.of(rig.world.seed, StableHash.ofString(""), s.key().stableHash());
         long botSeed = StructureRoll.botSeed(structureSeed, 0);
-        NameGenerator gen = new NameGenerator("Inh");
+        NameGenerator gen = new NameGenerator("");
         String first = gen.candidate(botSeed, 0);
 
         // an older, unrelated structure already owns that name (in different letter case)

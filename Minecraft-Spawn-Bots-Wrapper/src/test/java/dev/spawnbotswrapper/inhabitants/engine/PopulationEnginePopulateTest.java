@@ -640,7 +640,7 @@ class PopulationEnginePopulateTest {
         StructureRecord r = submitAndSettle(rig, s);
         String renamed = r.bots.get(0).name;
         assertNotEquals(original, renamed);
-        assertEquals(new NameGenerator("Inh").candidate(seed, 1), renamed, "the next deterministic candidate");
+        assertEquals(new NameGenerator("").candidate(seed, 1), renamed, "the next deterministic candidate");
         assertTrue(NameGenerator.isValid(renamed));
         assertEquals(0, rig.bots.requestsFor(original), "the taken name was never requested");
         assertEquals(1, rig.bots.requestsFor(renamed));

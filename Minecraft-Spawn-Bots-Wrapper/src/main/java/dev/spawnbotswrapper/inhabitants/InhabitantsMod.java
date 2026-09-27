@@ -4,6 +4,7 @@ import dev.spawnbotswrapper.inhabitants.adapter.PvpBotAdapter;
 import dev.spawnbotswrapper.inhabitants.command.InhabitantsCommand;
 import dev.spawnbotswrapper.inhabitants.config.ConfigIO;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
+import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
 import dev.spawnbotswrapper.inhabitants.mc.StepGuard;
@@ -57,6 +58,10 @@ public final class InhabitantsMod implements ModInitializer {
 
         detector.register();
         registerCommands();
+        GameMessageFilter.register(() -> {
+            ServerSession current = session;
+            return current == null ? null : current.services();
+        });
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);

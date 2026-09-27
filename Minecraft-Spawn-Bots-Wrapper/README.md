@@ -78,7 +78,7 @@ runs on defaults until you fix it.
 
   "spawning": {
     "backend": "AUTO",
-    "namePrefix": "Inh",
+    "namePrefix": "",
     "allowSubmerged": false
   },
 
@@ -129,6 +129,42 @@ never shrinking below whatever `spawning.minBotSeparation` already requires.
 structure id + start position`, so a fresh copy of the same world (and the same salt) reproduces the same
 inhabitants from scratch. Once a structure has actually been processed, the saved result is authoritative —
 deterministic mode does not retroactively re-roll anything.
+
+### One spawn per structure, ever
+
+Every structure is rolled and populated **exactly once**, permanently: `PopulationDriver` never re-rolls,
+renames a live bot, or requests one twice, and once a structure settles into `POPULATED` or `GAVE_UP` no
+code path ever revisits it. If a structure's inhabitants are later killed — by the player, by hostile mobs
+already living there, by anything — that structure stays settled; it is **not** repopulated. This mirrors
+the addon's own restart guarantee (a bot that goes permanently offline is never respawned either, see
+`processing.goneConfirmTicks`): a POI's population is a one-time event, not something that regenerates.
+
+### Names and presence
+
+Inhabitants are named `<Word><Word>[<digits>]` (e.g. `DuskRaven`, `IronFang7`, `BriarWarden42`) — two
+distinct words from the addon's own list run together, the way a person actually names an account, with an
+occasional short digit tail for extra variety and to resolve the rare collision. `spawning.namePrefix` is
+empty by default for exactly this reason: a fixed prefix in front of every single inhabitant (the addon's
+own former default, `"Inh"`) is the opposite of realistic, since a real gamertag essentially never looks
+like `Inh_Fang8rt2`. Set a prefix only if you need it for online-mode Mojang-account collision safety (see
+the field's own doc comment in
+[`InhabitantsConfig`](src/main/java/dev/spawnbotswrapper/inhabitants/config/InhabitantsConfig.java)) — every
+inhabitant will then visibly share it, trading realism for that guarantee.
+
+Two more things keep inhabitants from announcing themselves as an addon's bots rather than part of the
+world:
+
+- **No join/leave/advancement chat spam.** Vanilla's "X joined the game" / "X left the game" / advancement
+  lines are suppressed for every name this addon is currently tracking as an inhabitant, on every server —
+  a structure spawning several bots does not flood chat the moment its chunk loads. Real players, and any
+  other mod's bots, are completely unaffected.
+- **No nametag wallhack.** Vanilla player nametags render through terrain up to a distance — this is
+  vanilla's own long-standing behaviour, not something this addon or PvP BOT introduces, but it reads as an
+  X-ray for a structure meant to feel inhabited rather than radar-tagged. There is no vanilla per-entity,
+  line-of-sight-gated nametag to opt into, so inhabitants are placed on a dedicated scoreboard team with
+  `nametagVisibility` set to `never` instead: their nametags never render for anyone, full stop. This is
+  entirely server-side (a vanilla scoreboard team), so it needs no client-side component and cannot conflict
+  with another mod's rendering.
 
 ## What gets randomized, and what does not
 

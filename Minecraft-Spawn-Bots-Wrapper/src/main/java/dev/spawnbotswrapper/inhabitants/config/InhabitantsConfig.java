@@ -210,11 +210,15 @@ public final class InhabitantsConfig {
         /** Permit standing in water (some structures, e.g. ocean ruins, need it). Lava is never allowed. */
         public boolean allowSubmerged = false;
         /**
-         * Reserved prefix for generated bot names (up to 8 letters/digits/underscores; names are at most 16
-         * characters). A distinctive prefix keeps addon bots from colliding with real player accounts: on an
-         * online-mode server a bot named like a real Mojang account would take over that account's UUID/skin.
+         * Optional reserved prefix for generated bot names (up to 8 letters/digits/underscores; names are
+         * at most 16 characters). Empty by default: {@link dev.spawnbotswrapper.inhabitants.engine.NameGenerator}
+         * already draws from a large two-word pool ({@code DuskRaven}, {@code IronFang7}, ...), so an
+         * inhabitant reads as a real player name instead of every single one sharing an obvious system tag.
+         * Set this only on an online-mode server where a generated name might otherwise collide with a
+         * real Mojang account and take over its UUID/skin; a distinctive prefix (e.g. {@code "Inh"}) rules
+         * that out entirely, at the cost of every inhabitant visibly sharing it.
          */
-        public String namePrefix = "Inh";
+        public String namePrefix = "";
     }
 
     private static Map<String, RuleOverride> defaultStructureOverrides() {
