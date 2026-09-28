@@ -29,39 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DetourStartSelectorTest {
 
     // =================================================================================================
-    // checkDue: pure, zero host dependency.
-    // =================================================================================================
-
-    @Test
-    void checkDueFiresEveryTenTicks() {
-        assertTrue(DetourStartSelector.checkDue(0, 0));
-        assertFalse(DetourStartSelector.checkDue(1, 0));
-        assertFalse(DetourStartSelector.checkDue(9, 0));
-        assertTrue(DetourStartSelector.checkDue(10, 0));
-        assertTrue(DetourStartSelector.checkDue(100, 0));
-    }
-
-    @Test
-    void checkDueIsStaggeredByTheSeed() {
-        assertTrue(DetourStartSelector.checkDue(3, 7));   // 3 + 7 = 10
-        assertFalse(DetourStartSelector.checkDue(3, 6));  // 3 + 6 = 9
-        assertFalse(DetourStartSelector.checkDue(3, 8));  // 3 + 8 = 11
-        for (int seed = 0; seed < 10; seed++) {
-            assertTrue(DetourStartSelector.checkDue(10 - seed, seed), "seed " + seed);
-            assertTrue(DetourStartSelector.checkDue(20 - seed, seed), "seed " + seed);
-        }
-    }
-
-    @Test
-    void checkDueNeverNegatesForAnyNonNegativeInputs() {
-        // Every seed is in 0..9 (design 4.3: "staggered by uuid"), so taskTick + seed never goes negative,
-        // but floorMod keeps the predicate well defined even if a caller ever passed a larger seed.
-        assertTrue(DetourStartSelector.checkDue(0, 10));
-        assertFalse(DetourStartSelector.checkDue(1, 10));
-    }
-
-    // =================================================================================================
-    // select(): the cheap owners/age gate, before any WRITER-1/WRITER-2 call is made.
+    // select(): the cheap owners/age gate, before any WRITER-1/WRITER-2 call is made. Design 4.3 / the engine's
+    // due/consume cadence (see OreDigDetourEngine and its IDLE-cadence tests): this is the ONE outcome for which
+    // Result.pastCheapGate() is false, telling the engine's caller not to consume the due check. Every other
+    // outcome below (including a silent NONE for empty sightings, an empty rank, or a failed safety gate)
+    // consumes it -- asserted once here since selectReturnsTheSelectionOnceEveryGatePasses and the other tests
+    // below never reach the cheap gate at all.
     // =================================================================================================
 
     @Test
@@ -74,6 +47,7 @@ class DetourStartSelectorTest {
 
         assertNull(r.selection());
         assertEquals("", r.reason());
+        assertFalse(r.pastCheapGate(), "owners-not-idle must not consume the engine's due check");
         assertTrue(host.calls.isEmpty(), "must not call the host at all once owners are not idle");
         assertTrue(host.logs.isEmpty());
     }
@@ -87,6 +61,7 @@ class DetourStartSelectorTest {
         DetourStartSelector.Result r = DetourStartSelector.select(host);
 
         assertNull(r.selection());
+        assertFalse(r.pastCheapGate(), "too-young must not consume the engine's due check either");
         assertTrue(host.calls.isEmpty());
     }
 
@@ -130,7 +105,9 @@ class DetourStartSelectorTest {
         FakeDetourHost host = new FakeDetourHost();
         host.now = 1000;
 
-        assertNull(DetourStartSelector.select(host).selection());
+        DetourStartSelector.Result r = DetourStartSelector.select(host);
+        assertNull(r.selection());
+        assertTrue(r.pastCheapGate(), "got past owners/age, so this DOES consume the engine's due check");
     }
 
     @Test

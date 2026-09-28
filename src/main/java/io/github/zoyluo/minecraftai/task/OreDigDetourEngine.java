@@ -195,6 +195,21 @@ final class OreDigDetourEngine {
     /** Whether a route to the current waypoint has ever started OK this leg; see {@link #tickFrontierWalk}. */
     private boolean frontierRouteStarted;
 
+    /**
+     * IDLE only (design 4.3): the next task tick at which a start check is due. {@code -1} means "never
+     * initialised yet" -- the very first IDLE tick of a freshly constructed engine (a new task, or one rebuilt
+     * on restore) computes the stagger-based first due tick from {@link DetourHost#staggerSeed()} on demand
+     * (see {@link #tick}), so a fresh engine's first due tick is exactly the old {@code checkDue}'s. Once a
+     * check is due, it survives busy IDLE ticks: {@link #tick} only advances this past {@code now} once
+     * {@link DetourStartSelector#select} actually gets past its cheap owners/age gate ({@code Result.pastCheapGate()}),
+     * whatever it decides after that -- a check lost to "not idle yet" is retried on every following IDLE tick
+     * instead of waiting a further {@value DetourStartSelector#START_CHECK_INTERVAL_TICKS} ticks for a slot that
+     * might land busy again. {@code resetToIdle} sets it to {@code now + START_CHECK_INTERVAL_TICKS} whenever an
+     * excursion ends (finish, rebase, interrupt, abandon), so a finished excursion still waits the normal
+     * interval rather than getting a free check on the very next tick.
+     */
+    private int nextStartCheckTick = -1;
+
     private int startNow;
     private int leaseDeadline;
     private int lastBeat;
@@ -250,20 +265,30 @@ final class OreDigDetourEngine {
     // ---- driving --------------------------------------------------------------------------------------------
 
     /**
-     * One task tick. IDLE: when {@code DetourStartSelector.checkDue(now, host.staggerSeed())} run
-     * {@link DetourStartSelector#select}; a selection is started with {@link #start} (which consumes the tick),
-     * otherwise the result is IDLE. Active: detect a tick gap ({@link #TICK_GAP_ABORT_TICKS}), consume any pending
-     * net abort, then lease, SAFE gate, claim renewal (every 40 server ticks), then the phase step. An abort raised
-     * before the phase step ends the tick CONSUMED (the first RETURN step is on the next tick). Always CONSUMED
-     * except in the tick that finishes.
+     * One task tick. IDLE: once {@code now} reaches {@link #nextStartCheckTick} (lazily initialised from
+     * {@link DetourHost#staggerSeed()} on an engine's very first IDLE tick), run {@link DetourStartSelector#select}.
+     * A due check is only consumed -- {@code nextStartCheckTick} pushed out another
+     * {@value DetourStartSelector#START_CHECK_INTERVAL_TICKS} ticks -- when {@code select} gets past its cheap
+     * owners/age gate ({@code Result.pastCheapGate()}); the one rejection that fails that gate leaves the check
+     * due and is retried on every following IDLE tick, so a check is never lost to a busy tick. A selection is
+     * started with {@link #start} (which consumes the tick), otherwise the result is IDLE. Active: detect a tick
+     * gap ({@link #TICK_GAP_ABORT_TICKS}), consume any pending net abort, then lease, SAFE gate, claim renewal
+     * (every 40 server ticks), then the phase step. An abort raised before the phase step ends the tick CONSUMED
+     * (the first RETURN step is on the next tick). Always CONSUMED except in the tick that finishes.
      */
     Result tick(DetourHost host) {
         int now = host.now();
         if (phase == DetourPhase.IDLE) {
-            if (!DetourStartSelector.checkDue(now, host.staggerSeed())) {
+            if (nextStartCheckTick < 0) {
+                nextStartCheckTick = Math.floorMod(-host.staggerSeed(), DetourStartSelector.START_CHECK_INTERVAL_TICKS);
+            }
+            if (now < nextStartCheckTick) {
                 return Result.IDLE;
             }
             DetourStartSelector.Result r = DetourStartSelector.select(host);
+            if (r.pastCheapGate()) {
+                nextStartCheckTick = now + DetourStartSelector.START_CHECK_INTERVAL_TICKS;
+            }
             if (r.selection() == null) {
                 return Result.IDLE;
             }
@@ -494,7 +519,7 @@ final class OreDigDetourEngine {
         ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
         host.log("ore_dig_detour_abort", "reason", reason == null ? "paused" : reason);
         DetourHost.Anchor result = anchor;
-        resetToIdle();
+        resetToIdle(host);
         return result;
     }
 
@@ -510,7 +535,7 @@ final class OreDigDetourEngine {
         }
         ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
         host.log("ore_dig_detour_abort", "reason", "abandoned");
-        resetToIdle();
+        resetToIdle(host);
     }
 
     // ---- introspection --------------------------------------------------------------------------------------------
@@ -1155,7 +1180,7 @@ final class OreDigDetourEngine {
         host.log("ore_dig_detour_end", "reason", reason, "breaks", breaks, "members", membersStarted,
                 "seals", seals, "drops_lost", dropsLost, "ticks", host.now() - startNow, "abort", abortReason);
         Result result = Result.finished(reason);
-        resetToIdle();
+        resetToIdle(host);
         return result;
     }
 
@@ -1172,7 +1197,7 @@ final class OreDigDetourEngine {
         host.log("ore_dig_detour_end", "reason", "return_rebased", "breaks", breaks, "members", membersStarted,
                 "seals", seals, "drops_lost", dropsLost, "ticks", host.now() - startNow, "abort", abortReason);
         Result result = Result.finished("return_rebased");
-        resetToIdle();
+        resetToIdle(host);
         return result;
     }
 
@@ -1262,7 +1287,12 @@ final class OreDigDetourEngine {
         host.noteProgress();
     }
 
-    private void resetToIdle() {
+    /**
+     * Design 4.3: a finished excursion still waits the normal {@value DetourStartSelector#START_CHECK_INTERVAL_TICKS}-tick
+     * interval before its next start check, rather than getting one for free on the very next IDLE tick.
+     */
+    private void resetToIdle(DetourHost host) {
+        nextStartCheckTick = host.now() + DetourStartSelector.START_CHECK_INTERVAL_TICKS;
         phase = DetourPhase.IDLE;
         pendingAbort = null;
         abortReason = null;

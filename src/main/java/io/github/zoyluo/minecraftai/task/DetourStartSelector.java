@@ -18,8 +18,13 @@ import java.util.Set;
  * the host, and returns a {@link Selection} or a reason. It changes nothing except the skip bookkeeping the
  * design asks for (exclusions of failed candidates, sightings observed gone, one log line per skipped cell) and
  * the seed claim of the returned selection. The engine ({@link OreDigDetourEngine#tick}) calls it at most once
- * every {@value #START_CHECK_INTERVAL_TICKS} task ticks (staggered by {@link DetourHost#staggerSeed()}) and then
- * performs the start actions of design 4.3 itself.
+ * every {@value #START_CHECK_INTERVAL_TICKS} task ticks (initially staggered by {@link DetourHost#staggerSeed()})
+ * and then performs the start actions of design 4.3 itself. A due check is never lost to a busy tick: the engine
+ * retries {@link #select} on every following IDLE tick until it gets past the cheap "not idle / too young" gate
+ * below (see {@link Result#pastCheapGate()}); only once it does is the next check due a full interval later.
+ * Otherwise a check whose 10-tick slot lands mid-block (as it almost always does during continuous blind
+ * strip-mining) would simply be skipped, and the next slot might land busy again -- the phase relative to the
+ * mining rhythm need not ever align, so a sighted valuable could go undetoured indefinitely.
  *
  * <h2>Procedure (cheap first; every step returns "no selection" on failure, the reason being logged only where stated)</h2>
  * <ol>
@@ -95,31 +100,37 @@ final class DetourStartSelector {
                      List<BlockPos> cluster, DetourHost.Anchor anchor) {
     }
 
-    /** Outcome of {@link #select}: {@code selection} is null when nothing may start; {@code reason} then says why the last candidate or the whole check ended ({@code ""} when silently nothing to do). */
-    record Result(Selection selection, String reason) {
-        static final Result NONE = new Result(null, "");
+    /**
+     * Outcome of {@link #select}: {@code selection} is null when nothing may start; {@code reason} then says why
+     * the last candidate or the whole check ended ({@code ""} when silently nothing to do). {@code pastCheapGate}
+     * is false only for the one cheap rejection at the very top of {@link #select} ({@code !host.ownersIdle()} or
+     * the task is younger than {@link #MIN_TASK_AGE_TICKS}); the engine uses it to tell that rejection, which must
+     * leave the due check outstanding for the next IDLE tick, apart from every other outcome (a real selection,
+     * a later silent {@code NONE}, or {@code none("budget")}), which means the expensive part of the check
+     * actually ran and the next one is not due again for another {@link #START_CHECK_INTERVAL_TICKS}.
+     */
+    record Result(Selection selection, String reason, boolean pastCheapGate) {
+        /** The cheap "not idle / too young" rejection: does not consume the due check. */
+        static final Result NOT_IDLE = new Result(null, "", false);
+        /** Silently nothing to do, past the cheap gate: consumes the due check. */
+        static final Result NONE = new Result(null, "", true);
 
         static Result none(String reason) {
-            return new Result(null, reason == null ? "" : reason);
+            return new Result(null, reason == null ? "" : reason, true);
         }
 
         static Result of(Selection selection) {
-            return new Result(selection, "");
+            return new Result(selection, "", true);
         }
     }
 
     private DetourStartSelector() {
     }
 
-    /** Whether a start check is due at task tick {@code taskTick}: {@code (taskTick + staggerSeed) % START_CHECK_INTERVAL_TICKS == 0}. */
-    static boolean checkDue(int taskTick, int staggerSeed) {
-        return Math.floorMod(taskTick + staggerSeed, START_CHECK_INTERVAL_TICKS) == 0;
-    }
-
-    /** The procedure of the class comment. */
+    /** The procedure of the class comment. The cheap owners/age gate is the one outcome that does not consume the caller's due check ({@link Result#pastCheapGate()}). */
     static Result select(DetourHost host) {
         if (!host.ownersIdle() || host.now() < MIN_TASK_AGE_TICKS) {
-            return Result.NONE;
+            return Result.NOT_IDLE;
         }
         MissionAssistLedger.Entry ledger = host.ledger();
         MissionAssistLedger.StartVerdict verdict =
