@@ -230,7 +230,16 @@ public final class BoatLaunchTask extends AbstractTask {
             if (boardAttempts >= MAX_BOARD_ATTEMPTS) {
                 fail("boat_board_failed:" + result.reason());
             }
-        } else if (boardAttempts >= MAX_BOARD_ATTEMPTS) {
+            return;
+        }
+        if (bot.getVehicle() == boat) {
+            // BoatAction.boardBoat() mounts the bot synchronously on a successful interaction, so
+            // a non-failed result usually means the bot is already riding by now -- complete
+            // immediately instead of waiting for next tick's top-of-method mountedBoat() check.
+            complete();
+            return;
+        }
+        if (boardAttempts >= MAX_BOARD_ATTEMPTS) {
             fail("boat_board_not_confirmed");
         }
     }
