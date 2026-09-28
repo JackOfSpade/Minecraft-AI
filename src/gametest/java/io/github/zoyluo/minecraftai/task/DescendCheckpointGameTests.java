@@ -183,31 +183,47 @@ public final class DescendCheckpointGameTests {
         legacyIdle.put("task_schema", "2");
         legacyIdle.remove("traversed_detour_edges");
         legacyIdle.remove("budget_limit");
+        legacyIdle.remove("landing_drift_recoveries");
         require(context, DescendToYTask.inspectCheckpoint(legacyIdle).isPresent(),
                 "idle schema-2 checkpoint was not safely promoted");
         DescendToYTask promoted = new DescendToYTask(start.getY() - 5, legacyIdle);
         promoted.start(bot);
-        require(context, "4".equals(promoted.checkpoint().get("task_schema"))
+        require(context, "5".equals(promoted.checkpoint().get("task_schema"))
                         && "".equals(promoted.checkpoint().get("traversed_detour_edges"))
-                        && "4800".equals(promoted.checkpoint().get("budget_limit")),
-                "schema-2 promotion did not emit schema-4 edge and budget history: "
+                        && "4800".equals(promoted.checkpoint().get("budget_limit"))
+                        && "0".equals(promoted.checkpoint().get("landing_drift_recoveries")),
+                "schema-2 promotion did not emit schema-5 edge, budget and landing-drift history: "
                         + promoted.checkpoint());
         promoted.cancel(bot, "gametest_schema_check");
 
         Map<String, String> schemaThree = new LinkedHashMap<>(current);
         schemaThree.put("task_schema", "3");
         schemaThree.remove("budget_limit");
+        schemaThree.remove("landing_drift_recoveries");
         schemaThree.put("budget_used", "1000");
         schemaThree.put("last_progress_budget", "1000");
         require(context, DescendToYTask.inspectCheckpoint(schemaThree).isPresent(),
                 "schema-3 edge checkpoint was not accepted for one-time budget promotion");
         DescendToYTask promotedBudget = new DescendToYTask(start.getY() - 5, schemaThree);
         promotedBudget.start(bot);
-        require(context, "4".equals(promotedBudget.checkpoint().get("task_schema"))
+        require(context, "5".equals(promotedBudget.checkpoint().get("task_schema"))
                         && "5800".equals(promotedBudget.checkpoint().get("budget_limit")),
                 "schema-3 promotion did not persist its dynamic budget: "
                         + promotedBudget.checkpoint());
         promotedBudget.cancel(bot, "gametest_schema_check");
+
+        Map<String, String> schemaFour = new LinkedHashMap<>(current);
+        schemaFour.put("task_schema", "4");
+        schemaFour.remove("landing_drift_recoveries");
+        require(context, DescendToYTask.inspectCheckpoint(schemaFour).isPresent(),
+                "schema-4 checkpoint (pre-landing-drift field) was not accepted");
+        DescendToYTask promotedLandingDrift = new DescendToYTask(start.getY() - 5, schemaFour);
+        promotedLandingDrift.start(bot);
+        require(context, "5".equals(promotedLandingDrift.checkpoint().get("task_schema"))
+                        && "0".equals(promotedLandingDrift.checkpoint().get("landing_drift_recoveries")),
+                "schema-4 promotion did not default landing_drift_recoveries to zero: "
+                        + promotedLandingDrift.checkpoint());
+        promotedLandingDrift.cancel(bot, "gametest_schema_check");
 
         Map<String, String> tooSmallLimit = new LinkedHashMap<>(current);
         tooSmallLimit.put("budget_limit", "4799");

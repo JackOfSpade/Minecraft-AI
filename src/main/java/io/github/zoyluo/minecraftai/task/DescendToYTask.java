@@ -53,7 +53,8 @@ import java.util.Set;
  * A self-contained state machine (G1, not self-assigning), entirely on the main thread (G2).
  */
 public final class DescendToYTask extends AbstractTask implements CheckpointableTask {
-    private static final int CHECKPOINT_SCHEMA = 4;
+    private static final int CHECKPOINT_SCHEMA = 5;
+    private static final int LANDING_DRIFT_CHECKPOINT_SCHEMA = 4; // schema had budget_limit but not landing_drift_recoveries
     private static final int EDGE_CHECKPOINT_SCHEMA = 3;
     private static final int LEGACY_CHECKPOINT_SCHEMA = 2;
     private static final int MAX_CHECKPOINTED_WATER_SEALS = 256;
@@ -136,7 +137,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             int schema = Integer.parseInt(required(checkpoint, "task_schema"));
             boolean legacyWithoutEdges = schema == LEGACY_CHECKPOINT_SCHEMA;
             boolean legacyBudget = legacyWithoutEdges || schema == EDGE_CHECKPOINT_SCHEMA;
-            if (!legacyBudget && schema != CHECKPOINT_SCHEMA) {
+            // landing_drift_recoveries was added after budget_limit: a schema-4 checkpoint (from
+            // before this field existed) has budget_limit but not landing_drift_recoveries, and
+            // must still restore exactly as before -- treat it as landingDriftRecoveries=0 rather
+            // than rejecting the checkpoint (see LANDING_DRIFT_CHECKPOINT_SCHEMA).
+            boolean legacyLandingDrift = legacyBudget || schema == LANDING_DRIFT_CHECKPOINT_SCHEMA;
+            if (!legacyLandingDrift && schema != CHECKPOINT_SCHEMA) {
                 return Optional.empty();
             }
             Set<String> expectedKeys = new LinkedHashSet<>(Set.of(
@@ -161,6 +167,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             if (!legacyBudget) {
                 expectedKeys.add("budget_limit");
             }
+            if (!legacyLandingDrift) {
+                expectedKeys.add("landing_drift_recoveries");
+            }
             if (!checkpoint.keySet().equals(expectedKeys)) {
                 return Optional.empty();
             }
@@ -170,6 +179,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             int lastProgressBudget = Integer.parseInt(required(checkpoint, "last_progress_budget"));
             int budgetLimit = legacyBudget
                     ? -1 : Integer.parseInt(required(checkpoint, "budget_limit"));
+            int landingDriftRecoveries = legacyLandingDrift
+                    ? 0 : Integer.parseInt(required(checkpoint, "landing_drift_recoveries"));
             int stairDirection = Integer.parseInt(required(checkpoint, "stair_direction"));
             int lateralDetours = Integer.parseInt(required(checkpoint, "lateral_detours"));
             int detourHeading = Integer.parseInt(required(checkpoint, "detour_heading"));
@@ -233,7 +244,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     || directionIndex(lastEdge(traversedEdges)) == detourHeading)
                     && pendingShape && rejectedShape
                     && (taskOpen || pendingOrigin == null)
-                    && (lastTorchY == Integer.MAX_VALUE || lastTorchY >= -64 && lastTorchY <= 320);
+                    && (lastTorchY == Integer.MAX_VALUE || lastTorchY >= -64 && lastTorchY <= 320)
+                    && landingDriftRecoveries >= 0
+                    && landingDriftRecoveries <= MAX_LANDING_DRIFT_RECOVERIES;
             if (!valid) {
                 return Optional.empty();
             }
@@ -245,6 +258,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     budgetLimit,
                     stairDirection,
                     lateralDetours,
+                    landingDriftRecoveries,
                     detourHeading,
                     pendingOrigin,
                     pendingTarget,
@@ -266,6 +280,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                                   int budgetLimit,
                                   int stairDirection,
                                   int lateralDetours,
+                                  int landingDriftRecoveries,
                                   int detourHeading,
                                   BlockPos pendingLandingOrigin,
                                   BlockPos pendingLandingTarget,
@@ -327,6 +342,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             budgetLimit = budgetLimitFor(bot.getBlockPos().getY(), targetY);
             lastProgressTick = 0;
             lateralDetours = 0;
+            landingDriftRecoveries = 0;
             detourHeadingIndex = -1;
             traversedDetourEdges.clear();
         } else {
@@ -343,6 +359,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             lastProgressTick = restoredCheckpoint.lastProgressBudget();
             stairDirIndex = restoredCheckpoint.stairDirection();
             lateralDetours = restoredCheckpoint.lateralDetours();
+            landingDriftRecoveries = restoredCheckpoint.landingDriftRecoveries();
             detourHeadingIndex = restoredCheckpoint.detourHeading();
             pendingLandingOrigin = restoredCheckpoint.pendingLandingOrigin();
             pendingLandingTarget = restoredCheckpoint.pendingLandingTarget();
@@ -1786,6 +1803,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         values.put("budget_limit", String.valueOf(budgetLimit));
         values.put("stair_direction", String.valueOf(stairDirIndex));
         values.put("lateral_detours", String.valueOf(lateralDetours));
+        values.put("landing_drift_recoveries", String.valueOf(landingDriftRecoveries));
         values.put("detour_heading", String.valueOf(detourHeadingIndex));
         values.put("pending_landing_origin", encodeOptionalPos(pendingLandingOrigin));
         values.put("pending_landing_target", encodeOptionalPos(pendingLandingTarget));
