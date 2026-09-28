@@ -42,9 +42,12 @@ public final class MiningController {
         return targetState;
     }
 
-    /** Ticks spent actively breaking this cell. Valid once {@link #tick} has returned success. */
+    /**
+     * Ticks spent actively breaking this cell, including the tick that completed the break ({@code elapsed}
+     * itself only counts the ticks that were still in progress). Valid once {@link #tick} has returned success.
+     */
     public int elapsedTicks() {
-        return elapsed;
+        return elapsed + 1;
     }
 
     public ActionResult tick(ActionPack pack) {
