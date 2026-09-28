@@ -76,19 +76,7 @@ public final class CreeperDefenseTask extends AbstractTask {
                                   boolean lateFuse,
                                   boolean charged) {
         int riskRank() {
-            if (lateFuse || charged && fuseStarted) {
-                return 4;
-            }
-            if (fuseStarted) {
-                return 3;
-            }
-            if (distanceSquared <= URGENT_DISTANCE_SQUARED) {
-                return 3;
-            }
-            if (charged && distanceSquared <= STALLED_WALL_DISTANCE_SQUARED) {
-                return 2;
-            }
-            return 1;
+            return CreeperDefenseTask.riskRank(lateFuse, charged, fuseStarted, distanceSquared);
         }
     }
 
@@ -124,20 +112,8 @@ public final class CreeperDefenseTask extends AbstractTask {
         }
 
         private int riskRank() {
-            if (lateFuseObserved || chargedObserved && fuseObserved) {
-                return 4;
-            }
-            if (fuseObserved) {
-                return 3;
-            }
-            if (distanceSquared <= URGENT_DISTANCE_SQUARED) {
-                return 3;
-            }
-            if (chargedObserved
-                    && distanceSquared <= STALLED_WALL_DISTANCE_SQUARED) {
-                return 2;
-            }
-            return 1;
+            return CreeperDefenseTask.riskRank(
+                    lateFuseObserved, chargedObserved, fuseObserved, distanceSquared);
         }
     }
 
@@ -651,18 +627,30 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private static int riskRank(RiskSelection risk) {
-        if (risk.lateFuseObserved()
-                || risk.chargedObserved() && risk.fuseObserved()) {
+        return riskRank(risk.lateFuseObserved(), risk.chargedObserved(),
+                risk.fuseObserved(), risk.distanceSquared());
+    }
+
+    /**
+     * The single risk-rank rule shared by every Creeper risk representation (a fresh observation,
+     * a remembered risk and a selected risk): a late fuse or an armed-and-charged Creeper is
+     * rank 4 (act now); any started fuse or a Creeper already inside urgent range is rank 3; a
+     * charged Creeper still outside urgent range but within stalled-wall range is rank 2;
+     * everything else is rank 1. Ties within a rank are broken by the caller (nearer distance,
+     * then longer-remembered), not here.
+     */
+    private static int riskRank(
+            boolean lateFuse, boolean charged, boolean fuseStarted, double distanceSquared) {
+        if (lateFuse || charged && fuseStarted) {
             return 4;
         }
-        if (risk.fuseObserved()) {
+        if (fuseStarted) {
             return 3;
         }
-        if (risk.distanceSquared() <= URGENT_DISTANCE_SQUARED) {
+        if (distanceSquared <= URGENT_DISTANCE_SQUARED) {
             return 3;
         }
-        if (risk.chargedObserved()
-                && risk.distanceSquared() <= STALLED_WALL_DISTANCE_SQUARED) {
+        if (charged && distanceSquared <= STALLED_WALL_DISTANCE_SQUARED) {
             return 2;
         }
         return 1;
