@@ -298,48 +298,48 @@ class GoalExecutorMiningCheckpointPolicyTest {
 
     @Test
     void rareEpochTimeoutConsumesOnlyTheExactPersistedWindow() {
-        assertTrue(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertTrue(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 0, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS),
                 "ore_dig_timeout collected=3"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 0, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS - 1),
                 "ore_dig_timeout collected=3"));
-        assertTrue(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertTrue(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 1, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS * 2),
                 "ore_dig_timeout collected=7"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 1, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS),
                 "ore_dig_timeout collected=7"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 2, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS * 2),
                 "ore_dig_timeout collected=7"));
         // Margin epochs own their exact cumulative window inside the mission capacity of four.
-        assertTrue(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertTrue(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 2, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS * 3),
                 "ore_dig_timeout collected=7"));
-        assertTrue(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertTrue(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 3, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS * 4),
                 "ore_dig_timeout collected=7"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 4, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS * 5),
                 "ore_dig_timeout collected=7"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(false, 64, 0, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS),
                 "ore_dig_timeout collected=3"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 0, 0, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS),
                 "ore_dig_timeout collected=3"));
-        assertFalse(GoalExecutor.isLongRareResourceEpochTimeout(
+        assertFalse(MissionRecoveryScheduler.isLongRareResourceEpochTimeout(
                 restoreMetadata(true, 64, 0, false,
                         MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS),
                 "ore_dig_no_progress"));

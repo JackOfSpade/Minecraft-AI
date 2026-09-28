@@ -315,6 +315,11 @@ class GoalExecutorHuntCursorPersistenceTest {
             throws IOException {
         String source = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
+        // The mid-mission service/replan-scheduling cluster was extracted into
+        // MissionRecoveryScheduler; every invariant below that pins text inside that cluster is
+        // checked against this file instead, in the same relative order it always held.
+        String recoveryScheduler = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/goal/MissionRecoveryScheduler.java"));
 
         assertTrue(sourceSection(
                         source,
@@ -329,32 +334,41 @@ class GoalExecutorHuntCursorPersistenceTest {
                 {"goal_postcondition_repair\",",
                         "goal_postcondition_repair_rejected"},
                 {"report(bot, \"I ran into a problem and replanned the goal.\")",
-                        "private static Optional<MiningServiceTask.RestoreMetadata>"},
-                {"goal_rare_resource_epoch_advanced",
-                        "/** Schedules the one sealed inventory service"},
-                {"goal_rare_inventory_service_scheduled",
-                        "/**\n     * Inserts a capacity-only ORE_BATCH service"},
-                {"goal_mining_capacity_handoff_scheduled",
-                        "// Optimization 2: whether the goal has failed"}
+                        "public boolean recentlyFailed(AIPlayerEntity bot, int withinTicks)"}
         }) {
             assertTrue(sourceSection(source, bounds[0], bounds[1]).contains(
                             "captureTransitionAndAssignNext(bot, plan);"),
                     () -> "transition lacks write-ahead capture: " + bounds[0]);
         }
+        for (String[] bounds : new String[][]{
+                {"goal_rare_resource_epoch_advanced",
+                        "/** Schedules the one sealed inventory service"},
+                {"goal_rare_inventory_service_scheduled",
+                        "/**\n     * Inserts a capacity-only ORE_BATCH service"},
+                {"goal_mining_capacity_handoff_scheduled",
+                        "/** Releases the retry debit only after both durable namespaces attest the closed rare batch. */"}
+        }) {
+            assertTrue(sourceSection(recoveryScheduler, bounds[0], bounds[1]).contains(
+                            "captureTransitionAndAssignNext(bot, plan);"),
+                    () -> "transition lacks write-ahead capture: " + bounds[0]);
+        }
 
         assertTrue(sourceSection(
-                        source,
+                        recoveryScheduler,
                         "goal_step_retry_after_tool_recovery",
                         "private static boolean hasRecoveredMiningChannelTool")
                         .contains("captureBeforeAndAfterDispatch("),
                 "tool-recovery dispatch lacks write-ahead capture");
         assertTrue(sourceSection(
-                        source,
-                        "debitChannelToolResupply(plan.taskCheckpoint)",
+                        recoveryScheduler,
+                        "debitChannelToolResupply(plan.getTaskCheckpoint())",
                         "/**\n     * Atomically trades this exact open batch")
                         .contains("captureBeforeAndAfterDispatch("),
                 "channel-resupply dispatch lacks write-ahead capture");
         assertFalse(source.matches(
+                        "(?s).*assignNext\\(bot, plan\\);\\s*markDirty\\(bot\\);.*"),
+                "a committed plan transition still captures only after successor dispatch");
+        assertFalse(recoveryScheduler.matches(
                         "(?s).*assignNext\\(bot, plan\\);\\s*markDirty\\(bot\\);.*"),
                 "a committed plan transition still captures only after successor dispatch");
     }

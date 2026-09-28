@@ -26,7 +26,6 @@ import io.github.zoyluo.minecraftai.brain.BotReporter;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.MiningBudget;
-import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.task.BlueprintLoader;
@@ -49,7 +48,6 @@ import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.PlaceStationsTask;
-import io.github.zoyluo.minecraftai.task.ResupplyTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.Task;
@@ -62,7 +60,6 @@ import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.persist.MissionSpec;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
@@ -158,6 +155,10 @@ public final class GoalExecutor {
     // quarantined without first publishing an irreversible terminal result/chat/episode.
     private final Set<UUID> pocketRestorePreflights = ConcurrentHashMap.newKeySet();
     private final AtomicLong resultSequence = new AtomicLong();
+    // Decides how a failed/completed mining or service step is resumed, retried or committed;
+    // only ever mutates the ActivePlan it is handed. This executor keeps ownership of activePlans,
+    // finishActive and the top-level dispatch.
+    private final MissionRecoveryScheduler recoveryScheduler = new MissionRecoveryScheduler(this);
 
     private GoalExecutor() {
     }
@@ -1630,7 +1631,7 @@ public final class GoalExecutor {
             if (plan.current.kind() == GoalStep.Kind.MINE_ORE
                     && rareMissionTargetForMiningStep(plan.goal, plan.current.ores()) > 0) {
                 int completedEpoch = plan.rareResourceRetriesUsed;
-                if (!settleCompletedRareBatch(plan)) {
+                if (!MissionRecoveryScheduler.settleCompletedRareBatch(plan)) {
                     finishActive(bot, plan, evaluate(bot, plan),
                             "rare_batch_commit_checkpoint_invalid", false, true);
                     return true;
@@ -1642,8 +1643,8 @@ public final class GoalExecutor {
             if (plan.current.kind() == GoalStep.Kind.MINE_ORE
                     && plan.capacityParentNamespace != null
                     && plan.currentCapacityParentRetry
-                    && currentOreTaskOwnsCapacityParent(plan)
-                    && !settleCompletedCapacityParent(plan)) {
+                    && MissionRecoveryScheduler.currentOreTaskOwnsCapacityParent(plan)
+                    && !MissionRecoveryScheduler.settleCompletedCapacityParent(plan)) {
                 finishActive(bot, plan, evaluate(bot, plan),
                         "capacity_parent_commit_checkpoint_invalid", false, true,
                         GoalResult.Status.FAILED);
@@ -2768,7 +2769,8 @@ public final class GoalExecutor {
      * work or throw. A second capture records the assigned task's initial checkpoint when dispatch
      * succeeds. BotPersistence keeps both captures asynchronous with respect to disk I/O.
      */
-    private void captureTransitionAndAssignNext(AIPlayerEntity bot, ActivePlan plan) {
+    // Package-private: also called by MissionRecoveryScheduler after scheduling a service/retry.
+    void captureTransitionAndAssignNext(AIPlayerEntity bot, ActivePlan plan) {
         captureBeforeAndAfterDispatch(
                 () -> markDirty(bot),
                 () -> assignNext(bot, plan));
@@ -2919,7 +2921,8 @@ public final class GoalExecutor {
     }
 
     // Phase A progress signal: the current inventory count of the goal's target product (HaveItem/Stockpile use its item; MineOre uses ore drops).
-    private static int goalTargetCount(AIPlayerEntity bot, Goal goal) {
+    // Package-private: also called by MissionRecoveryScheduler's rare-resource scheduling helpers.
+    static int goalTargetCount(AIPlayerEntity bot, Goal goal) {
         if (goal instanceof Goal.HaveItem hi) {
             return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot, java.util.Set.of(hi.item()));
         }
@@ -3029,7 +3032,8 @@ public final class GoalExecutor {
                 && lifetimeReplans < lifetimeLimit;
     }
 
-    private static int originalLongRareOreTargetCount(Goal goal) {
+    // Package-private: also called by MissionRecoveryScheduler's rare-resource scheduling helpers.
+    static int originalLongRareOreTargetCount(Goal goal) {
         int target = 0;
         if (goal instanceof Goal.MineOre mineOre && isRareOre(mineOre.ores())) {
             target = mineOre.count();
@@ -3052,7 +3056,8 @@ public final class GoalExecutor {
         return missionTarget > 0 && miningStepFeedsGoal(goal, ores) ? missionTarget : 0;
     }
 
-    private static boolean isProtectedRareMiningCheckpoint(
+    // Package-private: also called by MissionRecoveryScheduler's capacity-handoff scheduling.
+    static boolean isProtectedRareMiningCheckpoint(
             Goal goal, Map<String, String> checkpoint) {
         int missionTarget = originalLongRareOreTargetCount(goal);
         return missionTarget >= MiningBudget.EXPEDITION_THRESHOLD
@@ -3257,7 +3262,8 @@ public final class GoalExecutor {
                 && serviceFace != null && serviceFace.equals(metadata.cursor().face());
     }
 
-    private static boolean hasOreDigPhysicalLedger(Map<String, String> checkpoint) {
+    // Package-private: also called by MissionRecoveryScheduler's capacity/service scheduling.
+    static boolean hasOreDigPhysicalLedger(Map<String, String> checkpoint) {
         return checkpoint != null && (checkpoint.containsKey("pending_pickup_pos")
                 || checkpoint.containsKey("active_break_pos"));
     }
@@ -3277,7 +3283,7 @@ public final class GoalExecutor {
     private void handleStepFailure(MinecraftServer server, AIPlayerEntity bot, ActivePlan plan, String reason) {
         captureTaskEvidence(bot, plan);
         Optional<SettledServiceTombstone> replayGuard =
-                matchingSettledServiceGuard(bot, plan, reason);
+                MissionRecoveryScheduler.matchingSettledServiceGuard(bot, plan, reason);
         if (replayGuard.isPresent()) {
             // MiningService reached its exact PREPARE capacity predicate and rejected the
             // forbidden geometry before any pocket mutation. This typed fact is terminal; generic
@@ -3312,7 +3318,7 @@ public final class GoalExecutor {
                 && failedClosedAuxiliaryServiceMatches(
                 plan.taskCheckpoint, plan.auxiliaryMiningCheckpoint);
         Optional<MiningServiceTask.RestoreMetadata> settledTerminalService =
-                settledTerminalServiceFailure(plan, reason);
+                MissionRecoveryScheduler.settledTerminalServiceFailure(plan, reason);
         if (settledTerminalService.isPresent()) {
             // The double-sealed pocket has no remaining physical authority. This receipt exists
             // solely to bridge TaskManager -> GoalExecutor settlement. Persist its semantic
@@ -3356,33 +3362,33 @@ public final class GoalExecutor {
                 return;
             }
         }
-        if (resumeOreDigAfterToolRecovery(bot, plan, reason)) {
+        if (MissionRecoveryScheduler.resumeOreDigAfterToolRecovery(bot, plan, reason)) {
             return;
         }
-        if (scheduleOrdinaryChannelToolResupply(bot, plan, reason)) {
+        if (MissionRecoveryScheduler.scheduleOrdinaryChannelToolResupply(bot, plan, reason)) {
             return;
         }
         if ("ore_dig_inventory_service_required".equals(reason)) {
-            if (!scheduleRareInventoryService(bot, plan)
-                    && !scheduleBoundedCapacityHandoff(bot, plan)) {
+            if (!recoveryScheduler.scheduleRareInventoryService(bot, plan)
+                    && !recoveryScheduler.scheduleBoundedCapacityHandoff(bot, plan)) {
                 finishActive(bot, plan, evaluate(bot, plan), reason, false, true);
             }
             return;
         }
-        if (isLongRareChannelToolFailure(plan, reason)) {
-            if (!scheduleRareResourceRetry(bot, plan, reason)) {
+        if (MissionRecoveryScheduler.isLongRareChannelToolFailure(plan, reason)) {
+            if (!recoveryScheduler.scheduleRareResourceRetry(bot, plan, reason)) {
                 finishActive(bot, plan, evaluate(bot, plan), reason, false, true);
             }
             return;
         }
         if (reason != null && reason.startsWith("ore_dig_torch_epoch_exhausted:")) {
-            if (!scheduleRareResourceRetry(bot, plan, reason)) {
+            if (!recoveryScheduler.scheduleRareResourceRetry(bot, plan, reason)) {
                 finishActive(bot, plan, evaluate(bot, plan), reason, false, true);
             }
             return;
         }
-        if (isLongRareResourceEpochTimeout(plan, reason)) {
-            if (!scheduleRareResourceRetry(bot, plan, reason)) {
+        if (MissionRecoveryScheduler.isLongRareResourceEpochTimeout(plan, reason)) {
+            if (!recoveryScheduler.scheduleRareResourceRetry(bot, plan, reason)) {
                 // Every funded epoch owns one independent 24,000-tick window: the batch's own
                 // retry first, then bounded mission-margin epochs while the shared pool lasts.
                 // Once both are spent the cumulative checkpoint is terminal and must not fall
@@ -3666,529 +3672,6 @@ public final class GoalExecutor {
         captureTransitionAndAssignNext(bot, plan);
     }
 
-    private static Optional<MiningServiceTask.RestoreMetadata> settledTerminalServiceFailure(
-            ActivePlan plan, String reason) {
-        if (plan == null || plan.current == null
-                || plan.current.kind() != GoalStep.Kind.MINING_SERVICE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINING_SERVICE
-                || hasActiveServicePocket(plan.taskCheckpoint)) {
-            return Optional.empty();
-        }
-        return MiningServiceTask.inspectCheckpoint(plan.taskCheckpoint)
-                .filter(metadata -> !metadata.done()
-                        && !metadata.terminalFailure().isBlank()
-                        && metadata.terminalFailure().equals(reason));
-    }
-
-    /**
-     * A generic background resupply can finish after OreDig has already published its typed tool
-     * failure. Replanning the whole parent goal at that point is both unnecessary and harmful: an
-     * underground obsidian dependency would be asked to re-establish every surface bootstrap
-     * reserve even though the exact ore branch now has a usable replacement pickaxe. Resume only
-     * the attested open batch, preserving its physical ledgers, cursor and already-spent hard
-     * budget. Any identity mismatch falls through to the ordinary fail-closed planner path.
-     */
-    private boolean resumeOreDigAfterToolRecovery(AIPlayerEntity bot,
-                                                   ActivePlan plan,
-                                                   String reason) {
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE) {
-            return false;
-        }
-        int rareMissionTarget = rareMissionTargetForMiningStep(
-                plan.goal, plan.current.ores());
-        String expectedTargetReason = "need_better_tool:"
-                + ToolTier.requiredPickaxeItemId(plan.current.ores());
-        boolean targetToolRecovered = expectedTargetReason.equals(reason);
-        boolean channelToolRecovered = rareMissionTarget == 0
-                && hasRecoveredMiningChannelTool(bot, reason);
-        if ((!targetToolRecovered && !channelToolRecovered)
-                || plan.current.ores().stream().noneMatch(block ->
-                ToolTier.canHarvestWithInventory(bot, block.getDefaultState()))) {
-            return false;
-        }
-        Optional<OreDigTask.RestoreMetadata> restored = OreDigTask.inspectCheckpoint(
-                plan.taskCheckpoint, rareMissionTarget);
-        if (restored.isEmpty()) {
-            return false;
-        }
-        OreDigTask.RestoreMetadata metadata = restored.orElseThrow();
-        String expectedFingerprint = OreDigTask.oreFingerprint(plan.current.ores());
-        if (!metadata.batchOpen()
-                || !metadata.acceptsStepTarget(plan.current.count())
-                || metadata.rareMissionTarget() != rareMissionTarget
-                || !expectedFingerprint.equals(OreDigTask.oreFingerprint(metadata.ores()))) {
-            return false;
-        }
-
-        Optional<Task> resumed = stepToTask(bot, plan.current, plan);
-        if (resumed.isEmpty() || !(resumed.orElseThrow() instanceof OreDigTask)) {
-            return false;
-        }
-        plan.currentTask = resumed.orElseThrow();
-        BotLog.task(bot, "goal_step_retry_after_tool_recovery",
-                "step", plan.current.describe(),
-                "mission_id", plan.missionId,
-                "budget_used", metadata.budgetUsed(),
-                "face", metadata.cursor().face().toShortString());
-        captureBeforeAndAfterDispatch(
-                () -> markDirty(bot),
-                () -> TaskManager.INSTANCE.assign(bot, plan.currentTask,
-                        TaskOrigin.mission(plan.missionId, plan.current.describe())));
-        return true;
-    }
-
-    private static boolean hasRecoveredMiningChannelTool(AIPlayerEntity bot, String reason) {
-        String prefix = "need_mining_channel_tool:";
-        if (reason == null || !reason.startsWith(prefix)) {
-            return false;
-        }
-        String requiredId = reason.substring(prefix.length());
-        if (requiredId.isBlank()) {
-            return false;
-        }
-        return java.util.stream.Stream.concat(
-                        bot.getInventory().getMainStacks().stream(),
-                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
-                .anyMatch(stack -> !stack.isEmpty()
-                        && requiredId.equals(Registries.ITEM.getId(stack.getItem()).toString())
-                        && MiningServiceTask.usableDurability(stack) > 0);
-    }
-
-    private static boolean isLongRareChannelToolFailure(ActivePlan plan, String reason) {
-        return plan.current != null
-                && plan.current.kind() == GoalStep.Kind.MINE_ORE
-                && originalLongRareOreTargetCount(plan.goal) >= MiningBudget.EXPEDITION_THRESHOLD
-                && "need_mining_channel_tool:minecraft:stone_pickaxe".equals(reason)
-                && miningStepFeedsGoal(plan.goal, plan.current.ores());
-    }
-
-    private static boolean isLongRareResourceEpochTimeout(ActivePlan plan, String reason) {
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE) {
-            return false;
-        }
-        int missionTarget = originalLongRareOreTargetCount(plan.goal);
-        return OreDigTask.inspectCheckpoint(plan.taskCheckpoint, missionTarget)
-                .filter(ore -> ore.rareMissionTarget() == missionTarget
-                        && miningStepFeedsGoal(plan.goal, ore.ores()))
-                .filter(ore -> isLongRareResourceEpochTimeout(ore, reason))
-                .isPresent();
-    }
-
-    static boolean isLongRareResourceEpochTimeout(OreDigTask.RestoreMetadata ore,
-                                                  String reason) {
-        if (ore == null || reason == null
-                || !reason.startsWith("ore_dig_timeout collected=")
-                || !ore.batchOpen()
-                || ore.rareMissionTarget() < MiningBudget.EXPEDITION_THRESHOLD) {
-            return false;
-        }
-        int epochCapacity = MiningBudget.rareMissionResourceEpochCapacity(
-                MiningBudget.rareMissionBatchCount(ore.rareMissionTarget()));
-        if (ore.resourceEpoch() < 0 || ore.resourceEpoch() >= epochCapacity) {
-            return false;
-        }
-        return ore.budgetUsed()
-                == MiningMissionBudget.rareOreDigCumulativeHardWindowTicks(
-                ore.resourceEpoch(), epochCapacity);
-    }
-
-    /**
-     * An ordinary OreDig can discover channel-tool exhaustion after it has switched its hand to a
-     * torch or another utility item. In that state the generic low-durability watcher has no
-     * factual held pickaxe to observe. Restore and pause the exact open batch, run one physical
-     * ResupplyTask, then let the normal pause stack resume that same task instance. The checkpoint
-     * debit makes this bounded across retries and process restarts.
-     */
-    private boolean scheduleOrdinaryChannelToolResupply(AIPlayerEntity bot,
-                                                        ActivePlan plan,
-                                                        String reason) {
-        String prefix = "need_mining_channel_tool:";
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE
-                || rareMissionTargetForMiningStep(plan.goal, plan.current.ores()) != 0
-                || reason == null || !reason.startsWith(prefix)) {
-            return false;
-        }
-        String requiredId = reason.substring(prefix.length());
-        Item requested;
-        try {
-            requested = Registries.ITEM.getOptionalValue(Identifier.of(requiredId)).orElse(null);
-        } catch (RuntimeException invalidIdentifier) {
-            return false;
-        }
-        if (requested == null) {
-            return false;
-        }
-        Optional<OreDigTask.RestoreMetadata> metadata =
-                OreDigTask.inspectCheckpoint(plan.taskCheckpoint, 0);
-        String expectedFingerprint = OreDigTask.oreFingerprint(plan.current.ores());
-        if (metadata.isEmpty()
-                || !metadata.orElseThrow().batchOpen()
-                || !metadata.orElseThrow().acceptsStepTarget(plan.current.count())
-                || metadata.orElseThrow().rareMissionTarget() != 0
-                || metadata.orElseThrow().inventoryServiceUsed()
-                || !expectedFingerprint.equals(OreDigTask.oreFingerprint(
-                metadata.orElseThrow().ores()))
-                || plan.current.ores().stream().noneMatch(block ->
-                ToolTier.canHarvestWithInventory(bot, block.getDefaultState()))) {
-            return false;
-        }
-        Optional<Map<String, String>> debited =
-                OreDigTask.debitChannelToolResupply(plan.taskCheckpoint);
-        if (debited.isEmpty()) {
-            return false;
-        }
-        plan.taskCheckpoint.clear();
-        plan.taskCheckpoint.putAll(debited.orElseThrow());
-        if (expectedFingerprint.equals(plan.miningCheckpoint.get("ore_fingerprint"))) {
-            plan.miningCheckpoint.clear();
-            plan.miningCheckpoint.putAll(plan.taskCheckpoint);
-        }
-        Optional<Task> resumed = stepToTask(bot, plan.current, plan);
-        if (resumed.isEmpty() || !(resumed.orElseThrow() instanceof OreDigTask)) {
-            return false;
-        }
-        plan.currentTask = resumed.orElseThrow();
-        captureBeforeAndAfterDispatch(
-                () -> markDirty(bot),
-                () -> {
-                    TaskManager.INSTANCE.assign(bot, plan.currentTask,
-                            TaskOrigin.mission(plan.missionId, plan.current.describe()));
-                    TaskManager.INSTANCE.pauseFor(bot, "ore_channel_tool_resupply");
-                    TaskManager.INSTANCE.assign(bot, ResupplyTask.tool(requested),
-                            TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND,
-                                    "ore_channel_tool_resupply"));
-                });
-        BotLog.task(bot, "goal_ore_channel_resupply_scheduled",
-                "required", requiredId,
-                "mission_id", plan.missionId,
-                "budget_used", metadata.orElseThrow().budgetUsed(),
-                "face", metadata.orElseThrow().cursor().face().toShortString());
-        return true;
-    }
-
-    /**
-     * Atomically trades this exact open batch's single resource retry — or, once that is spent,
-     * one bounded mission-level margin epoch (F2) — for one fresh rare-service step while
-     * preserving the OreDig hard budget, cursor and physical pickup/break ledgers.
-     */
-    private boolean scheduleRareResourceRetry(AIPlayerEntity bot,
-                                              ActivePlan plan,
-                                              String reason) {
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE) {
-            return false;
-        }
-        Optional<OreDigTask.RestoreMetadata> metadata =
-                OreDigTask.inspectCheckpoint(plan.taskCheckpoint,
-                        originalLongRareOreTargetCount(plan.goal));
-        if (metadata.isEmpty()) {
-            return false;
-        }
-        OreDigTask.RestoreMetadata ore = metadata.orElseThrow();
-        boolean torchFailure = reason.equals(OreDigTask.resourceEpochFailureReason(
-                ore.torchPlacements(), ore.resourceEpoch()));
-        boolean channelToolFailure = isLongRareChannelToolFailure(plan, reason);
-        boolean epochTimeout = isLongRareResourceEpochTimeout(ore, reason);
-        // Epochs beyond the per-batch retry are paid from the finite mission margin pool; the
-        // durable ledger below makes every draw exactly-once across replans and restarts.
-        int marginPool = rareMissionEpochMarginPool(plan.goal);
-        boolean marginDraw = ore.resourceEpoch()
-                >= MiningBudget.MAX_RARE_RESOURCE_RETRIES_PER_BATCH;
-        if (!ore.batchOpen()
-                || ore.rareMissionTarget() != originalLongRareOreTargetCount(plan.goal)
-                || plan.rareResourceRetriesUsed != ore.resourceEpoch()
-                || marginDraw && plan.rareEpochMarginUsed >= marginPool
-                || (!torchFailure && !channelToolFailure && !epochTimeout)
-                || !miningStepFeedsGoal(plan.goal, ore.ores())) {
-            return false;
-        }
-        Optional<Map<String, String>> advanced =
-                OreDigTask.advanceResourceEpoch(plan.taskCheckpoint);
-        if (advanced.isEmpty()) {
-            return false;
-        }
-
-        GoalPlanner.GoalPlan fresh = GoalPlanner.plan(
-                bot, plan.goal, snapshotContext(plan), plan.missionId.toString());
-        if (!fresh.success()) {
-            return false;
-        }
-        List<GoalStep> continuation = new ArrayList<>(applySkippedTargetReceipts(
-                fresh.steps(), plan.skippedTargetReceipts));
-        String fingerprint = OreDigTask.oreFingerprint(ore.ores());
-        int serviceBoundary = goalTargetCount(bot, plan.goal);
-        int serviceIndex = -1;
-        int miningIndex = -1;
-        for (int index = 0; index < continuation.size(); index++) {
-            GoalStep step = continuation.get(index);
-            if (serviceIndex < 0 && step.isRareOreService()
-                    && step.count() == serviceBoundary
-                    && step.rareOreMissionTarget() == originalLongRareOreTargetCount(plan.goal)
-                    && fingerprint.equals(OreDigTask.oreFingerprint(step.ores()))) {
-                serviceIndex = index;
-            } else if (miningIndex < 0 && step.kind() == GoalStep.Kind.MINE_ORE
-                    && ore.acceptsStepTarget(step.count())
-                    && fingerprint.equals(OreDigTask.oreFingerprint(step.ores()))) {
-                miningIndex = index;
-            }
-        }
-        if (miningIndex < 0) {
-            return false;
-        }
-        GoalStep service = serviceIndex >= 0
-                ? continuation.get(serviceIndex)
-                : GoalStep.rareOreService(
-                ore.ores(), serviceBoundary, originalLongRareOreTargetCount(plan.goal));
-        GoalStep mining = continuation.get(miningIndex);
-        reorderServiceThenMining(continuation, serviceIndex, miningIndex, service, mining);
-
-        // Commit only after the complete successor schedule has been proven. A crash can therefore
-        // observe either the failed epoch plus its task, or the advanced epoch plus the
-        // service-first schedule (margin ledger included), never a refreshed cursor with no
-        // corresponding epoch or margin debit.
-        plan.taskCheckpoint.clear();
-        plan.taskCheckpoint.putAll(advanced.orElseThrow());
-        plan.taskCheckpointKind = GoalStep.Kind.MINE_ORE;
-        plan.miningCheckpoint.clear();
-        plan.miningCheckpoint.putAll(advanced.orElseThrow());
-        plan.rareResourceRetriesUsed = ore.resourceEpoch() + 1;
-        if (marginDraw) {
-            plan.rareEpochMarginUsed++;
-            BotLog.task(bot, "rare_epoch_margin_drawn",
-                    "used", plan.rareEpochMarginUsed,
-                    "pool", marginPool,
-                    "epoch", plan.rareResourceRetriesUsed);
-        }
-        plan.steps.clear();
-        plan.steps.addAll(continuation);
-        plan.totalSteps = continuation.size();
-        plan.current = null;
-        plan.currentTask = null;
-        BotLog.task(bot, "goal_rare_resource_epoch_advanced",
-                "epoch", plan.rareResourceRetriesUsed,
-                "trigger", channelToolFailure ? "channel_tool"
-                        : epochTimeout ? "epoch_timeout" : "torch",
-                "budget", ore.budgetUsed(),
-                "face", ore.cursor().face().toShortString(),
-                "service_boundary", service.count());
-        captureTransitionAndAssignNext(bot, plan);
-        return true;
-    }
-
-    /** Schedules the one sealed inventory service owned by this exact OreDig batch. */
-    private boolean scheduleRareInventoryService(AIPlayerEntity bot, ActivePlan plan) {
-        int missionTarget = originalLongRareOreTargetCount(plan.goal);
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || missionTarget < MiningBudget.EXPEDITION_THRESHOLD) {
-            return false;
-        }
-        Optional<OreDigTask.RestoreMetadata> metadata =
-                OreDigTask.inspectCheckpoint(plan.taskCheckpoint, missionTarget);
-        if (metadata.isEmpty()) {
-            return false;
-        }
-        OreDigTask.RestoreMetadata ore = metadata.orElseThrow();
-        if (!ore.batchOpen() || ore.rareMissionTarget() != missionTarget
-                || !miningStepFeedsGoal(plan.goal, ore.ores())) {
-            return false;
-        }
-        Optional<Map<String, String>> debited =
-                OreDigTask.debitInventoryService(plan.taskCheckpoint);
-        if (debited.isEmpty()) {
-            return false;
-        }
-
-        GoalPlanner.GoalPlan fresh = GoalPlanner.plan(
-                bot, plan.goal, snapshotContext(plan), plan.missionId.toString());
-        if (!fresh.success()) {
-            return false;
-        }
-        List<GoalStep> continuation = new ArrayList<>(applySkippedTargetReceipts(
-                fresh.steps(), plan.skippedTargetReceipts));
-        String fingerprint = OreDigTask.oreFingerprint(ore.ores());
-        int serviceIndex = -1;
-        int miningIndex = -1;
-        for (int index = 0; index < continuation.size(); index++) {
-            GoalStep step = continuation.get(index);
-            if (serviceIndex < 0 && step.isRareOreService()
-                    && step.rareOreMissionTarget() == missionTarget
-                    && fingerprint.equals(OreDigTask.oreFingerprint(step.ores()))) {
-                serviceIndex = index;
-            } else if (miningIndex < 0 && step.kind() == GoalStep.Kind.MINE_ORE
-                    && fingerprint.equals(OreDigTask.oreFingerprint(step.ores()))) {
-                miningIndex = index;
-            }
-        }
-        if (serviceIndex < 0 || miningIndex < 0) {
-            return false;
-        }
-        GoalStep service = continuation.get(serviceIndex);
-        GoalStep mining = continuation.get(miningIndex);
-        reorderServiceThenMining(continuation, serviceIndex, miningIndex, service, mining);
-
-        plan.taskCheckpoint.clear();
-        plan.taskCheckpoint.putAll(debited.orElseThrow());
-        plan.taskCheckpointKind = GoalStep.Kind.MINE_ORE;
-        plan.miningCheckpoint.clear();
-        plan.miningCheckpoint.putAll(debited.orElseThrow());
-        plan.steps.clear();
-        plan.steps.addAll(continuation);
-        plan.totalSteps = continuation.size();
-        plan.current = null;
-        plan.currentTask = null;
-        BotLog.task(bot, "goal_rare_inventory_service_scheduled",
-                "budget", ore.budgetUsed(),
-                "face", ore.cursor().face().toShortString(),
-                "service_boundary", service.count());
-        captureTransitionAndAssignNext(bot, plan);
-        return true;
-    }
-
-    /**
-     * Pulls the service+mining step pair to the front of {@code steps}, service before mining.
-     * {@code serviceIndex} may be -1 (no existing service step to remove; only mining is dropped
-     * before both are reinserted at the head). Removing the larger index first keeps the smaller
-     * index valid for the second removal.
-     */
-    private static void reorderServiceThenMining(List<GoalStep> steps, int serviceIndex, int miningIndex,
-                                                  GoalStep service, GoalStep mining) {
-        if (serviceIndex >= 0) {
-            if (serviceIndex > miningIndex) {
-                steps.remove(serviceIndex);
-                steps.remove(miningIndex);
-            } else {
-                steps.remove(miningIndex);
-                steps.remove(serviceIndex);
-            }
-        } else {
-            steps.remove(miningIndex);
-        }
-        steps.add(0, mining);
-        steps.add(0, service);
-    }
-
-    /**
-     * Inserts a capacity-only ORE_BATCH service before retrying the exact failed ordinary or
-     * small-rare OreDig step. A first service debits the shared inventory-service bit. A later
-     * service must retain that bit and strictly advance either the delivered watermark or the
-     * factual branch work face. The persisted service count is capped by the original target
-     * count, matching MiningMissionBudget's exact dynamic-service upper bound across restarts.
-     */
-    private boolean scheduleBoundedCapacityHandoff(AIPlayerEntity bot, ActivePlan plan) {
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE) {
-            return false;
-        }
-        boolean primaryParent = plan.taskCheckpoint.equals(plan.miningCheckpoint)
-                && plan.auxiliaryMiningCheckpoint.isEmpty();
-        boolean existingAuxiliaryParent = plan.taskCheckpoint.equals(
-                plan.auxiliaryMiningCheckpoint)
-                && !plan.auxiliaryMiningCheckpoint.isEmpty();
-        boolean protectedRareParent = isProtectedRareMiningCheckpoint(
-                plan.goal, plan.miningCheckpoint)
-                && !hasOreDigPhysicalLedger(plan.miningCheckpoint);
-        boolean createAuxiliaryParent = plan.capacityParentNamespace == null
-                && !primaryParent && !existingAuxiliaryParent
-                && plan.auxiliaryMiningCheckpoint.isEmpty() && protectedRareParent;
-        if (!primaryParent && !existingAuxiliaryParent && !createAuxiliaryParent) {
-            return false;
-        }
-        Map<String, String> parentCheckpoint = primaryParent
-                ? plan.miningCheckpoint
-                : existingAuxiliaryParent
-                ? plan.auxiliaryMiningCheckpoint : plan.taskCheckpoint;
-        Optional<OreDigTask.RestoreMetadata> task =
-                OreDigTask.inspectCheckpoint(plan.taskCheckpoint, 0);
-        Optional<OreDigTask.RestoreMetadata> parent =
-                OreDigTask.inspectCheckpoint(parentCheckpoint, 0);
-        if (task.isEmpty() || parent.isEmpty()) {
-            return false;
-        }
-        OreDigTask.RestoreMetadata ore = task.orElseThrow();
-        OreDigTask.RestoreMetadata durable = parent.orElseThrow();
-        String expectedFingerprint = OreDigTask.oreFingerprint(plan.current.ores());
-        CapacityParentNamespace expectedParent = primaryParent
-                ? CapacityParentNamespace.MINING : CapacityParentNamespace.AUXILIARY;
-        boolean repeatedHandoff = plan.capacityParentNamespace != null;
-        boolean branchAdvanced = plan.capacityParentFace != null
-                && !ore.cursor().face().equals(plan.capacityParentFace);
-        boolean validHandoffProgress = repeatedHandoff
-                ? plan.capacityParentNamespace == expectedParent
-                && plan.capacityParentDelivered >= 0
-                && plan.capacityParentFace != null
-                && plan.capacityParentServicesUsed >= 1
-                && plan.capacityParentServicesUsed < ore.targetCount()
-                && ore.inventoryServiceUsed() && durable.inventoryServiceUsed()
-                && (ore.delivered() > plan.capacityParentDelivered || branchAdvanced)
-                : plan.capacityParentDelivered == -1
-                && plan.capacityParentFace == null
-                && plan.capacityParentServicesUsed == 0
-                && !ore.inventoryServiceUsed() && !durable.inventoryServiceUsed();
-        if (!ore.batchOpen() || !durable.batchOpen()
-                || ore.rareMissionTarget() != 0 || durable.rareMissionTarget() != 0
-                || !validHandoffProgress
-                || !ore.acceptsStepTarget(plan.current.count())
-                || !durable.acceptsStepTarget(plan.current.count())
-                || ore.delivered() != durable.delivered()
-                || !expectedFingerprint.equals(OreDigTask.oreFingerprint(ore.ores()))
-                || !expectedFingerprint.equals(OreDigTask.oreFingerprint(durable.ores()))
-                || !ore.cursor().equals(durable.cursor())
-                || hasOreDigPhysicalLedger(plan.taskCheckpoint)
-                || hasOreDigPhysicalLedger(parentCheckpoint)) {
-            return false;
-        }
-        Optional<Map<String, String>> debit =
-                OreDigTask.debitCapacityHandoff(
-                        plan.taskCheckpoint, plan.capacityParentDelivered,
-                        plan.capacityParentFace);
-        if (debit.isEmpty()) {
-            return false;
-        }
-
-        Map<String, String> debited = debit.orElseThrow();
-        GoalStep retry = plan.current;
-        GoalStep service = GoalStep.miningHandoffService(
-                retry.ores(), Math.max(1, ore.delivered()),
-                miningParentStoneLikeReserve(
-                        plan.goal, 0, plan.miningCheckpoint));
-        plan.taskCheckpoint.clear();
-        plan.taskCheckpoint.putAll(debited);
-        plan.taskCheckpointKind = GoalStep.Kind.MINE_ORE;
-        plan.capacityParentDelivered = ore.delivered();
-        plan.capacityParentFace = ore.cursor().face();
-        plan.capacityParentServicesUsed++;
-        if (primaryParent) {
-            plan.miningCheckpoint.clear();
-            plan.miningCheckpoint.putAll(debited);
-            plan.capacityParentNamespace = CapacityParentNamespace.MINING;
-        } else {
-            plan.auxiliaryMiningCheckpoint.clear();
-            plan.auxiliaryMiningCheckpoint.putAll(debited);
-            plan.capacityParentNamespace = CapacityParentNamespace.AUXILIARY;
-        }
-        plan.steps.addFirst(retry);
-        plan.steps.addFirst(service);
-        plan.totalSteps++;
-        plan.stepLabels.add(service.describe());
-        plan.current = null;
-        plan.currentTask = null;
-        BotLog.task(bot, "goal_mining_capacity_handoff_scheduled",
-                "budget", ore.budgetUsed(),
-                "face", ore.cursor().face().toShortString(),
-                "stone_reserve", service.miningHandoffStoneLikeReserve(),
-                "delivered_watermark", plan.capacityParentDelivered,
-                "face_watermark", plan.capacityParentFace.toShortString(),
-                "services_used", plan.capacityParentServicesUsed,
-                "service_limit", ore.targetCount(),
-                "repeat", repeatedHandoff,
-                "ore_fingerprint", expectedFingerprint);
-        captureTransitionAndAssignNext(bot, plan);
-        return true;
-    }
-
     // Optimization 2: whether the goal has failed overall recently (within withinTicks) -- used by ActionDispatcher to intercept the brain's manual block-by-block mining after a failure.
     public boolean recentlyFailed(AIPlayerEntity bot, int withinTicks) {
         Integer t = lastGoalFailTick.get(bot.getUuid());
@@ -4227,7 +3710,8 @@ public final class GoalExecutor {
         return false;
     }
 
-    private static Optional<Task> stepToTask(AIPlayerEntity bot, GoalStep step, ActivePlan plan) {
+    // Package-private: also called by MissionRecoveryScheduler to redispatch a resumed step.
+    static Optional<Task> stepToTask(AIPlayerEntity bot, GoalStep step, ActivePlan plan) {
         return switch (step.kind()) {
             // Planner GATHER counts are incremental deliveries; GatherQuotaTask owns an absolute
             // family quota (all log species, all forage foods, or the exact item). Convert at the
@@ -4575,8 +4059,10 @@ public final class GoalExecutor {
      * Once the rare parent is open, epoch zero additionally protects its sealed retry heads; epoch
      * one has already spent that debit. Direct obsidian acquisition retains its larger immutable
      * bootstrap/channel-retry horizon throughout all prerequisite phases.
+     *
+     * <p>Package-private: also called by MissionRecoveryScheduler's capacity-handoff scheduling.</p>
      */
-    private static int miningParentStoneLikeReserve(
+    static int miningParentStoneLikeReserve(
             Goal goal,
             int activeRareMissionTarget,
             Map<String, String> rareParentCheckpoint) {
@@ -4704,7 +4190,8 @@ public final class GoalExecutor {
         return plan.predicate.evaluate(snapshot);
     }
 
-    private static GoalSnapshotCollector.Context snapshotContext(ActivePlan plan) {
+    // Package-private: also called by MissionRecoveryScheduler's rare-resource replanning.
+    static GoalSnapshotCollector.Context snapshotContext(ActivePlan plan) {
         return new GoalSnapshotCollector.Context(
                 plan.origin,
                 plan.boundContainers,
@@ -4783,99 +4270,6 @@ public final class GoalExecutor {
         }
     }
 
-    /** Releases the retry debit only after both durable namespaces attest the closed rare batch. */
-    private static boolean settleCompletedRareBatch(ActivePlan plan) {
-        int missionTarget = originalLongRareOreTargetCount(plan.goal);
-        if (missionTarget < MiningBudget.EXPEDITION_THRESHOLD
-                || plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE
-                || !plan.taskCheckpoint.equals(plan.miningCheckpoint)) {
-            return false;
-        }
-        Optional<OreDigTask.RestoreMetadata> task = OreDigTask.inspectCheckpoint(
-                plan.taskCheckpoint, missionTarget);
-        Optional<OreDigTask.RestoreMetadata> mining = OreDigTask.inspectCheckpoint(
-                plan.miningCheckpoint, missionTarget);
-        String expectedFingerprint = OreDigTask.oreFingerprint(plan.current.ores());
-        if (task.isEmpty() || mining.isEmpty()
-                || task.orElseThrow().batchOpen()
-                || mining.orElseThrow().batchOpen()
-                || task.orElseThrow().resourceEpoch() != 0
-                || mining.orElseThrow().resourceEpoch() != 0
-                || task.orElseThrow().rareMissionTarget() != missionTarget
-                || !expectedFingerprint.equals(
-                OreDigTask.oreFingerprint(task.orElseThrow().ores()))) {
-            return false;
-        }
-        // The epoch counter is batch-scoped and resets with the closed commit. The margin ledger
-        // (plan.rareEpochMarginUsed) is deliberately NOT reset here: it is mission-scoped and a
-        // committed batch must not refund margin epochs the mission has already spent.
-        plan.rareResourceRetriesUsed = 0;
-        return true;
-    }
-
-    /** Distinguishes the debited parent retry from a different-family repair OreDig task. */
-    private static boolean currentOreTaskOwnsCapacityParent(ActivePlan plan) {
-        if (plan == null || plan.current == null
-                || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE
-                || plan.capacityParentNamespace == null
-                || !plan.currentCapacityParentRetry) {
-            return false;
-        }
-        Map<String, String> parent = plan.capacityParentNamespace
-                == CapacityParentNamespace.AUXILIARY
-                ? plan.auxiliaryMiningCheckpoint : plan.miningCheckpoint;
-        return !parent.isEmpty() && parent.equals(plan.taskCheckpoint)
-                && java.util.Objects.equals(parent.get("ore_fingerprint"),
-                OreDigTask.oreFingerprint(plan.current.ores()));
-    }
-
-    /** Closes the dynamic service debit only after its exact OreDig retry commits the batch. */
-    private static boolean settleCompletedCapacityParent(ActivePlan plan) {
-        if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINE_ORE
-                || plan.taskCheckpointKind != GoalStep.Kind.MINE_ORE
-                || plan.capacityParentNamespace == null) {
-            return false;
-        }
-        Map<String, String> parentCheckpoint = plan.capacityParentNamespace
-                == CapacityParentNamespace.AUXILIARY
-                ? plan.auxiliaryMiningCheckpoint : plan.miningCheckpoint;
-        Optional<OreDigTask.RestoreMetadata> parent =
-                OreDigTask.inspectCheckpoint(parentCheckpoint, 0);
-        String expectedFingerprint = OreDigTask.oreFingerprint(plan.current.ores());
-        if (parent.isEmpty() || parent.orElseThrow().batchOpen()
-                || parent.orElseThrow().rareMissionTarget() != 0
-                || plan.capacityParentDelivered < 0
-                || plan.capacityParentDelivered > parent.orElseThrow().targetCount()
-                || plan.capacityParentFace == null
-                || plan.capacityParentServicesUsed < 1
-                || plan.capacityParentServicesUsed > parent.orElseThrow().targetCount()
-                || !parentCheckpoint.equals(plan.taskCheckpoint)
-                || !expectedFingerprint.equals(
-                OreDigTask.oreFingerprint(parent.orElseThrow().ores()))
-                || hasOreDigPhysicalLedger(parentCheckpoint)) {
-            return false;
-        }
-        CapacityParentNamespace completedParent = plan.capacityParentNamespace;
-        plan.capacityParentNamespace = null;
-        plan.capacityParentDelivered = -1;
-        plan.capacityParentFace = null;
-        plan.capacityParentServicesUsed = 0;
-        if (completedParent == CapacityParentNamespace.AUXILIARY) {
-            GoalStep successor = plan.steps.peekFirst();
-            boolean sameFamilyService = successor != null
-                    && successor.kind() == GoalStep.Kind.MINING_SERVICE
-                    && expectedFingerprint.equals(
-                    OreDigTask.oreFingerprint(successor.ores()));
-            if (!sameFamilyService) {
-                plan.auxiliaryMiningCheckpoint.clear();
-                plan.auxiliaryMiningContinuationFingerprint = "";
-            }
-        }
-        return true;
-    }
-
     /** Settles a completed service without discarding a still-planned ordinary branch cursor. */
     private static void retireClosedAuxiliaryMiningCheckpoint(ActivePlan plan) {
         if (plan.current == null || plan.current.kind() != GoalStep.Kind.MINING_SERVICE
@@ -4941,7 +4335,8 @@ public final class GoalExecutor {
                 && !physicalLedgerOpen;
     }
 
-    private static boolean miningStepFeedsGoal(Goal goal, Set<Block> ores) {
+    // Package-private: also called by MissionRecoveryScheduler's rare-resource scheduling helpers.
+    static boolean miningStepFeedsGoal(Goal goal, Set<Block> ores) {
         Set<Item> drops = io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(ores);
         if (goal instanceof Goal.HaveItem haveItem) {
             return drops.contains(haveItem.item());
@@ -5094,7 +4489,8 @@ public final class GoalExecutor {
         markDirty(bot);
     }
 
-    private static void markDirty(AIPlayerEntity bot) {
+    // Package-private: also called by MissionRecoveryScheduler's write-ahead-capture dispatches.
+    static void markDirty(AIPlayerEntity bot) {
         io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
     }
 
@@ -5128,7 +4524,9 @@ public final class GoalExecutor {
                 || reason.contains("no_reachable");
     }
 
-    private static final class ActivePlan {
+    // Package-private (not public): MissionRecoveryScheduler needs the type to accept a plan
+    // parameter, but every field stays private -- only the narrow accessors below are exposed.
+    static final class ActivePlan {
         private UUID missionId;
         private final int startedTick;
         private final Goal goal;
@@ -5235,6 +4633,137 @@ public final class GoalExecutor {
                     .forEach(this.skippedSteps::add);
         }
 
+        // ---------------------------------------------------------------------------------
+        // Package-private accessors: fields stay private; MissionRecoveryScheduler (the only
+        // consumer outside GoalExecutor) reaches this state only through these narrow seams.
+        // Every mutable-collection accessor returns the live field -- it is mutated in place
+        // (clear/putAll/add) exactly as GoalExecutor's own code already does -- never a copy.
+        // ---------------------------------------------------------------------------------
+
+        Goal getGoal() {
+            return goal;
+        }
+
+        UUID getMissionId() {
+            return missionId;
+        }
+
+        GoalStep getCurrent() {
+            return current;
+        }
+
+        void setCurrent(GoalStep current) {
+            this.current = current;
+        }
+
+        Task getCurrentTask() {
+            return currentTask;
+        }
+
+        void setCurrentTask(Task currentTask) {
+            this.currentTask = currentTask;
+        }
+
+        GoalStep.Kind getTaskCheckpointKind() {
+            return taskCheckpointKind;
+        }
+
+        void setTaskCheckpointKind(GoalStep.Kind taskCheckpointKind) {
+            this.taskCheckpointKind = taskCheckpointKind;
+        }
+
+        Map<String, String> getTaskCheckpoint() {
+            return taskCheckpoint;
+        }
+
+        Map<String, String> getMiningCheckpoint() {
+            return miningCheckpoint;
+        }
+
+        Map<String, String> getAuxiliaryMiningCheckpoint() {
+            return auxiliaryMiningCheckpoint;
+        }
+
+        void setAuxiliaryMiningContinuationFingerprint(String auxiliaryMiningContinuationFingerprint) {
+            this.auxiliaryMiningContinuationFingerprint = auxiliaryMiningContinuationFingerprint;
+        }
+
+        int getRareResourceRetriesUsed() {
+            return rareResourceRetriesUsed;
+        }
+
+        void setRareResourceRetriesUsed(int rareResourceRetriesUsed) {
+            this.rareResourceRetriesUsed = rareResourceRetriesUsed;
+        }
+
+        int getRareEpochMarginUsed() {
+            return rareEpochMarginUsed;
+        }
+
+        void setRareEpochMarginUsed(int rareEpochMarginUsed) {
+            this.rareEpochMarginUsed = rareEpochMarginUsed;
+        }
+
+        ArrayDeque<GoalStep> getSteps() {
+            return steps;
+        }
+
+        java.util.List<String> getStepLabels() {
+            return stepLabels;
+        }
+
+        List<SkippedTargetReceipt> getSkippedTargetReceipts() {
+            return skippedTargetReceipts;
+        }
+
+        int getTotalSteps() {
+            return totalSteps;
+        }
+
+        void setTotalSteps(int totalSteps) {
+            this.totalSteps = totalSteps;
+        }
+
+        CapacityParentNamespace getCapacityParentNamespace() {
+            return capacityParentNamespace;
+        }
+
+        void setCapacityParentNamespace(CapacityParentNamespace capacityParentNamespace) {
+            this.capacityParentNamespace = capacityParentNamespace;
+        }
+
+        int getCapacityParentDelivered() {
+            return capacityParentDelivered;
+        }
+
+        void setCapacityParentDelivered(int capacityParentDelivered) {
+            this.capacityParentDelivered = capacityParentDelivered;
+        }
+
+        BlockPos getCapacityParentFace() {
+            return capacityParentFace;
+        }
+
+        void setCapacityParentFace(BlockPos capacityParentFace) {
+            this.capacityParentFace = capacityParentFace;
+        }
+
+        int getCapacityParentServicesUsed() {
+            return capacityParentServicesUsed;
+        }
+
+        void setCapacityParentServicesUsed(int capacityParentServicesUsed) {
+            this.capacityParentServicesUsed = capacityParentServicesUsed;
+        }
+
+        boolean isCurrentCapacityParentRetry() {
+            return currentCapacityParentRetry;
+        }
+
+        java.util.LinkedHashMap<String, SettledServiceTombstone> getSettledServiceTombstones() {
+            return settledServiceTombstones;
+        }
+
         private Map<String, String> takeTaskCheckpoint(GoalStep.Kind kind) {
             if (taskCheckpointKind != kind || taskCheckpoint.isEmpty()) {
                 return Map.of();
@@ -5336,7 +4865,8 @@ public final class GoalExecutor {
                                            int boundary) {
     }
 
-    private static Optional<SettledServiceAuthority> persistedServiceAuthority(
+    // Package-private: also called by MissionRecoveryScheduler's settled-service replay guard.
+    static Optional<SettledServiceAuthority> persistedServiceAuthority(
             MiningServiceTask.RestoreMetadata metadata) {
         Identifier dimension = metadata == null ? null
                 : Identifier.tryParse(metadata.serviceDimension());
@@ -5352,34 +4882,6 @@ public final class GoalExecutor {
                         SettledServiceDescriptor.fromMetadata(metadata),
                         metadata.serviceDimension(),
                         geometry));
-    }
-
-    private static Optional<SettledServiceAuthority> liveServiceAuthority(
-            AIPlayerEntity bot, MiningServiceTask.RestoreMetadata metadata) {
-        if (bot == null || metadata == null
-                || !bot.getEntityWorld().getRegistryKey().getValue().toString()
-                .equals(metadata.serviceDimension())) {
-            return Optional.empty();
-        }
-        return persistedServiceAuthority(metadata);
-    }
-
-    private static Optional<SettledServiceTombstone> matchingSettledServiceGuard(
-            AIPlayerEntity bot, ActivePlan plan, String reason) {
-        if (bot == null || plan == null || plan.current == null
-                || plan.current.kind() != GoalStep.Kind.MINING_SERVICE
-                || !MiningServiceTask.validTerminalFailureReason(reason)) {
-            return Optional.empty();
-        }
-        Optional<MiningServiceTask.RestoreMetadata> metadata =
-                MiningServiceTask.inspectCheckpoint(plan.taskCheckpoint);
-        Optional<SettledServiceAuthority> authority = metadata
-                .flatMap(value -> liveServiceAuthority(bot, value));
-        return authority.flatMap(current -> plan.settledServiceTombstones.values()
-                .stream()
-                .filter(settled -> settled.failureReason().equals(reason)
-                        && settled.sameGeometry(current))
-                .findFirst());
     }
 
     // Package-private: also constructed by GoalCheckpointCodec's decodeReplanSnapshot.
@@ -5458,7 +4960,9 @@ public final class GoalExecutor {
                                Map<String, String> settledServiceTombstone) {
     }
 
-    private enum CapacityParentNamespace {
+    // Package-private (not public): MissionRecoveryScheduler's capacity-handoff scheduling
+    // reads and assigns this enum through ActivePlan's package-private accessors.
+    enum CapacityParentNamespace {
         MINING("mining"),
         AUXILIARY("auxiliary");
 
