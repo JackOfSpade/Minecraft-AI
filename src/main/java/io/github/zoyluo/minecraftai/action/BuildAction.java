@@ -18,7 +18,8 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 public final class BuildAction {
-    private static final double FACE_SAMPLE_INSET = 0.375D;
+    // Shared with ObservableWorldQuery.FACE_SAMPLE_INSET (both sample the same 3x3 inset grid on a face).
+    private static final double FACE_SAMPLE_INSET = ObservableWorldQuery.FACE_SAMPLE_INSET;
     private static final double[][] FACE_SAMPLE_OFFSETS = {
             {0.0D, 0.0D},
             {-FACE_SAMPLE_INSET, 0.0D},

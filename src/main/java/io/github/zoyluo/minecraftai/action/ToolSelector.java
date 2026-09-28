@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.util.ItemStackUtil;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerInventory;
@@ -118,7 +119,7 @@ public final class ToolSelector {
             ItemStack stack = inventory.getMainStacks().get(slot);
             int tier = ToolTier.pickaxeTier(stack);
             if (tier < minimumTier || tier > maximumTier || !stack.isSuitableFor(state)
-                    || (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1)) {
+                    || ItemStackUtil.isNearlyBroken(stack)) {
                 continue;
             }
             int remaining = stack.isDamageable()
@@ -133,7 +134,7 @@ public final class ToolSelector {
         ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
         int offHandTier = ToolTier.pickaxeTier(offHandStack);
         if (offHandTier >= minimumTier && offHandTier <= maximumTier && offHandStack.isSuitableFor(state)
-                && !(offHandStack.isDamageable() && offHandStack.getDamage() >= offHandStack.getMaxDamage() - 1)) {
+                && !ItemStackUtil.isNearlyBroken(offHandStack)) {
             int remaining = offHandStack.isDamageable()
                     ? offHandStack.getMaxDamage() - offHandStack.getDamage() : Integer.MAX_VALUE;
             if (offHandTier < bestTier || (offHandTier == bestTier && remaining > bestRemaining)) {
@@ -224,7 +225,7 @@ public final class ToolSelector {
             return state.isToolRequired() ? 0.001F : 1.0F;
         }
         float speed = stack.getMiningSpeedMultiplier(state);
-        if (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1) {
+        if (ItemStackUtil.isNearlyBroken(stack)) {
             return 0.001F; // About to break -> don't use it, to avoid it breaking mid-swing
         }
         // Blocks that don't require a tool (dirt/sand/gravel/logs, etc.): keep the original behavior, pick the fastest tool (shovel/axe are fastest); unaffected.

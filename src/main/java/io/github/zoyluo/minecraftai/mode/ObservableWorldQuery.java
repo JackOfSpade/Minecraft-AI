@@ -14,7 +14,8 @@ import net.minecraft.world.RaycastContext;
 /** Strict-survival perception filter: nearby, exposed, and actually on the Bot's line of sight. */
 public final class ObservableWorldQuery {
     private static final double FACE_ENDPOINT_DEPTH = 0.499D;
-    private static final double FACE_SAMPLE_INSET = 0.375D;
+    /** Shared inset (in blocks) used to sample points around a face center. Also used by BuildAction. */
+    public static final double FACE_SAMPLE_INSET = 0.375D;
     private static final double[][] FACE_SAMPLE_OFFSETS = {
             {0.0D, 0.0D},
             {-FACE_SAMPLE_INSET, 0.0D},
