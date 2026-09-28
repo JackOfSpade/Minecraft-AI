@@ -125,11 +125,6 @@ final class OreDigDetourEngine {
     /** A route or contract failure, fluid_unsealable and tool aborts exclude the whole cluster for this long. */
     static final int FAILURE_EXCLUDE_TICKS = 1200;
 
-    // ---- observability -------------------------------------------------------------------------------------------
-    /** {@code BotProfiler} section of one active engine tick, and of one selector run (observability only, cost gate). */
-    static final String SECTION_DETOUR = "assist_detour";
-    static final String SECTION_DETOUR_SELECT = "assist_detour_select";
-
     /** Kind of a {@link Result}. */
     enum Kind {
         /** The engine is idle and did not consume the tick: OreDig runs its ladder as usual. */
@@ -611,9 +606,35 @@ final class OreDigDetourEngine {
     // Phase steps
     // ===========================================================================================================
 
+    /**
+     * Walks to the ore's pose, then mines (design 4.5). Structurally {@link #tickWalkLeg}'s ORE instantiation:
+     * the differences from {@link #tickFrontierWalk} are the per-10-tick re-proof of the target ore
+     * ({@link #approachReproof}, a waypoint has no block to re-proof), the arrival test (break-envelope arrival
+     * is a stand-in for "close enough to mine", which a waypoint has no equivalent of), what arrival does next
+     * (enter MINE, not advance to another leg or finish), the safety-stage target (the ore {@code cur}, not
+     * null), and the route-retry log event's name and {@code leg} value.
+     */
     private Result tickApproach(DetourHost host) {
-        int now = host.now();
-        if ((now - phaseEnter) % 10 == 0) {
+        return tickWalkLeg(host, APPROACH_STALL_TICKS, APPROACH_TOTAL_TICKS,
+                () -> approachReproof(host),
+                feet -> feet.equals(pose.stand())
+                        || (host.pathIdle() && host.walkIdle() && host.inBreakEnvelope(cur) && !host.isCurrentSupport(cur)),
+                () -> {
+                    enterMine(host);
+                    return tickMine(host);
+                },
+                cur, "ore_dig_detour_route", "approach", () -> {
+                });
+    }
+
+    /**
+     * The ORE-only re-proof half of {@link #tickApproach} (design 4.6 hook 1): every 10 ticks, re-check the
+     * target ore is still there. GONE forgets the sighting and advances to the next member; UNKNOWN does
+     * nothing (an approach never mines). Returns null to mean "keep ticking the walk"; {@link #tickFrontierWalk}
+     * passes a no-op ({@code () -> null}) in its place, since a waypoint has no block to re-proof.
+     */
+    private Result approachReproof(DetourHost host) {
+        if ((host.now() - phaseEnter) % 10 == 0) {
             DetourHost.Seen s = host.observeBlockIs(cur, curId);
             if (s == DetourHost.Seen.GONE) {
                 host.forgetSighting(cur);
@@ -623,18 +644,49 @@ final class OreDigDetourEngine {
             }
             // UNKNOWN: nothing, an approach never mines.
         }
+        return null;
+    }
+
+    /**
+     * The walk/beat/route-retry state machine shared by {@link #tickApproach} (ORE) and
+     * {@link #tickFrontierWalk} (FRONTIER, design 5.4's per-leg walk): re-proof (ORE only), the arrival test
+     * and what arrival does, the progress beat, the stall/total-tick caps, and -- while not yet arrived -- one
+     * route attempt at a time with the full TICK_FULL safety gate, {@code ROUTE_ATTEMPTS} cap, the
+     * {@code ROUTE_ATTEMPT_GAP_TICKS} spacing, and THROTTLED/BUDGET waiting up to {@code ROUTE_WAIT_MAX_TICKS}.
+     * Every branch, constant and log event is exactly what {@code tickApproach} and {@code tickFrontierWalk}
+     * had before unification; only the five listed differences are parameters.
+     *
+     * @param reproofStep      run first; a non-null {@link Result} ends the tick immediately (ORE's re-proof);
+     *                         FRONTIER passes {@code () -> null}
+     * @param arrivedTest      true when the leg is done; arrival runs {@code onArrived} instead of walking
+     * @param onArrived        what arrival does (ORE: enter MINE; FRONTIER: advance a leg or finish)
+     * @param safetyTarget     the {@code target} argument to {@code host.safety(TICK_FULL, pose.stand(), ...)}
+     *                         before each route attempt (ORE: {@code cur}; FRONTIER: {@code null})
+     * @param routeFailedEvent the log event for a FAILED route attempt
+     * @param routeFailedLeg   the log event's {@code leg} value
+     * @param onRouteStartedOk run once a route attempt returns OK, after the shared bookkeeping and before the
+     *                         beat (FRONTIER sets {@code frontierRouteStarted}; ORE is a no-op)
+     */
+    private Result tickWalkLeg(DetourHost host, int stallTicks, int totalTicks,
+            java.util.function.Supplier<Result> reproofStep,
+            java.util.function.Predicate<BlockPos> arrivedTest,
+            java.util.function.Supplier<Result> onArrived,
+            BlockPos safetyTarget, String routeFailedEvent, Object routeFailedLeg,
+            Runnable onRouteStartedOk) {
+        int now = host.now();
+        Result early = reproofStep.get();
+        if (early != null) {
+            return early;
+        }
         BlockPos feet = host.feet();
-        boolean arrived = feet.equals(pose.stand())
-                || (host.pathIdle() && host.walkIdle() && host.inBreakEnvelope(cur) && !host.isCurrentSupport(cur));
-        if (arrived) {
-            enterMine(host);
-            return tickMine(host);
+        if (arrivedTest.test(feet)) {
+            return onArrived.get();
         }
         double d = euclid(feet, pose.stand());
         if (d <= beatDist - PROGRESS_BLOCKS) {
             beat(host);
         }
-        if (now - lastBeat > APPROACH_STALL_TICKS || now - phaseEnter > APPROACH_TOTAL_TICKS) {
+        if (now - lastBeat > stallTicks || now - phaseEnter > totalTicks) {
             return abort(host, "approach_stall");
         }
         if (host.pathIdle()) {
@@ -642,7 +694,7 @@ final class OreDigDetourEngine {
                 return abort(host, "route");
             }
             if (routeAttempts == 0 || now - lastRouteAttempt >= ROUTE_ATTEMPT_GAP_TICKS) {
-                SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, pose.stand(), cur);
+                SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, pose.stand(), safetyTarget);
                 if (r != SafeReason.OK) {
                     return abort(host, r.abortReason());
                 }
@@ -651,12 +703,13 @@ final class OreDigDetourEngine {
                     routeAttempts++;
                     lastRouteAttempt = now;
                     waitSince = -1;
+                    onRouteStartedOk.run();
                     beat(host);
                 } else if (rr == DetourHost.RouteResult.FAILED) {
                     routeAttempts++;
                     lastRouteAttempt = now;
                     waitSince = -1;
-                    host.log("ore_dig_detour_route", "leg", "approach", "result", rr, "reason", host.routeFailureReason());
+                    host.log(routeFailedEvent, "leg", routeFailedLeg, "result", rr, "reason", host.routeFailureReason());
                 } else {
                     // THROTTLED or BUDGET
                     if (waitSince < 0) {
@@ -957,74 +1010,43 @@ final class OreDigDetourEngine {
     }
 
     /**
-     * Walks the current waypoint leg (design 5.4): structurally {@link #tickApproach} with a waypoint instead
-     * of an ore's pose, no mining at the end. On arrival at a non-final waypoint, advances to the next leg
-     * (next tick, unlike {@link #toNext}'s same-tick continuation -- at most {@link #FRONTIER_MAX_WAYPOINTS}
-     * legs, so the one-tick-per-hop cost is negligible). On arrival at the FINAL waypoint: panorama burst,
-     * then either {@link #rebaseCursorHere} in place (productive) or the ordinary {@link #beginReturn}
-     * (design 5.4's "same... return").
+     * Walks the current waypoint leg (design 5.4): {@link #tickWalkLeg}'s FRONTIER instantiation -- a waypoint
+     * instead of an ore's pose, no re-proof, no mining at the end. On arrival at a non-final waypoint, advances
+     * to the next leg (next tick, unlike {@link #toNext}'s same-tick continuation -- at most
+     * {@link #FRONTIER_MAX_WAYPOINTS} legs, so the one-tick-per-hop cost is negligible). On arrival at the
+     * FINAL waypoint: panorama burst, then either {@link #rebaseCursorHere} in place (productive) or the
+     * ordinary {@link #beginReturn} (design 5.4's "same... return").
+     *
+     * <p>Bug fix vs the contract's literal text: {@code tickApproach}'s own "path went idle short of the exact
+     * stand" fallback is guarded by {@code inBreakEnvelope(cur)}, which has no equivalent for a waypoint (there
+     * is no ore). Guarding on {@code routeAttempts > 0} alone is not enough either: a FAILED {@code startRoute}
+     * leaves {@code pathIdle()} and {@code walkIdle()} both true without the bot moving at all, so the fallback
+     * would still fire (falsely) after just one failed attempt instead of letting all {@code ROUTE_ATTEMPTS}
+     * play out and abort with {@code "route"} (caught by {@code OreDigDetourEngineTest}'s route-failure case).
+     * Tracking whether a route actually started this leg ({@link #frontierRouteStarted}, set only on
+     * {@code RouteResult.OK}) means the fallback can only ever fire once a route was genuinely dispatched --
+     * for a leg that never gets a successful route, only the exact-position check or the stall/attempt caps
+     * can end it.</p>
      */
     private Result tickFrontierWalk(DetourHost host) {
-        int now = host.now();
-        BlockPos feet = host.feet();
-        // Bug fix vs the contract's literal text: tickApproach's own "path went idle short of the exact stand"
-        // fallback is guarded by inBreakEnvelope(cur), which has no equivalent for a waypoint (there is no ore).
-        // Guarding on routeAttempts > 0 alone is not enough either: a FAILED startRoute leaves pathIdle() and
-        // walkIdle() both true without the bot moving at all, so the fallback would still fire (falsely) after
-        // just one failed attempt instead of letting all ROUTE_ATTEMPTS play out and abort with "route" (caught
-        // by OreDigDetourEngineTest's route-failure case). Tracking whether a route actually started this leg
-        // (frontierRouteStarted, set only on RouteResult.OK) means the fallback can only ever fire once a route
-        // was genuinely dispatched -- for a leg that never gets a successful route, only the exact-position
-        // check below or the stall/attempt caps can end it.
-        boolean arrived = feet.equals(pose.stand())
-                || (frontierRouteStarted && host.pathIdle() && host.walkIdle());
-        if (arrived) {
-            boolean isFinal = waypointIndex == waypoints.size() - 1;
-            if (!isFinal) {
-                waypointIndex++;
-                enterFrontierLeg(host, waypoints.get(waypointIndex));
-                return Result.CONSUMED;
-            }
-            return arriveAtFrontier(host);
+        return tickWalkLeg(host, FRONTIER_LEG_STALL_TICKS, FRONTIER_LEG_TOTAL_TICKS,
+                () -> null,
+                feet -> feet.equals(pose.stand()) || (frontierRouteStarted && host.pathIdle() && host.walkIdle()),
+                () -> frontierLegArrived(host),
+                null, "ore_dig_frontier_route", waypointIndex, () -> frontierRouteStarted = true);
+    }
+
+    /** Arrival at a waypoint (design 5.4): a non-final waypoint advances to the next leg; the final one hands
+     *  off to {@link #arriveAtFrontier}. Split out of {@link #tickFrontierWalk} as the {@code onArrived}
+     *  parameter of {@link #tickWalkLeg}. */
+    private Result frontierLegArrived(DetourHost host) {
+        boolean isFinal = waypointIndex == waypoints.size() - 1;
+        if (!isFinal) {
+            waypointIndex++;
+            enterFrontierLeg(host, waypoints.get(waypointIndex));
+            return Result.CONSUMED;
         }
-        double d = euclid(feet, pose.stand());
-        if (d <= beatDist - PROGRESS_BLOCKS) {
-            beat(host);
-        }
-        if (now - lastBeat > FRONTIER_LEG_STALL_TICKS || now - phaseEnter > FRONTIER_LEG_TOTAL_TICKS) {
-            return abort(host, "approach_stall");
-        }
-        if (host.pathIdle()) {
-            if (routeAttempts >= ROUTE_ATTEMPTS) {
-                return abort(host, "route");
-            }
-            if (routeAttempts == 0 || now - lastRouteAttempt >= ROUTE_ATTEMPT_GAP_TICKS) {
-                SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, pose.stand(), null);
-                if (r != SafeReason.OK) {
-                    return abort(host, r.abortReason());
-                }
-                DetourHost.RouteResult rr = host.startRoute(pose.stand(), routeMinY(feet, pose.stand(), host), anchor.face());
-                if (rr == DetourHost.RouteResult.OK) {
-                    routeAttempts++;
-                    lastRouteAttempt = now;
-                    waitSince = -1;
-                    frontierRouteStarted = true;
-                    beat(host);
-                } else if (rr == DetourHost.RouteResult.FAILED) {
-                    routeAttempts++;
-                    lastRouteAttempt = now;
-                    waitSince = -1;
-                    host.log("ore_dig_frontier_route", "leg", waypointIndex, "result", rr, "reason", host.routeFailureReason());
-                } else {
-                    if (waitSince < 0) {
-                        waitSince = now;
-                    } else if (now - waitSince > ROUTE_WAIT_MAX_TICKS) {
-                        return abort(host, "budget");
-                    }
-                }
-            }
-        }
-        return Result.CONSUMED;
+        return arriveAtFrontier(host);
     }
 
     /**
