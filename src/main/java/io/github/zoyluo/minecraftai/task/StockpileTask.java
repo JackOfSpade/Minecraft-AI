@@ -5,13 +5,11 @@ import io.github.zoyluo.minecraftai.action.ContainerAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -113,7 +111,7 @@ public final class StockpileTask extends AbstractTask {
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(containers::add);
         containers.sort(Comparator
-                .comparing((BlockPos pos) -> !containsItem(bot, pos, preferred))
+                .comparing((BlockPos pos) -> !ContainerSupport.containsItem(bot, pos, preferred))
                 .thenComparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())));
         if (containers.isEmpty()) {
             fail("no_base_container");
@@ -137,7 +135,7 @@ public final class StockpileTask extends AbstractTask {
             phase = Phase.TRANSFERRING;
             return;
         }
-        BlockPos stand = adjacentStand(bot, containerPos);
+        BlockPos stand = ContainerSupport.adjacentStand(bot, containerPos);
         if (stand == null) {
             selectNextContainer(bot);
             return;
@@ -205,32 +203,6 @@ public final class StockpileTask extends AbstractTask {
         ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
         if (!offHandStack.isEmpty() && depositFilter().test(offHandStack)) {
             return offHandStack.getItem();
-        }
-        return null;
-    }
-
-    private static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
-        if (item == null) {
-            return false;
-        }
-        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
-        if (inventory == null) {
-            return false;
-        }
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(item)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate.toImmutable();
-            }
         }
         return null;
     }

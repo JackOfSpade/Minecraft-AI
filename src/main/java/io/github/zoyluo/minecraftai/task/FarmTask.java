@@ -308,7 +308,7 @@ public final class FarmTask extends AbstractTask {
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(depositContainers::add);
         depositContainers.sort(Comparator
-                .comparing((BlockPos pos) -> !containsItem(bot, pos, item))
+                .comparing((BlockPos pos) -> !ContainerSupport.containsItem(bot, pos, item))
                 .thenComparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())));
         depositContainerIndex = 0;
         selectDepositContainer(bot);
@@ -489,19 +489,6 @@ public final class FarmTask extends AbstractTask {
             return Items.POTATO;
         }
         return seed;
-    }
-
-    private static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
-        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
-        if (inventory == null) {
-            return false;
-        }
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(item)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {

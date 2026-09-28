@@ -6,13 +6,11 @@ import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.CropBlock;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 
 import java.util.Set;
 
@@ -106,7 +104,7 @@ public final class RaidCropsTask extends AbstractTask {
             phase = Phase.HARVEST;
             return;
         }
-        BlockPos stand = adjacentStand(bot, current);
+        BlockPos stand = ContainerSupport.adjacentStand(bot, current);
         if (stand == null) {
             note = "unreachable " + current;
             current = null;
@@ -138,16 +136,6 @@ public final class RaidCropsTask extends AbstractTask {
 
     private static boolean isMatureCrop(net.minecraft.block.BlockState state) {
         return state.getBlock() instanceof CropBlock crop && crop.isMature(state);
-    }
-
-    private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos target) {
-        for (Direction d : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = target.offset(d);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate;
-            }
-        }
-        return null;
     }
 
     private void finishOrFail(AIPlayerEntity bot, String reason) {

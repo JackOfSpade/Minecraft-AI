@@ -6,13 +6,11 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 
 import java.util.Comparator;
 import java.util.Optional;
@@ -127,7 +125,7 @@ public final class ContainerTask extends AbstractTask {
             phase = Phase.TRANSFERRING;
             return;
         }
-        BlockPos stand = adjacentStand(bot, containerPos);
+        BlockPos stand = ContainerSupport.adjacentStand(bot, containerPos);
         if (stand == null) {
             fail("no_stand_position_for_container");
             return;
@@ -239,16 +237,6 @@ public final class ContainerTask extends AbstractTask {
                         && ContainerAction.resolve(bot, pos).isPresent()
                         ? Optional.of(pos.toImmutable())
                         : nearestContainerNear(bot, pos, 4));
-    }
-
-    private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate.toImmutable();
-            }
-        }
-        return null;
     }
 
     private static String shortPos(BlockPos pos) {

@@ -11,7 +11,6 @@ import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.AbstractFurnaceBlock;
 import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.inventory.Inventory;
@@ -273,7 +272,7 @@ public final class SmeltTask extends AbstractTask {
             phase = Phase.LOADING;
             return;
         }
-        BlockPos stand = adjacentStand(bot, furnacePos);
+        BlockPos stand = ContainerSupport.adjacentStand(bot, furnacePos);
         if (stand == null) {
             // Try the next ranked local station before consuming a carried/crafted furnace.
             rejectCurrentFurnace(bot, "no_stand_position");
@@ -637,16 +636,6 @@ public final class SmeltTask extends AbstractTask {
         return WorkshopLocator.nearestCompatibleFurnace(bot, input, output, requestedItems, excluded);
     }
 
-    private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate.toImmutable();
-            }
-        }
-        return null;
-    }
-
     // When boxed in: mine one horizontally adjacent breakable block to clear a space for the furnace. Returns false = no breakable block on any side (e.g. bedrock/fluid).
     private boolean clearSpaceForFurnace(AIPlayerEntity bot) {
         var world = bot.getEntityWorld();
@@ -733,22 +722,9 @@ public final class SmeltTask extends AbstractTask {
                 .map(BlockPos::toImmutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) <= REACH_SQUARED)
-                .filter(pos -> containsItem(bot, pos, fuel))
+                .filter(pos -> ContainerSupport.containsItem(bot, pos, fuel))
                 .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())))
                 .toList();
-    }
-
-    private static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
-        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
-        if (inventory == null) {
-            return false;
-        }
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(item)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static int divideRoundUp(int value, int divisor) {

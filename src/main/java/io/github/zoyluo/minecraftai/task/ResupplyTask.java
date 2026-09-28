@@ -7,7 +7,6 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
@@ -15,7 +14,6 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -200,7 +198,7 @@ public final class ResupplyTask extends AbstractTask {
             phase = Phase.WITHDRAWING;
             return;
         }
-        BlockPos stand = adjacentStand(bot, containerPos);
+        BlockPos stand = ContainerSupport.adjacentStand(bot, containerPos);
         if (stand == null) {
             selectNextContainer(bot);
             return;
@@ -219,7 +217,7 @@ public final class ResupplyTask extends AbstractTask {
             startCrafting(bot);
             return;
         }
-        BlockPos stand = adjacentStand(bot, basePos);
+        BlockPos stand = ContainerSupport.adjacentStand(bot, basePos);
         if (stand == null) {
             stand = basePos;
         }
@@ -423,18 +421,9 @@ public final class ResupplyTask extends AbstractTask {
             return false;
         }
         return switch (need) {
-            case TOOL -> requestedItem != null && containsItem(inventory, requestedItem);
+            case TOOL -> requestedItem != null && ContainerSupport.containsItem(inventory, requestedItem);
             case FOOD -> firstFood(inventory) != null;
         };
-    }
-
-    private static boolean containsItem(Inventory inventory, Item item) {
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(item)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static Item firstFood(Inventory inventory) {
@@ -461,13 +450,4 @@ public final class ResupplyTask extends AbstractTask {
         return stack.getMaxDamage() - stack.getDamage() > max * LOW_DURABILITY_FRACTION;
     }
 
-    private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate.toImmutable();
-            }
-        }
-        return null;
-    }
 }
