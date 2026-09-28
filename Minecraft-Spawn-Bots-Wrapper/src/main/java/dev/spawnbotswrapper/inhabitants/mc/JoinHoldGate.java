@@ -31,8 +31,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * thread, so this class never touches live server/world state from those callbacks: {@link #holdWindowOpen}
  * is a single-writer (main thread only) volatile flag, and {@link #pending} is a map safe for concurrent
  * adds/removals from Netty threads and a full drain from the main thread.
+ * <p>
+ * Vanilla's own {@code ServerLoginNetworkHandler} force-disconnects any client still in the LOGIN phase after
+ * exactly 600 ticks (30s: {@code multiplayer.disconnect.slow_login}, "Took too long to log in") -- a per
+ * connection counter, entirely independent of this class, that a LOGIN-phase hold cannot see or extend. A
+ * configured hold at or beyond that just gets the player kicked before this class's own release ever runs, so
+ * {@link #shouldHold} always clamps to {@link #MAX_SAFE_HOLD_TICKS} regardless of what {@code
+ * connection.joinHoldTicks} is actually set to.
  */
 public final class JoinHoldGate {
+    /** Comfortably under vanilla's own 600-tick LOGIN-phase disconnect; see the class doc for why this exists. */
+    static final int MAX_SAFE_HOLD_TICKS = 500;
+
     private final Map<ServerLoginNetworkHandler, CompletableFuture<Void>> pending = new ConcurrentHashMap<>();
     private volatile boolean holdWindowOpen;
     private Clock clock;
@@ -93,6 +103,7 @@ public final class JoinHoldGate {
         if (startupTick < 0 || joinHoldTicks <= 0 || nowTick < startupTick) {
             return false;
         }
-        return nowTick - startupTick < joinHoldTicks;
+        int safeTicks = Math.min(joinHoldTicks, MAX_SAFE_HOLD_TICKS);
+        return nowTick - startupTick < safeTicks;
     }
 }

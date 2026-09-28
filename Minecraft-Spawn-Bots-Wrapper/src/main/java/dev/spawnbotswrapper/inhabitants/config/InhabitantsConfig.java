@@ -216,12 +216,15 @@ public final class InhabitantsConfig {
          * restore burst can stall the server tick loop; a player who joins mid-stall could be placed into
          * the world before the surrounding terrain/chunks have finished loading and fall through it. This
          * addon holds any player who begins connecting during the first this-many ticks after server start
-         * on their client's own native loading screen (via the vanilla configuration-phase task mechanism);
-         * their player entity is never created until the hold ends, so there is no teleport-then-freeze.
-         * 0 disables the hold entirely. Independent of {@code processing.restoreSettleTicks} (which only
+         * on their client's own native loading screen (via the vanilla LOGIN-phase task mechanism, see
+         * {@link dev.spawnbotswrapper.inhabitants.mc.JoinHoldGate}); their player entity is never created
+         * until the hold ends, so there is no teleport-then-freeze. 0 disables the hold entirely. Actually
+         * capped at {@code JoinHoldGate.MAX_SAFE_HOLD_TICKS} (well under vanilla's own hard 600-tick LOGIN
+         * timeout) no matter what this is set to -- the default already reflects that cap, not the raw number
+         * this field could otherwise hold. Independent of {@code processing.restoreSettleTicks} (which only
          * gates this addon's own bot reconciliation) and never touches the population/roster engine.
          */
-        public int joinHoldTicks = 1800;
+        public int joinHoldTicks = 500;
     }
 
     /**
