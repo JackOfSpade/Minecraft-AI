@@ -10,6 +10,7 @@ import dev.spawnbotswrapper.inhabitants.spawn.DefaultSpawnPlanner;
 import dev.spawnbotswrapper.inhabitants.store.PopulationStore;
 import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.ServerCommandSource;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
@@ -100,6 +101,7 @@ public final class ServerSession {
     }
 
     private void initialise() {
+        guarded("startup commands", this::runStartupCommands);
         // The backend goes in first so the probe's report is about the spawn path that will actually be used.
         applyBackend();
         guarded("PvP BOT probe", this::probeUpstream);
@@ -110,6 +112,32 @@ public final class ServerSession {
         }
         if (engine == null) {
             shared.log().error("Population is DISABLED: the engine could not be started (see the messages above).");
+        }
+    }
+
+    /**
+     * Runs {@code connection.startupCommands} (see its doc comment) as the server console, silently, before
+     * anything else runs -- so a command that itself depends on another mod's own commands already being
+     * registered (true for every mod's {@code CommandRegistrationCallback}, which always fires before the
+     * first tick, well before this) still works. One command failing is logged and does not stop the rest.
+     */
+    private void runStartupCommands() {
+        List<String> commands = shared.config().get().startupCommands;
+        if (commands == null || commands.isEmpty()) {
+            return;
+        }
+        ServerCommandSource source = server.getCommandSource().withSilent();
+        for (String command : commands) {
+            if (command == null || command.isBlank()) {
+                continue;
+            }
+            try {
+                server.getCommandManager().getDispatcher().execute(command, source);
+            } catch (OutOfMemoryError e) {
+                throw e;
+            } catch (Throwable t) {
+                shared.log().warn("startup command '{}' failed: {}", command, t.toString());
+            }
         }
     }
 

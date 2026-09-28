@@ -73,6 +73,16 @@ public final class InhabitantsConfig {
     public Dormancy dormancy = new Dormancy();
     /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
     public Connection connection = new Connection();
+    /**
+     * Console commands run, in order, once every server start (silently: nothing is echoed to chat), before
+     * anything else in this file takes effect. Not specific to inhabitants -- a general convenience so choices
+     * that some OTHER mod only stores per world name (PvP BOT's own combat settings, for instance, which reset
+     * to its hardcoded defaults on every fresh world with no template of its own) can be reasserted automatically
+     * instead of retyped by hand after every new world. Each command is independent: one failing (unknown
+     * command, bad argument) is logged and does not stop the rest from running. Example:
+     * {@code ["pvpbot settings auto-target true", "pvpbot settings view-distance 16"]}.
+     */
+    public List<String> startupCommands = new ArrayList<>();
 
     /**
      * Rolled once per structure: occupied or abandoned, and the minimum bot count if occupied. There is
