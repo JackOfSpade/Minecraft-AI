@@ -131,12 +131,6 @@ public final class DangerWatcher {
         return new DropRecoveryDecision(true, "short_clear_route");
     }
 
-    public void scanAll(MinecraftServer server) {
-        for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            scanBot(server, bot);
-        }
-    }
-
     public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
         // SAFE-DEAD: a dead bot no longer endlessly dispatches evade (zombie loop). Respawn at full health on the surface, clear tasks/plans, and notify in chat.
         // isAlive() alone is not a death signal: it also goes false when the entity is removed for
@@ -181,9 +175,23 @@ public final class DangerWatcher {
             }
             return true;
         }
-        Optional<Threat> threat = collectTopThreat(bot);
+        // combat-dangerwatcher-repeated-hostile-scans: observableActiveHostilePressure(bot) does an
+        // entity-class world query plus a per-candidate observability/LOS raycast, and used to be
+        // recomputed independently by collectTopThreat, refreshShelterEpisode (unconditionally,
+        // every scan), decideCombatOrEvade's canFight/shouldDefensivelyFightClosePressure and
+        // maybeEat's hasNakedEatHostilePressure -- 2 to 4 redundant re-scans of the same nearby
+        // entities per bot per tick. Compute it once here and thread it through every one of those
+        // call sites instead. This is safe because nothing between here and the last read below can
+        // change its inputs: no code on any path that falls through (rather than returning) between
+        // this point and scanBot's final read of hostilePressure spawns, kills or moves an entity,
+        // or places/breaks a block that could change line of sight -- every branch that does mutate
+        // the world/task state (lava escape, shelter/barricade assignment, creeper defense, combat
+        // regroup, threat dispatch, ...) returns immediately afterward, so a later call within the
+        // same scanBot invocation always sees the same world this list was computed from.
+        List<LivingEntity> hostilePressure = observableActiveHostilePressure(bot);
+        Optional<Threat> threat = collectTopThreat(bot, hostilePressure);
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
-        refreshShelterEpisode(bot);
+        refreshShelterEpisode(bot, hostilePressure);
         // Self-rescue on lava contact (highest priority, overrides threat): lava burns 4 damage per
         // tick, killing the bot within seconds. SurvivalGuard only interrupts the current job, with a
         // comment claiming it "defers to DangerWatcher to escape" but that was never implemented --
@@ -407,7 +415,7 @@ public final class DangerWatcher {
             if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
                     && shouldAssignThreatTask(active, top)
                     && canAssignThreatTask(server, bot, top)) {
-                Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot));
+                Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
                 boolean trapped = trappedBackoff(server, bot, task);
                 if (trapped) {
                     boolean criticalHostile = isHostileBacked(top)
@@ -449,7 +457,7 @@ public final class DangerWatcher {
         if (maybeResupply(server, bot, active)) {
             return true;
         }
-        if (maybeEat(server, bot, active)) {
+        if (maybeEat(server, bot, active, hostilePressure)) {
             return true;
         }
         if (maybeStartNightTask(server, bot, active)) {
@@ -615,7 +623,8 @@ public final class DangerWatcher {
                 || task instanceof DigDownTask;
     }
 
-    private boolean maybeEat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
+    private boolean maybeEat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
+                             List<LivingEntity> hostilePressure) {
         int foodLevel = bot.getHungerManager().getFoodLevel();
         MinecraftAiConfig.Survival survival = MinecraftAiConfig.get().survival();
         boolean healingEmergency = isHealingEatTransaction(bot);
@@ -650,7 +659,7 @@ public final class DangerWatcher {
         // frame. Before assignment, however, eating in the open beside an already-observed hostile
         // (or immediately after a hit) is never safe. A sealed shelter owns its own internal EatTask
         // and therefore does not pass through this unprotected admission gate.
-        if (hasNakedEatHostilePressure(bot)) {
+        if (hasNakedEatHostilePressure(bot, hostilePressure)) {
             return false;
         }
         int now = server.getTicks();
@@ -724,7 +733,8 @@ public final class DangerWatcher {
 
     private Task decideCombatOrEvade(AIPlayerEntity bot,
                                      Threat threat,
-                                     boolean shelterAllowed) {
+                                     boolean shelterAllowed,
+                                     List<LivingEntity> hostilePressure) {
         MinecraftAiConfig.Combat combat = MinecraftAiConfig.get().combat();
         // These mobs require a dedicated tactic, never the generic defensive melee loop.
         if (isMeleeForbiddenThreat(threat)) {
@@ -740,11 +750,11 @@ public final class DangerWatcher {
         // non-Creeper must not fall through to naked healing merely because canFight's ordinary
         // cost/benefit gate rejects low HP. Defensive Combat starts in RETREAT, counterattacks only
         // if boxed in, and owns the later safe-heal boundary.
-        if (!shelterAllowed && shouldDefensivelyFightClosePressure(bot, threat)) {
+        if (!shelterAllowed && shouldDefensivelyFightClosePressure(bot, threat, hostilePressure)) {
             return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.getBlockPos());
         }
         // combat stuck-trap: combat repeatedly aborted as stuck (target unreachable -- e.g. a zombie below in a mineshaft/behind a wall) -> stop standing there waiting to die, switch to fleeing.
-        if (canFight(bot, threat, combat) && !combatStuck(bot)) {
+        if (canFight(bot, threat, combat, hostilePressure) && !combatStuck(bot)) {
             // Safety combat defends the interrupted work site. It binds the observed entity and
             // cannot turn into an open-ended hunt by reacquiring another mob of the same type.
             return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.getBlockPos());
@@ -753,11 +763,12 @@ public final class DangerWatcher {
     }
 
     private static boolean shouldDefensivelyFightClosePressure(AIPlayerEntity bot,
-                                                                Threat threat) {
+                                                                Threat threat,
+                                                                List<LivingEntity> hostilePressure) {
         return isHostileBacked(threat)
                 && !isMeleeForbiddenThreat(threat)
                 && EquipAction.bestWeaponSlot(bot).isPresent()
-                && visibleHostileCount(bot) == 1
+                && hostilePressure.size() == 1
                 && bot.distanceTo(threat.entity()) < CLOSE_DEFENSIVE_HOSTILE_RADIUS;
     }
 
@@ -801,14 +812,14 @@ public final class DangerWatcher {
                 "reason", reason == null ? "" : reason);
     }
 
-    private void refreshShelterEpisode(AIPlayerEntity bot) {
+    private void refreshShelterEpisode(AIPlayerEntity bot, List<LivingEntity> hostilePressure) {
         ShelterEpisode episode = shelterEpisodes.get(bot.getUuid());
         if (episode == null) {
             return;
         }
         boolean sameSite = episode.anchor().isWithinDistance(
                 bot.getBlockPos(), SHELTER_EPISODE_RADIUS);
-        boolean hostileContinues = !observableActiveHostilePressure(bot).isEmpty();
+        boolean hostileContinues = !hostilePressure.isEmpty();
         if (sameSite && hostileContinues) {
             return;
         }
@@ -1062,7 +1073,8 @@ public final class DangerWatcher {
                 && fail.get().count() >= 2;
     }
 
-    private boolean canFight(AIPlayerEntity bot, Threat threat, MinecraftAiConfig.Combat combat) {
+    private boolean canFight(AIPlayerEntity bot, Threat threat, MinecraftAiConfig.Combat combat,
+                             List<LivingEntity> hostilePressure) {
         if (threat.type() != Threat.Type.HOSTILE || threat.entity() == null || !threat.entity().isAlive()) {
             return false;
         }
@@ -1072,12 +1084,8 @@ public final class DangerWatcher {
         if (CombatCore.isMeleeForbiddenThreat(threat.entity())) {
             return false;
         }
-        int hostiles = visibleHostileCount(bot);
+        int hostiles = hostilePressure.size();
         return hostiles <= combat.maxEnemiesToFight() && EquipAction.bestWeaponSlot(bot).isPresent();
-    }
-
-    private static int visibleHostileCount(AIPlayerEntity bot) {
-        return observableActiveHostilePressure(bot).size();
     }
 
     /**
@@ -1088,9 +1096,9 @@ public final class DangerWatcher {
      * separately by the atomic-Eat branch near the top of
      * {@link #scanBot(MinecraftServer, AIPlayerEntity)}.
      */
-    private static boolean hasNakedEatHostilePressure(AIPlayerEntity bot) {
+    private static boolean hasNakedEatHostilePressure(AIPlayerEntity bot, List<LivingEntity> hostilePressure) {
         return bot.hurtTime > 0
-                || !observableActiveHostilePressure(bot).isEmpty();
+                || !hostilePressure.isEmpty();
     }
 
     /** Shared cleanup gate: only ordinary, already-observable hostile pressure can preempt it. */
@@ -1280,11 +1288,13 @@ public final class DangerWatcher {
         trapRecords.remove(id);
     }
 
-    private static Optional<Threat> collectTopThreat(AIPlayerEntity bot) {
+    private static Optional<Threat> collectTopThreat(AIPlayerEntity bot, List<LivingEntity> hostiles) {
         // Close threats use the original ten-block envelope. A ranged attacker remains pressure
         // through twenty blocks only with factual LOS, matching naked-Eat admission and secondary
-        // combat settlement. Sort the shared pressure set before choosing the top threat.
-        List<LivingEntity> hostiles = observableActiveHostilePressure(bot);
+        // combat settlement. Sort the shared pressure set before choosing the top threat. The caller
+        // owns this list for the rest of its scanBot() call (combat-dangerwatcher-repeated-hostile-scans
+        // -- see the comment at scanBot's hostilePressure computation); sorting it in place is safe
+        // because every later use only reads .isEmpty()/.size(), never relies on element order.
         // "melee mode, prioritize closest enemy; ranged mode, prioritize ranged enemies first":
         // once something is already close enough to be a melee exchange, ranged-ness stops
         // mattering and plain distance decides. Otherwise (nothing close yet -- the bot would be
@@ -1345,23 +1355,6 @@ public final class DangerWatcher {
     // around or into view).
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
         return CombatCore.hasLineOfSight(bot, mob);
-    }
-
-    // Whether there is a reachable (line-of-sight) hostile mob nearby (8 blocks). Serves as a
-    // defensive fallback for the near-death walling-in gate; a normal LOW_HP Threat already carries
-    // the hostile entity. Reuses the same line-of-sight check to avoid counting a mob behind a wall
-    // as current pressure.
-    private static boolean hasReachableHostile(AIPlayerEntity bot) {
-        List<LivingEntity> hostiles = bot.getEntityWorld()
-                .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(8.0D),
-                        entity -> entity instanceof HostileEntity && entity.isAlive()
-                                && ObservableWorldQuery.canObserveEntity(bot, entity));
-        for (LivingEntity mob : hostiles) {
-            if (canReachThreat(bot, mob)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
