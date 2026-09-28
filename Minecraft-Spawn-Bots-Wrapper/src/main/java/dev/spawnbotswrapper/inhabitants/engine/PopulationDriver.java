@@ -64,9 +64,9 @@ final class PopulationDriver {
     private final Map<StructureKey, PendingStructure> pending = new LinkedHashMap<>();
     /** By lower-case bot name: also what guarantees one bot is never requested twice concurrently. */
     private final Map<String, SpawnJob> inFlight = new LinkedHashMap<>();
-    /** Dormant bots currently being restored; kept apart from {@link #inFlight} so a bot in this map is never
-     * mistaken by {@link #audit} for an interrupted fresh request (it stays DORMANT, not REQUESTED, throughout). */
-    private final Map<String, SpawnJob> dormantInFlight = new LinkedHashMap<>();
+    /** Dormancy restore is a self-contained cluster (its own in-flight map, never touches {@link #pending}); see
+     * {@link DormancyRestorer}'s own doc for why it is deliberately outside the write-ahead machinery below. */
+    private final DormancyRestorer dormancyRestorer;
     private final List<StructureKey> finished = new ArrayList<>();
     private long lastSpawnTick = PendingStructure.NEVER;
 
@@ -74,6 +74,7 @@ final class PopulationDriver {
         this.ctx = ctx;
         this.roster = roster;
         this.tpsGovernor = tpsGovernor;
+        this.dormancyRestorer = new DormancyRestorer(ctx, roster, inFlight);
     }
 
     // ------------------------------------------------------------------ queue
@@ -100,7 +101,7 @@ final class PopulationDriver {
         pending.remove(key);
         finished.remove(key);
         inFlight.values().removeIf(j -> j.structure().equals(key));
-        dormantInFlight.values().removeIf(j -> j.structure().equals(key));
+        dormancyRestorer.forget(key);
     }
 
     // ------------------------------------------------------------------ in-flight bots
@@ -117,25 +118,20 @@ final class PopulationDriver {
     }
 
     private void pollOne(SpawnJob job, long now, InhabitantsConfig cfg) {
-        BotGateway.SpawnPoll result;
-        try {
-            result = ctx.bots.poll(job.handle());
-        } catch (OutOfMemoryError e) {
-            throw e;
-        } catch (Throwable t) {
-            ctx.log.error("poll", job.name(), t);
-            result = new BotGateway.SpawnPoll.Pending();
-        }
-        if (result instanceof BotGateway.SpawnPoll.Ready ready) {
+        int appearTimeoutTicks = EngineContext.processing(cfg).appearTimeoutTicks;
+        SpawnPollClassifier.Outcome outcome =
+                SpawnPollClassifier.classify(ctx, job, now, appearTimeoutTicks, "poll", true);
+        if (outcome instanceof SpawnPollClassifier.Ready ready) {
             inFlight.remove(EngineContext.lower(job.name()));
             finishSpawn(job, ready.uuid(), cfg, now);
-        } else if (result instanceof BotGateway.SpawnPoll.Failed failed) {
+        } else if (outcome instanceof SpawnPollClassifier.Failed failed) {
             inFlight.remove(EngineContext.lower(job.name()));
             failJob(job, failed.reason(), now);
-        } else if (now - job.startedAtTick() >= EngineContext.processing(cfg).appearTimeoutTicks) {
+        } else if (outcome instanceof SpawnPollClassifier.TimedOut) {
             inFlight.remove(EngineContext.lower(job.name()));
-            failJob(job, "did not appear within " + EngineContext.processing(cfg).appearTimeoutTicks + " ticks", now);
+            failJob(job, "did not appear within " + appearTimeoutTicks + " ticks", now);
         }
+        // StillPending: no bookkeeping change, retried next tick.
     }
 
     private void finishSpawn(SpawnJob job, UUID uuid, InhabitantsConfig cfg, long now) {
@@ -178,97 +174,14 @@ final class PopulationDriver {
 
     // ------------------------------------------------------------------ restoring a dormant bot
 
-    /**
-     * Re-requests every DORMANT bot of this structure at its exact remembered position; on success its exact
-     * remembered profile is re-applied (never regenerated). Deliberately outside the {@link #pending} /
-     * write-ahead machinery that a fresh roll needs: nothing here is durable mid-flight, because a restore is
-     * safely retriable (the next time this structure's chunk loads) rather than something that must never
-     * happen twice, so a crash mid-restore just leaves the bot DORMANT for another attempt.
-     */
+    /** See {@link DormancyRestorer#restoreDormant}: the whole cluster now lives there (wrapperA-r4). */
     void restoreDormant(StructureKey key, StructureRecord rec, long now) {
-        for (BotRecord b : rec.bots) {
-            if (b.state != BotState.DORMANT || b.name == null) {
-                continue;
-            }
-            String lower = EngineContext.lower(b.name);
-            if (dormantInFlight.containsKey(lower) || inFlight.containsKey(lower)) {
-                continue;
-            }
-            BotGateway.SpawnHandle handle;
-            try {
-                handle = ctx.bots.requestSpawn(new BotGateway.SpawnRequest(key.dimension(), b.name, b.x, b.y, b.z, b.yaw));
-                if (handle == null) {
-                    throw new IllegalStateException("the bot gateway returned no spawn handle");
-                }
-            } catch (OutOfMemoryError e) {
-                throw e;
-            } catch (Throwable t) {
-                ctx.log.error("restoreDormant", b.name, t);
-                continue; // stays DORMANT; retried the next time this structure's chunk loads
-            }
-            dormantInFlight.put(lower, new SpawnJob(key, b.index, b.name, handle, now));
-        }
+        dormancyRestorer.restoreDormant(key, rec, now);
     }
 
-    /** Polls every in-flight dormancy restore once. Runs every tick regardless of the settle period, like {@link #poll}. */
+    /** See {@link DormancyRestorer#pollDormant}. */
     void pollDormant(long now, InhabitantsConfig cfg) {
-        if (dormantInFlight.isEmpty()) {
-            return;
-        }
-        for (SpawnJob job : new ArrayList<>(dormantInFlight.values())) {
-            ctx.guard("pollDormant", () -> pollDormantOne(job, now, cfg));
-        }
-    }
-
-    private void pollDormantOne(SpawnJob job, long now, InhabitantsConfig cfg) {
-        BotGateway.SpawnPoll result;
-        try {
-            result = ctx.bots.poll(job.handle());
-        } catch (OutOfMemoryError e) {
-            throw e;
-        } catch (Throwable t) {
-            ctx.log.error("pollDormant", job.name(), t);
-            return; // try again next tick
-        }
-        if (result instanceof BotGateway.SpawnPoll.Ready ready) {
-            dormantInFlight.remove(EngineContext.lower(job.name()));
-            finishDormantRestore(job, ready.uuid(), cfg);
-        } else if (result instanceof BotGateway.SpawnPoll.Failed) {
-            dormantInFlight.remove(EngineContext.lower(job.name())); // stays DORMANT; retried later
-        } else if (now - job.startedAtTick() >= EngineContext.processing(cfg).appearTimeoutTicks) {
-            dormantInFlight.remove(EngineContext.lower(job.name())); // stays DORMANT; retried later
-        }
-    }
-
-    private void finishDormantRestore(SpawnJob job, UUID uuid, InhabitantsConfig cfg) {
-        StructureRecord rec = ctx.store.find(job.structure()).orElse(null);
-        if (rec == null) {
-            return;
-        }
-        BotRecord bot = null;
-        for (BotRecord b : rec.bots) {
-            if (b.index == job.botIndex() && job.name().equalsIgnoreCase(b.name)) {
-                bot = b;
-                break;
-            }
-        }
-        if (bot == null || bot.state != BotState.DORMANT) {
-            return; // reset or otherwise no longer ours: leave whatever exists alone
-        }
-        try {
-            ctx.bots.applyProfile(bot.name, bot.profile);
-        } catch (OutOfMemoryError e) {
-            throw e;
-        } catch (Throwable t) {
-            ctx.log.error("applyProfile", bot.name, t);
-        }
-        if (uuid != null) {
-            bot.uuid = uuid.toString();
-        }
-        bot.state = BotState.SPAWNED;
-        ctx.store.markDirty();
-        roster.trackSpawned(job.structure(), bot);
-        ctx.debug(cfg, "Inhabitant {} restored from dormancy in {}", bot.name, job.structure());
+        dormancyRestorer.pollDormant(now, cfg);
     }
 
     // ------------------------------------------------------------------ pending structures
@@ -313,17 +226,20 @@ final class PopulationDriver {
                 return; // finished, or the server could not be asked yet: never act on a half-reconciled record
             }
         }
-        if (budget.bots <= 0 || capacityLeft(pr) <= 0) {
-            return; // paced or capped: the structure just stays pending, it is never re-rolled or dropped
-        }
         StructureRecord rec = p.record;
         List<BotRecord> planned = plannedBots(rec);
         if (planned.isEmpty()) {
             return; // everything is in flight; the poll settles it
         }
+        // Adoption never creates a new entity -- it must run before the capacity/pacing gate below, or a bot
+        // whose spawn request timed out and then appeared late (slow profile lookup) can get stuck PLANNED
+        // forever whenever capacity is exhausted, since nothing else can ever adopt it (see adoptLateArrivals).
         planned = adoptLateArrivals(p, rec, planned, cfg, now);
         if (planned.isEmpty()) {
             return;
+        }
+        if (budget.bots <= 0 || capacityLeft(pr) <= 0) {
+            return; // paced or capped: the structure just stays pending, it is never re-rolled or dropped
         }
 
         if (!p.assigned.isEmpty() && now - p.assignedAtTick > ASSIGNMENT_TTL_TICKS) {

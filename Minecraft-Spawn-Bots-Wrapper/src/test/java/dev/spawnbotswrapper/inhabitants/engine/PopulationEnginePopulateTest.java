@@ -381,6 +381,51 @@ class PopulationEnginePopulateTest {
         assertEquals(2, rig.engine.stats().botsInFlight());
     }
 
+    /**
+     * wrapperA-001: a bot whose spawn request timed out ({@code appearTimeoutTicks}) and then actually appeared
+     * afterwards (a slow profile lookup upstream) must be adopted ({@link PopulationDriver#adoptLateArrivals})
+     * regardless of the capacity/pacing gate. Before the fix, {@code driveOne()} returned at that gate before
+     * ever reaching adoption, so a bot stuck this way was never dressed and the structure never left
+     * OCCUPIED_PENDING -- even though adoption itself needs no capacity, since it does not create a new entity.
+     * The TPS governor's hard block is used here rather than the live-bot cap because, unlike the cap, it never
+     * frees a slot on its own when one bot's request times out, so it isolates the bug from ordinary pacing.
+     */
+    @Test
+    void aLateArrivalIsAdoptedEvenWhileCapacityStaysExhausted() {
+        Rig rig = new Rig();
+        rig.bots.readyAfterPolls = MANY; // nobody naturally becomes Ready; every request times out instead
+        rig.cfg.tpsThrottle.checkIntervalTicks = 1;
+        StructureSnapshot s = Rig.structure("minecraft:pillager_outpost", 0, 0);
+        rig.engine.submit(s);
+        rig.run(5);
+        StructureRecord r = rig.record(s.key());
+        assertEquals(3, r.bots.size());
+        assertEquals(3, rig.bots.requests.size(), "all three are requested before anything times out");
+        String late = r.bots.get(0).name;
+
+        rig.tps.millis = 150.0; // above degradedMillis: the TPS governor now hard-blocks every new spawn
+        rig.run((int) rig.cfg.processing.appearTimeoutTicks + 10);
+        r = rig.record(s.key());
+        for (BotRecord b : r.bots) {
+            assertEquals(BotState.PLANNED, b.state, "every request timed out and capacity is now degraded");
+        }
+
+        // The entity actually appears (the earlier profile lookup was just slow) while capacity is still shut.
+        rig.bots.bringOnline(late);
+        rig.run(5);
+
+        r = rig.record(s.key());
+        BotRecord adopted = r.bots.stream().filter(b -> late.equals(b.name)).findFirst().orElseThrow();
+        assertEquals(BotState.SPAWNED, adopted.state, "adoption must not wait for capacity: it creates no new entity");
+        assertNotNull(adopted.profile, "an adopted bot is dressed exactly like a normally spawned one");
+        for (BotRecord b : r.bots) {
+            if (!late.equals(b.name)) {
+                assertEquals(BotState.PLANNED, b.state, "genuinely new spawns stay gated by capacity");
+            }
+        }
+        assertEquals(StructureStatus.OCCUPIED_PENDING, r.status, "the other two bots are still unresolved");
+    }
+
     @Test
     void positionsHeldBackByTheCapAreSearchedAgainOnceTheyAreStale() {
         Rig rig = new Rig();
