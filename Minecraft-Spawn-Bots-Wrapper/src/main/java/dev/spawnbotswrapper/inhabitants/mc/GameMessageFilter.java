@@ -35,8 +35,11 @@ public final class GameMessageFilter {
 
     /** Registers the filter; call once from the mod entrypoint. */
     public static void register(Supplier<CommandServices> services) {
-        ServerMessageEvents.ALLOW_GAME_MESSAGE.register(
-                (server, message, overlay) -> !isFromOurBot(services.get(), message.getString()));
+        ServerMessageEvents.ALLOW_GAME_MESSAGE.register((server, message, overlay) -> {
+            String rendered = message.getString();
+            CommandServices current = services.get();
+            return !isFromOurBot(current, rendered);
+        });
     }
 
     /**
