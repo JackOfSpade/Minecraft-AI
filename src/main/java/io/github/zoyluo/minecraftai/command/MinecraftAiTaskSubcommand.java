@@ -450,7 +450,8 @@ public final class MinecraftAiTaskSubcommand {
             case "south", "s" -> Direction.SOUTH;
             case "east", "e" -> Direction.EAST;
             case "west", "w" -> Direction.WEST;
-            case "down", "d", "up", "u" -> Direction.DOWN;
+            case "down", "d" -> Direction.DOWN;
+            case "up", "u" -> Direction.UP;
             default -> throw new IllegalArgumentException("unknown_direction: " + value);
         };
     }
