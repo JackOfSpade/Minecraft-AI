@@ -28,7 +28,9 @@ class JoinHoldGateTest {
     void neverHoldsAnywhereNearVanillasOwnSlowLoginDisconnect() {
         assertTrue(JoinHoldGate.shouldHold(1000, 1000 + JoinHoldGate.MAX_SAFE_HOLD_TICKS - 1, 1800));
         assertFalse(JoinHoldGate.shouldHold(1000, 1000 + JoinHoldGate.MAX_SAFE_HOLD_TICKS, 1800));
-        assertTrue(JoinHoldGate.MAX_SAFE_HOLD_TICKS < 600, "must stay comfortably under vanilla's 600-tick disconnect");
+        assertTrue(JoinHoldGate.MAX_SAFE_HOLD_TICKS <= 300,
+                "must leave a wide margin under vanilla's 600-tick disconnect -- a fresh world's own "
+                        + "spawn-chunk generation already eats into the same budget");
     }
 
     @Test

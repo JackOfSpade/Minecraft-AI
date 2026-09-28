@@ -40,8 +40,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * connection.joinHoldTicks} is actually set to.
  */
 public final class JoinHoldGate {
-    /** Comfortably under vanilla's own 600-tick LOGIN-phase disconnect; see the class doc for why this exists. */
-    static final int MAX_SAFE_HOLD_TICKS = 500;
+    /**
+     * Comfortably under vanilla's own 600-tick LOGIN-phase disconnect; see the class doc for why this exists.
+     * A brand-new world's own spawn-chunk generation already eats into the same tick budget (a still-settling
+     * server can run a few ticks slower than usual right after start), so 500 -- a mere 100-tick margin against
+     * the 600-tick kick -- measured as too thin in practice: observed a real disconnect ("Took too long to log
+     * in") on a fresh world where the hold and vanilla's own kick landed within a couple of seconds of each
+     * other. 300 leaves a full 300-tick (15s) margin instead.
+     */
+    static final int MAX_SAFE_HOLD_TICKS = 300;
 
     private final Map<ServerLoginNetworkHandler, CompletableFuture<Void>> pending = new ConcurrentHashMap<>();
     private volatile boolean holdWindowOpen;

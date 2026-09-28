@@ -10,7 +10,7 @@ import java.util.function.Supplier;
  * Suppresses vanilla's "X joined the game" / "X left the game" / advancement-announcement game messages for
  * this addon's own inhabitants, so a structure spawning a handful of PvP BOT fighters does not spam every
  * online player's chat -- an inhabited village should feel populated, not like a server restart log. Real
- * players, and any other mod's own bots (this project's own separate AIBot companions included), are
+ * players, and any other mod's own bots (this project's own separate Minecraft-AI companions included), are
  * completely untouched: only names this addon itself is currently tracking as an inhabitant are ever
  * suppressed.
  * <p>
