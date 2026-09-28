@@ -334,72 +334,90 @@ public final class MiningAssistConfig {
         }
         boolean harnessOff = harnessDefaultOff && source == ModeSource.DEFAULT;
 
-        Section senseSection = root.child("sense");
-        Sense sense = new Sense(
-                senseSection.integer("raysPerTick", Sense.DEFAULT_RAYS_PER_TICK, 1, 256),
-                senseSection.integer("globalRaysPerTick", Sense.DEFAULT_GLOBAL_RAYS_PER_TICK, 1, 4096),
-                senseSection.bool("adaptiveThrottle", true),
-                senseSection.bool("shadowLog", mode.allowsSense()));
-
-        Section tickSection = root.child("tick");
-        double startWorkMs = tickSection.decimal("startWorkMs", Tick.DEFAULTS.startWorkMs(), 1.0D, 100.0D);
-        double abortWorkMs = tickSection.decimal(
-                "abortWorkMs", Tick.DEFAULTS.abortWorkMs(), Tick.MIN_ABORT_WORK_MS, 100.0D);
-        if (abortWorkMs < startWorkMs) {
-            tickSection.warn("tick.abortWorkMs raised to startWorkMs " + startWorkMs);
-            abortWorkMs = startWorkMs;
-        }
-        Tick tick = new Tick(startWorkMs, abortWorkMs);
-
-        // A start needs at least 30 ms in the bucket, so a smaller capacity would block every start.
-        Route route = new Route(root.child("route").integer("bucketMs", Route.DEFAULTS.bucketMs(), 30, 1000));
-
-        Section detourSection = root.child("detour");
-        Detour detourDefaults = Detour.DEFAULTS;
-        Detour detour = new Detour(
-                detourSection.bool("enabled", detourDefaults.enabled()),
-                detourSection.integer("minValue", detourDefaults.minValue(), 1, 1000),
-                detourSection.decimal("minScore", detourDefaults.minScore(), 0.1D, 100.0D),
-                detourSection.integer("maxRadius", detourDefaults.maxRadius(), 1, 32),
-                detourSection.integer("maxUp", detourDefaults.maxUp(), 0, 16),
-                detourSection.integer("maxDown", detourDefaults.maxDown(), 0, 16),
-                detourSection.integer("leaseTicks", detourDefaults.leaseTicks(), 60, Detour.LEASE_CAP_TICKS),
-                detourSection.integer("minIntervalTicks", detourDefaults.minIntervalTicks(), 20,
-                        Detour.MIN_INTERVAL_CAP_TICKS),
-                detourSection.integer("maxPerMission", detourDefaults.maxPerMission(), 0, 200),
-                detourSection.integer("minFreeSlots", detourDefaults.minFreeSlots(), 1, 32),
-                detourSection.integer("startHpMargin", detourDefaults.startHpMargin(), 0, 20),
-                detourSection.integer("lavaClearRadius", detourDefaults.lavaClearRadius(), 1, 16),
-                detourSection.integer("announceMinValue", detourDefaults.announceMinValue(), 0, 1000));
-
-        Safety safety = new Safety(root.child("safety").bool("deepDarkVeto", Safety.DEFAULTS.deepDarkVeto()));
-
+        Sense sense = parseSense(root.child("sense"), mode);
+        Tick tick = parseTick(root.child("tick"));
+        Route route = parseRoute(root.child("route"));
+        Detour detour = parseDetour(root.child("detour"));
+        Safety safety = parseSafety(root.child("safety"));
         Poi poi = parsePoi(root.child("poi"));
-
-        Section advisorSection = root.child("advisor");
-        Advisor advisorDefaults = Advisor.DEFAULTS;
-        Advisor advisor = new Advisor(
-                advisorSection.bool("enabled", advisorDefaults.enabled()),
-                advisorSection.text("model", advisorDefaults.model(), MAX_MODEL_LENGTH),
-                advisorSection.integer("timeoutSeconds", advisorDefaults.timeoutSeconds(), 1, 10),
-                advisorSection.integer("maxTokens", advisorDefaults.maxTokens(), 64, 16384),
-                advisorSection.integer("maxConsultsPerMission", advisorDefaults.maxConsultsPerMission(), 0, 64),
-                advisorSection.integer("minIntervalTicks", advisorDefaults.minIntervalTicks(), 0, 12000),
-                advisorSection.integer("breakerFailures", advisorDefaults.breakerFailures(), 1, 20),
-                advisorSection.integer("breakerOpenTicks", advisorDefaults.breakerOpenTicks(), 200, 72000));
-
-        Edits edits = new Edits(root.child("edits").bool("sidecar", Edits.DEFAULTS.sidecar()));
-
-        Section exploreSection = root.child("explore");
-        Explore explore = new Explore(
-                exploreSection.bool("legChooser", Explore.DEFAULTS.legChooser()),
-                exploreSection.bool("frontier", Explore.DEFAULTS.frontier()),
-                exploreSection.integer("frontierMaxRadius", Explore.DEFAULTS.frontierMaxRadius(), 8, 64),
-                exploreSection.decimal("frontierMinUtility", Explore.DEFAULTS.frontierMinUtility(), 0.0D, 5.0D));
+        Advisor advisor = parseAdvisor(root.child("advisor"));
+        Edits edits = parseEdits(root.child("edits"));
+        Explore explore = parseExplore(root.child("explore"));
 
         return new MiningAssistConfig(
                 mode, source, harnessOff, envDeterministic,
                 sense, tick, route, detour, safety, poi, advisor, edits, explore, warnings);
+    }
+
+    private static Sense parseSense(Section section, AssistMode mode) {
+        return new Sense(
+                section.integer("raysPerTick", Sense.DEFAULT_RAYS_PER_TICK, 1, 256),
+                section.integer("globalRaysPerTick", Sense.DEFAULT_GLOBAL_RAYS_PER_TICK, 1, 4096),
+                section.bool("adaptiveThrottle", true),
+                section.bool("shadowLog", mode.allowsSense()));
+    }
+
+    private static Tick parseTick(Section section) {
+        double startWorkMs = section.decimal("startWorkMs", Tick.DEFAULTS.startWorkMs(), 1.0D, 100.0D);
+        double abortWorkMs = section.decimal(
+                "abortWorkMs", Tick.DEFAULTS.abortWorkMs(), Tick.MIN_ABORT_WORK_MS, 100.0D);
+        if (abortWorkMs < startWorkMs) {
+            section.warn("tick.abortWorkMs raised to startWorkMs " + startWorkMs);
+            abortWorkMs = startWorkMs;
+        }
+        return new Tick(startWorkMs, abortWorkMs);
+    }
+
+    private static Route parseRoute(Section section) {
+        // A start needs at least 30 ms in the bucket, so a smaller capacity would block every start.
+        return new Route(section.integer("bucketMs", Route.DEFAULTS.bucketMs(), 30, 1000));
+    }
+
+    private static Detour parseDetour(Section section) {
+        Detour defaults = Detour.DEFAULTS;
+        return new Detour(
+                section.bool("enabled", defaults.enabled()),
+                section.integer("minValue", defaults.minValue(), 1, 1000),
+                section.decimal("minScore", defaults.minScore(), 0.1D, 100.0D),
+                section.integer("maxRadius", defaults.maxRadius(), 1, 32),
+                section.integer("maxUp", defaults.maxUp(), 0, 16),
+                section.integer("maxDown", defaults.maxDown(), 0, 16),
+                section.integer("leaseTicks", defaults.leaseTicks(), 60, Detour.LEASE_CAP_TICKS),
+                section.integer("minIntervalTicks", defaults.minIntervalTicks(), 20, Detour.MIN_INTERVAL_CAP_TICKS),
+                section.integer("maxPerMission", defaults.maxPerMission(), 0, 200),
+                section.integer("minFreeSlots", defaults.minFreeSlots(), 1, 32),
+                section.integer("startHpMargin", defaults.startHpMargin(), 0, 20),
+                section.integer("lavaClearRadius", defaults.lavaClearRadius(), 1, 16),
+                section.integer("announceMinValue", defaults.announceMinValue(), 0, 1000));
+    }
+
+    private static Safety parseSafety(Section section) {
+        return new Safety(section.bool("deepDarkVeto", Safety.DEFAULTS.deepDarkVeto()));
+    }
+
+    private static Advisor parseAdvisor(Section section) {
+        Advisor defaults = Advisor.DEFAULTS;
+        return new Advisor(
+                section.bool("enabled", defaults.enabled()),
+                section.text("model", defaults.model(), MAX_MODEL_LENGTH),
+                section.integer("timeoutSeconds", defaults.timeoutSeconds(), 1, 10),
+                section.integer("maxTokens", defaults.maxTokens(), 64, 16384),
+                section.integer("maxConsultsPerMission", defaults.maxConsultsPerMission(), 0, 64),
+                section.integer("minIntervalTicks", defaults.minIntervalTicks(), 0, 12000),
+                section.integer("breakerFailures", defaults.breakerFailures(), 1, 20),
+                section.integer("breakerOpenTicks", defaults.breakerOpenTicks(), 200, 72000));
+    }
+
+    private static Edits parseEdits(Section section) {
+        return new Edits(section.bool("sidecar", Edits.DEFAULTS.sidecar()));
+    }
+
+    private static Explore parseExplore(Section section) {
+        return new Explore(
+                section.bool("legChooser", Explore.DEFAULTS.legChooser()),
+                section.bool("frontier", Explore.DEFAULTS.frontier()),
+                section.integer("frontierMaxRadius", Explore.DEFAULTS.frontierMaxRadius(), 8, 64),
+                section.decimal("frontierMinUtility", Explore.DEFAULTS.frontierMinUtility(), 0.0D, 5.0D));
     }
 
     private static Poi parsePoi(Section section) {
