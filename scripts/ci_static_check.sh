@@ -67,7 +67,9 @@ for script in scripts/ci_static_check.sh scripts/food_test.sh scripts/night_watc
   scripts/evidence_run.sh scripts/evidence_batch.sh scripts/evidence_validate.sh \
   scripts/mining_acceptance.sh scripts/mining_evidence_shard.sh scripts/mining_evidence_aggregate.sh \
   scripts/mining_release_gate.sh scripts/pin_baseline.sh scripts/persistence_restart_test.sh \
-  scripts/capability_matrix.sh scripts/lib/harness.sh scripts/lib/mining_acceptance_contract.sh; do
+  scripts/capability_matrix.sh scripts/deploy_profile.sh scripts/gate.sh scripts/auto30.sh \
+  scripts/story.sh scripts/reliability.sh scripts/lib/harness.sh \
+  scripts/lib/mining_acceptance_contract.sh scripts/lib/devloop.sh scripts/lib/env_parse.sh; do
   bash -n "$script" || fail "shell syntax failed: $script"
 done
 
@@ -131,6 +133,8 @@ bash scripts/mining_evidence_shard.sh --self-test >/dev/null \
   || fail 'Mining First shard matrix self-test failed'
 bash scripts/mining_evidence_aggregate.sh --self-test >/dev/null \
   || fail 'Mining First evidence aggregator self-test failed'
+bash scripts/lib/env_parse.sh --self-test >/dev/null \
+  || fail 'deploy_profile.sh .env parser self-test failed'
 
 manual=.github/workflows/manual-llm.yml
 grep -Fq 'workflow_dispatch:' "$manual" || fail 'manual LLM workflow is not dispatch-only'
