@@ -41,13 +41,11 @@ public final class MiningChain {
     };
 
     private static final Map<Block, OreEntry> BY_BLOCK = new HashMap<>();
-    private static final Map<Item, Item> SMELT_BY_RAW = new HashMap<>();
 
     static {
         for (OreEntry e : TABLE) {
             BY_BLOCK.put(e.ore(), e);
             BY_BLOCK.put(e.deepslate(), e);
-            SMELT_BY_RAW.put(e.rawDrop(), e.smelted());
         }
     }
 
@@ -80,8 +78,4 @@ public final class MiningChain {
         return ToolTier.requiredPickaxeTier(ores);
     }
 
-    /** Raw ore drop → smelted product (raw_iron→iron_ingot, etc.); returns null for non-ore drops, which SmeltChain (S5) handles for other smelting. */
-    public static Item smeltOutput(Item rawDrop) {
-        return SMELT_BY_RAW.get(rawDrop);
-    }
 }

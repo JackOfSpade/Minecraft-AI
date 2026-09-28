@@ -45,10 +45,6 @@ public final class MiningFoodReserve {
         return normalizedUnits(units, berries);
     }
 
-    public static boolean isReserveItem(Item item) {
-        return ReserveItems.ONE_UNIT_ITEMS.contains(item) || item == Items.SWEET_BERRIES;
-    }
-
     /** Returns the safest available reserve item, using berries only after full-unit foods. */
     public static Optional<Item> firstReserveItem(Inventory inventory) {
         for (Item item : ReserveItems.ONE_UNIT_PRIORITY) {

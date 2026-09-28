@@ -72,7 +72,6 @@ public record MiningBudget(
                     * RARE_EPOCH_FOOD_ALLOWANCE
                     + RARE_MISSION_FOOD_BUFFER;
     public static final int RARE_SERVICE_FOOD_FLOOR = 4;
-    public static final int RARE_RETRY_TORCHES = 40;
     /** Sixteen regular plus two margin forty-torch epochs; descent is added separately. */
     public static final int DIAMOND_STACK_MIN_BOOTSTRAP_TORCHES =
             (8 * RARE_RESOURCE_EPOCHS_PER_BATCH + DIAMOND_STACK_EPOCH_MARGIN)

@@ -38,11 +38,6 @@ public record MiningCursor(
                 0, Math.max(1, baseLegLength), 0);
     }
 
-    public MiningCursor withFace(BlockPos newFace) {
-        return new MiningCursor(schema, origin, newFace, directionIndex, legIndex,
-                stepsLeft, legLength, completedBatches);
-    }
-
     public MiningCursor withStrip(int newDirectionIndex, int newLegIndex,
                                   int newStepsLeft, int newLegLength) {
         return new MiningCursor(schema, origin, face, newDirectionIndex, newLegIndex,
