@@ -1196,10 +1196,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 // before mining. A live flow pushes the clientless player off its dry work pose,
                 // which repeatedly cancels BlockMiner and can strand one bucket per retry.
                 protectionPrepared = true;
-                enter(Phase.RECOVER_WATER);
-            } else {
-                enter(Phase.RECOVER_WATER);
             }
+            enter(Phase.RECOVER_WATER);
         }
     }
 
