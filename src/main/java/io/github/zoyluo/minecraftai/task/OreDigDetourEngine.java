@@ -440,6 +440,15 @@ final class OreDigDetourEngine {
      * sighting positions (the productive-cave check at arrival counts NEW ones against this snapshot), fix
      * the lease at {@link #FRONTIER_LEASE_TICKS} (not {@code DetourPolicy.leaseTicks}, which is ORE-only),
      * and enter {@link DetourPhase#FRONTIER_WALK} toward the first waypoint. The engine must be IDLE.
+     *
+     * <p>{@code ledger.noteStart} still runs (the {@code MAX_PER_MISSION} detour count is shared across
+     * kinds), but the excursion's own end -- {@link #finish}, {@link #rebase}, {@link #interrupt} or
+     * {@link #abandon} -- deliberately skips {@code ledger.noteEnd} for kind FRONTIER: FRONTIER pacing is
+     * {@code OreDigTask.frontierCooldownUntilServerTick} plus 5.4's own trigger conditions, which never
+     * consult the mission ledger to start, so a FRONTIER excursion ending must not set {@code lastEndTick}
+     * and arm the shared {@code min_interval * 2^routeFailures} rule that gates ordinary ORE detour starts
+     * (design 4.3). Without this, an excursion that ran right after a completed strip leg could block the
+     * next several hundred ticks of ORE detours for a reason that has nothing to do with them.</p>
      */
     void startFrontier(DetourHost host, FrontierSelection selection) {
         kind = ExcursionKind.FRONTIER;
@@ -516,7 +525,9 @@ final class OreDigDetourEngine {
         if (drift) {
             host.log("ore_dig_detour_cursor_drift", "face", anchor.face());
         }
-        ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        if (kind == ExcursionKind.ORE) {
+            ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        }
         host.log("ore_dig_detour_abort", "reason", reason == null ? "paused" : reason);
         DetourHost.Anchor result = anchor;
         resetToIdle(host);
@@ -533,7 +544,9 @@ final class OreDigDetourEngine {
         if (phase == DetourPhase.IDLE) {
             return;
         }
-        ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        if (kind == ExcursionKind.ORE) {
+            ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        }
         host.log("ore_dig_detour_abort", "reason", "abandoned");
         resetToIdle(host);
     }
@@ -1175,7 +1188,9 @@ final class OreDigDetourEngine {
         host.noteProgress();
         host.releaseClaims();
         boolean completed = abortReason == null;
-        ledger.noteEnd(host.serverTick(), completed, host.now() - startNow);
+        if (kind == ExcursionKind.ORE) {
+            ledger.noteEnd(host.serverTick(), completed, host.now() - startNow);
+        }
         String reason = abortReason != null ? abortReason : returnWhy;
         host.log("ore_dig_detour_end", "reason", reason, "breaks", breaks, "members", membersStarted,
                 "seals", seals, "drops_lost", dropsLost, "ticks", host.now() - startNow, "abort", abortReason);
@@ -1193,7 +1208,9 @@ final class OreDigDetourEngine {
         host.rebaseTargetMonitors();
         host.noteProgress();
         host.releaseClaims();
-        ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        if (kind == ExcursionKind.ORE) {
+            ledger.noteEnd(host.serverTick(), false, host.now() - startNow);
+        }
         host.log("ore_dig_detour_end", "reason", "return_rebased", "breaks", breaks, "members", membersStarted,
                 "seals", seals, "drops_lost", dropsLost, "ticks", host.now() - startNow, "abort", abortReason);
         Result result = Result.finished("return_rebased");
@@ -1212,6 +1229,18 @@ final class OreDigDetourEngine {
         return beginReturn(host, abortReason);
     }
 
+    /**
+     * Abort side effects (design 4.3, 4.12). The mission-ledger counters this touches -- route-failure
+     * counts (which feed {@code zeroTransitOnly}) and the hazard cooldown -- are ORE-only bookkeeping:
+     * {@code tool}/{@code tool_wear} and {@code fluid_unsealable} can only be reached from ORE's own
+     * MINE/POSTBREAK phases (FRONTIER_WALK never enters them), but {@code approach_stall}/{@code route} are
+     * reachable from BOTH {@link #tickApproach} and {@link #tickFrontierWalk}, and FRONTIER pacing is its own,
+     * separate mechanism ({@code OreDigTask.frontierCooldownUntilServerTick}, design 5.4's own trigger
+     * conditions) that never consults the mission ledger to start. Without this guard, a stalled or
+     * route-failing cave-frontier excursion would inflate {@code consecutiveRouteFailures} /
+     * {@code missionRouteFailures} and could arm {@code zeroTransitOnly}, throttling ordinary ORE detours for
+     * reasons that have nothing to do with them.
+     */
     private void applyAbortEffects(DetourHost host, String reason) {
         switch (reason) {
             case "lease" -> excludeCluster(host, ATTEMPT_EXCLUDE_TICKS);
@@ -1220,12 +1249,16 @@ final class OreDigDetourEngine {
                 if (pose != null) {
                     host.exclude(pose.stand(), FAILURE_EXCLUDE_TICKS);
                 }
-                ledger.noteRouteFailure(host.serverTick());
+                if (kind == ExcursionKind.ORE) {
+                    ledger.noteRouteFailure(host.serverTick());
+                }
             }
             case "tool", "tool_wear" -> excludeCluster(host, FAILURE_EXCLUDE_TICKS);
             case "fluid_unsealable" -> {
                 excludeCluster(host, FAILURE_EXCLUDE_TICKS);
-                ledger.noteHazard(host.serverTick());
+                if (kind == ExcursionKind.ORE) {
+                    ledger.noteHazard(host.serverTick());
+                }
             }
             default -> {
                 // safety_*, degraded_tps, paused, deep_dark_biome, poi_evidence, trap_spot, budget, capacity,

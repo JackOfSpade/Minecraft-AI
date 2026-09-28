@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
 import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
 import net.minecraft.util.math.BlockPos;
@@ -802,5 +803,73 @@ class OreDigDetourEngineTest {
         assertEquals("safety_hostile_pressure", r.reason());
         assertTrue(engine.wasFrontierUnproductive());
         assertEquals(0, host.panoramaBursts, "the excursion never reached the frontier to trigger a burst");
+    }
+
+    /** Audit finding (b): a FRONTIER excursion's own pacing is {@code OreDigTask.frontierCooldownUntilServerTick}
+     *  plus design 5.4's own trigger conditions, which never consult the mission ledger to start. Ending a
+     *  FRONTIER excursion must therefore leave {@code lastEndTick} alone, so it never arms the shared
+     *  {@code min_interval * 2^routeFailures} INTERVAL rule (design 4.3) that gates ordinary ORE detour starts. */
+    @Test
+    void unproductiveFrontierExcursionEndDoesNotArmTheOreStartInterval() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(6, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+        assertEquals("done", r.reason(), "unproductive: walks the ordinary RETURN leg back to the anchor");
+
+        assertEquals(MissionAssistLedger.NEVER, host.ledger.lastEndTick(),
+                "a FRONTIER excursion ending must not set lastEndTick");
+        assertEquals(MissionAssistLedger.StartVerdict.OK,
+                host.ledger.startVerdict(host.serverTick, host.cfg, host.maxElapsed),
+                "the shared ledger must not read INTERVAL for an ORE start right after a FRONTIER excursion ends");
+    }
+
+    /** Same as above, for the productive path ({@link #finish(DetourHost, boolean)} called with
+     *  {@code restoreAnchor = false} from {@code arriveAtFrontier}), and for a FRONTIER excursion that fails
+     *  its walk-only RETURN and rebases the cursor ({@code rebase}) -- both of the other {@code noteEnd} call
+     *  sites besides the ordinary FINISH path exercised above. */
+    @Test
+    void productiveFrontierExcursionEndDoesNotArmTheOreStartInterval() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(6, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+        host.sightings.add(new SightingLedger.Sighting(new BlockPos(20, 40, 0), "diamond_ore", 100, 0, 0));
+        host.sightings.add(new SightingLedger.Sighting(new BlockPos(21, 40, 0), "diamond_ore", 100, 0, 0));
+
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+        assertEquals("productive", r.reason());
+
+        assertEquals(MissionAssistLedger.NEVER, host.ledger.lastEndTick(),
+                "a productive FRONTIER excursion ending must not set lastEndTick either");
+    }
+
+    /** Audit finding (a): {@code approach_stall}/{@code route} aborts are reachable from BOTH
+     *  {@code tickApproach} (ORE) and {@code tickFrontierWalk} (FRONTIER). A FRONTIER route failure must not
+     *  feed the ORE-only route-failure counters that {@code zeroTransitOnly} and the INTERVAL exponent read. */
+    @Test
+    void frontierRouteFailureDoesNotIncrementOreRouteFailureCounters() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(20, 40, 0);
+        host.routeScript.add(DetourHost.RouteResult.FAILED);
+        host.routeScript.add(DetourHost.RouteResult.FAILED);
+        host.routeScript.add(DetourHost.RouteResult.FAILED);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+        assertEquals("route", r.reason());
+
+        assertEquals(0, host.ledger.consecutiveRouteFailures(),
+                "a FRONTIER route failure must not increment the ORE-only consecutiveRouteFailures counter");
+        assertEquals(0, host.ledger.missionRouteFailures(),
+                "a FRONTIER route failure must not increment the ORE-only missionRouteFailures counter");
+        assertFalse(host.ledger.zeroTransitOnly(host.serverTick),
+                "a FRONTIER route failure must never arm the ORE-only zeroTransitOnly window");
     }
 }

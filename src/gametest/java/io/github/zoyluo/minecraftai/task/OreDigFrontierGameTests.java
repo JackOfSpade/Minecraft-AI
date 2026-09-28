@@ -256,7 +256,9 @@ public final class OreDigFrontierGameTests {
         // biases ObservedGraphSearch's route to the frontier candidate. Deliberately on the NORTH (-Z) side of
         // the anchor, not the south: with explore.legChooser off, OreDigTask's own first strip leg always
         // starts along STRIP_DIRS[0] = Direction.NORTH (stripDirIndex defaults to 0), so once the mission
-        // resumes stripMine after the frontier excursion's RETURN and its own 600-tick unproductive cooldown,
+        // resumes stripMine right after the frontier excursion's RETURN (the 600-tick unproductive cooldown
+        // is frontierCooldownUntilServerTick, design 5.4's own re-trigger gate on a SECOND frontier excursion --
+        // it never gates stripMine or the ordinary P1 ORE detour, which the mission ledger paces separately),
         // the strip actually walks TOWARD this pillar and DetourPolicy's maxRadius (measured from the bot's
         // own live position every recheck, not a fixed point) can catch it -- placing it south, opposite that
         // deterministic direction, would have the strip walk permanently away and this test would never see a
