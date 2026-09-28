@@ -6,6 +6,8 @@ import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.Items;
@@ -19,6 +21,8 @@ import net.minecraft.util.math.Vec3d;
 import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class FishTask extends AbstractTask {
     private enum Phase {
@@ -179,7 +183,7 @@ public final class FishTask extends AbstractTask {
             }
             return;
         }
-        if (hasBite(hook.get()) || phaseTicks >= WAIT_BITE_FALLBACK_TICKS) {
+        if (hasBite(bot, hook.get()) || phaseTicks >= WAIT_BITE_FALLBACK_TICKS) {
             transition(Phase.REEL);
         }
     }
@@ -268,25 +272,29 @@ public final class FishTask extends AbstractTask {
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
-    private boolean hasBite(FishingBobberEntity hook) {
+    // Fields whose reflective lookup has already failed under both mapped names during this JVM
+    // run -- guards the one-time warning below so a mapping break is logged once, not every tick.
+    private static final Set<String> UNRESOLVED_FISH_BOBBER_FIELDS = ConcurrentHashMap.newKeySet();
+
+    private boolean hasBite(AIPlayerEntity bot, FishingBobberEntity hook) {
         if (hook.getHookedEntity() != null) {
             return true;
         }
-        return booleanField(hook, "caughtFish", "field_23232")
-                || intField(hook, "hookCountdown", "field_7173") > 0;
+        return booleanField(bot, hook, "caughtFish", "field_23232")
+                || intField(bot, hook, "hookCountdown", "field_7173") > 0;
     }
 
-    private static boolean booleanField(Object target, String named, String intermediary) {
-        Object value = fieldValue(target, named, intermediary);
+    private static boolean booleanField(AIPlayerEntity bot, Object target, String named, String intermediary) {
+        Object value = fieldValue(bot, target, named, intermediary);
         return value instanceof Boolean bool && bool;
     }
 
-    private static int intField(Object target, String named, String intermediary) {
-        Object value = fieldValue(target, named, intermediary);
+    private static int intField(AIPlayerEntity bot, Object target, String named, String intermediary) {
+        Object value = fieldValue(bot, target, named, intermediary);
         return value instanceof Integer integer ? integer : 0;
     }
 
-    private static Object fieldValue(Object target, String named, String intermediary) {
+    private static Object fieldValue(AIPlayerEntity bot, Object target, String named, String intermediary) {
         Class<?> type = target.getClass();
         for (String fieldName : new String[]{named, intermediary}) {
             try {
@@ -296,6 +304,12 @@ public final class FishTask extends AbstractTask {
             } catch (ReflectiveOperationException ignored) {
                 // Try the next runtime name. Yarn dev runs use named fields, remapped jars use intermediary names.
             }
+        }
+        // Both the yarn and intermediary names failed to resolve -- without this, hasBite()
+        // silently falls back to always-false with no diagnostic anywhere if a future mapping
+        // change renames the field again. Log once per field so the break is visible.
+        if (UNRESOLVED_FISH_BOBBER_FIELDS.add(named)) {
+            BotLog.warn(LogCategory.TASK, bot, "fish_bobber_field_unresolved", "field", named);
         }
         return null;
     }
