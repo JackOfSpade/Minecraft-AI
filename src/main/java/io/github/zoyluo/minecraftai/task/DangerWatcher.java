@@ -971,8 +971,19 @@ public final class DangerWatcher {
         }
         var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
+        int threshold = MinecraftAiConfig.get().night().torchLightThreshold();
         if (world.isSkyVisible(feet)
-                || world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) >= 8) {
+                || world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) >= threshold) {
+            return false;
+        }
+        // Block light alone also fires in broad daylight under a leaf canopy: isSkyVisible is
+        // false there (leaves are opaque to the sky-visibility test) even though enough sunlight
+        // filters through to keep the spot above the mob-spawn light level. The combined light --
+        // block light OR sky light reduced by the current ambient darkness, the same value vanilla
+        // uses for spawn eligibility -- stays high there during the day (ambient darkness ~0) and
+        // only drops at night, so require it to actually be spawn-dark too.
+        int combinedLight = world.getLightLevel(feet, world.getAmbientDarkness());
+        if (combinedLight >= threshold) {
             return false;
         }
         if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) <= 0) {
@@ -986,7 +997,8 @@ public final class DangerWatcher {
                 TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "dark_area_light"));
         nextNightAttemptTick.put(bot.getUuid(), now + 600);
         BotLog.danger(bot, "dark_area_lit",
-                "light", world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet));
+                "light", world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet),
+                "combined_light", combinedLight);
         return true;
     }
 

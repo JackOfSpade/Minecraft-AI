@@ -10,10 +10,15 @@ import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.LightType;
+import net.minecraft.world.World;
 
-import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.Queue;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class LightAreaTask extends AbstractTask {
     private enum Phase {
@@ -25,11 +30,22 @@ public final class LightAreaTask extends AbstractTask {
 
     private final int radius;
     private final int maxTorches;
-    private final Queue<BlockPos> targets = new LinkedList<>();
+    // The fixed pool of observable, dark, placeable floor cells within radius. Computed exactly
+    // once (in scan()), never rescanned mid-task: this is what keeps each decision cheap even
+    // though it drives every subsequent torch choice via TorchPlacementPlanner's prediction.
+    private final Set<BlockPos> cells = new LinkedHashSet<>();
+    private final Map<BlockPos, Integer> worldBlockLight = new HashMap<>();
+    // Torches this task itself has placed, used to PREDICT light at other cells instead of
+    // trusting a live world read that hasn't propagated yet (see TorchPlacementPlanner).
+    private final List<BlockPos> placedTorches = new ArrayList<>();
+    // Cells that turned out unreachable or unplaceable; excluded from future selection so the
+    // planner doesn't loop back onto them.
+    private final Set<BlockPos> excluded = new HashSet<>();
     private Phase phase = Phase.SCAN;
     private BlockPos target;
     private BlockPos standPos;
     private int placed;
+    private int threshold;
 
     public LightAreaTask(int radius, int maxTorches) {
         this.radius = Math.max(2, radius);
@@ -57,6 +73,13 @@ public final class LightAreaTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.SCAN;
+        cells.clear();
+        worldBlockLight.clear();
+        placedTorches.clear();
+        excluded.clear();
+        target = null;
+        standPos = null;
+        placed = 0;
     }
 
     @Override
@@ -85,26 +108,33 @@ public final class LightAreaTask extends AbstractTask {
     }
 
     private void scan(AIPlayerEntity bot) {
-        targets.clear();
         BlockPos origin = bot.getBlockPos();
-        int threshold = MinecraftAiConfig.get().night().torchLightThreshold();
+        threshold = MinecraftAiConfig.get().night().torchLightThreshold();
+        var world = bot.getEntityWorld();
         BlockPos.stream(origin.add(-radius, -2, -radius), origin.add(radius, 3, radius))
                 .map(BlockPos::toImmutable)
+                .filter(pos -> !pos.equals(origin) && !pos.equals(origin.up()))
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.down()))
-                .filter(pos -> canPlaceTorchAt(bot, pos, threshold))
-                .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)))
-                .limit(maxTorches)
-                .forEach(targets::add);
-        phase = targets.isEmpty() ? Phase.DONE : Phase.WALK;
+                .filter(pos -> isDarkFloorCell(world, pos, threshold))
+                .forEach(pos -> {
+                    cells.add(pos);
+                    worldBlockLight.put(pos, world.getLightLevel(LightType.BLOCK, pos));
+                });
+        pickNextTarget(bot);
+    }
+
+    private void pickNextTarget(AIPlayerEntity bot) {
+        Set<BlockPos> available = new LinkedHashSet<>(cells);
+        available.removeAll(excluded);
+        target = TorchPlacementPlanner.chooseNext(
+                available, worldBlockLight, placedTorches, bot.getBlockPos(), threshold);
+        standPos = null;
+        phase = target == null ? Phase.DONE : Phase.WALK;
     }
 
     private void walk(AIPlayerEntity bot) {
-        if (target == null || !canPlaceTorchAt(bot, target, MinecraftAiConfig.get().night().torchLightThreshold())) {
-            target = targets.poll();
-            standPos = null;
-        }
         if (target == null) {
-            phase = Phase.DONE;
+            pickNextTarget(bot);
             return;
         }
         if (bot.getEyePos().distanceTo(target.toCenterPos()) <= 4.0D) {
@@ -116,10 +146,12 @@ public final class LightAreaTask extends AbstractTask {
             standPos = adjacentStandPos(bot, target);
         }
         if (standPos == null) {
-            // Give up on this torch spot and switch to the next one on the next tick: if it eventually
-            // times out in WALK, just looking at "light_area_timeout phase=WALK" alone can't tell whether
-            // we kept failing to reach the same spot, or skipped several unreachable spots in a row.
+            // Give up on this torch spot and pick a fresh one on the next tick: if it eventually
+            // times out in WALK, just looking at "light_area_timeout phase=WALK" alone can't tell
+            // whether we kept failing to reach the same spot, or skipped several unreachable spots
+            // in a row.
             BotLog.action(bot, "light_area_target_unreachable", "pos", target.toShortString());
+            excluded.add(target);
             target = null;
             return;
         }
@@ -141,21 +173,25 @@ public final class LightAreaTask extends AbstractTask {
         ActionResult result = BuildAction.placeBlockAt(bot, target);
         if (result.isSuccess()) {
             placed++;
+            placedTorches.add(target);
+            cells.remove(target);
+        } else {
+            excluded.add(target);
         }
         target = null;
         if (placed >= maxTorches) {
             complete();
         } else {
-            phase = targets.isEmpty() ? Phase.SCAN : Phase.WALK;
+            pickNextTarget(bot);
         }
     }
 
-    private static boolean canPlaceTorchAt(AIPlayerEntity bot, BlockPos pos, int threshold) {
-        var world = bot.getEntityWorld();
-        BlockPos botFeet = bot.getBlockPos();
-        if (pos.equals(botFeet) || pos.equals(botFeet.up())) {
-            return false;
-        }
+    /**
+     * An observable air cell with a solid floor below it, currently below the light threshold --
+     * the same floor/air test the old scan() used, now also the definition of a "dark spawnable
+     * cell" that {@link TorchPlacementPlanner} tries to bring up to the threshold.
+     */
+    private static boolean isDarkFloorCell(World world, BlockPos pos, int threshold) {
         return world.getBlockState(pos).isAir()
                 && !world.getBlockState(pos.down()).isAir()
                 && world.getLightLevel(LightType.BLOCK, pos) < threshold;

@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.passive.PassiveEntity;
@@ -113,14 +114,26 @@ public final class DiagnosticLogger {
                     "submerged", now.submerged,
                     "air", now.air);
         }
-        // Death (still in the list but no longer alive)
+        // Alive -> !alive. Entity.isAlive() also goes false for a plain removal (chunk unload,
+        // despawn, the player disconnecting/quitting the world) that never touched health -- e.g.
+        // Moss was removed ~30ms before server_stopping when the user quit the world, at 20/20 hp,
+        // and that used to get misreported as diag_bot_died. Classify it first; only a real death
+        // gets diag_bot_died, everything else gets the lifecycle event below.
         if (prev.alive && !now.alive) {
-            BotLog.danger(bot, "diag_bot_died",
-                    "pos", now.x + "," + now.y + "," + now.z,
-                    "task", now.taskName + "/" + now.taskPhase,
-                    "fall", fmt(now.fallDistance),
-                    "in_lava", now.inLava,
-                    "air", now.air);
+            if (isRealDeath(now.health, now.removed, now.removalReason)) {
+                BotLog.danger(bot, "diag_bot_died",
+                        "pos", now.x + "," + now.y + "," + now.z,
+                        "task", now.taskName + "/" + now.taskPhase,
+                        "fall", fmt(now.fallDistance),
+                        "in_lava", now.inLava,
+                        "air", now.air);
+            } else {
+                BotLog.lifecycle(bot, "diag_bot_removed",
+                        "pos", now.x + "," + now.y + "," + now.z,
+                        "hp", fmt(now.health),
+                        "reason", now.removalReason == null ? "unknown" : now.removalReason.name(),
+                        "task", now.taskName + "/" + now.taskPhase);
+            }
         }
         // Large fall
         if (now.fallDistance > 4.0F && now.fallDistance > prev.fallDistance + 2.0F) {
@@ -235,6 +248,7 @@ public final class DiagnosticLogger {
         s.fallDistance = (float) bot.fallDistance;
         s.alive = bot.isAlive();
         s.removed = bot.isRemoved();
+        s.removalReason = bot.getRemovalReason();
         try {
             s.mode = bot.interactionManager.getGameMode().asString();
         } catch (RuntimeException ignored) {
@@ -301,6 +315,19 @@ public final class DiagnosticLogger {
         return end < 0 ? description.substring(idx + 6) : description.substring(idx + 6, end);
     }
 
+    /**
+     * A real death is zero/negative health, or an explicit KILLED removal (mirrors
+     * DangerWatcher.scanBot's own death check: {@code health <= 0 || removalReason == KILLED}).
+     * Any other removal reason (DISCARDED, UNLOADED_TO_CHUNK, the player quitting the world, ...)
+     * is a plain removal, not a death, even though Entity.isAlive() is false for it too.
+     */
+    static boolean isRealDeath(float health, boolean removed, Entity.RemovalReason removalReason) {
+        if (health <= 0.0F) {
+            return true;
+        }
+        return removed && removalReason == Entity.RemovalReason.KILLED;
+    }
+
     private static String fmt(float v) {
         return String.format(java.util.Locale.ROOT, "%.1f", v);
     }
@@ -319,6 +346,7 @@ public final class DiagnosticLogger {
         float fallDistance;
         boolean alive = true;
         boolean removed;
+        Entity.RemovalReason removalReason;
         String mode = "?";
         boolean submerged;
         boolean inLava;

@@ -44,7 +44,8 @@
       "io.github.zoyluo.minecraftai.task.OreDigOpportunisticLifecycleGameTests",
       "io.github.zoyluo.minecraftai.task.OreDigPoiGameTests",
       "io.github.zoyluo.minecraftai.task.LegChooserGameTests",
-      "io.github.zoyluo.minecraftai.task.OreDigFrontierGameTests"
+      "io.github.zoyluo.minecraftai.task.OreDigFrontierGameTests",
+      "io.github.zoyluo.minecraftai.task.LightAreaGameTests"
     ]
   },
   "depends": {
