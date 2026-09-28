@@ -88,13 +88,20 @@ public final class MiningAssistConfig {
         }
     }
 
-    /** Sensor budget. {@code shadowLog} defaults to true only in {@link AssistMode#SENSE}. */
+    /**
+     * Sensor budget. {@code shadowLog} defaults to true whenever the mode senses at all ({@link
+     * AssistMode#allowsSense()}: every mode but {@link AssistMode#OFF}), not only in the original
+     * {@link AssistMode#SENSE} phase -- DETOUR/POI/ALL still run the sensor (design: "the declaration
+     * order is the rollout order"), and a later phase needs the same shadow log for the same reason
+     * the SENSE-only rollout did (design 7: verify what the sensor believed it saw, at no behavioural
+     * cost). A later rollout flip must not silently turn the shadow log off.
+     */
     public record Sense(int raysPerTick, int globalRaysPerTick, boolean adaptiveThrottle, boolean shadowLog) {
         public static final int DEFAULT_RAYS_PER_TICK = 40;
         public static final int DEFAULT_GLOBAL_RAYS_PER_TICK = 640;
 
         public static Sense defaultsFor(AssistMode mode) {
-            return new Sense(DEFAULT_RAYS_PER_TICK, DEFAULT_GLOBAL_RAYS_PER_TICK, true, mode == AssistMode.SENSE);
+            return new Sense(DEFAULT_RAYS_PER_TICK, DEFAULT_GLOBAL_RAYS_PER_TICK, true, mode.allowsSense());
         }
     }
 
@@ -336,7 +343,7 @@ public final class MiningAssistConfig {
                 senseSection.integer("raysPerTick", Sense.DEFAULT_RAYS_PER_TICK, 1, 256),
                 senseSection.integer("globalRaysPerTick", Sense.DEFAULT_GLOBAL_RAYS_PER_TICK, 1, 4096),
                 senseSection.bool("adaptiveThrottle", true),
-                senseSection.bool("shadowLog", mode == AssistMode.SENSE));
+                senseSection.bool("shadowLog", mode.allowsSense()));
 
         Section tickSection = root.child("tick");
         double startWorkMs = tickSection.decimal("startWorkMs", Tick.DEFAULTS.startWorkMs(), 1.0D, 100.0D);

@@ -74,7 +74,8 @@ class MiningAssistConfigTest {
         assertFalse(c.harnessOff());
         assertTrue(c.warnings().isEmpty());
 
-        assertEquals(new Sense(40, 640, true, false), c.sense());
+        // shadowLog defaults on for every mode that senses (ALL included); only OFF turns it off.
+        assertEquals(new Sense(40, 640, true, true), c.sense());
         assertEquals(new Tick(38.0D, 48.0D), c.tick());
         assertEquals(new Route(100), c.route());
         assertEquals(new Detour(true, 25, 1.2D, 12, 6, 2, 300, 200, 24, 3, 4, 4, 90), c.detour());
@@ -126,13 +127,15 @@ class MiningAssistConfigTest {
     }
 
     @Test
-    void shadowLogDefaultsToTrueOnlyInSenseMode() {
+    void shadowLogDefaultsToTrueWheneverTheModeSenses() {
         for (AssistMode shipped : AssistMode.values()) {
             MiningAssistConfig c = MiningAssistConfig.parse(null, NO_ENV, shipped, false);
-            assertEquals(shipped == AssistMode.SENSE, c.sense().shadowLog(), "shipped " + shipped);
+            // DETOUR/POI/ALL still run the sensor (design: rollout order), so they still default the
+            // shadow log on, the same as SENSE; only OFF turns it off.
+            assertEquals(shipped.allowsSense(), c.sense().shadowLog(), "shipped " + shipped);
         }
-        // The resolved mode decides, so an env override to sense turns it on.
-        assertTrue(MiningAssistConfig.parse(null, env(MiningAssistConfig.ENV_MODE, "sense"), AssistMode.ALL, false)
+        // The resolved mode decides, so an env override to off turns it off even with a sensing default.
+        assertFalse(MiningAssistConfig.parse(null, env(MiningAssistConfig.ENV_MODE, "off"), AssistMode.ALL, false)
                 .sense().shadowLog());
         // An explicit key wins either way.
         assertFalse(MiningAssistConfig.parse(json("{\"miningAssist\":{\"sense\":{\"shadowLog\":false}}}"), NO_ENV,
