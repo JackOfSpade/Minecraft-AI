@@ -351,15 +351,15 @@ public final class HuntCrossRegionGameTests {
         }
         BlockPos beyond = new BlockPos(start.getX() + 12, baseY, start.getZ());
         int floorY = baseY - 16;
-        HuntTask.SurfaceRouteProof proof = HuntTask.provePreyApproachRoute(
+        HuntTask.SurfaceRouteProof proof = HuntSurfaceRoutes.provePreyApproachRoute(
                 null, world, start, beyond, floorY, null);
         require(context, proof == HuntTask.SurfaceRouteProof.SAFE,
                 "near-level dirt wall was not dig-provable: " + proof);
 
-        require(context, HuntTask.digBreakthroughFloor(start, beyond, floorY)
+        require(context, HuntSurfaceRoutes.digBreakthroughFloor(start, beyond, floorY)
                         == Math.max(floorY, baseY - 1),
                 "breakthrough floor must sit one block under the lower endpoint");
-        require(context, HuntTask.digBreakthroughFloor(start, beyond, baseY + 4)
+        require(context, HuntSurfaceRoutes.digBreakthroughFloor(start, beyond, baseY + 4)
                         == baseY + 4,
                 "breakthrough floor must never drop below the caller's minimum");
         java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> stair = new java.util.ArrayList<>();
@@ -539,8 +539,8 @@ public final class HuntCrossRegionGameTests {
             }
         }
 
-        BlockPos firstCompass = HuntTask.rotatedRoamColumn(start, 1, 0, 32, 0);
-        BlockPos rotatedRetry = HuntTask.rotatedRoamColumn(start, 1, 0, 32, 1);
+        BlockPos firstCompass = HuntSurfaceRoutes.rotatedRoamColumn(start, 1, 0, 32, 0);
+        BlockPos rotatedRetry = HuntSurfaceRoutes.rotatedRoamColumn(start, 1, 0, 32, 1);
         require(context, firstCompass.equals(start.add(32, 0, 0)),
                 "serial-zero roam geometry changed: " + firstCompass.toShortString());
         require(context, !world.getBlockState(firstCompass.down()).isOf(Blocks.STONE),
@@ -783,14 +783,14 @@ public final class HuntCrossRegionGameTests {
         world.setBlockState(pocket, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(pocket.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
 
-        require(context, !HuntTask.hasWalkableReturnRoute(world, pocket, origin),
+        require(context, !HuntSurfaceRoutes.hasWalkableReturnRoute(world, pocket, origin),
                 "one-way drop pocket was accepted as reusable surface exploration");
 
         BlockPos flat = origin.east();
         world.setBlockState(flat.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(flat, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(flat.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        require(context, HuntTask.hasWalkableReturnRoute(world, flat, origin),
+        require(context, HuntSurfaceRoutes.hasWalkableReturnRoute(world, flat, origin),
                 "adjacent reversible surface waypoint was rejected");
         context.complete();
     }
@@ -1163,7 +1163,7 @@ public final class HuntCrossRegionGameTests {
                 world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
             }
         }
-        require(context, !HuntTask.hasWalkableReturnRoute(world, pitCell, killCell),
+        require(context, !HuntSurfaceRoutes.hasWalkableReturnRoute(world, pitCell, killCell),
                 "deep pickup pit unexpectedly had a walkable return route");
 
         var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
@@ -1271,10 +1271,10 @@ public final class HuntCrossRegionGameTests {
         BlockPos initialPreyCell = start.east(6);
         BlockPos movedPreyCell = start.add(-6, 0, 4);
         int surfaceFloorY = start.getY() - 16;
-        require(context, HuntTask.hasRoundTripSurfaceRoute(
+        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                         world, start, initialPreyCell, surfaceFloorY),
                 "initial moving-prey cell was not safely reversible");
-        require(context, HuntTask.hasRoundTripSurfaceRoute(
+        require(context, HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                         world, start, movedPreyCell, surfaceFloorY),
                 "relocated moving-prey cell was not safely reversible");
 
@@ -1341,7 +1341,7 @@ public final class HuntCrossRegionGameTests {
                 require(context, chicken.getBlockPos().getSquaredDistance(initialPreyCell) >= 100.0D,
                         "fixture did not force the chicken far enough to require reselection");
                 require(context, chicken.getBlockPos().getY() >= surfaceFloorY
-                                && HuntTask.hasRoundTripSurfaceRoute(
+                                && HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                                 world, relocationOrigin, chicken.getBlockPos(), surfaceFloorY),
                         "forced chicken destination was not safely reversible");
                 botAtRelocation.set(relocationOrigin);
@@ -1363,7 +1363,7 @@ public final class HuntCrossRegionGameTests {
                         "hunt entered melee without physically traveling toward relocated prey");
                 require(context, bot.getBlockPos().getY() >= surfaceFloorY
                                 && chicken.getBlockPos().getY() >= surfaceFloorY
-                                && HuntTask.hasRoundTripSurfaceRoute(
+                                && HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                                 world, botAtRelocation.get(),
                                 bot.getBlockPos(), surfaceFloorY),
                         "relocated melee envelope was not reached on reversible safe surface");

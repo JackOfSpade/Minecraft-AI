@@ -109,6 +109,48 @@ public class HuntPickupCheckpointTest {
                 null, java.util.Optional.empty()));
     }
 
+    @Test
+    void encodeMatchesLegacyHuntTaskInlineEncoding() {
+        // combat-hunt-checkpoint-codec-duplication: HuntTask used to carry its own private,
+        // line-for-line copy of this encode/decode logic and built this exact key/value
+        // sequence (captured from that inline LinkedHashMap writer before it was deleted in
+        // favor of delegating to this codec) for an in-progress pickup transaction. This test
+        // pins that legacy wire format against the shared codec HuntTask now delegates to, so a
+        // future change here cannot silently drift from what HuntTask used to write on disk.
+        Map<String, String> expectedLegacyEncoding = new LinkedHashMap<>();
+        expectedLegacyEncoding.put("task_schema", "1");
+        expectedLegacyEncoding.put("cursor_kind", "hunt_pickup");
+        expectedLegacyEncoding.put("transaction_state", "OPEN");
+        expectedLegacyEncoding.put("target_count", "6");
+        expectedLegacyEncoding.put("require_full_quota", "false");
+        expectedLegacyEncoding.put("dimension", "minecraft:overworld");
+        expectedLegacyEncoding.put("expected_raw_item", "minecraft:porkchop");
+        expectedLegacyEncoding.put("pickup_origin", "12,70,-5");
+        expectedLegacyEncoding.put("pickup_return_anchor", "10,70,-5");
+        expectedLegacyEncoding.put("inventory_baseline", "2");
+        expectedLegacyEncoding.put("pickup_stat_baseline", "9");
+        expectedLegacyEncoding.put("aux_inventory_baseline", "1");
+        expectedLegacyEncoding.put("aux_pickup_stat_baseline", "3");
+        expectedLegacyEncoding.put("pickup_started_world_time", "5000");
+        expectedLegacyEncoding.put("bound_drop_units", FIRST + "=2;" + SECOND + "=1");
+
+        HuntPickupCheckpoint.Metadata metadata = new HuntPickupCheckpoint.Metadata(
+                HuntPickupCheckpoint.State.OPEN, 6, false, "minecraft:overworld",
+                "minecraft:porkchop",
+                new HuntPickupCheckpoint.Position(12, 70, -5),
+                new HuntPickupCheckpoint.Position(10, 70, -5),
+                2, 9, 1, 3, 5000, Map.of(FIRST, 2, SECOND, 1));
+
+        Map<String, String> encoded = HuntPickupCheckpoint.encode(metadata);
+
+        assertEquals(expectedLegacyEncoding, encoded);
+        // And it round-trips cleanly back through the very codec that produced it.
+        HuntPickupCheckpoint.Metadata restored = HuntPickupCheckpoint.inspect(encoded)
+                .orElseThrow();
+        assertEquals(metadata.expectedRawItemId(), restored.expectedRawItemId());
+        assertEquals(metadata.boundDropUnits(), restored.boundDropUnits());
+    }
+
     public static Map<String, String> openCheckpoint(String units) {
         Map<String, String> checkpoint = new LinkedHashMap<>();
         checkpoint.put("task_schema", "1");

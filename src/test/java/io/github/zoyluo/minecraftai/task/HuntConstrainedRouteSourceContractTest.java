@@ -12,23 +12,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Locks every Hunt movement segment to its runtime surface/return contract.
  *
- * <p>These assertions read {@code HuntTask.java} as text on purpose: loading the class would
- * initialise its {@code EntityType}/{@code Item} constants, which needs a bootstrapped Minecraft
- * registry that plain unit tests do not have. The executable geometry checks live in
- * {@code PathExecutorRouteContractTest} instead.</p>
+ * <p>These assertions read {@code HuntTask.java} (and, for the shared stateless route-proving
+ * primitives extracted out of it, {@code HuntSurfaceRoutes.java}) as text on purpose: loading the
+ * class would initialise its {@code EntityType}/{@code Item} constants, which needs a
+ * bootstrapped Minecraft registry that plain unit tests do not have. The executable geometry
+ * checks live in {@code PathExecutorRouteContractTest} instead.</p>
  */
 class HuntConstrainedRouteSourceContractTest {
     private static final Path SOURCE = Path.of(
             "src/main/java/io/github/zoyluo/minecraftai/task/HuntTask.java");
+    private static final Path ROUTES = Path.of(
+            "src/main/java/io/github/zoyluo/minecraftai/task/HuntSurfaceRoutes.java");
 
     @Test
     void exactSurfaceStarterAlwaysThreadsRuntimeContractIntoActionPack()
             throws IOException {
-        String source = Files.readString(SOURCE);
-        String starter = between(
-                source,
-                "private static SurfacePathStart startExactSurfacePath",
-                "// Keep scanning for prey while roaming");
+        // combat-hunttask-surface-route-cluster: this starter (and the proof it delegates to)
+        // now live in HuntSurfaceRoutes, the package-private helper HuntTask calls into.
+        String routes = Files.readString(ROUTES);
+        String starter = from(
+                routes, "static HuntTask.SurfacePathStart startExactSurfacePath");
 
         assertFalse(starter.contains("startSurfacePathTo(destination);"),
                 "Hunt must not start an unrestricted one-argument surface path");
@@ -51,7 +54,7 @@ class HuntConstrainedRouteSourceContractTest {
         String roam = between(
                 source,
                 "private RoamResult roamForPrey",
-                "/**\n     * Produces a new deterministic surface-sampling fan");
+                "// Keep scanning for prey while roaming");
 
         assertTrue(approach.contains(
                         "BlockPos returnAnchor = bot.getBlockPos().toImmutable();"));
@@ -115,11 +118,11 @@ class HuntConstrainedRouteSourceContractTest {
 
     @Test
     void exactSurfaceProofDelegatesToTheSharedRouteContract() throws IOException {
-        String source = Files.readString(SOURCE);
+        String routes = Files.readString(ROUTES);
         String proof = between(
-                source,
-                "private static SurfaceRouteProof proveExactSurfaceRoute",
-                "private static SurfacePathStart startExactSurfacePath");
+                routes,
+                "private static HuntTask.SurfaceRouteProof proveExactSurfaceRoute",
+                "static HuntTask.SurfacePathStart startExactSurfacePath");
 
         assertTrue(proof.contains("PathExecutor.isExactConstrainedRoute("),
                 "exactness must be decided by the shared route contract, not a local copy");
@@ -133,5 +136,11 @@ class HuntConstrainedRouteSourceContractTest {
         assertTrue(start >= 0 && end > start,
                 () -> "missing source markers: " + startMarker + " -> " + endMarker);
         return source.substring(start, end);
+    }
+
+    private static String from(String source, String startMarker) {
+        int start = source.indexOf(startMarker);
+        assertTrue(start >= 0, () -> "missing source marker: " + startMarker);
+        return source.substring(start);
     }
 }

@@ -1,15 +1,10 @@
 package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalPlanner;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
-import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
-import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
-import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
@@ -27,7 +22,6 @@ import net.minecraft.util.math.Vec3d;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -53,7 +47,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private enum Phase { RETURN_SURFACE, ACQUIRE, APPROACH, STRIKE, PICKUP, ROAM }
     public enum TransactionState { OPEN, CLOSED_COLLECTED, CLOSED_NO_RAW }
     private enum RoamResult { STARTED, RETRY, EXHAUSTED }
-    private enum SurfacePathStart { STARTED, RETRY, UNREACHABLE }
+    enum SurfacePathStart { STARTED, RETRY, UNREACHABLE }
     enum SurfaceRouteProof { SAFE, RETRY, UNREACHABLE }
 
     private record AttackPoseSelection(
@@ -80,27 +74,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private static final int APPROACH_STUCK_TICKS = 30;
     private static final int MAX_PREY_ROAMS = 10;      // Max number of roam-to-a-new-tile attempts when no prey is found (search more tiles when the target amount is large)
     private static final int ROAM_DISTANCE = 32;       // Horizontal distance covered by each roam
-    private static final int ROAM_RETRY_ROTATION_DEGREES = 11;
     private static final int MAX_SURFACE_DESCENT = 16;
-    /** Match ActionPack's surface-path budget so its outbound execution reuses A*'s success cache. */
-    private static final int SURFACE_ROUTE_MAX_NODES = 10_000;
-    private static final long SURFACE_ROUTE_MAX_MILLIS = 50L;
     private static final int SURFACE_RETURN_LIMIT = 400;
     private static final double MIN_ROAM_ADVANCE_SQUARED = 64.0D; // Must actually travel at least 8 blocks for a tile to count as explored
     private static final int WET_PREY_REJECTION_TICKS = 300; // After getting back on dry land, don't re-chase for 15s the same animal that just led the bot into water
     private static final int BLIND_PICKUP_SWEEP_DELAY = 20; // Even if no by-product was picked up, still run a bounded search, to cover single-drop prey like pigs
-    private static final int PICKUP_DROP_BIND_WINDOW = 40;
     private static final double PICKUP_DROP_ORIGIN_RADIUS_SQUARED = 16.0D;
-    private static final int PICKUP_CHECKPOINT_SCHEMA = 1;
-    private static final int MAX_BOUND_DROP_ENTRIES = 16;
-    private static final int MAX_BOUND_DROP_UNITS = 64;
-    private static final Set<String> PICKUP_CHECKPOINT_KEYS = Set.of(
-            "task_schema", "cursor_kind", "transaction_state",
-            "target_count", "require_full_quota", "dimension", "expected_raw_item",
-            "pickup_origin", "pickup_return_anchor", "inventory_baseline",
-            "pickup_stat_baseline", "aux_inventory_baseline",
-            "aux_pickup_stat_baseline", "pickup_started_world_time",
-            "bound_drop_units");
 
     // Edible prey and their raw meat drops (get the raw meat first, before cooking).
     private static final Set<EntityType<?>> PREY = Set.of(
@@ -473,7 +452,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         BlockPos destination = new BlockPos(anchor.x(), anchor.y(), anchor.z());
         int returnFloor = Math.min(
                 bot.getBlockPos().getY(), surfaceFloorY(anchor));
-        SurfacePathStart start = startExactSurfacePath(
+        SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
                 bot, destination, returnFloor, null);
         if (start == SurfacePathStart.UNREACHABLE) {
             fail("hunt_surface_return_unreachable anchor=" + destination.toShortString()
@@ -513,7 +492,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (bot.getActionPack().isPathExecutorIdle()) {
             int returnFloor = Math.min(
                     bot.getBlockPos().getY(), surfaceFloorY(anchor));
-            SurfacePathStart start = startExactSurfacePath(
+            SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
                     bot, destination, returnFloor, null);
             if (start == SurfacePathStart.UNREACHABLE) {
                 fail("hunt_surface_return_unreachable anchor=" + destination.toShortString()
@@ -581,9 +560,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (bot.getBlockPos().equals(attackPose)) {
             return SurfacePathStart.STARTED;
         }
-        return startExactSurfacePath(
+        return HuntSurfaceRoutes.startExactSurfacePath(
                 bot, attackPose,
-                digBreakthroughFloor(bot.getBlockPos(), attackPose, surfaceFloorY(bot)),
+                HuntSurfaceRoutes.digBreakthroughFloor(bot.getBlockPos(), attackPose, surfaceFloorY(bot)),
                 returnAnchor, true);
     }
 
@@ -642,7 +621,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     || !isObservableStandCandidate(bot, candidate, current, floorY)) {
                 continue;
             }
-            SurfaceRouteProof outbound = provePreyApproachRoute(
+            SurfaceRouteProof outbound = HuntSurfaceRoutes.provePreyApproachRoute(
                     bot, bot.getEntityWorld(), current, candidate, floorY, null);
             if (outbound == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
@@ -651,7 +630,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if (outbound != SurfaceRouteProof.SAFE) {
                 continue;
             }
-            SurfaceRouteProof dropRecovery = proveRoundTripSurfaceRoute(
+            SurfaceRouteProof dropRecovery = HuntSurfaceRoutes.proveRoundTripSurfaceRoute(
                     bot.getEntityWorld(), candidate, preyCell, floorY);
             if (dropRecovery == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
@@ -857,7 +836,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         for (int dist = ROAM_DISTANCE; dist >= ROAM_DISTANCE / 4; dist /= 2) {
             for (int i = 0; i < dirs.length; i++) {
                 int[] d = dirs[(start + i) % dirs.length];
-                BlockPos column = rotatedRoamColumn(feet, d[0], d[1], dist, attemptSerial);
+                BlockPos column = HuntSurfaceRoutes.rotatedRoamColumn(feet, d[0], d[1], dist, attemptSerial);
                 BlockPos ground = findGround(world, column.getX(), column.getZ());
                 if (ground == null
                         || ground.getY() < surfaceFloorY(bot)
@@ -873,7 +852,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 // Before accepting a lower waypoint, prove that a no-dig/no-pillar route can walk
                 // back to the current surface. This rejects seed-3000's chained safe drops into a
                 // Y=53 pocket whose only reverse path consumed pillar blocks and stranded the bot.
-                if (!hasRoundTripSurfaceRoute(
+                if (!HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                         world, feet, ground, surfaceFloorY(bot))) {
                     EpisodeMemory.INSTANCE.exclude(bot.getUuid(), ground,
                             bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
@@ -887,7 +866,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 // isPathExecutorIdle would be true -> instantly fall back to ACQUIRE -> roam again...
                 // firing 3 roams in the same second and instantly burning the whole roam budget while
                 // the bot never moved (observed: hunt spun idle for 642t on barren terrain and failed).
-                SurfacePathStart pathStart = startExactSurfacePath(
+                SurfacePathStart pathStart = HuntSurfaceRoutes.startExactSurfacePath(
                         bot, ground, surfaceFloorY(bot), feet);
                 if (pathStart == SurfacePathStart.RETRY) {
                     nextRoamRetryTick = elapsed + 5;
@@ -922,185 +901,6 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 "ordinal", claimedOrdinal,
                 "from", feet.toShortString());
         return RoamResult.RETRY;
-    }
-
-    /**
-     * Produces a new deterministic surface-sampling fan after every fully rejected roam attempt.
-     * Serial zero is byte-for-byte the old cardinal/diagonal geometry. Later attempts rotate that
-     * fan through the 45-degree symmetry sector, so a narrow ridge between the compass axes can be
-     * discovered without randomness, teleporting, digging, or accepting a one-way drop.
-     */
-    static BlockPos rotatedRoamColumn(BlockPos origin, int dx, int dz, int distance, int attemptSerial) {
-        double baseAngle = Math.atan2(dz, dx);
-        int rotation = Math.floorMod(attemptSerial * ROAM_RETRY_ROTATION_DEGREES, 45);
-        double angle = baseAngle + Math.toRadians(rotation);
-        double radius = distance * Math.sqrt((double) dx * dx + (double) dz * dz);
-        int x = origin.getX() + (int) Math.round(Math.cos(angle) * radius);
-        int z = origin.getZ() + (int) Math.round(Math.sin(angle) * radius);
-        return new BlockPos(x, origin.getY(), z);
-    }
-
-    static boolean hasWalkableReturnRoute(ServerWorld world, BlockPos waypoint, BlockPos origin) {
-        return hasExactSurfaceRoute(world, waypoint, origin, Integer.MIN_VALUE);
-    }
-
-    static boolean hasRoundTripSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
-        return proveRoundTripSurfaceRoute(
-                world, origin, destination, minimumY) == SurfaceRouteProof.SAFE;
-    }
-
-    private static boolean hasExactSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
-        return proveExactSurfaceRoute(
-                world, origin, destination, minimumY) == SurfaceRouteProof.SAFE;
-    }
-
-    private static SurfaceRouteProof proveRoundTripSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
-        return proveSurfaceRouteContract(
-                world, origin, destination, minimumY, origin);
-    }
-
-    private static SurfaceRouteProof proveSurfaceRouteContract(
-            ServerWorld world, BlockPos origin, BlockPos destination,
-            int minimumY, BlockPos returnAnchor) {
-        SurfaceRouteProof outbound =
-                proveExactSurfaceRoute(world, origin, destination, minimumY);
-        if (outbound != SurfaceRouteProof.SAFE) {
-            return outbound;
-        }
-        return returnAnchor == null ? SurfaceRouteProof.SAFE
-                : proveExactSurfaceRoute(
-                        world, destination, returnAnchor, minimumY);
-    }
-
-    /**
-     * Prey-approach contract: the outbound leg may dig a near-level stair through obstacles
-     * (walk-only first, dig fallback at most one block under the lower endpoint), while the
-     * return proof stays strictly no-dig. On natural hills the walk-only outbound rejected
-     * nearly every visible herd (no_round_trip) and starved whole missions; a dug stair is
-     * itself walk-only returnable, and the debt protection - never needing fresh digging on
-     * the way back - is unchanged. Deep trench crossings stay rejected: the A* prefers drop
-     * shortcuts there, and a reversible stair across a void is not something it will find.
-     * Every other route (surface returns, roams, pickup sweeps) stays strict.
-     */
-    static SurfaceRouteProof provePreyApproachRoute(
-            AIPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos destination,
-            int minimumY, BlockPos returnAnchor) {
-        SurfaceRouteProof outbound =
-                proveExactDigFallbackRoute(bot, world, origin, destination, minimumY);
-        if (outbound != SurfaceRouteProof.SAFE) {
-            return outbound;
-        }
-        return returnAnchor == null ? SurfaceRouteProof.SAFE
-                : proveExactSurfaceRoute(
-                        world, destination, returnAnchor, minimumY);
-    }
-
-    /** Near-level breakthrough floor: at most one block under the lower endpoint. */
-    static int digBreakthroughFloor(BlockPos origin, BlockPos destination, int minimumY) {
-        return Math.max(minimumY,
-                Math.min(origin.getY(), destination.getY()) - 1);
-    }
-
-    // bot is only used to gate NeighborEnumerator's DIG_THROUGH lava/water preflight on real
-    // observability (see AStarPathfinder's AIPlayerEntity constructor); it may be null (e.g. a
-    // proof run with no live bot handy), which safely degrades to allow-unknown at plan time --
-    // PathExecutor.tickDigThrough()'s reactive check is what actually keeps that safe at runtime.
-    private static SurfaceRouteProof proveExactDigFallbackRoute(
-            AIPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
-        SurfaceRouteProof walk = proveExactSurfaceRoute(world, origin, destination, minimumY);
-        if (walk == SurfaceRouteProof.SAFE) {
-            return walk;
-        }
-        // RETRY must fall through too: on natural hillsides the walk-only search burns its whole
-        // node/time budget hunting for a way around and reports RETRY forever - the dig search
-        // straight through the hill is cheaper and decisive (from-zero evidence: walk RETRY
-        // starved every hunt while the dig proof never ran).
-        int digFloor = digBreakthroughFloor(origin, destination, minimumY);
-        Standability.clearCache();
-        PathfindingResult result = new AStarPathfinder(
-                bot, world, origin, destination,
-                SURFACE_ROUTE_MAX_NODES, SURFACE_ROUTE_MAX_MILLIS,
-                false, true).findPathUncachedAtOrAbove(digFloor);
-        if (result.success()) {
-            // The dug corridor is itself the walk-only return route, but only when every
-            // step is stair-shaped: a dig path that drops more than one block cannot be
-            // walked back up, and digging on the way home is exactly the debt this
-            // contract exists to prevent.
-            return PathExecutor.isExactConstrainedRoute(result, origin, destination, digFloor)
-                    && PathExecutor.isReversibleStair(result)
-                    ? SurfaceRouteProof.SAFE : SurfaceRouteProof.UNREACHABLE;
-        }
-        return result.reason() == FailureReason.NO_START
-                || result.reason() == FailureReason.TIMEOUT
-                || result.reason() == FailureReason.SEARCH_LIMIT
-                ? SurfaceRouteProof.RETRY : SurfaceRouteProof.UNREACHABLE;
-    }
-
-    private static SurfaceRouteProof proveExactSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
-        Standability.clearCache();
-        if (origin.equals(destination)) {
-            return origin.getY() >= minimumY && Standability.isStandable(world, origin)
-                    ? SurfaceRouteProof.SAFE : SurfaceRouteProof.RETRY;
-        }
-        PathfindingResult result = new AStarPathfinder(
-                world, origin, destination,
-                SURFACE_ROUTE_MAX_NODES, SURFACE_ROUTE_MAX_MILLIS,
-                false, false).findPathUncachedAtOrAbove(minimumY);
-        if (result.success()) {
-            return PathExecutor.isExactConstrainedRoute(
-                            result, origin, destination, minimumY)
-                    ? SurfaceRouteProof.SAFE : SurfaceRouteProof.UNREACHABLE;
-        }
-        return result.reason() == FailureReason.NO_START
-                || result.reason() == FailureReason.TIMEOUT
-                || result.reason() == FailureReason.SEARCH_LIMIT
-                ? SurfaceRouteProof.RETRY : SurfaceRouteProof.UNREACHABLE;
-    }
-
-    private static SurfacePathStart startExactSurfacePath(
-            AIPlayerEntity bot, BlockPos destination, int minimumY,
-            BlockPos returnAnchor) {
-        return startExactSurfacePath(bot, destination, minimumY, returnAnchor, false);
-    }
-
-    /** Prey-approach variant: the executed outbound leg matches the dig-fallback proof. */
-    private static SurfacePathStart startExactSurfacePath(
-            AIPlayerEntity bot, BlockPos destination, int minimumY,
-            BlockPos returnAnchor, boolean digFallbackOutbound) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        SurfaceRouteProof proof = digFallbackOutbound
-                ? provePreyApproachRoute(bot, world, origin, destination, minimumY, returnAnchor)
-                : proveSurfaceRouteContract(
-                        world, origin, destination, minimumY, returnAnchor);
-        if (proof == SurfaceRouteProof.RETRY) {
-            return SurfacePathStart.RETRY;
-        }
-        if (proof != SurfaceRouteProof.SAFE) {
-            return SurfacePathStart.UNREACHABLE;
-        }
-        ActionResult result = returnAnchor == null
-                ? bot.getActionPack().startSurfacePathTo(destination, minimumY)
-                : digFallbackOutbound
-                ? bot.getActionPack().startSurfaceDigFallbackPathTo(
-                        destination, minimumY, returnAnchor)
-                : bot.getActionPack().startSurfacePathTo(
-                        destination, minimumY, returnAnchor);
-        if (result.isFailed()) {
-            return "pathfinding_throttled".equals(result.reason())
-                    || result.reason().contains("NO_START")
-                    ? SurfacePathStart.RETRY : SurfacePathStart.UNREACHABLE;
-        }
-        BlockPos resolved = bot.getActionPack().activePathGoal();
-        if (resolved == null || !resolved.equals(destination)) {
-            bot.getActionPack().stopAll();
-            return SurfacePathStart.UNREACHABLE;
-        }
-        return SurfacePathStart.STARTED;
     }
 
     // Keep scanning for prey while roaming: switch to hunting as soon as one is found; on reaching
@@ -1403,7 +1203,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                         && ObservableWorldQuery.canObserveEntity(bot, entity));
         for (ItemEntity drop : freshDrops) {
             int units = drop.getStack().getCount();
-            if (units > 0 && bindDropUnits(targetFreshRawDropUnits, drop.getUuid(), units)) {
+            if (units > 0 && HuntPickupCheckpoint.bindDropUnits(
+                    targetFreshRawDropUnits, drop.getUuid(), units)) {
                 BotLog.action(bot, "hunt_kill_drop_identity_bound",
                         "drop", drop.getUuid(),
                         "item", targetExpectedRawMeat,
@@ -1458,9 +1259,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 : HarvestCore.countInventoryItems(bot, Set.of(pickupExpectedRawMeat));
         int currentPickupStat = pickupExpectedRawMeat == null ? 0
                 : bot.getStatHandler().getStat(Stats.PICKED_UP, pickupExpectedRawMeat);
-        int requiredUnits = Math.max(1, boundDropUnitCount(pickupDropUnits));
+        int requiredUnits = Math.max(1,
+                HuntPickupCheckpoint.boundDropUnitCount(pickupDropUnits));
         boolean collectionConfirmed = pickupExpectedRawMeat != null
-                && collectionCoversBoundUnits(
+                && HuntPickupCheckpoint.collectionCoversBoundUnits(
                 pickupInventoryBaseline, currentMeat,
                 pickupRawMeatStatBaseline, currentPickupStat, requiredUnits);
         boolean auxiliaryPickupObserved = HarvestCore.countInventoryItems(bot, PREY_AUXILIARY_DROPS)
@@ -1548,7 +1350,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             boolean bound = pickupDropUnits.containsKey(drop.getUuid());
             if (!bound && isFreshTransactionDrop(drop, transactionAge)) {
                 int units = drop.getStack().getCount();
-                if (units > 0 && bindDropUnits(pickupDropUnits, drop.getUuid(), units)) {
+                if (units > 0 && HuntPickupCheckpoint.bindDropUnits(
+                        pickupDropUnits, drop.getUuid(), units)) {
                     checkpointDirty = true;
                     bound = true;
                     BotLog.action(bot, "hunt_pickup_drop_bound",
@@ -1561,7 +1364,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     checkpointDirty = true;
                     fail("hunt_pickup_checkpoint_capacity:entries="
                             + pickupDropUnits.size() + ":units="
-                            + boundDropUnitCount(pickupDropUnits));
+                            + HuntPickupCheckpoint.boundDropUnitCount(pickupDropUnits));
                     return Optional.empty();
                 }
             }
@@ -1578,7 +1381,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private boolean isFreshTransactionDrop(ItemEntity drop, long transactionAge) {
-        if (!canBindFreshDropAtAge(transactionAge)) {
+        if (!HuntPickupCheckpoint.canBindFreshDropAtAge(transactionAge)) {
             return false;
         }
         int itemAge = drop.getItemAge();
@@ -1596,50 +1399,6 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     static long pickupAgeAt(long startedWorldTime, long currentWorldTime) {
         return startedWorldTime < 0L || currentWorldTime < startedWorldTime
                 ? -1L : currentWorldTime - startedWorldTime;
-    }
-
-    static boolean canBindFreshDropAtAge(long transactionAge) {
-        return transactionAge >= 0L && transactionAge <= PICKUP_DROP_BIND_WINDOW;
-    }
-
-    static boolean collectionCoversBoundUnits(
-            int inventoryBaseline, int currentInventory,
-            int pickupStatBaseline, int currentPickupStat,
-            int requiredUnits) {
-        return requiredUnits > 0
-                && ((long) currentInventory - inventoryBaseline >= requiredUnits
-                || (long) currentPickupStat - pickupStatBaseline >= requiredUnits);
-    }
-
-    private static boolean bindDropUnits(
-            Map<UUID, Integer> unitsById, UUID id, int units) {
-        if (id == null || units <= 0 || units > MAX_BOUND_DROP_UNITS) {
-            return false;
-        }
-        Integer existing = unitsById.get(id);
-        if (existing != null) {
-            return existing == units;
-        }
-        if (unitsById.size() >= MAX_BOUND_DROP_ENTRIES
-                || (long) boundDropUnitCount(unitsById) + units > MAX_BOUND_DROP_UNITS) {
-            return false;
-        }
-        unitsById.put(id, units);
-        return true;
-    }
-
-    private static int boundDropUnitCount(Map<UUID, Integer> unitsById) {
-        long total = 0L;
-        for (Integer units : unitsById.values()) {
-            if (units == null || units <= 0) {
-                return Integer.MAX_VALUE;
-            }
-            total += units;
-            if (total > Integer.MAX_VALUE) {
-                return Integer.MAX_VALUE;
-            }
-        }
-        return (int) total;
     }
 
     private BlockPos safeObservedDropStand(AIPlayerEntity bot, ItemEntity drop) {
@@ -1674,10 +1433,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return false;
         }
         BlockPos current = bot.getBlockPos();
-        if (!hasExactSurfaceRoute(world, current, destination, surfaceFloorY(bot))) {
+        if (!HuntSurfaceRoutes.hasExactSurfaceRoute(world, current, destination, surfaceFloorY(bot))) {
             return false;
         }
-        return hasExactSurfaceRoute(
+        return HuntSurfaceRoutes.hasExactSurfaceRoute(
                 world, destination, pickupReturnAnchor, surfaceFloorY(bot));
     }
 
@@ -1703,7 +1462,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             }
             return true;
         }
-        return startExactSurfacePath(
+        return HuntSurfaceRoutes.startExactSurfacePath(
                 bot, stand, surfaceFloorY(bot), pickupReturnAnchor)
                 == SurfacePathStart.STARTED;
     }
@@ -1758,7 +1517,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     || !safePickupCellRoute(bot, candidate)) {
                 continue;
             }
-            SurfacePathStart start = startExactSurfacePath(
+            SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
                     bot, candidate, surfaceFloorY(bot), pickupReturnAnchor);
             if (start != SurfacePathStart.STARTED) {
                 continue;
@@ -1862,6 +1621,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         return pickupTransactionState;
     }
 
+    // Structural encode/decode (field set, canonical formatting, bound-drop-unit ledger,
+    // dimension/item identifier validation) all live in HuntPickupCheckpoint, the strict,
+    // Minecraft-bootstrap-independent codec that GoalExecutor also decodes these checkpoints
+    // through. HuntTask only adapts between its own Item-typed fields and the codec's
+    // bootstrap-free String/Position representation at the two edges below.
     @Override
     public Map<String, String> checkpoint() {
         if (invalidCheckpoint || pickupTransactionState == null
@@ -1869,83 +1633,43 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 || pickupReturnAnchor == null || pickupDimension.isBlank()) {
             return Map.of();
         }
-        Map<String, String> values = new LinkedHashMap<>();
-        values.put("task_schema", String.valueOf(PICKUP_CHECKPOINT_SCHEMA));
-        values.put("cursor_kind", "hunt_pickup");
-        values.put("transaction_state", pickupTransactionState.name());
-        values.put("target_count", String.valueOf(targetMeat));
-        values.put("require_full_quota", String.valueOf(requireFullQuota));
-        values.put("dimension", pickupDimension);
-        values.put("expected_raw_item",
-                Registries.ITEM.getId(pickupExpectedRawMeat).toString());
-        values.put("pickup_origin", encodeCheckpointPos(pickupOrigin));
-        values.put("pickup_return_anchor", encodeCheckpointPos(pickupReturnAnchor));
-        values.put("inventory_baseline", String.valueOf(pickupInventoryBaseline));
-        values.put("pickup_stat_baseline", String.valueOf(pickupRawMeatStatBaseline));
-        values.put("aux_inventory_baseline", String.valueOf(targetAuxiliaryBaseline));
-        values.put("aux_pickup_stat_baseline",
-                String.valueOf(targetAuxiliaryPickupBaseline));
-        values.put("pickup_started_world_time",
-                String.valueOf(pickupStartedWorldTime));
-        values.put("bound_drop_units", encodeBoundDropUnits(pickupDropUnits));
-        Map<String, String> encoded = Map.copyOf(values);
-        return inspectCheckpoint(encoded).isPresent() ? encoded : Map.of();
+        HuntPickupCheckpoint.Metadata metadata = new HuntPickupCheckpoint.Metadata(
+                HuntPickupCheckpoint.State.valueOf(pickupTransactionState.name()),
+                targetMeat, requireFullQuota, pickupDimension,
+                Registries.ITEM.getId(pickupExpectedRawMeat).toString(),
+                toCheckpointPosition(pickupOrigin), toCheckpointPosition(pickupReturnAnchor),
+                pickupInventoryBaseline, pickupRawMeatStatBaseline,
+                targetAuxiliaryBaseline, targetAuxiliaryPickupBaseline,
+                pickupStartedWorldTime, pickupDropUnits);
+        return HuntPickupCheckpoint.encode(metadata);
     }
 
     public static Optional<RestoreMetadata> inspectCheckpoint(
             Map<String, String> checkpoint) {
-        if (checkpoint == null || checkpoint.isEmpty()
-                || !checkpoint.keySet().equals(PICKUP_CHECKPOINT_KEYS)) {
+        return HuntPickupCheckpoint.inspect(checkpoint).flatMap(HuntTask::toRestoreMetadata);
+    }
+
+    // The codec's Metadata carries the raw item id as a String (so it can validate it against a
+    // hardcoded raw-meat id set without a live registry); HuntTask does have registry access, so
+    // it resolves that id to the actual Item here and rejects anything that doesn't resolve to a
+    // known raw meat, matching the pre-delegation registry-backed validation exactly (the codec's
+    // RAW_MEAT_IDS string set and this class's RAW_MEATS item set name the same five vanilla
+    // items, so this can only reject an already-invalid checkpoint, never a valid one).
+    private static Optional<RestoreMetadata> toRestoreMetadata(
+            HuntPickupCheckpoint.Metadata metadata) {
+        Item expectedRaw = Registries.ITEM.getOptionalValue(
+                Identifier.of(metadata.expectedRawItemId())).orElse(null);
+        if (expectedRaw == null || !RAW_MEATS.contains(expectedRaw)) {
             return Optional.empty();
         }
-        try {
-            int schema = strictInt(required(checkpoint, "task_schema"));
-            if (schema != PICKUP_CHECKPOINT_SCHEMA
-                    || !"hunt_pickup".equals(required(checkpoint, "cursor_kind"))) {
-                return Optional.empty();
-            }
-            TransactionState transactionState = TransactionState.valueOf(
-                    required(checkpoint, "transaction_state"));
-            int targetCount = strictInt(required(checkpoint, "target_count"));
-            boolean fullQuota = strictBoolean(required(checkpoint, "require_full_quota"));
-            String dimension = canonicalIdentifier(required(checkpoint, "dimension"));
-            String itemId = canonicalIdentifier(required(checkpoint, "expected_raw_item"));
-            Item expectedRaw = Registries.ITEM.getOptionalValue(
-                    Identifier.of(itemId)).orElse(null);
-            BlockPos origin = decodeCheckpointPos(
-                    required(checkpoint, "pickup_origin")).orElse(null);
-            BlockPos returnAnchor = decodeCheckpointPos(
-                    required(checkpoint, "pickup_return_anchor")).orElse(null);
-            int inventoryBaseline = strictInt(required(checkpoint, "inventory_baseline"));
-            int pickupStatBaseline = strictInt(required(checkpoint, "pickup_stat_baseline"));
-            int auxInventoryBaseline = strictInt(
-                    required(checkpoint, "aux_inventory_baseline"));
-            long auxPickupStatBaseline = strictLong(
-                    required(checkpoint, "aux_pickup_stat_baseline"));
-            long startedWorldTime = strictLong(
-                    required(checkpoint, "pickup_started_world_time"));
-            Optional<Map<UUID, Integer>> decodedUnits = decodeBoundDropUnits(
-                    required(checkpoint, "bound_drop_units"));
-            if (targetCount < 1 || targetCount > 4096
-                    || dimension == null || expectedRaw == null
-                    || !RAW_MEATS.contains(expectedRaw)
-                    || origin == null || returnAnchor == null
-                    || inventoryBaseline < 0 || inventoryBaseline > 4096
-                    || pickupStatBaseline < 0 || auxInventoryBaseline < 0
-                    || auxInventoryBaseline > 4096 || auxPickupStatBaseline < 0L
-                    || startedWorldTime < 0L || decodedUnits.isEmpty()
-                    || transactionState == TransactionState.CLOSED_NO_RAW
-                    && !decodedUnits.orElseThrow().isEmpty()) {
-                return Optional.empty();
-            }
-            return Optional.of(new RestoreMetadata(
-                    transactionState, targetCount, fullQuota, dimension, expectedRaw,
-                    origin, returnAnchor, inventoryBaseline, pickupStatBaseline,
-                    auxInventoryBaseline, auxPickupStatBaseline, startedWorldTime,
-                    decodedUnits.orElseThrow()));
-        } catch (RuntimeException invalid) {
-            return Optional.empty();
-        }
+        return Optional.of(new RestoreMetadata(
+                TransactionState.valueOf(metadata.transactionState().name()),
+                metadata.targetCount(), metadata.requireFullQuota(), metadata.dimension(),
+                expectedRaw,
+                toBlockPos(metadata.pickupOrigin()), toBlockPos(metadata.pickupReturnAnchor()),
+                metadata.inventoryBaseline(), metadata.pickupStatBaseline(),
+                metadata.auxInventoryBaseline(), metadata.auxPickupStatBaseline(),
+                metadata.pickupStartedWorldTime(), metadata.boundDropUnits()));
     }
 
     public record RestoreMetadata(
@@ -1969,7 +1693,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
 
         public int boundUnits() {
-            return boundDropUnitCount(boundDropUnits);
+            return HuntPickupCheckpoint.boundDropUnitCount(boundDropUnits);
         }
 
         public boolean open() {
@@ -1977,106 +1701,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
     }
 
-    private static String encodeBoundDropUnits(Map<UUID, Integer> unitsById) {
-        if (unitsById.isEmpty()) {
-            return "none";
-        }
-        return unitsById.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey(
-                        Comparator.comparing(UUID::toString)))
-                .map(entry -> entry.getKey() + "=" + entry.getValue())
-                .collect(java.util.stream.Collectors.joining(";"));
+    private static HuntPickupCheckpoint.Position toCheckpointPosition(BlockPos pos) {
+        return new HuntPickupCheckpoint.Position(pos.getX(), pos.getY(), pos.getZ());
     }
 
-    private static Optional<Map<UUID, Integer>> decodeBoundDropUnits(String encoded) {
-        if ("none".equals(encoded)) {
-            return Optional.of(Map.of());
-        }
-        if (encoded == null || encoded.isBlank()) {
-            return Optional.empty();
-        }
-        Map<UUID, Integer> decoded = new LinkedHashMap<>();
-        for (String pair : encoded.split(";", -1)) {
-            String[] parts = pair.split("=", -1);
-            if (parts.length != 2) {
-                return Optional.empty();
-            }
-            UUID id = UUID.fromString(parts[0]);
-            if (!id.toString().equals(parts[0])) {
-                return Optional.empty();
-            }
-            int units = strictInt(parts[1]);
-            if (!bindDropUnits(decoded, id, units)) {
-                return Optional.empty();
-            }
-        }
-        Map<UUID, Integer> result = Map.copyOf(decoded);
-        return encodeBoundDropUnits(result).equals(encoded)
-                ? Optional.of(result) : Optional.empty();
-    }
-
-    private static String required(Map<String, String> values, String key) {
-        String value = values.get(key);
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("missing_" + key);
-        }
-        return value;
-    }
-
-    private static int strictInt(String value) {
-        int parsed = Integer.parseInt(value);
-        if (!String.valueOf(parsed).equals(value)) {
-            throw new IllegalArgumentException("non_canonical_int");
-        }
-        return parsed;
-    }
-
-    private static long strictLong(String value) {
-        long parsed = Long.parseLong(value);
-        if (!String.valueOf(parsed).equals(value)) {
-            throw new IllegalArgumentException("non_canonical_long");
-        }
-        return parsed;
-    }
-
-    private static boolean strictBoolean(String value) {
-        if ("true".equals(value)) {
-            return true;
-        }
-        if ("false".equals(value)) {
-            return false;
-        }
-        throw new IllegalArgumentException("non_canonical_boolean");
-    }
-
-    private static String canonicalIdentifier(String value) {
-        String canonical = Identifier.of(value).toString();
-        if (!canonical.equals(value)) {
-            throw new IllegalArgumentException("non_canonical_identifier");
-        }
-        return canonical;
-    }
-
-    private static String encodeCheckpointPos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private static Optional<BlockPos> decodeCheckpointPos(String encoded) {
-        if (encoded == null) {
-            return Optional.empty();
-        }
-        String[] parts = encoded.split(",", -1);
-        if (parts.length != 3) {
-            return Optional.empty();
-        }
-        try {
-            BlockPos pos = new BlockPos(
-                    strictInt(parts[0]), strictInt(parts[1]), strictInt(parts[2]));
-            return encodeCheckpointPos(pos).equals(encoded)
-                    ? Optional.of(pos) : Optional.empty();
-        } catch (RuntimeException invalid) {
-            return Optional.empty();
-        }
+    private static BlockPos toBlockPos(HuntPickupCheckpoint.Position pos) {
+        return new BlockPos(pos.x(), pos.y(), pos.z());
     }
 
     /** Factual net raw-food inventory used by GoalExecutor's HUNT-specific replan watermark. */
