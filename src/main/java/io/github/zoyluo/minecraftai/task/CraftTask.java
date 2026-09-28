@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.BlockState;
@@ -272,9 +273,21 @@ public final class CraftTask extends AbstractTask {
      * which permanently blocks DangerWatcher's paused-task resume (it requires actions to be idle)
      * and deadlocks the bot with its mission step stuck PAUSED. Stop the action pack before handing
      * control back so a fresh task, or the resume path, always starts from a clean slate.
+     *
+     * <p>That same chase can also leave the bot's real sub-block stance nudged toward the reclaimed
+     * cell (or otherwise off-center, e.g. from the approach the reclaim mining itself needed) without
+     * ever moving it to a different block -- {@code bot.getBlockPos()} still reads the original
+     * cell. Vanilla's own placement check ({@code World.canPlace}) does not exclude the placer from
+     * the destination's entity-collision test the way this task's own candidate scan does, so an
+     * off-center stance can let the bot's own hitbox clip the neighbouring cell just enough to fail
+     * a later {@code BuildAction.placeBlockAt} at that exact cell -- e.g. the very next repair cycle
+     * placing another carried table back at this same reclaimed spot. Recenter before completing so
+     * every exit path (success, timeout, mine failure, claimed position) hands back a stance as
+     * neutral as the one this task started from.
      */
     private void finishReclaim(AIPlayerEntity bot) {
         bot.getActionPack().stopAll();
+        FakePlayerMotion.returnToBlockCenter(bot, bot.getBlockPos(), "craft_table_reclaim_settle");
         complete();
     }
 
@@ -429,11 +442,22 @@ public final class CraftTask extends AbstractTask {
      * attempt has a real bounding box, and vanilla 1.21.5 rejects any placement whose collision
      * shape intersects a live entity -- so without this check, a stale drop at this exact cell
      * would keep failing every future placement attempt here, not just the reclaim that left it.
+     *
+     * <p>{@code isSpaceEmpty(bot, box)} deliberately excludes the bot itself so a candidate this
+     * close never reads as blocked by the placer's own presence -- but vanilla's own placement
+     * check has no such self-exemption (see the same reasoning just above for why {@code
+     * origin.up()} is skipped entirely). A bot whose real sub-block stance has drifted off-center
+     * -- e.g. from the walk/nudge a same-cell item pickup during an earlier reclaim can leave
+     * behind -- can have its own hitbox clip a horizontal neighbour without ever changing {@code
+     * bot.getBlockPos()}, so this candidate scan must reject exactly that overlap itself instead of
+     * confidently choosing a cell vanilla's {@code World.canPlace} will then fail.
      */
     private static boolean isOpenPlacementCell(AIPlayerEntity bot, BlockPos candidate) {
+        var candidateBox = new net.minecraft.util.math.Box(candidate);
         return ObservableWorldQuery.canObserveCell(bot, candidate)
                 && bot.getEntityWorld().getBlockState(candidate).isAir()
-                && bot.getEntityWorld().isSpaceEmpty(bot, new net.minecraft.util.math.Box(candidate));
+                && bot.getEntityWorld().isSpaceEmpty(bot, candidateBox)
+                && !bot.getBoundingBox().intersects(candidateBox);
     }
 
     private static String describeIngredient(RecipeRegistry.Ingredient ingredient, int count) {
