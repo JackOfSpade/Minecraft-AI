@@ -516,6 +516,16 @@ public final class StripMineTask extends AbstractTask {
                 note = "torch_failed:" + result.reason();
             }
         }
+        // Slot identity is not stable once a torch is equipped (mirrors
+        // MineValuablesTask.maybePlaceTorch): restore the active mining tool now, using the
+        // upcoming tunnel step (or the just-completed one if the plan is drained) as a reasonable
+        // proxy target, rather than leaving the torch equipped through shouldReturn()'s very next
+        // durability check.
+        Step upcoming = steps.peekFirst();
+        BlockPos toolTarget = upcoming != null ? upcoming.stand() : currentStep != null ? currentStep.stand() : null;
+        if (toolTarget != null) {
+            ToolSelector.equipBestTool(bot, bot.getEntityWorld().getBlockState(toolTarget));
+        }
         phase = Phase.MOVE;
     }
 
