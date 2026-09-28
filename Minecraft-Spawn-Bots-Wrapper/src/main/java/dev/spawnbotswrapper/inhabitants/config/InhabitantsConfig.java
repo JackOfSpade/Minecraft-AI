@@ -67,6 +67,10 @@ public final class InhabitantsConfig {
     public Deterministic deterministic = new Deterministic();
     public Processing processing = new Processing();
     public Spawning spawning = new Spawning();
+    /** Despawns inhabitants when the server is struggling, farthest from the nearest real player first. */
+    public TpsThrottle tpsThrottle = new TpsThrottle();
+    /** Despawns inhabitants that have drifted far from every real player, and restores them later unchanged. */
+    public Dormancy dormancy = new Dormancy();
     /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
     public Connection connection = new Connection();
 
@@ -179,7 +183,7 @@ public final class InhabitantsConfig {
         /** Population attempts (with loaded chunks) before an occupied structure is given up on permanently. */
         public int maxAttemptsPerStructure = 12;
         /** Never have more than this many living inhabitants at once; further population waits (no re-roll). 0 = unlimited. */
-        public int maxLiveBots = 64;
+        public int maxLiveBots = 24;
         /** Ticks to wait for PvP BOT to make a requested bot appear before counting the attempt as failed. */
         public int appearTimeoutTicks = 200;
         /** Ticks between disk saves of changed state (also saved on server stop). */
@@ -208,6 +212,65 @@ public final class InhabitantsConfig {
          * gates this addon's own bot reconciliation) and never touches the population/roster engine.
          */
         public int joinHoldTicks = 1800;
+    }
+
+    /**
+     * Reactive safety valve for server load, instead of a single hand-picked {@code processing.maxLiveBots}
+     * guess that may be wrong at any given moment: periodically checks the real, measured tick rate and, while
+     * it is degraded, (a) hard-blocks every new spawn -- both freshly-discovered structures and already-pending
+     * ones -- and (b) sheds a batch of already-live inhabitants, farthest from the nearest real player first,
+     * since those are both the least noticed if removed and the least likely to be who the slowdown is actually
+     * about. The batch escalates the longer the server stays degraded (a lone bad check sheds one base batch, a
+     * second consecutive one sheds two, and so on, resetting the moment it recovers), so a brief blip is handled
+     * gently while a sustained, genuine overload converges quickly instead of nibbling forever. A despawn here
+     * is permanent, exactly like a death: nothing here ever brings a bot back on its own. Unblocking new spawns
+     * once the server is healthy again cannot by itself respawn anything either -- only a newly discovered
+     * structure, or {@link Dormancy} restoring one it put to sleep, ever creates a new bot. See {@link Dormancy}
+     * for the separate, always-on, fully reversible mechanism that keeps the population naturally close to the
+     * player during ordinary play.
+     */
+    public static final class TpsThrottle {
+        /** Master switch. */
+        public boolean enabled = true;
+        /** Rolling average ms/tick at or below which the server is healthy: new spawns are unblocked (fully,
+         * immediately -- see the class doc on why that is safe) and the shed-escalation level resets to zero.
+         * ~52.6ms/tick is ~19 TPS -- one TPS of hysteresis above {@link #degradedMillis} so a server sitting
+         * right at the target does not flip between the two states every check. */
+        public double healthyMillis = 52.6;
+        /** Rolling average ms/tick above which the server is degraded: new spawns are hard-blocked and shedding
+         * begins. ~55.6ms/tick is 18 TPS: this starts the moment the server drops below that. */
+        public double degradedMillis = 55.6;
+        /** Ticks between checks, so one round's effect on the tick rate is fully measured before reacting again.
+         * Matches {@code TpsGateway}'s own rolling sample window (100 ticks) on purpose: a shorter interval
+         * would react to a reading still diluted by ticks from before the last shed. */
+        public int checkIntervalTicks = 100;
+        /** Base inhabitants removed on the first consecutive degraded check, farthest from the nearest real
+         * player first; doubles-by-addition for each further consecutive bad check (2x, 3x, ...), resetting to
+         * this base the moment the server is healthy again. No floor: can reduce the live population to 0 if
+         * the problem persists (useful for narrowing down whether the inhabitants are even the cause). */
+        public int despawnBatchSize = 3;
+    }
+
+    /**
+     * Without this, a spawned inhabitant is a real player-like entity (see the addon README) that keeps
+     * ticking forever no matter how far the player travels -- PvP BOT gives it none of vanilla's distance-based
+     * entity unloading. Left alone, the live population would only ever grow as the player explores. This
+     * periodically despawns inhabitants that have stayed far from every real player for a while, and remembers
+     * them exactly (name, position, profile) so they are restored unchanged -- not re-rolled -- the next time
+     * their structure is near a real player again. This is what lets the population settle to an equilibrium
+     * around wherever the player actually is, instead of accumulating across the whole explored world. See
+     * {@link TpsThrottle} for the separate, reactive, one-way mechanism that responds to server load instead.
+     */
+    public static final class Dormancy {
+        /** Master switch. */
+        public boolean enabled = true;
+        /** Blocks from the nearest online real player beyond which a live inhabitant is a dormancy candidate. */
+        public double distanceBlocks = 160.0;
+        /** A candidate must stay beyond that distance for this many consecutive ticks before it actually goes
+         * dormant, so a brief detour or flyby does not despawn it. */
+        public int delayTicks = 1200;
+        /** Ticks between distance scans. */
+        public int scanIntervalTicks = 100;
     }
 
     public static final class Spawning {

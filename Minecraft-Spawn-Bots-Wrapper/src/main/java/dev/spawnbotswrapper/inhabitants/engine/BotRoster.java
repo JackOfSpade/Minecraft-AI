@@ -122,6 +122,37 @@ final class BotRoster {
         }
     }
 
+    /**
+     * Drops tracking for one bot without touching its siblings: the caller has already despawned it on
+     * purpose (dormancy, TPS throttling) and knows why, so there is nothing left for this roster to reconcile.
+     */
+    void untrackOne(BotRecord bot) {
+        String key = EngineContext.lower(bot.name);
+        Tracked t = byName.remove(key);
+        if (t == null) {
+            return;
+        }
+        entries.remove(t);
+        offlineWatch.remove(t);
+        if (t.online) {
+            onlineCount--;
+        }
+        if (cursor > entries.size()) {
+            cursor = 0;
+        }
+    }
+
+    /** Every inhabitant currently believed online, with which structure it belongs to. */
+    List<Map.Entry<StructureKey, BotRecord>> onlineEntries() {
+        List<Map.Entry<StructureKey, BotRecord>> out = new ArrayList<>();
+        for (Tracked t : entries) {
+            if (t.online) {
+                out.add(Map.entry(t.structure, t.bot));
+            }
+        }
+        return out;
+    }
+
     int size() {
         return entries.size();
     }

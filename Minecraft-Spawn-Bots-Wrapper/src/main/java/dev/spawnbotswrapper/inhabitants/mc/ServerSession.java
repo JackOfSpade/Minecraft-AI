@@ -8,6 +8,7 @@ import dev.spawnbotswrapper.inhabitants.engine.PopulationEngine;
 import dev.spawnbotswrapper.inhabitants.profile.ProfileGenerator;
 import dev.spawnbotswrapper.inhabitants.spawn.DefaultSpawnPlanner;
 import dev.spawnbotswrapper.inhabitants.store.PopulationStore;
+import dev.spawnbotswrapper.inhabitants.util.SplitMix64;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
 
@@ -34,7 +35,8 @@ public final class ServerSession {
 
     /** What every session shares with the mod entrypoint. */
     public record Shared(ConfigHolder config, PvpBotOperations adapter, StructureDetector detector,
-                         StructureLocator locator, StepGuard guard, String addonVersion, Logger log) {
+                         StructureLocator locator, StepGuard guard, String addonVersion, Logger log,
+                         McTpsGateway tps) {
     }
 
     private final MinecraftServer server;
@@ -158,7 +160,9 @@ public final class ServerSession {
                 new McWorldGateway(access),
                 McClock.of(server),
                 new ProfileGenerator(() -> shared.config().get().profiles),
-                new DefaultSpawnPlanner(() -> shared.config().get().spawning));
+                new DefaultSpawnPlanner(() -> shared.config().get().spawning),
+                shared.tps(),
+                () -> SplitMix64.fromEntropy().nextLong());
         services = new CommandServices(shared.config(), engine.view(), engine, adapter,
                 shared.locator(), this::reloadConfig, shared.addonVersion());
     }

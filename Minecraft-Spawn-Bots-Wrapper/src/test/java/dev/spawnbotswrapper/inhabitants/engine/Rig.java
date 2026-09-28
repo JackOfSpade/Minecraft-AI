@@ -35,6 +35,7 @@ final class Rig {
     final FakeWorld world = new FakeWorld();
     final FakeProfiles profiles = new FakeProfiles();
     final FakePlanner planner = new FakePlanner();
+    final FakeTps tps = new FakeTps();
     private final SplitMix64 entropy;
 
     InMemoryStorage store;
@@ -80,7 +81,7 @@ final class Rig {
     }
 
     PopulationEngine newEngine(InMemoryStorage storage) {
-        return new PopulationEngine(() -> cfg, storage, bots, world, clock, profiles, planner, entropy::nextLong);
+        return new PopulationEngine(() -> cfg, storage, bots, world, clock, profiles, planner, tps, entropy::nextLong);
     }
 
     /** Replaces engine and storage as a server restart would; {@code clean} flushes first, otherwise it is a crash. */

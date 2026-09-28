@@ -55,8 +55,13 @@ public final class PopulationEngine implements EngineControl {
      */
     static final int MAX_ROLL_QUEUE = 4096;
 
+    /** Stands in for a real {@link TpsGateway} when none is supplied: the TPS governor then never fires. */
+    private static final TpsGateway NO_TPS_DATA = () -> -1;
+
     private final EngineContext ctx;
     private final BotRoster roster;
+    private final TpsGovernor tpsGovernor;
+    private final DormancyGovernor dormancyGovernor;
     private final PopulationDriver driver;
     private final LongSupplier seedSource;
     private final PopulationView view;
@@ -68,20 +73,34 @@ public final class PopulationEngine implements EngineControl {
 
     public PopulationEngine(Supplier<InhabitantsConfig> config, PopulationStorage store, BotGateway bots,
                             WorldGateway world, Clock clock, ProfileFactory profiles, SpawnPlanner planner) {
-        this(config, store, bots, world, clock, profiles, planner, () -> SplitMix64.fromEntropy().nextLong());
+        this(config, store, bots, world, clock, profiles, planner, NO_TPS_DATA, () -> SplitMix64.fromEntropy().nextLong());
     }
 
     /** @param seedSource where non-deterministic structure seeds come from; tests inject a seeded source */
     PopulationEngine(Supplier<InhabitantsConfig> config, PopulationStorage store, BotGateway bots,
                      WorldGateway world, Clock clock, ProfileFactory profiles, SpawnPlanner planner,
                      LongSupplier seedSource) {
+        this(config, store, bots, world, clock, profiles, planner, NO_TPS_DATA, seedSource);
+    }
+
+    /**
+     * @param tps        real tick-rate data for {@link TpsGovernor}; production wiring ({@link dev.spawnbotswrapper.inhabitants.mc.ServerSession})
+     *                    must use this constructor (not the one above with no {@link TpsGateway}) so the TPS-driven
+     *                    despawn described on {@link InhabitantsConfig.TpsThrottle} works
+     * @param seedSource where non-deterministic structure seeds come from
+     */
+    public PopulationEngine(Supplier<InhabitantsConfig> config, PopulationStorage store, BotGateway bots,
+                     WorldGateway world, Clock clock, ProfileFactory profiles, SpawnPlanner planner,
+                     TpsGateway tps, LongSupplier seedSource) {
         this.ctx = new EngineContext(Objects.requireNonNull(config, "config"), Objects.requireNonNull(store, "store"),
                 Objects.requireNonNull(bots, "bots"), Objects.requireNonNull(world, "world"),
                 Objects.requireNonNull(clock, "clock"), Objects.requireNonNull(profiles, "profiles"),
                 Objects.requireNonNull(planner, "planner"));
         this.seedSource = Objects.requireNonNull(seedSource, "seedSource");
         this.roster = new BotRoster(ctx);
-        this.driver = new PopulationDriver(ctx, roster);
+        this.tpsGovernor = new TpsGovernor(ctx, roster, Objects.requireNonNull(tps, "tps"));
+        this.dormancyGovernor = new DormancyGovernor(ctx, roster);
+        this.driver = new PopulationDriver(ctx, roster, tpsGovernor);
         this.view = new ReadOnlyView(store);
         this.createdAtTick = clock.tick();
     }
@@ -117,6 +136,12 @@ public final class PopulationEngine implements EngineControl {
             if (existing.status == StructureStatus.OCCUPIED_PENDING && isAllowedHere(cfg, snapshot)) {
                 driver.enqueue(snapshot, false, ctx.now());
             }
+            // A settled (even POPULATED) structure can still have DORMANT bots -- put to sleep for being far
+            // from every real player, never re-rolled -- that are restored exactly as they were now that a
+            // real player is near again.
+            if (isAllowedHere(cfg, snapshot) && hasDormantBots(existing)) {
+                driver.restoreDormant(key, existing, ctx.now());
+            }
             return;
         }
         if (!isAllowedHere(cfg, snapshot)) {
@@ -139,6 +164,15 @@ public final class PopulationEngine implements EngineControl {
                 && RuleResolver.isEligible(cfg, key.structureId(), snapshot.tagIds());
     }
 
+    private static boolean hasDormantBots(StructureRecord rec) {
+        for (BotRecord b : rec.bots) {
+            if (b.state == BotState.DORMANT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------ tick
 
     /** Advances the state machine; call once per server tick. Server thread. */
@@ -157,8 +191,10 @@ public final class PopulationEngine implements EngineControl {
         long now = ctx.now();
         ctx.guard("roster", roster::build);
 
-        // Bots already requested are always seen through, even if the addon was disabled meanwhile.
+        // Bots already requested (fresh or a dormancy restore) are always seen through, even if the addon was
+        // disabled meanwhile.
         driver.poll(now, cfg);
+        driver.pollDormant(now, cfg);
 
         if (cfg.enabled && ctx.available()) {
             ctx.guard("roll", () -> rollQueued(now, cfg));
@@ -169,6 +205,8 @@ public final class PopulationEngine implements EngineControl {
                 }
                 ctx.guard("drive", () -> driver.drive(now, cfg));
                 ctx.guard("reconcile", () -> roster.tick(now, cfg));
+                ctx.guard("tps-governor", () -> tpsGovernor.tick(now, cfg));
+                ctx.guard("dormancy", () -> dormancyGovernor.tick(now, cfg));
             }
         }
         ctx.saveIfDue(now, cfg);

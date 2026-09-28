@@ -47,20 +47,24 @@ public final class StructureRecord {
         return r;
     }
 
-    /** True when every planned bot has reached a terminal state. */
+    /**
+     * True when every planned bot has reached a terminal state, or DORMANT -- which counts as resolved too:
+     * that bot has already been placed successfully at least once and is merely away, not unaccounted for.
+     */
     public boolean allBotsResolved() {
         for (BotRecord b : bots) {
-            if (b.state != BotState.SPAWNED && b.state != BotState.FAILED) {
+            if (b.state != BotState.SPAWNED && b.state != BotState.FAILED && b.state != BotState.DORMANT) {
                 return false;
             }
         }
         return true;
     }
 
+    /** SPAWNED and DORMANT both count: a dormant bot was placed successfully, it is just away right now. */
     public int spawnedCount() {
         int n = 0;
         for (BotRecord b : bots) {
-            if (b.state == BotState.SPAWNED) {
+            if (b.state == BotState.SPAWNED || b.state == BotState.DORMANT) {
                 n++;
             }
         }

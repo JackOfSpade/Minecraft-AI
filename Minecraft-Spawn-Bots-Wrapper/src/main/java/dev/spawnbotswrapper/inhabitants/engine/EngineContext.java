@@ -20,6 +20,8 @@ final class EngineContext {
     private static final Logger LOG = LoggerFactory.getLogger(PopulationEngine.class);
     private static final InhabitantsConfig.Processing FALLBACK_PROCESSING = new InhabitantsConfig.Processing();
     private static final InhabitantsConfig.Profiles FALLBACK_PROFILES = new InhabitantsConfig.Profiles();
+    private static final InhabitantsConfig.TpsThrottle FALLBACK_TPS_THROTTLE = new InhabitantsConfig.TpsThrottle();
+    private static final InhabitantsConfig.Dormancy FALLBACK_DORMANCY = new InhabitantsConfig.Dormancy();
     private static final String FALLBACK_PREFIX = "Inh";
 
     final Supplier<InhabitantsConfig> configSource;
@@ -64,6 +66,14 @@ final class EngineContext {
 
     static InhabitantsConfig.Profiles profileOptions(InhabitantsConfig cfg) {
         return cfg.profiles != null ? cfg.profiles : FALLBACK_PROFILES;
+    }
+
+    static InhabitantsConfig.TpsThrottle tpsThrottle(InhabitantsConfig cfg) {
+        return cfg.tpsThrottle != null ? cfg.tpsThrottle : FALLBACK_TPS_THROTTLE;
+    }
+
+    static InhabitantsConfig.Dormancy dormancy(InhabitantsConfig cfg) {
+        return cfg.dormancy != null ? cfg.dormancy : FALLBACK_DORMANCY;
     }
 
     static boolean isDeterministic(InhabitantsConfig cfg) {
@@ -165,6 +175,18 @@ final class EngineContext {
         } catch (Throwable t) {
             log.error("isOnline", String.valueOf(name), t);
             return null;
+        }
+    }
+
+    /** Blocks from the bot to the nearest online real player; -1 when unknown (see {@link BotGateway#distanceToNearestPlayer}). */
+    double distanceToNearestPlayer(String name) {
+        try {
+            return bots.distanceToNearestPlayer(name);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            log.error("distanceToNearestPlayer", String.valueOf(name), t);
+            return -1;
         }
     }
 

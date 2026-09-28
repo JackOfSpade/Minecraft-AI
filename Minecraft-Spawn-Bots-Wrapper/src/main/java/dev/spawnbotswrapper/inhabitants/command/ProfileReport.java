@@ -49,9 +49,9 @@ final class ProfileReport {
         out.add(label("  state: ") + state(bot.state) + label("  |  index " + bot.index + "  |  spawn attempts "
                 + bot.spawnAttempts));
         out.add(label("  uuid: ") + (bot.uuid == null || bot.uuid.isBlank() ? label("not seen yet") : plain(bot.uuid)));
-        if (bot.state == BotState.REQUESTED || bot.state == BotState.SPAWNED) {
+        if (bot.state == BotState.REQUESTED || bot.state == BotState.SPAWNED || bot.state == BotState.DORMANT) {
             out.add(label("  position: ") + plain(Fmt.xyz(bot.x, bot.y, bot.z)) + label(", yaw "
-                    + Fmt.decimal(bot.yaw, 0)));
+                    + Fmt.decimal(bot.yaw, 0) + (bot.state == BotState.DORMANT ? " (remembered, not currently live)" : "")));
         } else {
             out.add(label("  position: not chosen yet"));
         }
@@ -90,6 +90,7 @@ final class ProfileReport {
             case REQUESTED -> warn("REQUESTED");
             case SPAWNED -> good("SPAWNED");
             case FAILED -> bad("FAILED");
+            case DORMANT -> warn("DORMANT");
         };
     }
 }

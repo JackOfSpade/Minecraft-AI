@@ -60,15 +60,20 @@ final class PopulationDriver {
 
     private final EngineContext ctx;
     private final BotRoster roster;
+    private final TpsGovernor tpsGovernor;
     private final Map<StructureKey, PendingStructure> pending = new LinkedHashMap<>();
     /** By lower-case bot name: also what guarantees one bot is never requested twice concurrently. */
     private final Map<String, SpawnJob> inFlight = new LinkedHashMap<>();
+    /** Dormant bots currently being restored; kept apart from {@link #inFlight} so a bot in this map is never
+     * mistaken by {@link #audit} for an interrupted fresh request (it stays DORMANT, not REQUESTED, throughout). */
+    private final Map<String, SpawnJob> dormantInFlight = new LinkedHashMap<>();
     private final List<StructureKey> finished = new ArrayList<>();
     private long lastSpawnTick = PendingStructure.NEVER;
 
-    PopulationDriver(EngineContext ctx, BotRoster roster) {
+    PopulationDriver(EngineContext ctx, BotRoster roster, TpsGovernor tpsGovernor) {
         this.ctx = ctx;
         this.roster = roster;
+        this.tpsGovernor = tpsGovernor;
     }
 
     // ------------------------------------------------------------------ queue
@@ -95,6 +100,7 @@ final class PopulationDriver {
         pending.remove(key);
         finished.remove(key);
         inFlight.values().removeIf(j -> j.structure().equals(key));
+        dormantInFlight.values().removeIf(j -> j.structure().equals(key));
     }
 
     // ------------------------------------------------------------------ in-flight bots
@@ -168,6 +174,101 @@ final class PopulationDriver {
             }
         }
         return null;
+    }
+
+    // ------------------------------------------------------------------ restoring a dormant bot
+
+    /**
+     * Re-requests every DORMANT bot of this structure at its exact remembered position; on success its exact
+     * remembered profile is re-applied (never regenerated). Deliberately outside the {@link #pending} /
+     * write-ahead machinery that a fresh roll needs: nothing here is durable mid-flight, because a restore is
+     * safely retriable (the next time this structure's chunk loads) rather than something that must never
+     * happen twice, so a crash mid-restore just leaves the bot DORMANT for another attempt.
+     */
+    void restoreDormant(StructureKey key, StructureRecord rec, long now) {
+        for (BotRecord b : rec.bots) {
+            if (b.state != BotState.DORMANT || b.name == null) {
+                continue;
+            }
+            String lower = EngineContext.lower(b.name);
+            if (dormantInFlight.containsKey(lower) || inFlight.containsKey(lower)) {
+                continue;
+            }
+            BotGateway.SpawnHandle handle;
+            try {
+                handle = ctx.bots.requestSpawn(new BotGateway.SpawnRequest(key.dimension(), b.name, b.x, b.y, b.z, b.yaw));
+                if (handle == null) {
+                    throw new IllegalStateException("the bot gateway returned no spawn handle");
+                }
+            } catch (OutOfMemoryError e) {
+                throw e;
+            } catch (Throwable t) {
+                ctx.log.error("restoreDormant", b.name, t);
+                continue; // stays DORMANT; retried the next time this structure's chunk loads
+            }
+            dormantInFlight.put(lower, new SpawnJob(key, b.index, b.name, handle, now));
+        }
+    }
+
+    /** Polls every in-flight dormancy restore once. Runs every tick regardless of the settle period, like {@link #poll}. */
+    void pollDormant(long now, InhabitantsConfig cfg) {
+        if (dormantInFlight.isEmpty()) {
+            return;
+        }
+        for (SpawnJob job : new ArrayList<>(dormantInFlight.values())) {
+            ctx.guard("pollDormant", () -> pollDormantOne(job, now, cfg));
+        }
+    }
+
+    private void pollDormantOne(SpawnJob job, long now, InhabitantsConfig cfg) {
+        BotGateway.SpawnPoll result;
+        try {
+            result = ctx.bots.poll(job.handle());
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            ctx.log.error("pollDormant", job.name(), t);
+            return; // try again next tick
+        }
+        if (result instanceof BotGateway.SpawnPoll.Ready ready) {
+            dormantInFlight.remove(EngineContext.lower(job.name()));
+            finishDormantRestore(job, ready.uuid(), cfg);
+        } else if (result instanceof BotGateway.SpawnPoll.Failed) {
+            dormantInFlight.remove(EngineContext.lower(job.name())); // stays DORMANT; retried later
+        } else if (now - job.startedAtTick() >= EngineContext.processing(cfg).appearTimeoutTicks) {
+            dormantInFlight.remove(EngineContext.lower(job.name())); // stays DORMANT; retried later
+        }
+    }
+
+    private void finishDormantRestore(SpawnJob job, UUID uuid, InhabitantsConfig cfg) {
+        StructureRecord rec = ctx.store.find(job.structure()).orElse(null);
+        if (rec == null) {
+            return;
+        }
+        BotRecord bot = null;
+        for (BotRecord b : rec.bots) {
+            if (b.index == job.botIndex() && job.name().equalsIgnoreCase(b.name)) {
+                bot = b;
+                break;
+            }
+        }
+        if (bot == null || bot.state != BotState.DORMANT) {
+            return; // reset or otherwise no longer ours: leave whatever exists alone
+        }
+        try {
+            ctx.bots.applyProfile(bot.name, bot.profile);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            ctx.log.error("applyProfile", bot.name, t);
+        }
+        if (uuid != null) {
+            bot.uuid = uuid.toString();
+        }
+        bot.state = BotState.SPAWNED;
+        ctx.store.markDirty();
+        roster.trackSpawned(job.structure(), bot);
+        ctx.debug(cfg, "Inhabitant {} restored from dormancy in {}", bot.name, job.structure());
     }
 
     // ------------------------------------------------------------------ pending structures
@@ -253,8 +354,15 @@ final class PopulationDriver {
         }
     }
 
-    /** How many more bots may be started without exceeding {@code maxLiveBots}: live ones plus those in flight. */
+    /**
+     * How many more bots may be started without exceeding {@code maxLiveBots}: live ones plus those in flight
+     * -- or 0 unconditionally whenever {@link TpsGovernor} says the server is currently degraded, overriding
+     * the configured number entirely (see that class's doc for why this must be a hard flag, not a number).
+     */
     private int capacityLeft(InhabitantsConfig.Processing pr) {
+        if (tpsGovernor.blocksNewSpawns()) {
+            return 0; // hard gate: see TpsGovernor's class doc for why this must be a flag, not a number
+        }
         if (pr.maxLiveBots <= 0) {
             return Integer.MAX_VALUE;
         }

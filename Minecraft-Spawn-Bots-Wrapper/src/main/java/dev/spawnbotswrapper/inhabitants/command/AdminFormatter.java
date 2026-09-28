@@ -96,7 +96,7 @@ final class AdminFormatter {
             List<String> names = new ArrayList<>();
             if (r.bots != null) {
                 for (BotRecord b : r.bots) {
-                    if (b.state == BotState.SPAWNED && b.name != null) {
+                    if ((b.state == BotState.SPAWNED || b.state == BotState.DORMANT) && b.name != null) {
                         names.add(b.name);
                     }
                 }

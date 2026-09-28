@@ -216,6 +216,7 @@ final class StructureFormatter {
             case REQUESTED -> warn("(requested)");
             case SPAWNED -> good("(spawned)");
             case FAILED -> bad("(failed)");
+            case DORMANT -> warn("(dormant)");
         };
     }
 }

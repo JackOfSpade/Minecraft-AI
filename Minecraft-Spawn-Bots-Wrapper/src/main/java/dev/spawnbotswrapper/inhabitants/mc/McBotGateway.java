@@ -7,6 +7,7 @@ import dev.spawnbotswrapper.inhabitants.profile.BotProfile;
 import dev.spawnbotswrapper.inhabitants.profile.GlobalCapabilities;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -160,6 +161,30 @@ public final class McBotGateway implements BotGateway {
             return isOnline(botName) && adapter.isManaged(botName);
         } catch (RuntimeException e) {
             return false;
+        }
+    }
+
+    @Override
+    public double distanceToNearestPlayer(String botName) {
+        try {
+            Optional<ServerPlayerEntity> bot = findBot(botName);
+            if (bot.isEmpty()) {
+                return -1;
+            }
+            Vec3d botPos = bot.get().getEntityPos();
+            double best = -1;
+            for (ServerPlayerEntity p : access.server().getPlayerManager().getPlayerList()) {
+                if (adapter.isBotEntity(p)) {
+                    continue;
+                }
+                double d = p.getEntityPos().distanceTo(botPos);
+                if (best < 0 || d < best) {
+                    best = d;
+                }
+            }
+            return best;
+        } catch (RuntimeException e) {
+            return -1;
         }
     }
 

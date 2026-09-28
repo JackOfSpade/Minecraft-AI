@@ -8,6 +8,7 @@ import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.JoinHoldGate;
 import dev.spawnbotswrapper.inhabitants.mc.McClock;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
+import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
 import dev.spawnbotswrapper.inhabitants.mc.StepGuard;
 import dev.spawnbotswrapper.inhabitants.mc.StructureDetector;
@@ -47,6 +48,7 @@ public final class InhabitantsMod implements ModInitializer {
     private ServerSession.Shared shared;
     private volatile ServerSession session;
     private final JoinHoldGate joinHoldGate = new JoinHoldGate();
+    private final McTpsGateway tps = new McTpsGateway();
 
     @Override
     public void onInitialize() {
@@ -58,7 +60,7 @@ public final class InhabitantsMod implements ModInitializer {
         StepGuard guard = StepGuard.logging(LOGGER);
         StructureSnapshotBuilder snapshots = new StructureSnapshotBuilder();
         StructureDetector detector = new StructureDetector(snapshots, guard);
-        shared = new ServerSession.Shared(config, adapter, detector, new McStructureLocator(snapshots), guard, version, LOGGER);
+        shared = new ServerSession.Shared(config, adapter, detector, new McStructureLocator(snapshots), guard, version, LOGGER, tps);
 
         detector.register();
         registerCommands();
@@ -117,6 +119,9 @@ public final class InhabitantsMod implements ModInitializer {
     }
 
     private void onEndServerTick(MinecraftServer server) {
+        // Measured first and unconditionally, so the addon's own tick cost is included in what an operator
+        // would see anyway, and a throw further down never leaves a gap in the sample window.
+        tps.recordTick();
         ServerSession current = session;
         if (current != null && current.server() == server) {
             shared.guard().run("server tick", current::tick);

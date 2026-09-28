@@ -46,6 +46,9 @@ final class FakeBots implements BotGateway {
     final Set<String> online = new HashSet<>();
     final Set<String> unmanaged = new HashSet<>();
     final Set<String> taken = new HashSet<>();
+    /** Per-name override for {@link #distanceToNearestPlayer}, by lower-case name; unset means -1 (unknown). */
+    final Map<String, Double> distanceToPlayer = new HashMap<>();
+    boolean throwDistance;
 
     final List<Request> requests = new ArrayList<>();
     final List<Applied> applied = new ArrayList<>();
@@ -207,6 +210,14 @@ final class FakeBots implements BotGateway {
     @Override
     public boolean isManaged(String botName) {
         return online.contains(key(botName)) && !unmanaged.contains(key(botName));
+    }
+
+    @Override
+    public double distanceToNearestPlayer(String botName) {
+        if (throwDistance) {
+            throw new IllegalStateException("injected distanceToNearestPlayer failure");
+        }
+        return distanceToPlayer.getOrDefault(key(botName), -1.0);
     }
 
     @Override

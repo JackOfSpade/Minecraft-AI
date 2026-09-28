@@ -49,6 +49,12 @@ public interface BotGateway {
     boolean isManaged(String botName);
 
     /**
+     * Distance in blocks from the bot's current position to the nearest online real player (this addon's own
+     * inhabitants and any other bot do not count), or -1 when the bot is not online or no real player is online.
+     */
+    double distanceToNearestPlayer(String botName);
+
+    /**
      * Releases per-bot upstream state the addon created (path, follower, ...) for a bot that is gone.
      * Idempotent; safe for names that never existed.
      */
