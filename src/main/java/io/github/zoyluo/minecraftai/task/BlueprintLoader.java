@@ -14,10 +14,14 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public final class BlueprintLoader {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final int MAX_EXPANDED_BLOCKS = 4096;
+    // Belt of the belt-and-suspenders path-traversal guard in load(): a bare-filename allowlist
+    // (no '/', '\\', or other separators reach this charset at all).
+    private static final Pattern VALID_BLUEPRINT_NAME = Pattern.compile("[A-Za-z0-9_.-]+");
 
     private BlueprintLoader() {
     }
@@ -37,7 +41,15 @@ public final class BlueprintLoader {
         if ("hut_5x5".equals(name) || "small_hut".equals(name)) {
             ensureDefaultBlueprintsWritten();
         }
-        Path path = blueprintDir().resolve(name + ".json");
+        // Path-traversal guard: name is LLM-tool-call-controlled (see ToolRegistry/GoalExecutor/
+        // GoalPlanner/IdleCoordinator callers), so it must be a bare file name -- reject anything
+        // that isn't, then re-verify the resolved path actually stays under blueprintDir() as a
+        // second, independent check (suspenders) rather than trusting the charset allowlist alone.
+        Path blueprintDir = blueprintDir();
+        Path path = blueprintDir.resolve(name + ".json").normalize();
+        if (!isValidBlueprintName(name) || !path.startsWith(blueprintDir.normalize())) {
+            throw new IOException("blueprint_not_found: " + name);
+        }
         if (!Files.exists(path)) {
             throw new IOException("blueprint_not_found: " + name);
         }
@@ -155,6 +167,23 @@ public final class BlueprintLoader {
 
     private static Path blueprintDir() {
         return FabricLoader.getInstance().getGameDir().resolve("blueprints");
+    }
+
+    /**
+     * True only for a bare file-name-shaped blueprint name: [A-Za-z0-9_.-] characters, no ".."
+     * segment, and not an absolute path. Package-private so tests can exercise it directly.
+     */
+    static boolean isValidBlueprintName(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        if (!VALID_BLUEPRINT_NAME.matcher(name).matches()) {
+            return false;
+        }
+        if (name.contains("..")) {
+            return false;
+        }
+        return !Path.of(name).isAbsolute();
     }
 
     private record Key(int x, int y, int z) {
