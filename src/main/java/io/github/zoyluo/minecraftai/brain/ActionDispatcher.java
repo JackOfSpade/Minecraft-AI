@@ -100,7 +100,7 @@ public final class ActionDispatcher {
             ToolDefinition definition = registry.get(call.name())
                     .orElseThrow(() -> new IllegalArgumentException("unknown_tool: " + call.name()));
             JsonObject args = call.parsedArguments();
-            BotLog.action(bot, "tool_dispatch", "tool", call.name(), "args", sanitizedArguments(args));
+            BotLog.action(bot, "tool_dispatch", "tool", call.name(), "args", sanitizedArguments(call.name(), args));
             return definition.handler().invoke(bot, args);
         } catch (IllegalArgumentException exception) {
             // D: parameter/input validation failures (usually the brain using the wrong tool or passing
@@ -117,14 +117,37 @@ public final class ActionDispatcher {
         }
     }
 
-    private static JsonObject sanitizedArguments(JsonObject args) {
+    // Tools whose "message"/"text"/"value" argument IS the bot's own chat output -- redacting it makes
+    // tool_dispatch log lines useless for debugging what the bot actually said, while the player's own
+    // chat_in is already logged verbatim elsewhere. Log the chat text itself (truncated/escaped) instead
+    // of "<redacted>" for these; every other tool keeps full redaction.
+    private static final java.util.Set<String> CHAT_TEXT_LOGGING_TOOLS = java.util.Set.of("say", "tell_bot");
+    private static final int CHAT_LOG_TEXT_MAX_CHARS = 300;
+
+    static JsonObject sanitizedArguments(String toolName, JsonObject args) {
         JsonObject sanitized = args == null ? new JsonObject() : args.deepCopy();
+        boolean logChatText = CHAT_TEXT_LOGGING_TOOLS.contains(toolName);
         for (String sensitive : java.util.List.of("message", "text", "value")) {
-            if (sanitized.has(sensitive)) {
+            if (!sanitized.has(sensitive)) {
+                continue;
+            }
+            if (logChatText && sanitized.get(sensitive).isJsonPrimitive()
+                    && sanitized.get(sensitive).getAsJsonPrimitive().isString()) {
+                sanitized.addProperty(sensitive, truncateForLog(sanitized.get(sensitive).getAsString()));
+            } else {
                 sanitized.addProperty(sensitive, "<redacted>");
             }
         }
         return sanitized;
+    }
+
+    /** Collapses to a single line (escaping real newlines) and truncates to {@link #CHAT_LOG_TEXT_MAX_CHARS}. */
+    private static String truncateForLog(String text) {
+        String singleLine = text.replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n");
+        if (singleLine.length() > CHAT_LOG_TEXT_MAX_CHARS) {
+            singleLine = singleLine.substring(0, CHAT_LOG_TEXT_MAX_CHARS) + "...";
+        }
+        return singleLine;
     }
 
     // Whether this is a "manual mining/blind movement" type call -- includes direct low-level tools
