@@ -16,6 +16,7 @@ import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.Registries;
@@ -589,7 +590,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // physically could not pass through the descent shaft). After adding ahead.up(), the descent
         // tunnel has a genuine 2-cell-high clearance along the diagonal and is passable. firstSolid3
         // skips fluids to avoid a lava/water collapse.
-        BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
+        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.up(), next);
         DetourEdge flatLandingEdge = new DetourEdge(feet, ahead);
         if (solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
                 && !feet.equals(selfCarvedAheadAt)
@@ -1246,7 +1247,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     }
                     continue;
                 }
-                BlockPos solid = firstSolid(world, side, side.up());
+                BlockPos solid = TerrainProbe.firstSolid(world, side, side.up());
                 if (solid != null) {
                     // Only a genuinely visible neighbouring lava source (through an already open
                     // gap elsewhere) may reject this block; unmined rock beyond it stays UNKNOWN.
@@ -1751,29 +1752,6 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
     }
 
-    // 3-argument version: returns the first cell that is "solid and not a fluid" (fluids are
-    // skipped, never mined -- to avoid a lava/water collapse). Used to clear the three body cells
-    // of a descent stair step (ahead = head cell, ahead.up() = headroom clearance, next = foot
-    // cell), ensuring the descent tunnel has 2-cell walkable height.
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b, BlockPos c) {
-        for (BlockPos p : new BlockPos[]{a, b, c}) {
-            if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {
-                return p.toImmutable();
-            }
-        }
-        return null;
-    }
-
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b) {
-        if (!world.getBlockState(a).isAir() && world.getFluidState(a).isEmpty()) {
-            return a.toImmutable();
-        }
-        if (!world.getBlockState(b).isAir() && world.getFluidState(b).isEmpty()) {
-            return b.toImmutable();
-        }
-        return null;
-    }
-
     @Override
     public Map<String, String> checkpoint() {
         if (invalidCheckpoint || ownedWaterSeals.size() > MAX_CHECKPOINTED_WATER_SEALS) {
@@ -1837,22 +1815,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     private static String encodeOptionalPos(BlockPos pos) {
-        return pos == null ? "none"
-                : pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        return BlockPosText.encodeOptionalPos(pos);
     }
 
     private static BlockPos decodeOptionalPos(String value) {
-        if ("none".equals(value)) {
-            return null;
-        }
-        String[] parts = value.split(",", -1);
-        if (parts.length != 3) {
-            throw new IllegalArgumentException("invalid_pos");
-        }
-        return new BlockPos(
-                Integer.parseInt(parts[0]),
-                Integer.parseInt(parts[1]),
-                Integer.parseInt(parts[2]));
+        return BlockPosText.decodeOptionalPos(value);
     }
 
     private static String encodeDetourEdges(Set<DetourEdge> edges) {

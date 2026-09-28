@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.util.math.BlockPos;
@@ -42,7 +43,7 @@ public final class EvadeTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Evading " + threat.type() + " toward " + (escapeGoal == null ? "(pending)" : compact(escapeGoal));
+        return "Evading " + threat.type() + " toward " + (escapeGoal == null ? "(pending)" : BlockPosText.compact(escapeGoal));
     }
 
     @Override
@@ -230,9 +231,5 @@ public final class EvadeTask extends AbstractTask {
         // perception. Other mobs use the shared close/ranged combat pressure boundary.
         return source instanceof CreeperEntity
                 || CombatCore.isWithinHostilePressureEnvelope(bot, source);
-    }
-
-    private static String compact(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 }

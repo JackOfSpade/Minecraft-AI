@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.task.TerrainProbe;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
@@ -39,7 +40,7 @@ public final class DigNav {
         if (adjacentHazardFluid(bot, step)) {
             return false; // The facing block is adjacent to an observed hazardous fluid (lava/water) -> don't dig, hand control back to the caller
         }
-        BlockPos solid = firstSolid(world, step, step.up());
+        BlockPos solid = TerrainProbe.firstNonAir(world, step, step.up());
         if (solid == null) {
             // The facing block is already air -> step into it (descend if lower, walk if level/higher).
             miner.cancel(bot);
@@ -89,17 +90,6 @@ public final class DigNav {
         }
         if (dy > 0) {
             return from.up();
-        }
-        return null;
-    }
-
-    // The first block among a, b that needs to be dug out (non-air).
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b) {
-        if (!world.getBlockState(a).isAir()) {
-            return a.toImmutable();
-        }
-        if (!world.getBlockState(b).isAir()) {
-            return b.toImmutable();
         }
         return null;
     }

@@ -13,6 +13,7 @@ import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
@@ -756,7 +757,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         //     ceiling at Y+1 in front, leaving only 1 walkable cell height on the way down the stair
         //     -- a normal player can't pass through. Clearing the headroom too -> the descending
         //     tunnel is 2 cells tall and passable. firstSolid3 skips fluids to prevent a mud/water collapse.
-        BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
+        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.up(), next);
         if (solid != null) {
             miner.begin(bot, solid);
             miner.tick(bot); // start mining this cell immediately, don't waste a tick
@@ -1282,7 +1283,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 continue;
             }
             BlockPos side = feet.offset(HDIRS[directionIndex]);
-            if (firstSolid(world, side, side.up()) != null) {
+            if (TerrainProbe.firstNonAir(world, side, side.up()) != null) {
                 return false;
             }
             if (descentTrail.contains(side)) {
@@ -1550,7 +1551,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 hdirIndex = (hdirIndex + 1) % HDIRS.length; // water/lava is visibly touching the body in this direction, switch to another
                 continue;
             }
-            BlockPos solid = firstSolid(world, side, side.up());
+            BlockPos solid = TerrainProbe.firstNonAir(world, side, side.up());
             if (solid != null) {
                 if (miner.target() == null || !miner.target().equals(solid)) {
                     miner.begin(bot, solid); // advanced by the miner.tick at the top of onTick
@@ -1598,29 +1599,6 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // the bot steps into its drop cell. Persist an explicit bounded pickup debt before WALLED;
         // onTick services it ahead of the hard work budget, including after restart.
         armHorizontalFrontierSettle(bot);
-    }
-
-    // 3-argument version: returns the first "solid and non-fluid" cell in order (fluid cells are
-    // skipped, never mined -> prevents a mud/water collapse). Clearing the diving stair's three body
-    // cells (ahead = head cell + ahead.up = headroom + next = foot cell) guarantees the descending
-    // tunnel is 2 cells tall and walkable, so a normal player can pass through.
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b, BlockPos c) {
-        for (BlockPos p : new BlockPos[]{a, b, c}) {
-            if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {
-                return p.toImmutable();
-            }
-        }
-        return null;
-    }
-
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b) {
-        if (!world.getBlockState(a).isAir()) {
-            return a.toImmutable();
-        }
-        if (!world.getBlockState(b).isAir()) {
-            return b.toImmutable();
-        }
-        return null;
     }
 
     @Override
@@ -1784,7 +1762,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             if (schema >= RETURN_OUTCOME_CHECKPOINT_SCHEMA) {
                 values.put("return_outcome", returnOutcome.name());
             }
-            values.put("start_pos", encodePos(startPos));
+            values.put("start_pos", BlockPosText.encodePos(startPos));
             values.put("target_y", String.valueOf(targetY));
             values.put("inventory_baseline", String.valueOf(inventoryBaseline));
             values.put("collected", String.valueOf(collected));
@@ -1796,11 +1774,11 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             values.put("horizontal_mode", String.valueOf(horizontalMode));
             if (schema >= WATER_SEAL_CHECKPOINT_SCHEMA) {
                 values.put("rejected_landing_origin", rejectedLandingOrigin == null
-                        ? "none" : encodePos(rejectedLandingOrigin));
+                        ? "none" : BlockPosText.encodePos(rejectedLandingOrigin));
                 values.put("rejected_landing_directions", String.valueOf(rejectedLandingDirections));
             }
             values.put("trail", trail.stream()
-                    .map(DigDownTask::encodePos)
+                    .map(BlockPosText::encodePos)
                     .collect(java.util.stream.Collectors.joining(";")));
             values.put("return_index", String.valueOf(returnTrailIndex));
             values.put("return_budget_used", String.valueOf(returnBudgetUsed));
@@ -1848,7 +1826,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 ReturnOutcome returnOutcome = schema < RETURN_OUTCOME_CHECKPOINT_SCHEMA
                         ? ReturnOutcome.COMPLETE
                         : ReturnOutcome.valueOf(required(values, "return_outcome"));
-                BlockPos start = decodePos(required(values, "start_pos")).orElse(null);
+                BlockPos start = BlockPosText.decodePosStrictSplit(required(values, "start_pos")).orElse(null);
                 int targetY = integer(values, "target_y");
                 int baseline = integer(values, "inventory_baseline");
                 int collected = integer(values, "collected");
@@ -1953,7 +1931,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             if ("none".equals(value)) {
                 return null;
             }
-            return decodePos(value).orElseThrow();
+            return BlockPosText.decodePosStrictSplit(value).orElseThrow();
         }
 
         private static String required(Map<String, String> values, String key) {
@@ -1970,31 +1948,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             }
             List<BlockPos> result = new ArrayList<>();
             for (String part : encoded.split(";", -1)) {
-                result.add(decodePos(part).orElseThrow());
+                result.add(BlockPosText.decodePosStrictSplit(part).orElseThrow());
             }
             return List.copyOf(result);
-        }
-    }
-
-    private static String encodePos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private static Optional<BlockPos> decodePos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        String[] parts = value.split(",", -1);
-        if (parts.length != 3) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.of(new BlockPos(
-                    Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]),
-                    Integer.parseInt(parts[2])));
-        } catch (NumberFormatException exception) {
-            return Optional.empty();
         }
     }
 }

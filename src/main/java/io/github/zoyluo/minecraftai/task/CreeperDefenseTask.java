@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.util.hit.BlockHitResult;
@@ -180,9 +181,9 @@ public final class CreeperDefenseTask extends AbstractTask {
     @Override
     public String describe() {
         return "Creeper defense phase=" + phase
-                + " source=" + compact(lastSeenPos)
+                + " source=" + BlockPosText.compactOrElse(lastSeenPos, "(none)")
                 + " source_id=" + trackedCreeperId
-                + " escape=" + compact(escapeGoal)
+                + " escape=" + BlockPosText.compactOrElse(escapeGoal, "(none)")
                 + " core_remaining=" + coreTargets.size()
                 + " wing_remaining=" + wingTargets.size()
                 + " wall_placed=" + wallPlacements
@@ -911,10 +912,5 @@ public final class CreeperDefenseTask extends AbstractTask {
                 "hidden_ticks", hiddenTicks(),
                 "wall_placed", wallPlacements);
         fail(reason);
-    }
-
-    private static String compact(BlockPos pos) {
-        return pos == null ? "(none)"
-                : pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 }

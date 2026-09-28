@@ -15,6 +15,7 @@ import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.task.HuntSearchCursor;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
@@ -630,23 +631,11 @@ final class GoalCheckpointCodec {
     }
 
     static String encodePos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        return BlockPosText.encodePos(pos);
     }
 
     static Optional<BlockPos> decodePos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            String[] parts = value.split(",");
-            if (parts.length != 3) {
-                return Optional.empty();
-            }
-            return Optional.of(new net.minecraft.util.math.BlockPos(
-                    Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
-        } catch (RuntimeException ignored) {
-            return Optional.empty();
-        }
+        return BlockPosText.decodePos(value);
     }
 
     record SettledServiceDescriptor(

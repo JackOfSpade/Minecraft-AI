@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
 
@@ -56,8 +57,8 @@ public final class MiningBarricadeTask extends AbstractTask {
     @Override
     public String describe() {
         return "Mining barricade phase=" + phase
-                + " retreat=" + compact(retreatFeet)
-                + " gate=" + compact(barrierFeet);
+                + " retreat=" + BlockPosText.compactOrElse(retreatFeet, "missing")
+                + " gate=" + BlockPosText.compactOrElse(barrierFeet, "missing");
     }
 
     @Override
@@ -216,7 +217,4 @@ public final class MiningBarricadeTask extends AbstractTask {
         return Math.abs(first.getX() - second.getX()) + Math.abs(first.getZ() - second.getZ());
     }
 
-    private static String compact(BlockPos pos) {
-        return pos == null ? "missing" : pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
 }

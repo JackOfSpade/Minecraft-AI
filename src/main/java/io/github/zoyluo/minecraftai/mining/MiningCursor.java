@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.mining;
 
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.LinkedHashMap;
@@ -52,8 +53,8 @@ public record MiningCursor(
     public Map<String, String> encode() {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("schema", String.valueOf(schema));
-        values.put("origin", encodePos(origin));
-        values.put("face", encodePos(face));
+        values.put("origin", BlockPosText.encodePosOrEmpty(origin));
+        values.put("face", BlockPosText.encodePosOrEmpty(face));
         values.put("direction", String.valueOf(directionIndex));
         values.put("leg", String.valueOf(legIndex));
         values.put("steps_left", String.valueOf(stepsLeft));
@@ -71,8 +72,8 @@ public record MiningCursor(
             if (schema != CURRENT_SCHEMA) {
                 return Optional.empty();
             }
-            BlockPos origin = decodePos(values.get("origin")).orElse(null);
-            BlockPos face = decodePos(values.get("face")).orElse(origin);
+            BlockPos origin = BlockPosText.decodePosOrThrow(values.get("origin")).orElse(null);
+            BlockPos face = BlockPosText.decodePosOrThrow(values.get("face")).orElse(origin);
             if (origin == null || face == null) {
                 return Optional.empty();
             }
@@ -95,21 +96,4 @@ public record MiningCursor(
         return value == null || value.isBlank() ? fallback : Integer.parseInt(value);
     }
 
-    private static String encodePos(BlockPos pos) {
-        return pos == null ? "" : pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private static Optional<BlockPos> decodePos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        String[] parts = value.split(",");
-        if (parts.length != 3) {
-            return Optional.empty();
-        }
-        return Optional.of(new BlockPos(
-                Integer.parseInt(parts[0]),
-                Integer.parseInt(parts[1]),
-                Integer.parseInt(parts[2])));
-    }
 }

@@ -51,6 +51,7 @@ import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -2544,25 +2545,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private static String encodeCheckpointPos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        return BlockPosText.encodePos(pos);
     }
 
     private static Optional<BlockPos> decodeCheckpointPos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            String[] parts = value.split(",");
-            if (parts.length != 3) {
-                return Optional.empty();
-            }
-            return Optional.of(new BlockPos(
-                    Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]),
-                    Integer.parseInt(parts[2])));
-        } catch (NumberFormatException ignored) {
-            return Optional.empty();
-        }
+        return BlockPosText.decodePos(value);
     }
 
     private static String encodeRememberedHighWorkPoses(Map<BlockPos, BlockPos> poses) {
@@ -4277,7 +4264,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // tall along the diagonal -- clearing only next+ahead would leave a player descending the
         // stairs bumping their head on the solid ceiling ahead, making the passage effectively only
         // 1 block tall and impassable.
-        BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
+        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.up(), next);
         if (solid != null) {
             BlockMiner.Status st = miner.target() != null && miner.target().equals(solid)
                     ? miner.tick(bot)
@@ -6526,19 +6513,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
         }
         return throttled;
-    }
-
-    // 3-argument version: returns, in order, the first cell that is "solid and not a fluid" (a
-    // fluid cell is skipped, never mined -> prevents a lava/water breach). The dive-shaft stair
-    // clears three body cells (ahead = head cell + ahead.up = headroom + next = foot cell),
-    // guaranteeing the dive shaft is 2 cells tall and passable for a normal player.
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b, BlockPos c) {
-        for (BlockPos p : new BlockPos[]{a, b, c}) {
-            if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {
-                return p.toImmutable();
-            }
-        }
-        return null;
     }
 
     // The next cell toward the target: vertical takes priority (dig down if the target is lower), otherwise the larger horizontal component (avoids cutting diagonally through a wall corner).

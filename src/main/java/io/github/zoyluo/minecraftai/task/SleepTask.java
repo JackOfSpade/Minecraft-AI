@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.BedBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -44,7 +45,7 @@ public final class SleepTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Sleeping phase=" + phase + " bed=" + (bedPos == null ? "(pending)" : compact(bedPos));
+        return "Sleeping phase=" + phase + " bed=" + (bedPos == null ? "(pending)" : BlockPosText.compact(bedPos));
     }
 
     @Override
@@ -77,7 +78,7 @@ public final class SleepTask extends AbstractTask {
             // Include phase+bed together: this 3000t timeout can fire during any of FIND_BED/PLACE_BED/WALK_TO_BED
             // (most commonly WALK_TO_BED getting stuck on pathing) -- "sleep_timeout" alone wouldn't tell us whether
             // we failed to find a bed, failed to place one, or failed to reach it.
-            fail("sleep_timeout phase=" + phase + (bedPos == null ? "" : " bed=" + compact(bedPos)));
+            fail("sleep_timeout phase=" + phase + (bedPos == null ? "" : " bed=" + BlockPosText.compact(bedPos)));
             return;
         }
         switch (phase) {
@@ -296,10 +297,6 @@ public final class SleepTask extends AbstractTask {
             }
         }
         return null;
-    }
-
-    private static String compact(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     private record BedPlacement(BlockPos foot, BlockPos head, Direction facing) {

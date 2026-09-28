@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.inventory.Inventory;
@@ -87,7 +88,7 @@ public final class FarmTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return name() + " crop=" + crop + " center=" + compact(areaCenter) + " radius=" + radius
+        return name() + " crop=" + crop + " center=" + BlockPosText.compact(areaCenter) + " radius=" + radius
                 + " done=" + completedActions + " phase=" + phase + (note.isBlank() ? "" : " note=" + note);
     }
 
@@ -244,7 +245,7 @@ public final class FarmTask extends AbstractTask {
         }
         BlockPos stand = adjacentStandPos(bot, current.ground());
         if (stand == null) {
-            note = "unreachable " + compact(current.ground());
+            note = "unreachable " + BlockPosText.compact(current.ground());
             phase = Phase.NEXT;
             return;
         }
@@ -323,7 +324,7 @@ public final class FarmTask extends AbstractTask {
             note = "deposit_skipped:no_base_container";
             // Same as above: with no usable container, depositing is silently abandoned and the loop would
             // keep retrying the same thing with no trace left behind.
-            BotLog.action(bot, "farm_deposit_no_container", "base", compact(basePos));
+            BotLog.action(bot, "farm_deposit_no_container", "base", BlockPosText.compact(basePos));
             finishDeposit();
             return;
         }
@@ -499,10 +500,6 @@ public final class FarmTask extends AbstractTask {
             }
         }
         return null;
-    }
-
-    private static String compact(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     private enum TargetAction {

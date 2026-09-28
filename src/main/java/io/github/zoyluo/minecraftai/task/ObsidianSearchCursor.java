@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
@@ -134,8 +135,8 @@ record ObsidianSearchCursor(
         Map<String, String> values = new LinkedHashMap<>();
         values.put("schema", String.valueOf(schema));
         values.put("cursor_kind", KIND);
-        values.put("origin", encodePos(origin));
-        values.put("work_face", encodePos(face));
+        values.put("origin", BlockPosText.encodePos(origin));
+        values.put("work_face", BlockPosText.encodePos(face));
         values.put("direction", String.valueOf(directionIndex));
         values.put("leg", String.valueOf(legIndex));
         values.put("steps_left", String.valueOf(stepsLeft));
@@ -157,8 +158,8 @@ record ObsidianSearchCursor(
             if (schema != CURRENT_SCHEMA && schema != LEGACY_SCHEMA) {
                 return Optional.empty();
             }
-            BlockPos origin = decodePos(values.get("origin")).orElse(null);
-            BlockPos face = decodePos(values.get("work_face")).orElse(null);
+            BlockPos origin = BlockPosText.decodePosOrThrow(values.get("origin")).orElse(null);
+            BlockPos face = BlockPosText.decodePosOrThrow(values.get("work_face")).orElse(null);
             if (origin == null || face == null) {
                 return Optional.empty();
             }
@@ -223,21 +224,4 @@ record ObsidianSearchCursor(
         return Integer.parseInt(value);
     }
 
-    private static String encodePos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private static Optional<BlockPos> decodePos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        String[] parts = value.split(",");
-        if (parts.length != 3) {
-            return Optional.empty();
-        }
-        return Optional.of(new BlockPos(
-                Integer.parseInt(parts[0]),
-                Integer.parseInt(parts[1]),
-                Integer.parseInt(parts[2])));
-    }
 }

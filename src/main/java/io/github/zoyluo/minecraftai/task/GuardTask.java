@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
@@ -50,7 +51,7 @@ public final class GuardTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Guarding " + compact(currentGuardPoint()) + " phase=" + phase + (waiting ? " waiting" : "");
+        return "Guarding " + BlockPosText.compactOrElse(currentGuardPoint(), "owner") + " phase=" + phase + (waiting ? " waiting" : "");
     }
 
     @Override
@@ -198,9 +199,5 @@ public final class GuardTask extends AbstractTask {
 
     private BlockPos currentGuardPoint() {
         return guardPoint == null ? fixedPoint : guardPoint;
-    }
-
-    private static String compact(BlockPos pos) {
-        return pos == null ? "owner" : pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 }

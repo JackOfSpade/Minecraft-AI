@@ -19,6 +19,7 @@ import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
@@ -4612,25 +4613,11 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private static String encodePos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        return BlockPosText.encodePos(pos);
     }
 
     private static Optional<BlockPos> decodePos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            String[] parts = value.split(",");
-            if (parts.length != 3) {
-                return Optional.empty();
-            }
-            return Optional.of(new BlockPos(
-                    Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]),
-                    Integer.parseInt(parts[2])));
-        } catch (NumberFormatException ignored) {
-            return Optional.empty();
-        }
+        return BlockPosText.decodePos(value);
     }
 
     static String encodeItemLedger(Map<Item, Integer> ledger) {

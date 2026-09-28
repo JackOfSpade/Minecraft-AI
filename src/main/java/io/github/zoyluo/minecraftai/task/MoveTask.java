@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.action.DigNav;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.Heightmap;
@@ -54,7 +55,7 @@ public final class MoveTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return (digging ? "Digging to " : "Walking to ") + compact(goal);
+        return (digging ? "Digging to " : "Walking to ") + BlockPosText.compact(goal);
     }
 
     @Override
@@ -152,7 +153,7 @@ public final class MoveTask extends AbstractTask {
         waypoint = null; // Mutually exclusive: entering digging mode abandons the waypoint relay
         digLastProgressTick = elapsed;
         bot.getActionPack().stopAll(); // Clear the pathfinding state; DigNav takes over driving from here
-        BotLog.action(bot, "move_dig_fallback", "goal", compact(goal), "reason", reason);
+        BotLog.action(bot, "move_dig_fallback", "goal", BlockPosText.compact(goal), "reason", reason);
     }
 
     private void digTick(AIPlayerEntity bot) {
@@ -248,20 +249,20 @@ public final class MoveTask extends AbstractTask {
     private boolean tryWaypointRelay(AIPlayerEntity bot, String reason) {
         if (waypointHops >= WAYPOINT_MAX_HOPS) {
             BotLog.action(bot, "move_waypoint_exhausted",
-                    "why", "hops_limit", "hops", waypointHops, "goal", compact(goal), "reason", reason);
+                    "why", "hops_limit", "hops", waypointHops, "goal", BlockPosText.compact(goal), "reason", reason);
             return false;
         }
         BlockPos picked = pickWaypoint(bot, goal);
         if (picked == null) {
             BotLog.action(bot, "move_waypoint_exhausted",
-                    "why", "no_candidate", "hops", waypointHops, "goal", compact(goal), "reason", reason);
+                    "why", "no_candidate", "hops", waypointHops, "goal", BlockPosText.compact(goal), "reason", reason);
             return false;
         }
         waypoint = picked;
         waypointHops++;
         digging = false; // May be transitioning in from a digging circuit-breaker: the waypoint segment proceeds as pure pathfinding, no more digging
         BotLog.action(bot, "move_waypoint",
-                "to", waypoint.toShortString(), "hop", waypointHops, "goal", compact(goal), "reason", reason);
+                "to", waypoint.toShortString(), "hop", waypointHops, "goal", BlockPosText.compact(goal), "reason", reason);
         return true;
     }
 
@@ -337,9 +338,5 @@ public final class MoveTask extends AbstractTask {
 
     private BlockPos currentGoal() {
         return resolvedGoal == null ? goal : resolvedGoal;
-    }
-
-    private static String compact(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 }

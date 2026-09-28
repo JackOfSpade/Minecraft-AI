@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.task.CreateObsidianTask.Phase;
 import io.github.zoyluo.minecraftai.task.CreateObsidianTask.PourPlan;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
@@ -345,24 +346,10 @@ record ObsidianCheckpoint(int targetCount,
     }
 
     private static String encodeCheckpointPos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        return BlockPosText.encodePos(pos);
     }
 
     private static Optional<BlockPos> decodeCheckpointPos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            String[] parts = value.split(",");
-            if (parts.length != 3) {
-                return Optional.empty();
-            }
-            return Optional.of(new BlockPos(
-                    Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]),
-                    Integer.parseInt(parts[2])));
-        } catch (NumberFormatException ignored) {
-            return Optional.empty();
-        }
+        return BlockPosText.decodePos(value);
     }
 }

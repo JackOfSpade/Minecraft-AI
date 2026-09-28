@@ -12,6 +12,7 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.BlockItem;
@@ -75,7 +76,7 @@ public final class BuildTask extends AbstractTask {
 
     @Override
     public String describe() {
-        String anchorText = anchor == null ? "auto" : compact(anchor);
+        String anchorText = anchor == null ? "auto" : BlockPosText.compact(anchor);
         return "Building " + blueprint.name() + " at " + anchorText + " " + nextIndex + "/" + blueprint.placements().size()
                 + " phase=" + phase + (note.isBlank() ? "" : " note=" + note);
     }
@@ -150,7 +151,7 @@ public final class BuildTask extends AbstractTask {
                 fail("no_flat_site");
                 return;
             }
-            note = "auto_site=" + compact(anchor);
+            note = "auto_site=" + BlockPosText.compact(anchor);
         }
         if (flatten) {
             planFlatten(bot);
@@ -198,13 +199,13 @@ public final class BuildTask extends AbstractTask {
         // Flatten-cell budget: a cell that stays out of reach (when nearbyStand finds no stand position it degenerates into startPathTo(self), an in-place infinite loop, observed in real_build as
         // path_idle with 0 progress leading to build_timeout) is skipped if not resolved within 50t; flattening/building then continues best-effort, without insisting on cells the bot can't stand near.
         if (elapsed - flattenTargetTick > 50) {
-            note = "flatten_skip=" + compact(currentFlattenTarget.pos()); // Skipping a flatten cell that's out of reach (prevents an in-place infinite loop)
+            note = "flatten_skip=" + BlockPosText.compact(currentFlattenTarget.pos()); // Skipping a flatten cell that's out of reach (prevents an in-place infinite loop)
             // Unlike a skipped build block (build_block_skipped below), a skipped flatten cell
             // leaves no BotLog trace at all otherwise: the site may still finish the structure and
             // "complete" while a hole/bump was silently left under it, and only StructureVerifier's
             // eventual mismatch (if any) would hint at why -- with nothing pointing back to this cell.
             BotLog.action(bot, "build_flatten_skipped",
-                    "pos", compact(currentFlattenTarget.pos()),
+                    "pos", BlockPosText.compact(currentFlattenTarget.pos()),
                     "kind", currentFlattenTarget.kind());
             currentFlattenTarget = null;
             return;
@@ -277,7 +278,7 @@ public final class BuildTask extends AbstractTask {
             bot.getActionPack().startPathTo(stand);
         }
         if (retryTicks > 12) {
-            fail("flatten_fill_failed: " + result.reason() + " at " + compact(pos));
+            fail("flatten_fill_failed: " + result.reason() + " at " + BlockPosText.compact(pos));
         }
     }
 
@@ -409,7 +410,7 @@ public final class BuildTask extends AbstractTask {
         bot.getActionPack().stopAll();
         BotLog.action(bot, "build_block_skipped",
                 "index", nextIndex,
-                "pos", compact(pos),
+                "pos", BlockPosText.compact(pos),
                 "reason", reason);
         note = "build_skip=" + nextIndex + ":" + reason;
         skippedBlocks++;
@@ -461,7 +462,7 @@ public final class BuildTask extends AbstractTask {
             if (bot.getActionPack().isPathExecutorIdle()) {
                 BlockPos stand = nearbyStand(bot, pos);
                 if (stand == null || stand.equals(feet)) {
-                    fail("no_safe_stand_for_" + reason + ": " + compact(pos));
+                    fail("no_safe_stand_for_" + reason + ": " + BlockPosText.compact(pos));
                     return false;
                 }
                 ActionResult path = bot.getActionPack().startPathTo(stand);
@@ -483,7 +484,7 @@ public final class BuildTask extends AbstractTask {
         if (bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) > maxDistanceSquared) {
             BlockPos stand = nearbyStand(bot, pos);
             if (stand == null) {
-                fail("no_stand_position_for_" + reason + ": " + compact(pos));
+                fail("no_stand_position_for_" + reason + ": " + BlockPosText.compact(pos));
                 return false;
             }
             ActionResult path = bot.getActionPack().startPathTo(stand);
@@ -614,10 +615,6 @@ public final class BuildTask extends AbstractTask {
         return placement.palette() == null || placement.palette().isBlank() ? placement.blockId() : "palette:" + placement.palette();
     }
 
-    private static String compact(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
     public BlockPos anchor() {
         return anchor == null ? null : anchor.toImmutable();
     }
@@ -637,7 +634,7 @@ public final class BuildTask extends AbstractTask {
     public void restoreAnchor(BlockPos restoredAnchor) {
         if (restoredAnchor != null && phase == Phase.SITE) {
             this.anchor = restoredAnchor.toImmutable();
-            this.note = "restored_anchor=" + compact(this.anchor);
+            this.note = "restored_anchor=" + BlockPosText.compact(this.anchor);
         }
     }
 
