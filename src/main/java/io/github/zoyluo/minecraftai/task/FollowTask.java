@@ -2,26 +2,20 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BoatAction;
-import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.MathHelper;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Mirrors the followed player's travel mode without treating water as ordinary land:
@@ -46,13 +40,10 @@ public final class FollowTask extends AbstractTask {
     // leg that simply finishes early is never mistaken for this backoff and can re-path immediately.
     private boolean repathBackoff;
     private BoatFollowTask boatFollow;
-    private final BlockMiner shelterExitMiner = new BlockMiner();
-    private final Set<BlockPos> rejectedShelterEgress = new HashSet<>();
-    private EmergencyShelterTask.ExitDebt shelterExitDebt;
-    private BlockPos activeShelterEgress;
+    private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
 
     public FollowTask(String targetName) {
-        this.targetName = targetName == null ? "" : targetName.trim();
+        this.targetName = FollowTargetResolver.normalize(targetName);
     }
 
     @Override
@@ -84,10 +75,7 @@ public final class FollowTask extends AbstractTask {
         waiting = false;
         repathBackoff = false;
         boatFollow = null;
-        shelterExitMiner.cancel(bot);
-        rejectedShelterEgress.clear();
-        shelterExitDebt = EmergencyShelterTask.pendingExitDebt(bot).orElse(null);
-        activeShelterEgress = null;
+        shelterExitDebtRepayer.reset(bot);
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
     }
 
@@ -113,7 +101,8 @@ public final class FollowTask extends AbstractTask {
         // The owner/name lookup above is explicit player authority, not a radius- or
         // line-of-sight-gated entity scan.  If a new instruction cancelled a sealed shelter,
         // first reopen only the task-owned doorway, then continue following that known player.
-        if (repayShelterExitDebt(bot, target)) {
+        if (shelterExitDebtRepayer.repay(bot, target, elapsed)) {
+            waiting = shelterExitDebtRepayer.isWaiting();
             return;
         }
 
@@ -301,150 +290,9 @@ public final class FollowTask extends AbstractTask {
                 playerPos.getZ() + dz * scale);
     }
 
-    /**
-     * Repays a sealed shelter's cancellation debt before pathing.  It can mine only a block whose
-     * exact state was recorded as bot-owned by {@link EmergencyShelterTask}; arbitrary enclosure
-     * blocks are rejected rather than punched through.
-     */
-    private boolean repayShelterExitDebt(AIPlayerEntity bot, ServerPlayerEntity target) {
-        if (shelterExitDebt == null) {
-            return false;
-        }
-        if (!shelterExitDebt.matchesDimension(bot)
-                || !bot.getBlockPos().equals(shelterExitDebt.anchor())) {
-            finishShelterExitDebt(bot);
-            return false;
-        }
-        BlockPos egress = activeShelterEgress == null
-                ? selectShelterEgress(bot, target)
-                : activeShelterEgress;
-        if (egress == null) {
-            if (elapsed % 200 == 1) {
-                BotLog.action(bot, "follow_shelter_egress_unavailable", "anchor", shelterExitDebt.anchor().toShortString());
-            }
-            bot.getActionPack().stopMovement();
-            waiting = true;
-            return true;
-        }
-        activeShelterEgress = egress;
-        BlockPos obstruction = firstShelterExitObstruction(bot, egress);
-        if (obstruction != null) {
-            if (!shelterExitDebt.ownsCurrentPlacement(bot, obstruction)) {
-                rejectedShelterEgress.add(egress);
-                activeShelterEgress = null;
-                waiting = true;
-                return true;
-            }
-            if (!obstruction.equals(shelterExitMiner.target())) {
-                shelterExitMiner.begin(bot, obstruction);
-            }
-            BlockMiner.Status status = shelterExitMiner.tick(bot);
-            if (status == BlockMiner.Status.FAILED) {
-                rejectedShelterEgress.add(egress);
-                activeShelterEgress = null;
-            }
-            waiting = true;
-            return true;
-        }
-        Standability.clearCache();
-        if (!Standability.isStandable(bot.getEntityWorld(), egress)
-                || !FakePlayerMotion.stepToStandable(bot, egress, "follow_shelter_exit")) {
-            rejectedShelterEgress.add(egress);
-            activeShelterEgress = null;
-            waiting = true;
-            return true;
-        }
-        // The body is now physically outside a cancelled shell.  Promote only this exact owned
-        // state proof to low-priority cleanup before forgetting the doorway debt; no player-built
-        // blocks can enter the registry.
-        EmergencyShelterTask.promoteExitDebtForCleanup(bot, shelterExitDebt);
-        finishShelterExitDebt(bot);
-        waiting = false;
-        return false;
-    }
-
-    private BlockPos selectShelterEgress(AIPlayerEntity bot, ServerPlayerEntity target) {
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (BlockPos candidate : shelterExitDebt.egressCandidates()) {
-            if (rejectedShelterEgress.contains(candidate)
-                    || !hasSafeShelterExitSupport(bot, candidate)) {
-                continue;
-            }
-            BlockPos obstruction = firstShelterExitObstruction(bot, candidate);
-            if (obstruction != null && !shelterExitDebt.ownsCurrentPlacement(bot, obstruction)) {
-                rejectedShelterEgress.add(candidate);
-                continue;
-            }
-            double targetDistance = candidate.getSquaredDistance(target.getBlockPos());
-            if (best == null || targetDistance < bestDistance) {
-                best = candidate;
-                bestDistance = targetDistance;
-            }
-        }
-        return best;
-    }
-
-    private static BlockPos firstShelterExitObstruction(AIPlayerEntity bot, BlockPos egress) {
-        if (!isPassableShelterExitCell(bot, egress.up())) {
-            return egress.up().toImmutable();
-        }
-        if (!isPassableShelterExitCell(bot, egress)) {
-            return egress.toImmutable();
-        }
-        return null;
-    }
-
-    private static boolean hasSafeShelterExitSupport(AIPlayerEntity bot, BlockPos egress) {
-        var world = bot.getEntityWorld();
-        var support = world.getBlockState(egress.down());
-        return support.getFluidState().isEmpty()
-                && !support.getCollisionShape(world, egress.down()).isEmpty()
-                && !Standability.isDangerous(support);
-    }
-
-    private static boolean isPassableShelterExitCell(AIPlayerEntity bot, BlockPos position) {
-        var world = bot.getEntityWorld();
-        var state = world.getBlockState(position);
-        return state.getFluidState().isEmpty()
-                && state.getCollisionShape(world, position).isEmpty()
-                && !Standability.isDangerous(state);
-    }
-
-    private void finishShelterExitDebt(AIPlayerEntity bot) {
-        shelterExitMiner.cancel(bot);
-        EmergencyShelterTask.clearExitDebt(bot, shelterExitDebt);
-        shelterExitDebt = null;
-        rejectedShelterEgress.clear();
-        activeShelterEgress = null;
-    }
-
     /** @return true while the bot is still aboard and needs another boat tick before land follow. */
     private boolean leaveBoatForLand(AIPlayerEntity bot, ServerPlayerEntity target) {
-        AbstractBoatEntity boat = BoatSupport.mountedBoat(bot).orElse(null);
-        if (boat == null) {
-            return false;
-        }
-        if (BoatSupport.nearbySafeDismountShore(bot, boat).isPresent()) {
-            BoatAction.stopBoat(boat);
-            bot.dismountVehicle();
-            return bot.getVehicle() instanceof AbstractBoatEntity;
-        }
-        driveBoatToward(boat, target.getX(), target.getZ());
-        return true;
-    }
-
-    private static void driveBoatToward(AbstractBoatEntity boat, double targetX, double targetZ) {
-        double dx = targetX - boat.getX();
-        double dz = targetZ - boat.getZ();
-        if (Math.hypot(dx, dz) <= STOP_DISTANCE) {
-            BoatAction.stopBoat(boat);
-            return;
-        }
-        float desiredYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D);
-        float turn = MathHelper.wrapDegrees(desiredYaw - boat.getYaw());
-        boat.setInputs(turn < -4.0F, turn > 4.0F,
-                Math.abs(turn) < BOAT_TURN_ONLY_ANGLE, false);
+        return BoatSupport.leaveBoatForLand(bot, target.getX(), target.getZ(), STOP_DISTANCE, BOAT_TURN_ONLY_ANGLE);
     }
 
     private void abandonBoatChild(AIPlayerEntity bot) {
@@ -478,17 +326,13 @@ public final class FollowTask extends AbstractTask {
     }
 
     private Optional<ServerPlayerEntity> target(AIPlayerEntity bot) {
-        if (!targetName.isBlank()) {
-            return Optional.ofNullable(bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetName));
-        }
-        return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
+        return FollowTargetResolver.resolve(bot, targetName);
     }
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-        shelterExitMiner.cancel(bot);
+        shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.pause(bot);
         }
@@ -505,7 +349,7 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-        shelterExitMiner.cancel(bot);
+        shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.abort(bot);
         }

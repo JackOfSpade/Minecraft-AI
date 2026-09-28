@@ -3,10 +3,8 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.MathHelper;
 
 import java.util.Optional;
 
@@ -48,7 +46,7 @@ public final class BoatFollowTask extends AbstractTask {
     }
 
     private BoatFollowTask(String targetName, boolean prepareBeforeTargetBoards) {
-        this.targetName = targetName == null ? "" : targetName.trim();
+        this.targetName = FollowTargetResolver.normalize(targetName);
         this.prepareBeforeTargetBoards = prepareBeforeTargetBoards;
     }
 
@@ -159,7 +157,7 @@ public final class BoatFollowTask extends AbstractTask {
                 phase = Phase.WAITING;
                 return;
             }
-            driveToward(mounted, target.getX(), target.getZ());
+            waiting = BoatSupport.steerToward(mounted, target.getX(), target.getZ(), BOAT_STOP_DISTANCE, TURN_ONLY_ANGLE);
             phase = Phase.FOLLOWING;
             return;
         }
@@ -205,45 +203,13 @@ public final class BoatFollowTask extends AbstractTask {
         }
     }
 
-    private void driveToward(AbstractBoatEntity boat, double targetX, double targetZ) {
-        double dx = targetX - boat.getX();
-        double dz = targetZ - boat.getZ();
-        double horizontalDistance = Math.hypot(dx, dz);
-        if (horizontalDistance <= BOAT_STOP_DISTANCE) {
-            BoatAction.stopBoat(boat);
-            waiting = true;
-            return;
-        }
-        float desiredYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D);
-        float turn = MathHelper.wrapDegrees(desiredYaw - boat.getYaw());
-        boolean left = turn < -4.0F;
-        boolean right = turn > 4.0F;
-        boolean forward = Math.abs(turn) < TURN_ONLY_ANGLE;
-        boat.setInputs(left, right, forward, false);
-        waiting = false;
-    }
-
     /** @return true while the boat still needs to reach a dry shore before dismounting. */
     private boolean leaveBoatForLand(AIPlayerEntity bot, ServerPlayerEntity target) {
-        AbstractBoatEntity boat = BoatSupport.mountedBoat(bot).orElse(null);
-        if (boat == null) {
-            return false;
-        }
-        if (BoatSupport.nearbySafeDismountShore(bot, boat).isPresent()) {
-            BoatAction.stopBoat(boat);
-            bot.dismountVehicle();
-            return bot.getVehicle() instanceof AbstractBoatEntity;
-        }
-        driveToward(boat, target.getX(), target.getZ());
-        return true;
+        return BoatSupport.leaveBoatForLand(bot, target.getX(), target.getZ(), BOAT_STOP_DISTANCE, TURN_ONLY_ANGLE);
     }
 
     private Optional<ServerPlayerEntity> target(AIPlayerEntity bot) {
-        if (!targetName.isBlank()) {
-            return Optional.ofNullable(bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetName));
-        }
-        return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
+        return FollowTargetResolver.resolve(bot, targetName);
     }
 
     @Override
