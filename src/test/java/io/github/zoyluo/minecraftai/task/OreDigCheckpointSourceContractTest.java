@@ -12,18 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OreDigCheckpointSourceContractTest {
     private static final Path SOURCE = Path.of(
             "src/main/java/io/github/zoyluo/minecraftai/task/OreDigTask.java");
+    private static final Path CHECKPOINT_SOURCE = Path.of(
+            "src/main/java/io/github/zoyluo/minecraftai/task/OreDigCheckpoint.java");
 
     @Test
     void checkpointMatchesOreFamilyAndReturnsToSavedFaceBeforeMining() throws IOException {
         String source = Files.readString(SOURCE);
+        String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
         int constructor = source.indexOf("this.restoredCheckpoint = OreDigCheckpoint.decode(");
         int missionIdentity = source.indexOf(
                 "values, this.targetOres, expectedRareMissionTarget", constructor);
         int invalidGuard = source.indexOf("this.invalidCheckpoint = !values.isEmpty()", constructor);
-        int fingerprintGuard = source.indexOf(
-                "!OreDigTask.oreFingerprint(ores).equals(fingerprint)", invalidGuard);
+        int fingerprintGuard = checkpointSource.indexOf(
+                "!OreDigTask.oreFingerprint(ores).equals(fingerprint)");
         assertTrue(constructor >= 0 && missionIdentity > constructor && invalidGuard > missionIdentity
-                        && fingerprintGuard > invalidGuard,
+                        && fingerprintGuard >= 0,
                 "OreDig restore must reject another ore family or rare mission identity");
 
         int restoreFlag = source.indexOf(
@@ -335,17 +338,19 @@ class OreDigCheckpointSourceContractTest {
                         && !helperBody.contains("digTowardStep"),
                 "an occluded remembered pose must never authorize terrain modification");
 
-        int codecKey = source.indexOf("\"remembered_high_work_poses\"");
-        int decode = source.indexOf("decodeRememberedHighWorkPoses", codecKey);
-        int exactShape = source.indexOf("isExactHighWorkPose(entry.getKey(), entry.getValue())", decode);
-        int boundedShape = source.indexOf(
+        String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
+        int codecKey = checkpointSource.indexOf("\"remembered_high_work_poses\"");
+        int decode = checkpointSource.indexOf("decodeRememberedHighWorkPoses", codecKey);
+        int exactShape = checkpointSource.indexOf(
+                "isExactHighWorkPose(entry.getKey(), entry.getValue())", decode);
+        int boundedShape = checkpointSource.indexOf(
                 "isRememberedHighWorkPoseNearFace(face, entry.getKey())", exactShape);
         // Each derivation helper (withResourceEpoch/withTorchPlacements/withInventoryServiceUsed)
         // rebuilds the record from its own fields, ending its constructor call with the bare
         // "rememberedHighWorkPoses)" field reference (single close-paren; decode's own
         // "Optional.of(new OreDigCheckpoint(...))" call ends with a double close-paren and is
         // excluded), so this still counts exactly the transforms that must preserve pose facts.
-        int transformCopies = source.split(
+        int transformCopies = checkpointSource.split(
                 "rememberedHighWorkPoses\\);", -1).length - 1;
         assertTrue(codecKey >= 0 && decode > codecKey && exactShape > decode
                         && boundedShape > exactShape && transformCopies == 3,
@@ -359,6 +364,7 @@ class OreDigCheckpointSourceContractTest {
                 "src/main/java/io/github/zoyluo/minecraftai/action/BlockMiner.java"));
         String selector = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/action/ToolSelector.java"));
+        String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
 
         assertTrue(oreDig.contains("miner.begin(bot, pos, true)"),
                 "OreDig must explicitly opt into mining-channel tool conservation");
@@ -413,14 +419,14 @@ class OreDigCheckpointSourceContractTest {
                         && oreDig.contains("isObservableNarrowMiningGate"),
                 "hostile recovery at a factual corner must retreat through the crossed old leg");
         assertTrue(oreDig.contains("stripStepsLeft == stripLegLength")
-                        && oreDig.contains("stepsLeft == legLength"),
+                        && checkpointSource.contains("stepsLeft == legLength"),
                 "only a full untouched successor leg may own the factual-corner rear pair");
         assertTrue(oreDig.contains("isObservedSafeOpenEscapeCorridor")
                         && oreDig.contains("ore_dig_branch_boundary_backtrack")
                         && oreDig.contains("stripStepsLeft = 1"),
                 "a zero-movement fluid cascade must retain one bounded observed rear step");
         assertTrue(oreDig.contains("boundaryRerouteOrigin = origin.toImmutable()")
-                        && oreDig.contains("values.put(\"boundary_reroute_origin\"")
+                        && checkpointSource.contains("values.put(\"boundary_reroute_origin\"")
                         && oreDig.contains("restoredCheckpoint.boundaryRerouteOrigin()"),
                 "the zero-movement reverse exception must survive an exact checkpoint restart");
         assertTrue(oreDig.contains("!feet.equals(boundaryRerouteOrigin)"),
@@ -432,13 +438,14 @@ class OreDigCheckpointSourceContractTest {
     @Test
     void activeBudgetsAreDurableAndCommittedCursorStartsANewBoundedBatch() throws IOException {
         String source = Files.readString(SOURCE);
+        String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
         assertTrue(source.contains("private static final int MAX_ELAPSED_BASE = MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS"),
                 "common-ore seed3000 needs the bounded 24000 tick base budget");
-        assertTrue(source.contains("values.put(\"batch_open\""));
-        assertTrue(source.contains("values.put(\"budget_used\""));
-        assertTrue(source.contains("values.put(\"last_progress_budget\""));
-        assertTrue(source.contains("values.put(\"pending_pickup_started_budget\""));
-        assertTrue(source.contains("values.put(\"pickup_gain_budget\""));
+        assertTrue(checkpointSource.contains("values.put(\"batch_open\""));
+        assertTrue(checkpointSource.contains("values.put(\"budget_used\""));
+        assertTrue(checkpointSource.contains("values.put(\"last_progress_budget\""));
+        assertTrue(checkpointSource.contains("values.put(\"pending_pickup_started_budget\""));
+        assertTrue(checkpointSource.contains("values.put(\"pickup_gain_budget\""));
         assertTrue(source.contains("int durableBudget = committed ? 0"),
                 "completed cursor must not leak an active-batch hard budget");
         assertTrue(source.contains("state == TaskState.FAILED && collected > 0"));
@@ -457,6 +464,7 @@ class OreDigCheckpointSourceContractTest {
     @Test
     void everyTargetBreakPausesForDurablePhysicalPickup() throws IOException {
         String source = Files.readString(SOURCE);
+        String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
         int tick = source.indexOf("protected void onTick");
         int recoveryGate = source.indexOf("if (recoverPendingTargetDrop(bot))", tick);
         int veinDispatch = source.indexOf("advanceVein(bot, world)", recoveryGate);
@@ -464,9 +472,9 @@ class OreDigCheckpointSourceContractTest {
         assertTrue(recoveryGate > tick && veinDispatch > recoveryGate && scanDispatch > veinDispatch,
                 "a pending target drop must block vein, scan and strip work until vanilla pickup is confirmed");
 
-        assertTrue(source.contains("values.put(\"pending_pickup_pos\""));
-        assertTrue(source.contains("values.put(\"pending_pickup_last_seen_pos\""));
-        assertTrue(source.contains("values.put(\"pending_pickup_inventory\""));
+        assertTrue(checkpointSource.contains("values.put(\"pending_pickup_pos\""));
+        assertTrue(checkpointSource.contains("values.put(\"pending_pickup_last_seen_pos\""));
+        assertTrue(checkpointSource.contains("values.put(\"pending_pickup_inventory\""));
         assertTrue(source.contains("restoredPendingPickupPos"));
         assertTrue(source.contains("restoredPendingPickupLastSeenPos"));
         assertTrue(source.contains("pendingPickupLastSeenPos = drop.getBlockPos().toImmutable()"),

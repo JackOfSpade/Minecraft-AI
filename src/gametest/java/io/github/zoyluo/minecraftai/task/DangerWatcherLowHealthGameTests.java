@@ -2294,7 +2294,7 @@ public final class DangerWatcherLowHealthGameTests {
                                                          BlockPos pendingPickup,
                                                          BlockPos activeBreak) {
         Set<Block> ores = Set.of(Blocks.IRON_ORE);
-        Map<String, String> checkpoint = new OreDigTask.OreDigCheckpoint(
+        Map<String, String> checkpoint = new OreDigCheckpoint(
                 4,
                 1,
                 true,
@@ -2317,7 +2317,7 @@ public final class DangerWatcherLowHealthGameTests {
                 -1,
                 activeBreak,
                 activeBreak == null ? -1 : 0).encode();
-        if (OreDigTask.OreDigCheckpoint.decode(checkpoint, ores).isEmpty()) {
+        if (OreDigCheckpoint.decode(checkpoint, ores).isEmpty()) {
             throw new IllegalStateException("invalid OreDig raw-one fixture: " + checkpoint);
         }
         return checkpoint;

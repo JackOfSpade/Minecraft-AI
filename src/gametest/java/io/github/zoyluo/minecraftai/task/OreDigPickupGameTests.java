@@ -6102,7 +6102,7 @@ public final class OreDigPickupGameTests {
                                                        int targetCount,
                                                        Set<Block> ores,
                                                        int rareMissionTarget) {
-        return new OreDigTask.OreDigCheckpoint(
+        return new OreDigCheckpoint(
                 4,
                 targetCount,
                 true,

@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * a multiple of 48 in [48, 384], {@code stepsLeft <= legLength}, and direction in [-1, 3], because
  * the checkpoint decode requires it." {@link LegChooser} never touches a cursor itself -- it is a
  * pure kernel that only returns ints -- so the thing that actually has to accept those values is
- * the shared {@link MiningCursor} codec {@code OreDigTask.OreDigCheckpoint} carries them through
+ * the shared {@link MiningCursor} codec {@code OreDigCheckpoint} carries them through
  * (see {@code OreDigCheckpoint.cursor}). This proves that codec round-trips, with no silent
  * corruption or clamping, every value {@link LegChooser#chooseInitialDirection}, {@link
  * LegChooser#chooseTurn} and {@link LegChooser#lengthForFreshFraction} can legally produce, plus

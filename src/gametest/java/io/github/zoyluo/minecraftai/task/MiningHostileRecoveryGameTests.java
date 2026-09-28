@@ -62,7 +62,7 @@ public final class MiningHostileRecoveryGameTests {
                 12,
                 48,
                 0);
-        Map<String, String> checkpoint = new OreDigTask.OreDigCheckpoint(
+        Map<String, String> checkpoint = new OreDigCheckpoint(
                 4, 1, true, 0, 0, false, 40, 0, 0, cursor,
                 OreDigTask.oreFingerprint(Set.of(Blocks.IRON_ORE)),
                 0, 0, null, null, null, null, -1, -1, -1, null, -1).encode();
@@ -101,7 +101,7 @@ public final class MiningHostileRecoveryGameTests {
         MiningCursor cursor = new MiningCursor(
                 MiningCursor.CURRENT_SCHEMA,
                 fixture.workFace(), fixture.workFace(), 0, 0, 12, 48, 0);
-        Map<String, String> checkpoint = new OreDigTask.OreDigCheckpoint(
+        Map<String, String> checkpoint = new OreDigCheckpoint(
                 4, 1, true, 0, 0, false, 40, 0, 0, cursor,
                 OreDigTask.oreFingerprint(Set.of(Blocks.IRON_ORE)),
                 0, 0, null, null, null, null,
@@ -165,7 +165,7 @@ public final class MiningHostileRecoveryGameTests {
 
         MiningCursor cursor = new MiningCursor(
                 MiningCursor.CURRENT_SCHEMA, face, face, 1, 1, 48, 48, 0);
-        Map<String, String> checkpoint = new OreDigTask.OreDigCheckpoint(
+        Map<String, String> checkpoint = new OreDigCheckpoint(
                 4, 1, true, 0, 0, false, 40, 0, 0, cursor,
                 OreDigTask.oreFingerprint(Set.of(Blocks.IRON_ORE)),
                 7, 7, null, face, null, null,
@@ -212,7 +212,7 @@ public final class MiningHostileRecoveryGameTests {
                 1,
                 48,
                 0);
-        Map<String, String> checkpoint = new OreDigTask.OreDigCheckpoint(
+        Map<String, String> checkpoint = new OreDigCheckpoint(
                 4, 3, true, 0, 0, false, 40, 0, 0, cursor,
                 OreDigTask.oreFingerprint(Set.of(Blocks.IRON_ORE)),
                 0, 0, null, null, null, null,
@@ -382,7 +382,7 @@ public final class MiningHostileRecoveryGameTests {
                 12,
                 48,
                 0);
-        Map<String, String> checkpoint = new OreDigTask.OreDigCheckpoint(
+        Map<String, String> checkpoint = new OreDigCheckpoint(
                 4, 3, true, 0, 0, false, 40, 0, 0, cursor,
                 OreDigTask.oreFingerprint(Set.of(Blocks.IRON_ORE)),
                 40, 40, null, null, null, null, -1, -1, -1, null, -1).encode();

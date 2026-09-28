@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OreDigAssistSourceContractTest {
     private static final Path SOURCE = Path.of(
             "src/main/java/io/github/zoyluo/minecraftai/task/OreDigTask.java");
+    private static final Path CHECKPOINT_SOURCE = Path.of(
+            "src/main/java/io/github/zoyluo/minecraftai/task/OreDigCheckpoint.java");
 
     private static String read(Path path) throws IOException {
         return Files.readString(path);
@@ -50,6 +52,7 @@ class OreDigAssistSourceContractTest {
     @Test
     void literalBlacklistCountsAreUnchangedByTheDetourInserts() throws IOException {
         String source = read(SOURCE);
+        String checkpointSource = read(CHECKPOINT_SOURCE);
         assertEquals(1, count(source, "advanceVein(bot, world)"));
         assertEquals(1, count(source, "if (activeBonus)"));
         assertEquals(1, count(source, "if (miningTarget)"));
@@ -67,7 +70,8 @@ class OreDigAssistSourceContractTest {
         // still preserves the field once, ending its own constructor call with the bare
         // "rememberedHighWorkPoses)" (single close-paren -- decode's own
         // "Optional.of(new OreDigCheckpoint(...))" ends with a double close-paren and is excluded).
-        assertEquals(3, count(source, "rememberedHighWorkPoses);"));
+        assertEquals(3, count(source, "rememberedHighWorkPoses);")
+                + count(checkpointSource, "rememberedHighWorkPoses);"));
         assertEquals(1, count(source, "|| !veinQueue.isEmpty() || bonusOre != null"),
                 "the pinned boolean-or literal must stay on one line, unduplicated");
         assertEquals(4, count(source, "NO_PROGRESS_LIMIT"), "the NO_PROGRESS_LIMIT condition must not be touched");
