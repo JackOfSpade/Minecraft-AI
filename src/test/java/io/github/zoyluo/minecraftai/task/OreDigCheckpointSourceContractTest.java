@@ -20,11 +20,10 @@ class OreDigCheckpointSourceContractTest {
         int missionIdentity = source.indexOf(
                 "values, this.targetOres, expectedRareMissionTarget", constructor);
         int invalidGuard = source.indexOf("this.invalidCheckpoint = !values.isEmpty()", constructor);
-        int matcher = source.indexOf("static Optional<MiningCursor> matchingCursor");
         int fingerprintGuard = source.indexOf(
-                "!OreDigTask.oreFingerprint(ores).equals(fingerprint)", matcher);
+                "!OreDigTask.oreFingerprint(ores).equals(fingerprint)", invalidGuard);
         assertTrue(constructor >= 0 && missionIdentity > constructor && invalidGuard > missionIdentity
-                        && matcher > invalidGuard && fingerprintGuard > matcher,
+                        && fingerprintGuard > invalidGuard,
                 "OreDig restore must reject another ore family or rare mission identity");
 
         int restoreFlag = source.indexOf(
@@ -341,8 +340,13 @@ class OreDigCheckpointSourceContractTest {
         int exactShape = source.indexOf("isExactHighWorkPose(entry.getKey(), entry.getValue())", decode);
         int boundedShape = source.indexOf(
                 "isRememberedHighWorkPoseNearFace(face, entry.getKey())", exactShape);
+        // Each derivation helper (withResourceEpoch/withTorchPlacements/withInventoryServiceUsed)
+        // rebuilds the record from its own fields, ending its constructor call with the bare
+        // "rememberedHighWorkPoses)" field reference (single close-paren; decode's own
+        // "Optional.of(new OreDigCheckpoint(...))" call ends with a double close-paren and is
+        // excluded), so this still counts exactly the transforms that must preserve pose facts.
         int transformCopies = source.split(
-                "restored\\.rememberedHighWorkPoses\\(\\)", -1).length - 1;
+                "rememberedHighWorkPoses\\);", -1).length - 1;
         assertTrue(codecKey >= 0 && decode > codecKey && exactShape > decode
                         && boundedShape > exactShape && transformCopies == 3,
                 "checkpoint codec and all service transforms must preserve bounded pose facts");

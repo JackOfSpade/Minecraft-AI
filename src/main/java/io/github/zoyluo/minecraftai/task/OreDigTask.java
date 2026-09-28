@@ -2374,10 +2374,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return ores.isEmpty() ? Optional.empty() : Optional.of(Set.copyOf(ores));
     }
 
-    static Optional<MiningCursor> matchingCursor(Set<Block> ores, Map<String, String> checkpoint) {
-        return OreDigCheckpoint.decode(checkpoint, ores).map(OreDigCheckpoint::cursor);
-    }
-
     /**
      * Advances one bounded resource epoch — the per-batch retry or a mission-margin epoch —
      * without changing any physical or time cursor. This codec only proves the successor epoch
@@ -4390,20 +4386,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private static boolean isWater(ServerWorld world, BlockPos pos) {
         return world.getBlockState(pos).getFluidState().isIn(FluidTags.WATER);
-    }
-
-    private static BlockPos firstFallingObstruction(AIPlayerEntity bot,
-                                                    ServerWorld world,
-                                                    BlockPos... positions) {
-        for (BlockPos position : positions) {
-            if (!canObserveWorldState(bot, position)) {
-                return null;
-            }
-            if (world.getBlockState(position).getBlock() instanceof FallingBlock) {
-                return position.toImmutable();
-            }
-        }
-        return null;
     }
 
     private static boolean canObserveWorldState(AIPlayerEntity bot, BlockPos pos) {
@@ -6586,16 +6568,6 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {
                 return p.toImmutable();
             }
-        }
-        return null;
-    }
-
-    private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b) {
-        if (!world.getBlockState(a).isAir() && world.getFluidState(a).isEmpty()) {
-            return a.toImmutable();
-        }
-        if (!world.getBlockState(b).isAir() && world.getFluidState(b).isEmpty()) {
-            return b.toImmutable();
         }
         return null;
     }
