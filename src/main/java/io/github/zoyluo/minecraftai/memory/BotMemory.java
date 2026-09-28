@@ -170,10 +170,11 @@ public final class BotMemory {
         StringBuilder builder = new StringBuilder();
         if (!places.isEmpty()) {
             builder.append("Known places:\n");
-            int count = 0;
+            int start = Math.max(0, places.size() - PLACE_INJECT_LIMIT);
+            int index = 0;
             for (Map.Entry<String, Place> entry : places.entrySet()) {
-                if (count++ >= PLACE_INJECT_LIMIT) {
-                    break;
+                if (index++ < start) {
+                    continue;
                 }
                 Place place = entry.getValue();
                 builder.append("- ").append(entry.getKey()).append(" = ")
