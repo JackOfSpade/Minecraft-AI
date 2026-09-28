@@ -146,7 +146,7 @@ public final class ChatView implements PanelComponent {
     private void drawEmpty(DrawContext context, TextRenderer renderer) {
         String first = Theme.tr("chat.minecraftai.empty");
         int maxTextW = Math.max(40, w - EDGE_PAD * 4);
-        String second = trimToWidth(renderer, Theme.tr("chat.minecraftai.hint"), maxTextW);
+        String second = Theme.trim(renderer, Theme.tr("chat.minecraftai.hint"), maxTextW);
         int emptyW = Math.min(w - EDGE_PAD * 2, Math.max(renderer.getWidth(first), renderer.getWidth(second)) + BUBBLE_PAD * 2);
         int emptyX = x + Math.max(EDGE_PAD, (w - emptyW) / 2);
         int emptyY = y + h / 2 - 18;
@@ -180,22 +180,6 @@ public final class ChatView implements PanelComponent {
             case "system" -> Theme.tr("screen.minecraftai.role.system");
             default -> role == null || role.isBlank() ? Theme.tr("screen.minecraftai.role.system") : role;
         };
-    }
-
-    private static String trimToWidth(TextRenderer renderer, String value, int maxWidth) {
-        if (renderer.getWidth(value) <= maxWidth) {
-            return value;
-        }
-        String suffix = "...";
-        StringBuilder builder = new StringBuilder();
-        for (int offset = 0; offset < value.length(); offset++) {
-            String candidate = builder.toString() + value.charAt(offset) + suffix;
-            if (renderer.getWidth(candidate) > maxWidth) {
-                break;
-            }
-            builder.append(value.charAt(offset));
-        }
-        return builder + suffix;
     }
 
     private static List<String> wrap(TextRenderer renderer, String text, int maxWidth) {

@@ -23,15 +23,6 @@ public final class BotClientState {
         return targetBot;
     }
 
-    public synchronized void setTargetBot(String targetBot) {
-        String cleaned = targetBot == null ? "" : targetBot.trim();
-        if (!this.targetBot.equals(cleaned)) {
-            transcript.clear();
-            snapshot = null;
-        }
-        this.targetBot = cleaned;
-    }
-
     public synchronized boolean matchesTarget(String botName) {
         return targetBot.isBlank() || normalize(targetBot).equals(normalize(botName));
     }

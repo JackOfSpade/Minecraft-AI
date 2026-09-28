@@ -6,7 +6,6 @@ import net.minecraft.client.resource.language.I18n;
 
 public final class Theme {
     // Backgrounds are always fully opaque (alpha=FF), to prevent the bright world behind from showing through and weakening text contrast, which would cause a "blurry" look
-    public static final int SCRIM = 0xDC000000;
     public static final int PANEL_BG = 0xFF161A20;
     public static final int CARD_BG = 0xFF222832;
     public static final int CHAT_BG = 0xFF0D0F13;
@@ -41,15 +40,6 @@ public final class Theme {
         context.drawVerticalLine(x + w - 1, y, y + h - 1, BORDER);
     }
 
-    public static void divider(DrawContext context, TextRenderer renderer, int x, int y, int w, String labelKey) {
-        String label = tr(labelKey);
-        int labelW = renderer.getWidth(label);
-        int lineY = y + 5;
-        context.drawHorizontalLine(x, x + Math.max(0, (w - labelW) / 2 - 4), lineY, BORDER);
-        context.drawTextWithShadow(renderer, label, x + Math.max(0, (w - labelW) / 2), y, TEXT_DIM);
-        context.drawHorizontalLine(x + Math.min(w - 1, (w + labelW) / 2 + 4), x + w - 1, lineY, BORDER);
-    }
-
     public static void bar(DrawContext context, int x, int y, int w, int h, float frac, int fill) {
         float clamped = Math.max(0.0F, Math.min(1.0F, frac));
         panel(context, x, y, w, h, TRACK);
@@ -70,5 +60,23 @@ public final class Theme {
 
     public static String tr(String key, Object... args) {
         return I18n.translate(key, args);
+    }
+
+    /** Truncates {@code value} to fit {@code maxWidth} pixels, appending {@code "..."}, if needed.
+     *  Formerly copy-pasted (byte-for-byte identical) across GoalCard/GoalView/TaskCard/ChatView. */
+    public static String trim(TextRenderer renderer, String value, int maxWidth) {
+        if (renderer.getWidth(value) <= maxWidth) {
+            return value;
+        }
+        String suffix = "...";
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < value.length(); index++) {
+            String candidate = builder.toString() + value.charAt(index) + suffix;
+            if (renderer.getWidth(candidate) > maxWidth) {
+                break;
+            }
+            builder.append(value.charAt(index));
+        }
+        return builder + suffix;
     }
 }

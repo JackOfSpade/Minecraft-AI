@@ -6,9 +6,8 @@ import net.minecraft.client.gui.DrawContext;
 
 /**
  * Goal view (GOAL mode): shows the **complete execution chain** of the bot's current goal
- * and which node it is currently on.
- * Unlike the small GoalCard in the left column, this view shows as many steps as the available
- * height allows, and keeps the current step scrolled into the center.
+ * and which node it is currently on, using as many steps as the available height allows, and
+ * keeping the current step scrolled into the center.
  */
 public final class GoalView extends PanelCard {
     @Override
@@ -36,7 +35,7 @@ public final class GoalView extends PanelCard {
                         bx, by, "COMPLETED".equals(snapshot.goalResultStatus()) ? Theme.OK
                                 : "PARTIAL".equals(snapshot.goalResultStatus()) ? Theme.SYS
                                 : "FAILED".equals(snapshot.goalResultStatus()) ? Theme.HP : Theme.TEXT_DIM);
-                context.drawTextWithShadow(renderer, trim(renderer, snapshot.goalResultSummary(), bw), bx, by + 16, Theme.TEXT);
+                context.drawTextWithShadow(renderer, Theme.trim(renderer, snapshot.goalResultSummary(), bw), bx, by + 16, Theme.TEXT);
                 context.drawTextWithShadow(renderer,
                         Theme.tr("goal.minecraftai.evidence", snapshot.goalResultMatched(), snapshot.goalResultRequired()),
                         bx, by + 32, Theme.TEXT_DIM);
@@ -44,7 +43,7 @@ public final class GoalView extends PanelCard {
             return;
         }
         String title = snapshot.goalTitle().isBlank() ? Theme.tr("goal.minecraftai.untitled") : snapshot.goalTitle();
-        context.drawTextWithShadow(renderer, trim(renderer, title, bw), bx, by, Theme.TEXT_STRONG);
+        context.drawTextWithShadow(renderer, Theme.trim(renderer, title, bw), bx, by, Theme.TEXT_STRONG);
         int cur = snapshot.goalCurrentStepIndex();
         int total = snapshot.goalTotalSteps();
         int currentNumber = Math.min(cur + 1, total);
@@ -61,24 +60,8 @@ public final class GoalView extends PanelCard {
             boolean current = idx == cur;
             int color = current ? Theme.ACCENT : idx < cur ? Theme.OK : Theme.TEXT_DIM;
             String marker = current ? ">" : idx < cur ? "x" : "-";
-            context.drawTextWithShadow(renderer, trim(renderer, marker + " " + snapshot.goalSteps().get(idx), bw),
+            context.drawTextWithShadow(renderer, Theme.trim(renderer, marker + " " + snapshot.goalSteps().get(idx), bw),
                     bx, by + 27 + i * Theme.LINE_H, color);
         }
-    }
-
-    private static String trim(TextRenderer renderer, String value, int maxWidth) {
-        if (renderer.getWidth(value) <= maxWidth) {
-            return value;
-        }
-        String suffix = "...";
-        StringBuilder builder = new StringBuilder();
-        for (int index = 0; index < value.length(); index++) {
-            String candidate = builder.toString() + value.charAt(index) + suffix;
-            if (renderer.getWidth(candidate) > maxWidth) {
-                break;
-            }
-            builder.append(value.charAt(index));
-        }
-        return builder + suffix;
     }
 }
