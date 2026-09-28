@@ -46,7 +46,10 @@ final class BoatFollowSourceContractTest {
         String swimmingBody = follow.substring(swimming, land);
         assertFalse(swimmingBody.contains("BoatLaunchTask"),
                 "a swimming player must never make ordinary follow launch a boat");
-        assertTrue(follow.contains("nearbySafeDismountShore"),
+        assertTrue(follow.contains("BoatSupport.leaveBoatForLand("),
+                "boat-to-land follow must go through the shared dismount-or-steer helper");
+        String boatSupport = read("task/BoatSupport.java");
+        assertTrue(boatSupport.contains("nearbySafeDismountShore"),
                 "boat-to-land follow must wait for a real dry shore before dismounting");
         assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 6"));
         assertTrue(safety.contains("void renewFollowSwim(AIPlayerEntity bot)"));

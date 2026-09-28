@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
@@ -15,6 +16,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 
 import java.util.Comparator;
 import java.util.List;
@@ -145,6 +147,52 @@ final class BoatSupport {
 
     static boolean isWater(ServerWorld world, BlockPos pos) {
         return world.getFluidState(pos).isIn(net.minecraft.registry.tag.FluidTags.WATER);
+    }
+
+    /**
+     * Steers {@code boat} toward the given world coordinates using its vanilla paddle-input API,
+     * or stops it once within {@code stopDistance}. {@code turnOnlyAngle} is the yaw-error
+     * threshold beyond which the boat turns in place instead of also paddling forward.
+     *
+     * @return true once the boat has stopped (already within {@code stopDistance}).
+     */
+    static boolean steerToward(AbstractBoatEntity boat, double targetX, double targetZ,
+            double stopDistance, double turnOnlyAngle) {
+        double dx = targetX - boat.getX();
+        double dz = targetZ - boat.getZ();
+        double horizontalDistance = Math.hypot(dx, dz);
+        if (horizontalDistance <= stopDistance) {
+            BoatAction.stopBoat(boat);
+            return true;
+        }
+        float desiredYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D);
+        float turn = MathHelper.wrapDegrees(desiredYaw - boat.getYaw());
+        boolean left = turn < -4.0F;
+        boolean right = turn > 4.0F;
+        boolean forward = Math.abs(turn) < turnOnlyAngle;
+        boat.setInputs(left, right, forward, false);
+        return false;
+    }
+
+    /**
+     * Drives the bot's mounted boat toward {@code (targetX, targetZ)} until it can dismount at a
+     * genuine dry shore near the boat, then dismounts.
+     *
+     * @return true while the bot is still aboard and needs another boat tick before land follow.
+     */
+    static boolean leaveBoatForLand(AIPlayerEntity bot, double targetX, double targetZ,
+            double stopDistance, double turnOnlyAngle) {
+        AbstractBoatEntity boat = mountedBoat(bot).orElse(null);
+        if (boat == null) {
+            return false;
+        }
+        if (nearbySafeDismountShore(bot, boat).isPresent()) {
+            BoatAction.stopBoat(boat);
+            bot.dismountVehicle();
+            return bot.getVehicle() instanceof AbstractBoatEntity;
+        }
+        steerToward(boat, targetX, targetZ, stopDistance, turnOnlyAngle);
+        return true;
     }
 
     private static boolean isOpenWater(ServerWorld world, BlockPos water) {
