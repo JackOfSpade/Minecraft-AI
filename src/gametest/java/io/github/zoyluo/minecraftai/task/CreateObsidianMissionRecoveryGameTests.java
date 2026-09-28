@@ -1486,10 +1486,9 @@ public final class CreateObsidianMissionRecoveryGameTests {
                             && InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 1
                             && InventoryAction.countItem(fixture.bot(), Items.WATER_BUCKET) == 0,
                     "AIR restore did not place the post-break protection source: " + live);
-            CreateObsidianTask.ObsidianCheckpoint decoded =
-                    CreateObsidianTask.ObsidianCheckpoint.decode(live, 1, 24000)
-                            .orElseThrow(() -> new IllegalStateException(
-                                    "live AIR restore checkpoint failed its codec: " + live));
+            ObsidianCheckpoint decoded = ObsidianCheckpoint.decode(live, 1, 24000)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "live AIR restore checkpoint failed its codec: " + live));
             require(context, target.equals(decoded.pickupLastSeenPos()),
                     "promoted pickup lost its factual last-seen fallback: " + live);
             finish(context, fixture);
@@ -1509,8 +1508,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         checkpoint.put("water_source", encode(target));
         checkpoint.put("water_bucket_baseline", "1");
         Map<String, String> sealed = Map.copyOf(checkpoint);
-        require(context, CreateObsidianTask.ObsidianCheckpoint.decode(
-                        sealed, 1, 24000).isPresent(),
+        require(context, ObsidianCheckpoint.decode(sealed, 1, 24000).isPresent(),
                 "live-source active-break fixture failed the production codec");
 
         CreateObsidianTask task = new CreateObsidianTask(1, sealed);
@@ -1793,8 +1791,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     private static void restore(TestContext context,
                                 Fixture fixture,
                                 Map<String, String> taskCheckpoint) {
-        require(context, CreateObsidianTask.ObsidianCheckpoint
-                        .decode(taskCheckpoint, TARGET, TARGET_BUDGET).isPresent(),
+        require(context, ObsidianCheckpoint.decode(taskCheckpoint, TARGET, TARGET_BUDGET).isPresent(),
                 "fixture checkpoint must satisfy the production codec");
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, TARGET);
         restoreMake(fixture, goal, taskCheckpoint);
@@ -1983,7 +1980,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         values.put("active_break_inventory", "-1");
         values.put("protection_prepared", "false");
         Map<String, String> checkpoint = Map.copyOf(values);
-        if (CreateObsidianTask.ObsidianCheckpoint.decode(checkpoint, 1, 24000).isEmpty()) {
+        if (ObsidianCheckpoint.decode(checkpoint, 1, 24000).isEmpty()) {
             throw new IllegalStateException("invalid pickup checkpoint fixture: " + checkpoint);
         }
         return checkpoint;
@@ -2015,7 +2012,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         values.put("stand", encode(stand));
         values.put("active_break_pos", encode(obsidian));
         Map<String, String> checkpoint = Map.copyOf(values);
-        if (CreateObsidianTask.ObsidianCheckpoint.decode(checkpoint, 1, 24000).isEmpty()) {
+        if (ObsidianCheckpoint.decode(checkpoint, 1, 24000).isEmpty()) {
             throw new IllegalStateException("invalid active-break fixture: " + checkpoint);
         }
         return checkpoint;
@@ -2035,8 +2032,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         values.put("active_break_pos", encode(obsidian));
         values.put("active_break_inventory", "0");
         Map<String, String> checkpoint = Map.copyOf(values);
-        if (CreateObsidianTask.ObsidianCheckpoint.decode(
-                checkpoint, TARGET, TARGET_BUDGET).isEmpty()) {
+        if (ObsidianCheckpoint.decode(checkpoint, TARGET, TARGET_BUDGET).isEmpty()) {
             throw new IllegalStateException("invalid open-break fixture: " + checkpoint);
         }
         return checkpoint;
@@ -2051,8 +2047,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         values.put("serviced_collected", String.valueOf(serviced));
         values.put("pending_service_boundary", String.valueOf(pending));
         Map<String, String> checkpoint = Map.copyOf(values);
-        if (CreateObsidianTask.ObsidianCheckpoint.decode(
-                checkpoint, TARGET, TARGET_BUDGET).isEmpty()) {
+        if (ObsidianCheckpoint.decode(checkpoint, TARGET, TARGET_BUDGET).isEmpty()) {
             throw new IllegalStateException("invalid service-boundary fixture: " + checkpoint);
         }
         return checkpoint;

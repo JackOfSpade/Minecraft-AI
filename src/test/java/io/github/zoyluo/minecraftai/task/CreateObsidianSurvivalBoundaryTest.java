@@ -41,10 +41,14 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("elevatedPourStand"),
                 "a dry observation ledge above the pool is a valid close work pose");
         assertTrue(task.contains("pickupPos"));
-        assertTrue(task.contains("pending_pickup_pos"));
-        assertTrue(task.contains("pending_pickup_inventory"));
-        assertTrue(task.contains("active_break_pos"));
-        assertTrue(task.contains("active_break_inventory"),
+        // obsidianwater-refactor-004: these checkpoint wire-format keys moved with ObsidianCheckpoint
+        // into its own file; the invariant (this pending/active ledger exists in the checkpoint
+        // codec) is now pinned against that file instead of CreateObsidianTask.java.
+        String checkpoint = read("task/ObsidianCheckpoint.java");
+        assertTrue(checkpoint.contains("pending_pickup_pos"));
+        assertTrue(checkpoint.contains("pending_pickup_inventory"));
+        assertTrue(checkpoint.contains("active_break_pos"));
+        assertTrue(checkpoint.contains("active_break_inventory"),
                 "a restart between block break and pickup must retain the pre-break inventory ledger");
         assertTrue(task.contains("create_obsidian_pickup_confirmed"),
                 "a broken block must remain pending until vanilla inventory gain is confirmed");
@@ -90,8 +94,8 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("create_obsidian_invalid_checkpoint"));
         assertTrue(task.contains("restoredCheckpoint.resumePhase() == Phase.RECOVER_WATER"),
                 "restart must repay a live placed-source obligation before any saved phase");
-        assertTrue(task.contains("budget_used"));
-        assertTrue(task.contains("phase_started"));
+        assertTrue(checkpoint.contains("budget_used"));
+        assertTrue(checkpoint.contains("phase_started"));
         assertTrue(task.contains("controlsNearbyLava"));
         String danger = read("task/DangerWatcher.java");
         assertTrue(danger.contains("obsidianTask.controlsNearbyLava"),
@@ -116,7 +120,7 @@ class CreateObsidianSurvivalBoundaryTest {
                 "an empty current LOS must enter physical prospecting instead of proving no lava");
         assertTrue(task.contains("beginSearch(bot, \"no_observable_lava\")"));
         assertTrue(task.contains("Phase.RETURN_TO_SCAN_FACE")
-                        && task.contains("scan_resume_face")
+                        && checkpoint.contains("scan_resume_face")
                         && task.contains("returnToScanFace(bot)"),
                 "a restored SCAN must return to its own durable survey pose before reading targets");
         assertTrue(task.contains("Phase.RETURN_TO_SEARCH_FACE"));

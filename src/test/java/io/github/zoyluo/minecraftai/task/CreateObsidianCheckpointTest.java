@@ -26,7 +26,7 @@ class CreateObsidianCheckpointTest {
         values.put("active_break_pos", "9,-54,5");
         values.put("active_break_inventory", "11");
 
-        CreateObsidianTask.ObsidianCheckpoint decoded = decode(values);
+        ObsidianCheckpoint decoded = decode(values);
 
         assertEquals(CreateObsidianTask.Phase.RECOVER_WATER, decoded.resumePhase());
         assertEquals(new BlockPos(9, -53, 4), decoded.waterSource());
@@ -50,7 +50,7 @@ class CreateObsidianCheckpointTest {
         forming.put("pour_support", "3,-51,3");
         forming.put("pour_face", "EAST");
 
-        CreateObsidianTask.ObsidianCheckpoint decodedFormation = decode(forming);
+        ObsidianCheckpoint decodedFormation = decode(forming);
         assertEquals(new BlockPos(4, -52, 4), decodedFormation.lavaTarget());
         assertEquals(new BlockPos(3, -51, 3), decodedFormation.pourPlan().support());
         assertEquals(forming, decodedFormation.encode());
@@ -61,7 +61,7 @@ class CreateObsidianCheckpointTest {
         pickup.put("pickup_gain_budget", "390");
         pickup.put("return_rim", "11,-53,-8");
 
-        CreateObsidianTask.ObsidianCheckpoint decodedPickup = decode(pickup);
+        ObsidianCheckpoint decodedPickup = decode(pickup);
         assertEquals(CreateObsidianTask.Phase.PICKUP, decodedPickup.resumePhase());
         assertEquals(new BlockPos(12, -54, -8), decodedPickup.pickupPos());
         assertEquals(decodedPickup.pickupPos(), decodedPickup.pickupLastSeenPos(),
@@ -73,7 +73,7 @@ class CreateObsidianCheckpointTest {
 
         Map<String, String> movingPickup = new LinkedHashMap<>(pickup);
         movingPickup.put("pending_pickup_last_seen_pos", "17,-57,-16");
-        CreateObsidianTask.ObsidianCheckpoint decodedMovingPickup = decode(movingPickup);
+        ObsidianCheckpoint decodedMovingPickup = decode(movingPickup);
         assertEquals(new BlockPos(17, -57, -16), decodedMovingPickup.pickupLastSeenPos());
         assertEquals(movingPickup, decodedMovingPickup.encode());
     }
@@ -89,7 +89,7 @@ class CreateObsidianCheckpointTest {
         protectedPickup.put("pending_pickup_inventory", "15");
         protectedPickup.put("return_rim", "11,-53,-8");
 
-        CreateObsidianTask.ObsidianCheckpoint decoded = decode(protectedPickup);
+        ObsidianCheckpoint decoded = decode(protectedPickup);
 
         assertEquals(CreateObsidianTask.Phase.PROTECT_PICKUP, decoded.resumePhase());
         assertEquals(350, decoded.phaseStartedBudget(),
@@ -143,7 +143,7 @@ class CreateObsidianCheckpointTest {
 
         Map<String, String> acknowledged = CreateObsidianTask
                 .acknowledgeServiceBoundary(pending).orElseThrow();
-        CreateObsidianTask.ObsidianCheckpoint decoded = decode(acknowledged);
+        ObsidianCheckpoint decoded = decode(acknowledged);
         assertEquals(CreateObsidianTask.Phase.SCAN, decoded.phase());
         assertEquals(8, decoded.servicedCollected());
         assertEquals(0, decoded.pendingServiceBoundary());
@@ -193,7 +193,7 @@ class CreateObsidianCheckpointTest {
         pickup.put("pending_pickup_inventory", "7");
         pickup.put("return_rim", "11,-53,-8");
 
-        CreateObsidianTask.ObsidianCheckpoint decoded = decode(pickup);
+        ObsidianCheckpoint decoded = decode(pickup);
         assertEquals(CreateObsidianTask.Phase.PICKUP, decoded.phase());
         assertEquals(8, decoded.pendingServiceBoundary());
         CreateObsidianTask.RestoreMetadata metadata =
@@ -210,7 +210,7 @@ class CreateObsidianCheckpointTest {
         legacy.remove("serviced_collected");
         legacy.remove("pending_service_boundary");
 
-        CreateObsidianTask.ObsidianCheckpoint decoded = decode(legacy);
+        ObsidianCheckpoint decoded = decode(legacy);
         assertEquals(0, decoded.servicedCollected());
         assertEquals(0, decoded.pendingServiceBoundary());
         assertEquals("3", decoded.encode().get("task_schema"));
@@ -223,7 +223,7 @@ class CreateObsidianCheckpointTest {
         previous.put("task_schema", "2");
         previous.remove("scan_resume_face");
 
-        CreateObsidianTask.ObsidianCheckpoint decoded = decode(previous);
+        ObsidianCheckpoint decoded = decode(previous);
         assertEquals(decoded.searchCursor().face(), decoded.scanResumeFace());
         assertEquals("3", decoded.encode().get("task_schema"));
 
@@ -325,13 +325,13 @@ class CreateObsidianCheckpointTest {
                 "a rejected restore must not synthesize a replacement checkpoint");
     }
 
-    private static CreateObsidianTask.ObsidianCheckpoint decode(Map<String, String> values) {
-        return CreateObsidianTask.ObsidianCheckpoint.decode(values, TARGET, MAX_BUDGET)
+    private static ObsidianCheckpoint decode(Map<String, String> values) {
+        return ObsidianCheckpoint.decode(values, TARGET, MAX_BUDGET)
                 .orElseThrow();
     }
 
     private static void assertInvalid(Map<String, String> values) {
-        assertFalse(CreateObsidianTask.ObsidianCheckpoint.decode(values, TARGET, MAX_BUDGET).isPresent());
+        assertFalse(ObsidianCheckpoint.decode(values, TARGET, MAX_BUDGET).isPresent());
     }
 
     private static Map<String, String> validCheckpoint(CreateObsidianTask.Phase phase) {

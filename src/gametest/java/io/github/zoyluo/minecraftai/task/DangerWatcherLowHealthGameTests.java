@@ -2284,7 +2284,7 @@ public final class DangerWatcherLowHealthGameTests {
         values.put("stand", encode(stand));
         values.put("active_break_pos", encode(obsidian));
         Map<String, String> checkpoint = Map.copyOf(values);
-        if (CreateObsidianTask.ObsidianCheckpoint.decode(checkpoint, 1, 24000).isEmpty()) {
+        if (ObsidianCheckpoint.decode(checkpoint, 1, 24000).isEmpty()) {
             throw new IllegalStateException("invalid Create raw-one fixture: " + checkpoint);
         }
         return checkpoint;
