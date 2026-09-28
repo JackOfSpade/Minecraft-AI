@@ -94,11 +94,6 @@ public final class BlockFactsAdapter {
         CACHE.clear();
     }
 
-    /** Number of blocks classified so far (diagnostics). */
-    public static int cacheSize() {
-        return CACHE.size();
-    }
-
     private static BlockFacts compute(Block block, BlockState state, boolean lush) {
         Identifier id = Registries.BLOCK.getId(block);
         String namespace = id.getNamespace();

@@ -298,9 +298,10 @@ public final class HazardField {
             while (remaining != 0L) {
                 int local = Long.numberOfTrailingZeros(remaining);
                 remaining &= remaining - 1L;
-                int x = (bucket.bx << SHIFT) + (local & LOCAL_MASK);
-                int z = (bucket.bz << SHIFT) + (local >> SHIFT & LOCAL_MASK);
-                int y = (bucket.by << SHIFT) + (local >> (2 * SHIFT) & LOCAL_MASK);
+                long world = decodeWorld(bucket, local);
+                int x = BlockPos.unpackLongX(world);
+                int y = BlockPos.unpackLongY(world);
+                int z = BlockPos.unpackLongZ(world);
                 victims.add(new Victim(x, y, z, bucket.kinds[local] == LAVA, distSq(x, y, z, rx, ry, rz)));
             }
         }
@@ -451,9 +452,10 @@ public final class HazardField {
             while (remaining != 0L) {
                 int local = Long.numberOfTrailingZeros(remaining);
                 remaining &= remaining - 1L;
-                int x = (bucket.bx << SHIFT) + (local & LOCAL_MASK);
-                int z = (bucket.bz << SHIFT) + (local >> SHIFT & LOCAL_MASK);
-                int y = (bucket.by << SHIFT) + (local >> (2 * SHIFT) & LOCAL_MASK);
+                long world = decodeWorld(bucket, local);
+                int x = BlockPos.unpackLongX(world);
+                int y = BlockPos.unpackLongY(world);
+                int z = BlockPos.unpackLongZ(world);
                 cells.add(new Cell(new BlockPos(x, y, z), KINDS[bucket.kinds[local]], bucket.ticks[local]));
             }
         }
@@ -526,9 +528,10 @@ public final class HazardField {
             if (bucket.kinds[local] != wanted) {
                 continue;
             }
-            int x = (bucket.bx << SHIFT) + (local & LOCAL_MASK);
-            int z = (bucket.bz << SHIFT) + (local >> SHIFT & LOCAL_MASK);
-            int y = (bucket.by << SHIFT) + (local >> (2 * SHIFT) & LOCAL_MASK);
+            long world = decodeWorld(bucket, local);
+            int x = BlockPos.unpackLongX(world);
+            int y = BlockPos.unpackLongY(world);
+            int z = BlockPos.unpackLongZ(world);
             if (x < minX || x > maxX || y < minY || y > maxY || z < minZ || z > maxZ) {
                 continue;
             }
@@ -545,6 +548,18 @@ public final class HazardField {
 
     private static int localIndex(int x, int y, int z) {
         return ((y & LOCAL_MASK) << (2 * SHIFT)) | ((z & LOCAL_MASK) << SHIFT) | (x & LOCAL_MASK);
+    }
+
+    /**
+     * Decodes a bucket-local index back to the world position it was packed from by {@link
+     * #localIndex}, as {@link BlockPos#asLong()}; callers unpack with {@link BlockPos#unpackLongX}/
+     * {@code unpackLongY}/{@code unpackLongZ}. The exact inverse of {@link #localIndex}.
+     */
+    private static long decodeWorld(Bucket bucket, int local) {
+        int x = (bucket.bx << SHIFT) + (local & LOCAL_MASK);
+        int z = (bucket.bz << SHIFT) + (local >> SHIFT & LOCAL_MASK);
+        int y = (bucket.by << SHIFT) + (local >> (2 * SHIFT) & LOCAL_MASK);
+        return BlockPos.asLong(x, y, z);
     }
 
     /**

@@ -73,12 +73,18 @@ public final class PoiEvidenceWindow {
         return existing == null;
     }
 
-    /** Forgets a position (mined, replaced, or observed as something harmless). Returns true if one existed. */
+    /**
+     * Forgets a position (mined, replaced, or observed as something harmless). Returns true if one
+     * existed. Both sub-windows are always checked -- a position lives in at most one of them, but
+     * nothing guarantees the caller knows which, so both removes run unconditionally as independent
+     * statements rather than relying on {@code ||} short-circuiting to skip the second one.
+     */
     public boolean remove(BlockPos pos) {
         Objects.requireNonNull(pos, "pos");
         long key = pos.asLong();
-        boolean removed = structural.remove(key) != null;
-        return flagOnly.remove(key) != null || removed;
+        boolean removedStructural = structural.remove(key) != null;
+        boolean removedFlagOnly = flagOnly.remove(key) != null;
+        return removedStructural || removedFlagOnly;
     }
 
     /** Drops every entry unseen for more than {@link #EXPIRE_TICKS}. Returns how many were dropped. */

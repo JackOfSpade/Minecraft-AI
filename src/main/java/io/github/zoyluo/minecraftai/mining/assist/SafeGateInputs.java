@@ -86,44 +86,6 @@ public record SafeGateInputs(
         return new Builder().build();
     }
 
-    /** A builder pre-loaded with this record's values. */
-    public Builder toBuilder() {
-        Builder b = new Builder();
-        b.modeAllowsDetour = modeAllowsDetour;
-        b.originReal = originReal;
-        b.auditSession = auditSession;
-        b.tpsDegraded = tpsDegraded;
-        b.headroomStartOk = headroomStartOk;
-        b.headroomAbort = headroomAbort;
-        b.health = health;
-        b.retreatHp = retreatHp;
-        b.startHpMargin = startHpMargin;
-        b.hurtTime = hurtTime;
-        b.onFire = onFire;
-        b.inLava = inLava;
-        b.submerged = submerged;
-        b.touchingWater = touchingWater;
-        b.foodLevel = foodLevel;
-        b.hungerCritical = hungerCritical;
-        b.waterRescueActive = waterRescueActive;
-        b.pausedDepth = pausedDepth;
-        b.userPaused = userPaused;
-        b.originSafety = originSafety;
-        b.threatCooldown = threatCooldown;
-        b.shelterEpisode = shelterEpisode;
-        b.hostilePressure = hostilePressure;
-        b.lavaInThreatBox = lavaInThreatBox;
-        b.hazardLavaNear = hazardLavaNear;
-        b.deepDark = deepDark;
-        b.poiStructureScore = poiStructureScore;
-        b.poiEvidenceStale = poiEvidenceStale;
-        b.poiWindowVeto = poiWindowVeto;
-        b.poiCandidatePending = poiCandidatePending;
-        b.inNoDetourZone = inNoDetourZone;
-        b.trapNear = trapNear;
-        return b;
-    }
-
     /**
      * Mutable builder; every setter returns the builder. Defaults: health 20, retreatHp 10, margin 4, food 20, poiEvidenceStale false,
      * hunger critical 6, headroomStartOk true, every other flag clear, poiStructureScore 0.

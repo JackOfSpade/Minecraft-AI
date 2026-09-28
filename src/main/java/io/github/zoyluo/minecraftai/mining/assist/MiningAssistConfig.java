@@ -99,10 +99,6 @@ public final class MiningAssistConfig {
     public record Sense(int raysPerTick, int globalRaysPerTick, boolean adaptiveThrottle, boolean shadowLog) {
         public static final int DEFAULT_RAYS_PER_TICK = 40;
         public static final int DEFAULT_GLOBAL_RAYS_PER_TICK = 640;
-
-        public static Sense defaultsFor(AssistMode mode) {
-            return new Sense(DEFAULT_RAYS_PER_TICK, DEFAULT_GLOBAL_RAYS_PER_TICK, true, mode.allowsSense());
-        }
     }
 
     /**

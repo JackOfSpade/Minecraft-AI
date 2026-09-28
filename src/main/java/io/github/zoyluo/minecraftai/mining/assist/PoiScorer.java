@@ -139,10 +139,6 @@ public final class PoiScorer {
             return band == Band.MANDATORY;
         }
 
-        public boolean isStructureCertain() {
-            return band == Band.STRUCTURE_CERTAIN;
-        }
-
         /** The centroid rounded down to a block, or {@code null} when there is no evidence cell. */
         public BlockPos centroidBlock() {
             if (centroid == null) {

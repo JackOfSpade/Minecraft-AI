@@ -45,6 +45,8 @@ public final class PoiDetector {
      * or a nearer structure mob out of the scan.
      */
     public static final int ENTITY_EXAMINE_CAP = 96;
+    /** Mask applied to a bot's uuid hash to pick its first-call stagger: a 0-15 tick offset. */
+    private static final int STAGGER_MASK = 15;
 
     private PoiDetector() {
     }
@@ -114,13 +116,13 @@ public final class PoiDetector {
 
     /**
      * True when this bot's evaluation is due at {@code serverTick}. The first call arms a stagger of
-     * {@code uuid.hashCode() & 15} ticks (so bots do not all evaluate on the same tick) and returns
-     * false; afterwards it is due every {@value PoiScorer#EVAL_INTERVAL_TICKS} ticks.
+     * {@code uuid.hashCode() & }{@value #STAGGER_MASK} ticks (so bots do not all evaluate on the same
+     * tick) and returns false; afterwards it is due every {@value PoiScorer#EVAL_INTERVAL_TICKS} ticks.
      */
     public static boolean due(MiningAssistState state, int serverTick) {
         int next = state.nextPoiEvalTick();
         if (next == MiningAssistState.NEVER) {
-            state.setNextPoiEvalTick(serverTick + (state.botId().hashCode() & 15));
+            state.setNextPoiEvalTick(serverTick + (state.botId().hashCode() & STAGGER_MASK));
             return false;
         }
         return serverTick >= next || next - serverTick > PoiScorer.EVAL_INTERVAL_TICKS + 16;
