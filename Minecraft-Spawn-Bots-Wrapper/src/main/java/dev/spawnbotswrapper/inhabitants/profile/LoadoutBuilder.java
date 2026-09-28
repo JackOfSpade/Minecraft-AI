@@ -26,7 +26,11 @@ final class LoadoutBuilder {
     static final int HOTBAR_SIZE = 9;
     static final int MAIN_SIZE = 27;
 
-    /** Trim priorities: the lower the number, the later a stack is dropped (or spilled) when the inventory is full. */
+    /**
+     * Trim priorities: the lower the number, the later a stack is dropped (or spilled) when the inventory is
+     * full. Only relative order matters (see the comparator in {@link #fit()}); 5 is intentionally left free
+     * as headroom for a future priority tier between UTILITY and LUXURY, not a missing category.
+     */
     static final int AMMO = 1;
     static final int TOTEM = 2;
     static final int SUSTAIN = 3;

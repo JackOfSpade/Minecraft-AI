@@ -2,6 +2,7 @@ package dev.spawnbotswrapper.inhabitants.profile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * Explains, for a stored profile and the PvP BOT settings as they are now, why something the bot carries
@@ -196,44 +197,29 @@ final class GlobalNotes {
         }
 
         boolean hasMelee() {
-            for (BotProfile.PlacedItem p : items) {
-                if (p.spec() != null && ItemIds.isMelee(p.spec().item())) {
-                    return true;
-                }
-            }
-            return false;
+            return any(ItemIds::isMelee);
         }
 
         boolean hasSpear() {
-            for (BotProfile.PlacedItem p : items) {
-                if (p.spec() != null && ItemIds.isSpear(p.spec().item())) {
-                    return true;
-                }
-            }
-            return false;
+            return any(ItemIds::isSpear);
         }
 
         boolean hasAxe() {
-            for (BotProfile.PlacedItem p : items) {
-                if (p.spec() != null && ItemIds.isAxe(p.spec().item())) {
-                    return true;
-                }
-            }
-            return false;
+            return any(ItemIds::isAxe);
         }
 
         boolean hasFood() {
-            for (BotProfile.PlacedItem p : items) {
-                if (p.spec() != null && ItemIds.isFood(p.spec().item())) {
-                    return true;
-                }
-            }
-            return false;
+            return any(ItemIds::isFood);
         }
 
         boolean hasPotion() {
+            return any(ItemIds::isPotionItem);
+        }
+
+        /** True as soon as some placed item's spec item id matches {@code itemPredicate}. */
+        private boolean any(Predicate<String> itemPredicate) {
             for (BotProfile.PlacedItem p : items) {
-                if (p.spec() != null && ItemIds.isPotionItem(p.spec().item())) {
+                if (p.spec() != null && itemPredicate.test(p.spec().item())) {
                     return true;
                 }
             }
