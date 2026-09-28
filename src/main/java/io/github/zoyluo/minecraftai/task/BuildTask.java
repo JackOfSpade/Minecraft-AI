@@ -227,7 +227,13 @@ public final class BuildTask extends AbstractTask {
             retryTicks = 0;
             return;
         }
-        if (!flattenMiningStarted && bot.getActionPack().isMiningIdle()) {
+        if (bot.getActionPack().isMiningIdle()) {
+            // Self-heal like clearBlueprintAir: a pause (AbstractTask.onPause() -> stopAll())
+            // can idle the mining action pack mid-mine without resetting flattenMiningStarted,
+            // which would otherwise permanently block re-issuing startMining on resume.
+            if (flattenMiningStarted) {
+                flattenMiningStarted = false;
+            }
             ActionResult result = MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
             if (result.isFailed()) {
                 fail(result.reason());
