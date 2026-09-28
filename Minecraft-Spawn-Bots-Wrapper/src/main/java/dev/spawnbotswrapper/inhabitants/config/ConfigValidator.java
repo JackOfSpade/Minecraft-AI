@@ -93,7 +93,6 @@ public final class ConfigValidator {
             c.connection = new InhabitantsConfig.Connection();
             w.add("'connection' section missing; using built-in defaults");
         }
-        c.connection.joinHoldTicks = clamp(w, "connection.joinHoldTicks", c.connection.joinHoldTicks, 0, 72000);
 
         if (c.spawning == null) {
             c.spawning = new InhabitantsConfig.Spawning();

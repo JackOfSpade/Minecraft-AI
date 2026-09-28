@@ -91,7 +91,6 @@ class ConfigIOTest {
                   "processing": { "maxStructuresPerTick": 0, "maxLiveBots": -5 },
                   "profiles": { "coverageBuckets": 1000 },
                   "spawning": { "backend": "nonsense", "namePrefix": "bad prefix!!" },
-                  "connection": { "joinHoldTicks": 999999 },
                   "commandPermissionLevel": 9
                 }
                 """, StandardCharsets.UTF_8);
@@ -104,9 +103,27 @@ class ConfigIOTest {
         assertEquals(64, c.profiles.coverageBuckets);
         assertEquals("AUTO", c.spawning.backend);
         assertEquals("badprefi", c.spawning.namePrefix); // stripped to "badprefix", then cut to 8 characters
-        assertEquals(72000, c.connection.joinHoldTicks);
         assertEquals(4, c.commandPermissionLevel);
         assertFalse(r.warnings().isEmpty());
+    }
+
+    /**
+     * xThreads-1 / wrapperA-r1: {@code connection.joinHoldTicks} (and the JoinHoldGate mechanism that read it)
+     * were removed in commit 770ccd1. A config file hand-edited before that removal may still have the key --
+     * or an otherwise-empty "connection" section -- and loading it must still succeed with no fatal error,
+     * simply ignoring the now-meaningless key.
+     */
+    @Test
+    void obsoleteJoinHoldTicksKeyIsIgnoredWithoutError(@TempDir Path dir) throws IOException {
+        Path f = dir.resolve("cfg.json");
+        Files.writeString(f, """
+                {
+                  "connection": { "joinHoldTicks": 999999 }
+                }
+                """, StandardCharsets.UTF_8);
+        ConfigIO.LoadResult r = ConfigIO.load(f);
+        assertNull(r.fatalError());
+        assertNotNull(r.config().connection);
     }
 
     @Test

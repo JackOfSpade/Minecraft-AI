@@ -139,15 +139,6 @@ already living there, by anything — that structure stays settled; it is **not*
 the addon's own restart guarantee (a bot that goes permanently offline is never respawned either, see
 `processing.goneConfirmTicks`): a POI's population is a one-time event, not something that regenerates.
 
-### Holding new joins right after a server restart
-
-For a configurable number of ticks after the server starts (`connection.joinHoldTicks`, default 1800 = 90s),
-a newly-connecting player is held on their own client's loading screen instead of being placed into the
-world. This covers PvP BOT's own post-start bot-restore burst, during which a tick stall could otherwise let
-a freshly-placed player fall through terrain that has not finished loading. The player's entity is never
-created during the hold — there is no teleport-then-freeze, they simply see "Joining world..." a little
-longer than usual. Set `connection.joinHoldTicks` to `0` to disable.
-
 ### Names and presence
 
 Inhabitants are named `<Word><Word>[<digits>]` (e.g. `DuskRaven`, `IronFang7`, `BriarWarden42`) — two
