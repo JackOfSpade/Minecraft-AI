@@ -73,6 +73,13 @@ public final class FakePlayerMotion {
         bot.getActionPack().stopMovement();
         bot.teleport(world, targetX, targetY, targetZ,
                 Collections.emptySet(), bot.getYaw(), bot.getPitch(), false);
+        // This is a verified landing on solid, collision-checked ground -- same as
+        // returnToBlockCenter/swimStepTo below. Leaving a real, vanilla-accumulated fallDistance
+        // uncleared here lets a later, unrelated on-ground transition apply stale fall damage the
+        // bot never actually took at that moment (this path is also used mid-fall recovery by
+        // ActionPack.tryPhysicalSnap's one-block-drop case).
+        bot.setVelocity(Vec3d.ZERO);
+        bot.fallDistance = 0.0F;
         BotLog.action(bot, "fake_player_step", "reason", reason, "from", from, "to", target);
         return true;
     }
@@ -362,6 +369,10 @@ public final class FakePlayerMotion {
         if (!sameColumn) {
             bot.setOnGround(true);
         }
+        // Same reasoning as stepTo(): this is a verified, collision-checked landing, so any real
+        // fallDistance/velocity carried into it must not survive to cause stale fall damage later.
+        bot.setVelocity(Vec3d.ZERO);
+        bot.fallDistance = 0.0F;
         BotLog.action(bot, "fake_player_jump", "reason", reason, "from", from, "to", target);
         return true;
     }

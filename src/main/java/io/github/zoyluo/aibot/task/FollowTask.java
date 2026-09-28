@@ -29,8 +29,7 @@ import java.util.Set;
  * is followed through bounded verified swim steps without launching a boat.
  */
 public final class FollowTask extends AbstractTask {
-    private static final double STOP_DISTANCE = 3.0D;
-    private static final double START_DISTANCE = 4.5D;
+    private static final double STOP_DISTANCE = 2.0D;
     private static final double MAX_DIRECT_FALLBACK_DISTANCE = 12.0D;
     private static final int REPATH_TICKS = 40;
     private static final double SWIM_STOP_DISTANCE = 3.5D;
@@ -234,31 +233,20 @@ public final class FollowTask extends AbstractTask {
         boolean pathIdle = bot.getActionPack().isPathExecutorIdle();
         boolean walkIdle = bot.getActionPack().isWalkToIdle();
 
-        // The hysteresis band still needs one bounded direct approach.  The previous code left
-        // this 3.0-4.5 block range marked active with no controller, which the stuck watcher then
-        // interpreted as a failed follow.
-        if (distance < START_DISTANCE) {
-            // Unlike the full-pathfind branch below, a direct startWalkTo has no expensive-retry
-            // concern, so react to idleness immediately instead of waiting out the periodic timer.
-            if (pathIdle && walkIdle) {
-                bot.getActionPack().startWalkTo(target.getEntityPos());
-                nextRepathTick = elapsed + REPATH_TICKS;
-                waiting = false;
-            } else {
-                waiting = false;
-            }
-            return;
-        }
-
-        // ServerPlayerEntity is an explicitly authorized follow target even when it is outside
-        // ordinary perception.  Snapshot that known position for deterministic route replacement;
-        // do not substitute an observable-entity query here.
-        BlockPos trackedTarget = target.getBlockPos().toImmutable();
+        // The actual walk/path destination is offset STOP_DISTANCE from the player -- never the
+        // player's own block -- so the bot's own arrival condition stops it at the requested
+        // distance instead of relying solely on the check above to interrupt an in-flight
+        // walk/path at exactly the right instant. Real pathfinding (not a direct walk) is used at
+        // every distance now, close range included: a direct walk has no obstacle-planning of its
+        // own, so a single step-up block right in the way was only ever discovered reactively,
+        // after WalkToController's own multi-second stuck/sidle ladder gave up on walking through
+        // it -- by then the player had already pulled well ahead. A* plans the jump immediately.
+        BlockPos standNear = standOffsetFrom(target.getBlockPos(), bot.getBlockPos(), STOP_DISTANCE);
         // Besides the periodic retarget schedule, also re-path the instant the controller goes
         // idle on its own (a short leg toward a close, moving target often finishes well before
         // nextRepathTick) -- unless we're deliberately backing off a just-failed distant search.
         if (elapsed >= nextRepathTick || (pathIdle && walkIdle && !repathBackoff)) {
-            ActionResult path = bot.getActionPack().startPathTo(trackedTarget);
+            ActionResult path = bot.getActionPack().startPathTo(standNear);
             nextRepathTick = elapsed + REPATH_TICKS;
             if (!path.isFailed()) {
                 repathBackoff = false;
@@ -274,7 +262,7 @@ public final class FollowTask extends AbstractTask {
                 return;
             }
             if (distance <= MAX_DIRECT_FALLBACK_DISTANCE) {
-                bot.getActionPack().startWalkTo(target.getEntityPos());
+                bot.getActionPack().startWalkTo(standNear.toCenterPos());
                 repathBackoff = false;
                 waiting = false;
                 return;
@@ -288,6 +276,29 @@ public final class FollowTask extends AbstractTask {
         // A completed/failed controller waits for the scheduled replan rather than looking active
         // while idle.  This is intentional reacquisition, so StuckWatcher must not abort it.
         waiting = pathIdle && walkIdle;
+    }
+
+    /**
+     * A point {@code standoff} blocks from {@code playerPos}, along the horizontal direction from
+     * the player toward {@code fromPos} (the bot's current position) -- so approaching the player
+     * settles at the requested distance instead of walking onto the player's own block. Falls back
+     * to an arbitrary horizontal direction on the rare exact-column coincidence (directly above or
+     * below the player).
+     */
+    private static BlockPos standOffsetFrom(BlockPos playerPos, BlockPos fromPos, double standoff) {
+        double dx = fromPos.getX() - playerPos.getX();
+        double dz = fromPos.getZ() - playerPos.getZ();
+        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        if (horizontalDist < 1.0e-6D) {
+            dx = 1.0D;
+            dz = 0.0D;
+            horizontalDist = 1.0D;
+        }
+        double scale = standoff / horizontalDist;
+        return BlockPos.ofFloored(
+                playerPos.getX() + dx * scale,
+                playerPos.getY(),
+                playerPos.getZ() + dz * scale);
     }
 
     /**

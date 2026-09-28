@@ -17,8 +17,10 @@ final class FollowRecoverySourceContractTest {
     void landFollowUsesAuthorizedPlayerTrackingAndDoesNotResetItsFallbackEveryTick() throws IOException {
         String follow = read("task/FollowTask.java");
 
-        assertTrue(follow.contains("BlockPos trackedTarget = target.getBlockPos().toImmutable()"));
-        assertTrue(follow.contains("startPathTo(trackedTarget)"));
+        assertTrue(follow.contains(
+                "BlockPos standNear = standOffsetFrom(target.getBlockPos(), bot.getBlockPos(), STOP_DISTANCE)"),
+                "the walk/path destination must stand off from the player, not target their own block");
+        assertTrue(follow.contains("startPathTo(standNear)"));
         assertTrue(follow.contains("boolean walkIdle = bot.getActionPack().isWalkToIdle()"));
         assertTrue(follow.contains("if (!walkIdle)"));
         assertTrue(follow.contains("waiting = pathIdle && walkIdle;"),

@@ -381,6 +381,14 @@ public final class ActionPack {
                 player.getYaw(),
                 player.getPitch(),
                 true);
+        // findNearestStandable only just verified a solid landing at `safe`; this can relocate the
+        // player up to 128 blocks vertically (e.g. away from a genuine, in-progress vanilla fall),
+        // so any real fallDistance/velocity carried into the jump must be cleared here too, or a
+        // later unrelated on-ground transition applies stale fall damage for a fall that this exact
+        // teleport already resolved.
+        player.setVelocity(Vec3d.ZERO);
+        player.fallDistance = 0.0F;
+        player.setOnGround(true);
         Standability.clearCache();
         BotLog.path(player, "path_start_snapped",
                 "reason", reason,

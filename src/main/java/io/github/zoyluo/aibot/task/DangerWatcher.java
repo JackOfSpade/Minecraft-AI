@@ -10,6 +10,7 @@ import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
 import net.minecraft.block.BlockState;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.ai.RangedAttackMob;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.LivingEntity;
@@ -136,7 +137,10 @@ public final class DangerWatcher {
 
     public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
         // SAFE-DEAD:死亡的 bot 不再无限派 evade(僵尸循环)。满血复活到地表,清任务/计划,中文告知。
-        if (bot.getHealth() <= 0.0F || !bot.isAlive()) {
+        // isAlive() alone is not a death signal: it also goes false when the entity is removed for
+        // a non-death reason (e.g. chunk unload), same pitfall documented in HuntTask's
+        // resolveUnavailableTarget. Only zero health or Minecraft's explicit KILLED reason count.
+        if (bot.getHealth() <= 0.0F || bot.getRemovalReason() == Entity.RemovalReason.KILLED) {
             BlockPos deathPos = bot.getBlockPos();
             long deathTick = server.getTicks();
             int visibleHostilesAtDeath = bot.getEntityWorld()
