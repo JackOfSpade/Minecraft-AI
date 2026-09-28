@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.inventory;
+package io.github.zoyluo.minecraftai.inventory;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.screen.NamedScreenHandlerFactory;

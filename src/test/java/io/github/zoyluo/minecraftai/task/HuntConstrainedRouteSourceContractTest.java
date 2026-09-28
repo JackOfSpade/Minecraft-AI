@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class HuntConstrainedRouteSourceContractTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/HuntTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/HuntTask.java");
 
     @Test
     void exactSurfaceStarterAlwaysThreadsRuntimeContractIntoActionPack()
@@ -28,7 +28,7 @@ class HuntConstrainedRouteSourceContractTest {
         String starter = between(
                 source,
                 "private static SurfacePathStart startExactSurfacePath",
-                "// 漫游途中持续扫猎物");
+                "// Keep scanning for prey while roaming");
 
         assertFalse(starter.contains("startSurfacePathTo(destination);"),
                 "Hunt must not start an unrestricted one-argument surface path");
@@ -76,7 +76,7 @@ class HuntConstrainedRouteSourceContractTest {
         String pickupRouting = between(
                 source,
                 "private BlockPos safeObservedDropStand",
-                "// 只猎确定掉生肉的成年 vanilla 动物");
+                "// Only hunts adult vanilla animals known to drop raw meat");
         String sweep = between(
                 source,
                 "private boolean startNextPickupSweepStep",

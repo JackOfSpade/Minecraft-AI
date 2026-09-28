@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Per-bot record of "is this bot currently being sensed", used by the coordinator for two things: the

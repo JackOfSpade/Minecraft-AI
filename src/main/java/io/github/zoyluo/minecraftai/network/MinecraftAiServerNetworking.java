@@ -1,34 +1,34 @@
-package io.github.zoyluo.aibot.network;
+package io.github.zoyluo.minecraftai.network;
 
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.brain.BotRuntimeOptions;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.memory.BotMemory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.network.payload.BotChatS2C;
-import io.github.zoyluo.aibot.network.payload.BotCommandC2S;
-import io.github.zoyluo.aibot.network.payload.BotItemMoveC2S;
-import io.github.zoyluo.aibot.network.payload.BotTeleportC2S;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
-import io.github.zoyluo.aibot.network.payload.SetOptionC2S;
-import io.github.zoyluo.aibot.network.payload.SubscribeBotC2S;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.RuntimeLifecycleCoordinator;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.EatTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.SmeltTask;
-import io.github.zoyluo.aibot.task.SleepTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.brain.BotRuntimeOptions;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.memory.BotMemory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.network.payload.BotChatS2C;
+import io.github.zoyluo.minecraftai.network.payload.BotCommandC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotItemMoveC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotTeleportC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.network.payload.SetOptionC2S;
+import io.github.zoyluo.minecraftai.network.payload.SubscribeBotC2S;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.EatTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.SmeltTask;
+import io.github.zoyluo.minecraftai.task.SleepTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Block;
@@ -48,14 +48,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class AIBotServerNetworking {
-    public static final AIBotServerNetworking INSTANCE = new AIBotServerNetworking();
+public final class MinecraftAiServerNetworking {
+    public static final MinecraftAiServerNetworking INSTANCE = new MinecraftAiServerNetworking();
 
     private static final int SNAPSHOT_INTERVAL_TICKS = 10;
     private final Map<UUID, UUID> subscriptions = new ConcurrentHashMap<>();
     private int snapshotTick;
 
-    private AIBotServerNetworking() {
+    private MinecraftAiServerNetworking() {
     }
 
     public void register() {
@@ -138,7 +138,7 @@ public final class AIBotServerNetworking {
                 player, payload.botName(), BotAuthorizationPolicy.Operation.VIEW, "network:subscribe");
         if (bot.isEmpty()) {
             subscriptions.remove(player.getUuid());
-            sendSystem(player, "", "找不到该 Bot 或无权限。");
+            sendSystem(player, "", "Bot not found or insufficient permissions.");
             return;
         }
         AIPlayerEntity target = bot.get();
@@ -146,14 +146,14 @@ public final class AIBotServerNetworking {
         if (ServerPlayNetworking.canSend(player, BotSnapshotS2C.ID)) {
             ServerPlayNetworking.send(player, snapshot(target));
         }
-        sendSystem(player, target.getGameProfile().name(), "已订阅 " + target.getGameProfile().name());
+        sendSystem(player, target.getGameProfile().name(), "Subscribed to " + target.getGameProfile().name());
     }
 
     private void handleCommand(ServerPlayerEntity player, BotCommandC2S payload) {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.COMMAND, "network:command");
         if (bot.isEmpty()) {
-            sendSystem(player, "", "找不到该 Bot 或无权限。");
+            sendSystem(player, "", "Bot not found or insufficient permissions.");
             return;
         }
         try {
@@ -161,7 +161,7 @@ public final class AIBotServerNetworking {
         } catch (RuntimeException exception) {
             BotLog.error(bot.get(), "panel_command_exception", exception, "action", payload.action());
             String reason = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            sendSystem(player, payload.botName(), "命令执行失败: " + reason);
+            sendSystem(player, payload.botName(), "Command execution failed: " + reason);
         }
     }
 
@@ -169,7 +169,7 @@ public final class AIBotServerNetworking {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.ADMIN, "network:set_option");
         if (bot.isEmpty()) {
-            sendSystem(player, "", "找不到该 Bot 或无权限。");
+            sendSystem(player, "", "Bot not found or insufficient permissions.");
             return;
         }
         AIPlayerEntity target = bot.get();
@@ -179,42 +179,42 @@ public final class AIBotServerNetworking {
             case "reports" -> BotRuntimeOptions.INSTANCE.setVerboseReportsEnabled(target, payload.value());
             default -> throw new IllegalArgumentException("unknown_option: " + payload.key());
         }
-        sendSystem(player, target.getGameProfile().name(), "设置已更新: " + payload.key() + "=" + payload.value());
+        sendSystem(player, target.getGameProfile().name(), "Setting updated: " + payload.key() + "=" + payload.value());
     }
 
-    // 面板传送：server thread 内执行；授权在解析目标后、任何坐标修改前完成。
+    // Panel teleport: runs on the server thread; authorization completes after the target is resolved, before any coordinate change.
     private void handleTeleport(ServerPlayerEntity player, BotTeleportC2S payload) {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.TELEPORT, "network:teleport");
         if (bot.isEmpty()) {
-            sendSystem(player, "", "找不到该 Bot 或无权限。");
+            sendSystem(player, "", "Bot not found or insufficient permissions.");
             return;
         }
         AIPlayerEntity target = bot.get();
-        if (!io.github.zoyluo.aibot.mode.CapabilityRuntime.decide(
-                target, io.github.zoyluo.aibot.mode.PrivilegedCapability.MANUAL_TELEPORT,
+        if (!io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
+                target, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.MANUAL_TELEPORT,
                 "network_manual_teleport").allowed()) {
             sendSystem(player, target.getGameProfile().name(),
-                    "当前运行模式禁止面板传送；请显式启用 operator/manualTeleport。");
+                    "Panel teleport is disabled in the current runtime mode; explicitly enable operator/manualTeleport.");
             return;
         }
         if (payload.direction() == BotTeleportC2S.TO_AI) {
-            // 玩家 → AI 附近 10 格内可站立方块。
+            // Player -> a standable block within 10 blocks of the AI.
             net.minecraft.server.world.ServerWorld world = target.getEntityWorld();
-            io.github.zoyluo.aibot.pathfinding.Standability.findNearestStandable(world, target.getBlockPos(), 10, 8, 8)
+            io.github.zoyluo.minecraftai.pathfinding.Standability.findNearestStandable(world, target.getBlockPos(), 10, 8, 8)
                     .ifPresent(p -> player.teleport(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
                             java.util.Set.of(), player.getYaw(), player.getPitch(), true));
         } else if (payload.direction() == BotTeleportC2S.RECALL_AI) {
-            // AI → 玩家附近 10 格内可站立方块(先停手头动作再传)。
+            // AI -> a standable block within 10 blocks of the player (stop its current action first, then teleport).
             net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
-            io.github.zoyluo.aibot.pathfinding.Standability.findNearestStandable(world, player.getBlockPos(), 10, 8, 8)
+            io.github.zoyluo.minecraftai.pathfinding.Standability.findNearestStandable(world, player.getBlockPos(), 10, 8, 8)
                     .ifPresent(p -> {
                         target.getActionPack().stopAll();
                         target.teleport(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
                                 java.util.Set.of(), target.getYaw(), target.getPitch(), true);
                     });
         } else {
-            sendSystem(player, target.getGameProfile().name(), "无效的传送方向。");
+            sendSystem(player, target.getGameProfile().name(), "Invalid teleport direction.");
         }
     }
 
@@ -222,14 +222,14 @@ public final class AIBotServerNetworking {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.INVENTORY, "network:item_move");
         if (bot.isEmpty()) {
-            sendSystem(player, "", "找不到该 Bot 或无权限。");
+            sendSystem(player, "", "Bot not found or insufficient permissions.");
             return;
         }
         AIPlayerEntity target = bot.get();
         var botInv = target.getInventory();
         var playerInv = player.getInventory();
         if (payload.direction() == BotItemMoveC2S.TAKE) {
-            // 从 AI main[slot] 拿到玩家背包
+            // Take from the AI's main[slot] into the player's inventory
             int slot = payload.slot();
             if (slot < 0 || slot >= botInv.getMainStacks().size()) {
                 return;
@@ -241,14 +241,14 @@ public final class AIBotServerNetworking {
             int move = payload.amount() <= 0 ? src.getCount() : Math.min(payload.amount(), src.getCount());
             ItemStack moving = src.copy();
             moving.setCount(move);
-            boolean inserted = playerInv.insertStack(moving); // moving 被原地改为"未放入的剩余"
+            boolean inserted = playerInv.insertStack(moving); // moving is mutated in place to the "remainder not inserted"
             int placed = move - moving.getCount();
             if (placed > 0) {
                 src.decrement(placed);
                 botInv.markDirty();
             }
         } else if (payload.direction() == BotItemMoveC2S.PUT) {
-            // 把玩家 inventory.main[slot] 放进 AI 背包
+            // Put the player's inventory.main[slot] into the AI's inventory
             int slot = payload.slot();
             if (slot < 0 || slot >= playerInv.getMainStacks().size()) {
                 return;
@@ -266,19 +266,19 @@ public final class AIBotServerNetworking {
                 playerInv.markDirty();
             }
         } else {
-            sendSystem(player, target.getGameProfile().name(), "无效的物品移动方向。");
+            sendSystem(player, target.getGameProfile().name(), "Invalid item move direction.");
             return;
         }
-        // 立即回推一帧快照(含双方背包),UI 不必等 10-tick 周期刷新。
+        // Immediately push a snapshot frame (including both inventories) so the UI doesn't have to wait for the 10-tick refresh cycle.
         if (ServerPlayNetworking.canSend(player, BotSnapshotS2C.ID)) {
             ServerPlayNetworking.send(player, snapshot(target));
         }
     }
 
-    // 把 stack 尽量插入 AI 背包 main 区(先堆叠到同类,再填空槽),返回实际放入数量。
+    // Insert stack into the AI's inventory main area as much as possible (stack onto matching items first, then fill empty slots); returns the amount actually placed.
     private static int insertIntoBot(net.minecraft.entity.player.PlayerInventory botInv, ItemStack moving) {
         int want = moving.getCount();
-        // 1) 堆叠到已有同类未满槽
+        // 1) Stack onto existing not-yet-full slots of the same item
         for (int i = 0; i < botInv.getMainStacks().size() && !moving.isEmpty(); i++) {
             ItemStack dst = botInv.getMainStacks().get(i);
             if (!dst.isEmpty() && ItemStack.areItemsAndComponentsEqual(dst, moving) && dst.getCount() < dst.getMaxCount()) {
@@ -288,7 +288,7 @@ public final class AIBotServerNetworking {
                 moving.decrement(add);
             }
         }
-        // 2) 填空槽
+        // 2) Fill empty slots
         for (int i = 0; i < botInv.getMainStacks().size() && !moving.isEmpty(); i++) {
             if (botInv.getMainStacks().get(i).isEmpty()) {
                 botInv.getMainStacks().set(i, moving.copy());
@@ -327,7 +327,7 @@ public final class AIBotServerNetworking {
             case "reset" -> {
                 RuntimeLifecycleCoordinator.INSTANCE.resetBot(
                         bot, IntentController.ControlOrigin.PLAYER_PANEL, "panel_brain_reset");
-                sendSystem(player, bot.getGameProfile().name(), "大脑已重置。");
+                sendSystem(player, bot.getGameProfile().name(), "Brain has been reset.");
             }
             default -> throw new IllegalArgumentException("unknown_action: " + payload.action());
         }
@@ -356,7 +356,7 @@ public final class AIBotServerNetworking {
                 inventory.add(new BotSnapshotS2C.ItemEntry(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), slot));
             }
         }
-        // UI:全身装备(头/胸/腿/脚/主手/副手),slot index 0..5,供背包面板的装备区展示。
+        // UI: full-body equipment (head/chest/legs/feet/main hand/off hand), slot index 0..5, for the inventory panel's equipment display.
         ArrayList<BotSnapshotS2C.ItemEntry> equipment = new ArrayList<>();
         net.minecraft.entity.EquipmentSlot[] equipSlots = {
                 net.minecraft.entity.EquipmentSlot.HEAD, net.minecraft.entity.EquipmentSlot.CHEST,
@@ -369,8 +369,8 @@ public final class AIBotServerNetworking {
                         Registries.ITEM.getId(equipped.getItem()).toString(), equipped.getCount(), slotIndex));
             }
         }
-        // 任务链条:优先展示 GoalExecutor 的实际确定性计划(provision_food→[砍树/做镐/挖石/造炉/打猎/烤]…),
-        // 没有激活计划时才回退到大脑 set_goal 记的目标(memory)。这样面板链条与 bot 真正在执行的步骤一致。
+        // Task chain: prefer showing GoalExecutor's actual deterministic plan (provision_food -> [chop tree/craft pickaxe/mine stone/build furnace/hunt/cook]...),
+        // and only fall back to the goal recorded by the brain's set_goal (memory) when there's no active plan. This keeps the panel's chain consistent with what the bot is actually executing.
         boolean hasPlan = GoalExecutor.INSTANCE.hasActivePlan(bot);
         String goalTitle = hasPlan ? GoalExecutor.INSTANCE.activeGoalTitle(bot) : memory.goalTitle();
         List<String> goalSteps = hasPlan ? GoalExecutor.INSTANCE.activeGoalSteps(bot) : memory.goalSteps();
@@ -379,10 +379,10 @@ public final class AIBotServerNetworking {
         String goalCurrentStep = goalIndex >= 0 && goalIndex < goalSteps.size()
                 ? goalSteps.get(goalIndex) : memory.currentGoalStep().orElse("");
         var goalResult = GoalExecutor.INSTANCE.lastResult(bot).orElse(null);
-        var runtimeConfig = io.github.zoyluo.aibot.AIBotConfig.get();
+        var runtimeConfig = io.github.zoyluo.minecraftai.MinecraftAiConfig.get();
         List<String> effectiveCapabilities = java.util.Arrays.stream(
-                        io.github.zoyluo.aibot.mode.PrivilegedCapability.values())
-                .filter(capability -> io.github.zoyluo.aibot.mode.CapabilityPolicy.decide(
+                        io.github.zoyluo.minecraftai.mode.PrivilegedCapability.values())
+                .filter(capability -> io.github.zoyluo.minecraftai.mode.CapabilityPolicy.decide(
                         runtimeConfig.profile(), runtimeConfig.operatorCapabilities(), capability).allowed())
                 .map(Enum::name)
                 .toList();

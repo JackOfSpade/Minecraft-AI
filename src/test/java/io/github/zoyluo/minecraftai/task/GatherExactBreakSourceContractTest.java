@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,7 +12,7 @@ final class GatherExactBreakSourceContractTest {
     @Test
     void exactBlockBreakingCountsDestructionRatherThanDropsAndStaysLocal() throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/task/GatherQuotaTask.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
 
         assertTrue(source.contains("public static GatherQuotaTask breakBlocks(Block block, int targetCount)"));
         assertTrue(source.contains("\"break_blocks\", Registries.BLOCK.getId(block).toString()"));

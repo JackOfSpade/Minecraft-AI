@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
@@ -107,7 +107,7 @@ public final class MiningAssistLog {
 
     private static void emitSummary(AIPlayerEntity bot, MiningAssistState state, int serverTick,
                                     SenseCounters window, int windowStart, boolean last) {
-        double radius = SenseBudget.sweepRadius(AIBotConfig.get().perception().radius());
+        double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
         Vec3d eye = bot.getEyePos();
         FreeRunStats.Openness openness = state.ring().openness(
                 serverTick, SweepEngine.eyeCell(eye.x, eye.y, eye.z), radius);

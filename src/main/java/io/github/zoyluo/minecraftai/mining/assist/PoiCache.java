@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import java.util.ArrayList;
 import java.util.Comparator;

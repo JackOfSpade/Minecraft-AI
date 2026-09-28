@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -8,7 +8,7 @@ import java.util.List;
 
 /** Pure profile migration and environment-override policy. */
 public final class ProfileResolver {
-    public static final String ENVIRONMENT_KEY = "AIBOT_PROFILE";
+    public static final String ENVIRONMENT_KEY = "MINECRAFTAI_PROFILE";
 
     private ProfileResolver() {
     }

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,9 +12,9 @@ final class GatherVisibilityAndIncrementSourceContractTest {
     @Test
     void collisionlessPlantsUseAnOptInLineOfSightCellFallback() throws IOException {
         String harvestCore = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/action/HarvestCore.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/action/HarvestCore.java"));
         String gather = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/task/GatherQuotaTask.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
 
         assertTrue(harvestCore.contains("boolean allowObservableCellFallback"));
         assertTrue(harvestCore.contains("allowObservableCellFallback && ObservableWorldQuery.canObserveCell(bot, pos)"),
@@ -29,11 +29,11 @@ final class GatherVisibilityAndIncrementSourceContractTest {
     @Test
     void explicitGatherCountsNewItemsInsteadOfExistingInventory() throws IOException {
         String gather = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/task/GatherQuotaTask.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
         String tools = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/brain/ToolRegistry.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/brain/ToolRegistry.java"));
         String prompt = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/brain/BrainCoordinator.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/brain/BrainCoordinator.java"));
 
         assertTrue(gather.contains("public static GatherQuotaTask collectAdditional(Item targetItem, int targetCount)"));
         assertTrue(gather.contains("acceptedInventoryAtStart"));

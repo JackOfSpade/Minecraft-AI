@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.persist;
+package io.github.zoyluo.minecraftai.persist;
 
-import io.github.zoyluo.aibot.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.Goal;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.EquipAction;
-import io.github.zoyluo.aibot.action.InteractAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.InteractAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.RangedAttackMob;
@@ -137,7 +137,7 @@ public final class CombatCore {
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(range),
                         entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot)
                 .stream()
-                .filter(entity -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -147,7 +147,7 @@ public final class CombatCore {
                 .getEntitiesByClass(LivingEntity.class, box,
                         entity -> entity instanceof HostileEntity && entity.isAlive() && entity != bot)
                 .stream()
-                .filter(entity -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -155,9 +155,13 @@ public final class CombatCore {
         return bot.distanceTo(target) <= ATTACK_RANGE;
     }
 
-    // 视线/可达判定:bot 眼睛 → 目标眼睛之间做一次方块 raycast,中间被实心方块挡住(非 MISS)即视为
-    // 够不到(隔墙/隔隧道)。raycast 只检测方块、不含实体,正好判断"有没有墙挡着"。被挡的怪近战打不到、
-    // 远程射不到、苦力怕炸不到,不应触发/维持战斗(实测 bug:被方块阻隔的怪让 bot 一直"正在战斗")。
+    // Line-of-sight/reachability check: casts one block raycast from the bot's eyes to the target's
+    // eyes; a solid block blocking the middle (result is not MISS) is treated as unreachable
+    // (blocked by a wall/tunnel). The raycast only tests blocks, not entities, which is exactly
+    // what's needed to determine "is a wall in the way". A blocked hostile can't land a melee hit,
+    // can't land a ranged shot, and a creeper can't explode on the bot, so it should not
+    // trigger/sustain combat (observed bug: a mob blocked by blocks left the bot stuck "in combat"
+    // forever).
     public static boolean hasLineOfSight(AIPlayerEntity bot, LivingEntity mob) {
         HitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
                 bot.getEyePos(), mob.getEyePos(),

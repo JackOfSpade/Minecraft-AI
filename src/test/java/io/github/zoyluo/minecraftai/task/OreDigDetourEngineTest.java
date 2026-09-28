@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.mining.assist.DetourPhase;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.SafeReason;
-import io.github.zoyluo.aibot.mining.assist.SightingLedger;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
+import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
@@ -163,7 +163,7 @@ class OreDigDetourEngineTest {
         DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
         OreDigDetourEngine engine = new OreDigDetourEngine();
         engine.start(host, sel);
-        host.safetyFn = stage -> stage == io.github.zoyluo.aibot.mining.assist.SafeGate.Stage.TICK_FULL
+        host.safetyFn = stage -> stage == io.github.zoyluo.minecraftai.mining.assist.SafeGate.Stage.TICK_FULL
                 ? SafeReason.HOSTILE_PRESSURE : SafeReason.OK;
         // Drive a handful of ticks; an abort must land on an even tick (TICK_FULL parity) at the latest.
         OreDigDetourEngine.Result r = runToFinish(host, engine);
@@ -634,8 +634,8 @@ class OreDigDetourEngineTest {
         DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
         OreDigDetourEngine engine = new OreDigDetourEngine();
         engine.start(host, sel);
-        io.github.zoyluo.aibot.mining.assist.MissionAssistLedger.Entry firstEntry = host.ledger;
-        host.ledger = new io.github.zoyluo.aibot.mining.assist.MissionAssistLedger.Entry(); // a later host.ledger() call would resolve a different one
+        io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger.Entry firstEntry = host.ledger;
+        host.ledger = new io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger.Entry(); // a later host.ledger() call would resolve a different one
         DetourHost.Anchor a = engine.interrupt(host, "paused");
         assertNotNull(a);
         assertEquals(1, firstEntry.detoursStarted());

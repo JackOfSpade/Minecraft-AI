@@ -1,16 +1,16 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.coordination.MiningAssistCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.perception.PerceptionCollector;
-import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.coordination.MiningAssistCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.perception.PerceptionCollector;
+import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -172,7 +172,7 @@ public final class ChatCaptureListener {
         BotLog.warn(LogCategory.COMM, null, "chat_recipient_routing_failed",
                 "sender", sender.getGameProfile().name(),
                 "reason", reason);
-        sender.sendMessage(Text.literal("[AIBot] I couldn't determine which companion you meant. Please try again."), false);
+        sender.sendMessage(Text.literal("[Minecraft-AI] I couldn't determine which companion you meant. Please try again."), false);
     }
 
     private static long nextEpoch(UUID senderId) {
@@ -194,8 +194,8 @@ public final class ChatCaptureListener {
             return;
         }
         BotLog.comm(bot, "chat_in", "sender", sender.getGameProfile().name(), "text", body);
-        if (io.github.zoyluo.aibot.runtime.IntentController.INSTANCE.routePlayerControlPhrase(
-                bot, io.github.zoyluo.aibot.runtime.IntentController.ControlOrigin.PLAYER_COMMAND, body)) {
+        if (io.github.zoyluo.minecraftai.runtime.IntentController.INSTANCE.routePlayerControlPhrase(
+                bot, io.github.zoyluo.minecraftai.runtime.IntentController.ControlOrigin.PLAYER_COMMAND, body)) {
             return;
         }
         BrainCoordinator.INSTANCE.handleRoutedMessage(bot, sender, body, routingModelCallCost);

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Phase of the opportunistic valuables detour engine (mining-assist design 4.14). Pure data, shared by the

@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.craft.RecipeRegistry;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
@@ -26,7 +26,7 @@ import net.minecraft.entity.EquipmentSlot;
 
 /** Reproduces the unsupported first-air furnace placement seen after DigDown returns to the surface. */
 public final class SmeltFurnacePlacementGameTests {
-    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_unsupported_air_retry_cannot_replace_active_clearing_pickaxe", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:smelt_furnace_placement_game_tests_unsupported_air_retry_cannot_replace_active_clearing_pickaxe", maxTicks = 800)
     public void unsupportedAirRetryCannotReplaceActiveClearingPickaxe(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -48));
@@ -40,10 +40,12 @@ public final class SmeltFurnacePlacementGameTests {
                 }
             }
         }
-        // seed 3000 的精确失败形态：NORTH 是没有任何可点击支撑的悬空 air，
-        // 放炉会先在这里合法失败；EAST 是需要石镐清掉的铁矿。旧状态机在开始
-        // 挖 EAST 后，下一 tick 会先重试 NORTH 并把镐换回 furnace。SOUTH/WEST
-        // 用不可破坏块锁定唯一清障格，不让方向迭代顺序弱化用例。
+        // seed 3000's exact failure shape: NORTH is unsupported, floating air with no
+        // clickable support, so placing the furnace will legitimately fail here first; EAST is
+        // iron ore that needs the stone pickaxe to clear it. After the old state machine started
+        // digging EAST, the next tick would retry NORTH first and swap the pickaxe back for the
+        // furnace. SOUTH/WEST use indestructible blocks to lock in the only clearable cell, so
+        // the direction-iteration order can't weaken the test case.
         world.setBlockState(start.north(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(start.north().down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(start.north().down(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
@@ -58,10 +60,11 @@ public final class SmeltFurnacePlacementGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
-        // 填满 main，并把 furnace 放在 offhand。首次找炉会无损提升它；清障开始后再
-        // 把它放回 offhand，精确复现 active pick 被下一 tick findItem 交换掉的边界。
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
+        // Fill main, and put the furnace in the offhand. The first findItem lookup will promote
+        // it losslessly; once clearing begins, put it back in the offhand to precisely reproduce
+        // the boundary case where the active pick gets swapped out by findItem on the next tick.
         for (var filler : new net.minecraft.item.Item[]{
                 Items.DIRT, Items.SAND, Items.GRAVEL, Items.COBBLESTONE,
                 Items.ANDESITE, Items.DIORITE, Items.GRANITE,
@@ -143,7 +146,7 @@ public final class SmeltFurnacePlacementGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_skips_unsupported_stair_mouth_and_cooks_on_supported_side", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:smelt_furnace_placement_game_tests_skips_unsupported_stair_mouth_and_cooks_on_supported_side", maxTicks = 800)
     public void skipsUnsupportedStairMouthAndCooksOnSupportedSide(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -48));
@@ -168,8 +171,8 @@ public final class SmeltFurnacePlacementGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE));
         InventoryAction.giveItem(bot, new ItemStack(Items.MUTTON));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL));
@@ -196,7 +199,7 @@ public final class SmeltFurnacePlacementGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_crafts_local_furnace_instead_of_chasing_far_remembered_surface_furnace", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:smelt_furnace_placement_game_tests_crafts_local_furnace_instead_of_chasing_far_remembered_surface_furnace", maxTicks = 800)
     public void craftsLocalFurnaceInsteadOfChasingFarRememberedSurfaceFurnace(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 4, 8));
@@ -218,7 +221,7 @@ public final class SmeltFurnacePlacementGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .markPlace("furnace", world, farSurfaceFurnace);
         // Exact seed-3000 regression: the bot first reached the remote furnace with five
         // cobblestone, mined four more while trying to get there, then could plan a furnace but
@@ -269,13 +272,13 @@ public final class SmeltFurnacePlacementGameTests {
                     "capacity recovery did not create an ordinary dirt ItemEntity");
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 1,
                     "local furnace craft did not consume exactly eight of nine cobblestone");
-            io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.remove(bot.getUuid());
+            io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.remove(bot.getUuid());
             AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });
     }
 
-    @GameTest(environment = "aibot-gametest:smelt_furnace_placement_game_tests_crafts_local_furnace_when_remembered_surface_furnace_is_beyond_lookup_radius", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:smelt_furnace_placement_game_tests_crafts_local_furnace_when_remembered_surface_furnace_is_beyond_lookup_radius", maxTicks = 800)
     public void craftsLocalFurnaceWhenRememberedSurfaceFurnaceIsBeyondLookupRadius(
             TestContext context) {
         var world = context.getWorld();
@@ -303,9 +306,9 @@ public final class SmeltFurnacePlacementGameTests {
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
-        io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .markPlace("furnace", world, farSurfaceFurnace);
 
         // Preserve non-zero baselines so the test catches absolute-vs-incremental accounting bugs.
@@ -347,7 +350,7 @@ public final class SmeltFurnacePlacementGameTests {
                     "local furnace craft consumed the carried crafting table");
             require(context, InventoryAction.countItem(bot, Items.FURNACE) == 0,
                     "local furnace remained duplicated in inventory after placement");
-            io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.remove(bot.getUuid());
+            io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.remove(bot.getUuid());
             AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
             context.complete();
         });

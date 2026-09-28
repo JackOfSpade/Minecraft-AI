@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -32,11 +32,13 @@ import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
 /**
- * 真实地形捕获器 /aibot snapshot [radius]——把 bot 周围 radius 立方体的"非凡方块"
- * dump 成可复现的 setRel 代码 + 紧凑统计,写到 reports/snapshot_<坐标>.txt。
- * 用途:real_diamond/real_iron 真实失败那刻一键抓现场 → 粘成确定性 L1 场景 → 把 flaky 真实失败真修。
+ * Real terrain capture tool: /minecraftai snapshot [radius] -- dumps the "notable blocks" in the
+ * radius-sized cube around the bot into reproducible setRel code + a compact tally, writing to
+ * reports/snapshot_<coords>.txt.
+ * Purpose: one-click capture of the scene at the moment of a real real_diamond/real_iron failure ->
+ * paste it into a deterministic L1 scenario -> actually fix flaky real-world failures.
  */
-public final class AIBotSnapshotSubcommand {
+public final class MinecraftAiSnapshotSubcommand {
     private static final int DEFAULT_RADIUS = 8;
     private static final int MAX_RADIUS = 24;
 
@@ -46,7 +48,7 @@ public final class AIBotSnapshotSubcommand {
             Blocks.DIRT, Blocks.GRASS_BLOCK, Blocks.COARSE_DIRT, Blocks.ROOTED_DIRT, Blocks.PODZOL, Blocks.MUD,
             Blocks.SAND, Blocks.GRAVEL, Blocks.SANDSTONE, Blocks.NETHERRACK);
 
-    private AIBotSnapshotSubcommand() {
+    private MinecraftAiSnapshotSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -63,12 +65,12 @@ public final class AIBotSnapshotSubcommand {
         }
         Optional<AIPlayerEntity> botOpt = selectBot(source);
         if (botOpt.isEmpty()) {
-            source.sendError(Text.literal("[AIBot Snapshot] no bot — /aibot spawn <name> first"));
+            source.sendError(Text.literal("[MinecraftAi Snapshot] no bot — /minecraftai spawn <name> first"));
             return 0;
         }
         AIPlayerEntity bot = botOpt.get();
         if (!CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "admin_snapshot").allowed()) {
-            source.sendError(Text.literal("[AIBot Snapshot] unavailable in strict_survival; enable operator hiddenBlockScan explicitly"));
+            source.sendError(Text.literal("[MinecraftAi Snapshot] unavailable in strict_survival; enable operator hiddenBlockScan explicitly"));
             return 0;
         }
         ServerWorld world = bot.getEntityWorld();
@@ -106,17 +108,17 @@ public final class AIBotSnapshotSubcommand {
         try {
             file = writeReport(center, header, code.toString(), tally);
         } catch (IOException e) {
-            source.sendError(Text.literal("[AIBot Snapshot] write failed: " + e.getMessage()));
+            source.sendError(Text.literal("[MinecraftAi Snapshot] write failed: " + e.getMessage()));
             return 0;
         }
         final int total = written;
-        source.sendFeedback(() -> Text.literal("[AIBot Snapshot] " + total + " notable blocks @ "
+        source.sendFeedback(() -> Text.literal("[MinecraftAi Snapshot] " + total + " notable blocks @ "
                 + center.toShortString() + " r=" + radius + " notable=" + notable + " -> " + file), false);
         return 1;
     }
 
     private static boolean isOreLike(Block block, Identifier id) {
-        return io.github.zoyluo.aibot.mining.OreScan.isOreBlock(block)
+        return io.github.zoyluo.minecraftai.mining.OreScan.isOreBlock(block)
                 || id.getPath().endsWith("_ore") || id.getPath().contains("ancient_debris");
     }
 
@@ -125,14 +127,14 @@ public final class AIBotSnapshotSubcommand {
         int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING,
                 center.getX(), center.getZ());
         long seed = world.getSeed();
-        return "// === AIBot terrain snapshot ===\n"
+        return "// === MinecraftAi terrain snapshot ===\n"
                 + "// bot=" + bot.getGameProfile().name()
                 + "  center=" + center.getX() + "," + center.getY() + "," + center.getZ()
                 + "  yaw=" + Math.round(bot.getYaw()) + "  pitch=" + Math.round(bot.getPitch()) + "\n"
                 + "// dimension=" + world.getRegistryKey().getValue()
                 + "  seed=" + seed + "  surface_y=" + surfaceY + "\n"
                 + "// radius=" + radius + "  notable_blocks=" + written + "  notable_kinds=" + notable + "\n"
-                + "// PASTE 下面整段进 testmod verification fixture 的 assignCapturedX。\n";
+                + "// PASTE the block below into the testmod verification fixture's assignCapturedX.\n";
     }
 
     private static Path writeReport(BlockPos center, String header, String code,

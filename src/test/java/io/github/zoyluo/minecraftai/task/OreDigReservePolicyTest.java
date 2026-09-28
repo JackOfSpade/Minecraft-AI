@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OreDigReservePolicyTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/OreDigTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/OreDigTask.java");
 
     @Test
     void parentMissionAndRareEpochReservesComposeWithoutWeakeningEitherOwner() {

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 /** Fine-grained operator-mode switches. Boxed fields preserve explicit false through Gson defaults. */
 public record OperatorCapabilities(

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 /** Privileged operations that strict survival must never execute. */
 public enum PrivilegedCapability {

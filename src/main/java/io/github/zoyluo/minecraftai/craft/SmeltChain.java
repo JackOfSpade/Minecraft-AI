@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -8,26 +8,29 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * S5:冶炼链单一数据源——输入物 → 冶炼产物(矿锭/熟肉/玻璃/木炭/烤土豆),以及燃料燃烧时长。
+ * S5: single source of truth for the smelting chain — input item → smelted output (ingots/cooked
+ * meat/glass/charcoal/baked potato), plus fuel burn duration.
  *
- * 此前冶炼映射散落在 `GoalPlanner.smeltRecipeFor`(仅矿锭/石/木炭),食物链(熟肉)无从倒推。本表为
- * 材料链(A)与食物链(B)共用:`GoalPlanner` 倒推冶炼产物、`SmeltTask` 校验"可冶炼"都读这里。
+ * Previously the smelting mapping was scattered across `GoalPlanner.smeltRecipeFor` (ingots/stone/
+ * charcoal only), with no way to reverse-derive the food chain (cooked meat). This table is shared
+ * by the material chain (A) and the food chain (B): `GoalPlanner` reverse-derives smelting outputs,
+ * and `SmeltTask` reads this table to validate that an input is "smeltable".
  */
 public final class SmeltChain {
 
-    // 输入 → 产物。顺序仅影响 rawFor 反查的优先级(各产物唯一,无歧义)。
+    // Input → output. Order only affects rawFor's reverse-lookup priority (each output is unique, so there is no ambiguity).
     private static final Map<Item, Item> SMELT = new LinkedHashMap<>();
-    // 燃料 → 可烧物品数(vanilla:煤/炭 8、原木/木板 1.5、木棍 0.5;此处用"可烧个数"近似,规划层按需向上取整)。
+    // Fuel → number of items it can smelt (vanilla: coal/charcoal 8, logs/planks 1.5, sticks 0.5; approximated here as a "burnable item count", rounded up by the planning layer as needed).
     private static final Map<Item, Double> FUEL = new LinkedHashMap<>();
 
     static {
-        // 矿物冶炼
+        // Ore smelting
         SMELT.put(Items.RAW_IRON, Items.IRON_INGOT);
         SMELT.put(Items.RAW_COPPER, Items.COPPER_INGOT);
         SMELT.put(Items.RAW_GOLD, Items.GOLD_INGOT);
         SMELT.put(Items.COBBLESTONE, Items.STONE);
-        SMELT.put(Items.OAK_LOG, Items.CHARCOAL); // 任意原木皆可,规划默认橡木
-        // 食物冶炼(B 模块用:熟肉饱食/饱和远高于生肉)
+        SMELT.put(Items.OAK_LOG, Items.CHARCOAL); // Any log works; the planner defaults to oak
+        // Food smelting (used by module B: cooked meat gives far more hunger/saturation than raw meat)
         SMELT.put(Items.BEEF, Items.COOKED_BEEF);
         SMELT.put(Items.PORKCHOP, Items.COOKED_PORKCHOP);
         SMELT.put(Items.CHICKEN, Items.COOKED_CHICKEN);
@@ -36,7 +39,7 @@ public final class SmeltChain {
         SMELT.put(Items.COD, Items.COOKED_COD);
         SMELT.put(Items.SALMON, Items.COOKED_SALMON);
         SMELT.put(Items.POTATO, Items.BAKED_POTATO);
-        // 其它
+        // Other
         SMELT.put(Items.SAND, Items.GLASS);
 
         FUEL.put(Items.COAL, 8.0);
@@ -46,12 +49,12 @@ public final class SmeltChain {
         FUEL.put(Items.STICK, 0.5);
     }
 
-    /** B 模块:可烤的生食(猎到/钓到/挖到的生料,需烤成熟食才高饱食、且生鸡肉等避免中毒)。 */
+    /** Module B: raw foods that can be cooked (raw materials hunted/fished/dug up need to be cooked for higher hunger/saturation, and to avoid poisoning from things like raw chicken). */
     public static final Set<Item> RAW_FOODS = Set.of(
             Items.BEEF, Items.PORKCHOP, Items.CHICKEN, Items.MUTTON, Items.RABBIT,
             Items.COD, Items.SALMON, Items.POTATO);
 
-    /** B 模块:对应熟食(备粮达标只认这些——饱食/饱和远高于生料)。 */
+    /** Module B: the corresponding cooked foods (only these count toward meeting the food-reserve target — hunger/saturation is far higher than raw). */
     public static final Set<Item> COOKED_FOODS = Set.of(
             Items.COOKED_BEEF, Items.COOKED_PORKCHOP, Items.COOKED_CHICKEN, Items.COOKED_MUTTON,
             Items.COOKED_RABBIT, Items.COOKED_COD, Items.COOKED_SALMON, Items.BAKED_POTATO);
@@ -59,17 +62,17 @@ public final class SmeltChain {
     private SmeltChain() {
     }
 
-    /** 输入物的冶炼产物;不可冶炼返回 null。 */
+    /** The smelted output for an input item; returns null if it cannot be smelted. */
     public static Item smeltOf(Item input) {
         return SMELT.get(input);
     }
 
-    /** 该输入物是否可冶炼(SmeltTask 入参校验用)。 */
+    /** Whether this input item can be smelted (used by SmeltTask to validate its input). */
     public static boolean isSmeltable(Item input) {
         return SMELT.containsKey(input);
     }
 
-    /** 反查:要得到 output 这个冶炼产物,需要的输入物;无则 null(供 GoalPlanner 倒推)。 */
+    /** Reverse lookup: the input item needed to produce this smelted output; null if none exists (used by GoalPlanner for reverse derivation). */
     public static Item rawFor(Item output) {
         for (Map.Entry<Item, Item> e : SMELT.entrySet()) {
             if (e.getValue() == output) {
@@ -79,7 +82,7 @@ public final class SmeltChain {
         return null;
     }
 
-    /** 该燃料能烧多少个物品(0=非燃料)。 */
+    /** How many items this fuel can smelt (0 = not a fuel). */
     public static double burnYield(Item fuel) {
         return FUEL.getOrDefault(fuel, 0.0);
     }

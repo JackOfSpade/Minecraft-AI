@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
@@ -13,9 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PathExecutorReplanGateTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/pathfinding/PathExecutor.java");
+            "src/main/java/io/github/zoyluo/minecraftai/pathfinding/PathExecutor.java");
     private static final Path ACTION_PACK_SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/action/ActionPack.java");
+            "src/main/java/io/github/zoyluo/minecraftai/action/ActionPack.java");
 
     @Test
     void unreachableExecutorCanReplanOnlyOnceUntilARealNodeAdvance() {
@@ -151,7 +151,7 @@ class PathExecutorReplanGateTest {
                 source, "private ActionResult tickWalk", "private ActionResult tickDrop");
         String digWalk = between(
                 source, "private ActionResult tickDigThrough",
-                "// NAV-9:垫方块上升一格");
+                "// NAV-9:");
 
         assertControllerProofOrdering(walk, "ActionResult result = subWalker.tick(pack);");
         assertControllerProofOrdering(digWalk, "ActionResult walk = subWalker.tick(pack);");

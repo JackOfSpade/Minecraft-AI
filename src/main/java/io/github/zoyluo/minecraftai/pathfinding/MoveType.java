@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
 public enum MoveType {
     WALK,

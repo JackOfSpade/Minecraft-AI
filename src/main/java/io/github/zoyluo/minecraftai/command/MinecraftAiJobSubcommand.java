@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.coordination.Job;
-import io.github.zoyluo.aibot.coordination.TaskBoard;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.coordination.Job;
+import io.github.zoyluo.minecraftai.coordination.TaskBoard;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
@@ -19,8 +19,8 @@ import java.util.stream.Collectors;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotJobSubcommand {
-    private AIBotJobSubcommand() {
+public final class MinecraftAiJobSubcommand {
+    private MinecraftAiJobSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -56,8 +56,8 @@ public final class AIBotJobSubcommand {
             return 0;
         }
         UUID id = TaskBoard.INSTANCE.postGlobal(kind, parseParams(paramsText), role);
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
-        source.sendFeedback(() -> Text.literal("[AIBot] job posted " + id + " kind=" + kind + " role=" + role), false);
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] job posted " + id + " kind=" + kind + " role=" + role), false);
         return 1;
     }
 
@@ -67,13 +67,13 @@ public final class AIBotJobSubcommand {
         }
         var jobs = TaskBoard.INSTANCE.snapshot();
         if (jobs.isEmpty()) {
-            source.sendFeedback(() -> Text.literal("[AIBot] jobs: empty"), false);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] jobs: empty"), false);
             return 0;
         }
         String text = jobs.stream()
-                .map(AIBotJobSubcommand::format)
+                .map(MinecraftAiJobSubcommand::format)
                 .collect(Collectors.joining(" | "));
-        source.sendFeedback(() -> Text.literal("[AIBot] jobs: " + text), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] jobs: " + text), false);
         return jobs.size();
     }
 
@@ -82,8 +82,8 @@ public final class AIBotJobSubcommand {
             return 0;
         }
         TaskBoard.INSTANCE.clear();
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
-        source.sendFeedback(() -> Text.literal("[AIBot] jobs cleared"), false);
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] jobs cleared"), false);
         return 1;
     }
 
@@ -99,7 +99,7 @@ public final class AIBotJobSubcommand {
         // Preserve the real OP/console provenance. The legacy from_bot argument is not used as an
         // identity because that would let an administrator silently impersonate a Bot.
         boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), source.getName(), message);
-        source.sendFeedback(() -> Text.literal("[AIBot] operator tell " + (queued ? "queued" : "busy")
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] operator tell " + (queued ? "queued" : "busy")
                 + " (legacy from_bot=" + fromBot + " ignored)"), false);
         return queued ? 1 : 0;
     }

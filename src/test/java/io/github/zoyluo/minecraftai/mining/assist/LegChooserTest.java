@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.assist.LegChooser.DirectionSignal;
-import io.github.zoyluo.aibot.mining.assist.LegChooser.TurnChoice;
+import io.github.zoyluo.minecraftai.mining.assist.LegChooser.DirectionSignal;
+import io.github.zoyluo.minecraftai.mining.assist.LegChooser.TurnChoice;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

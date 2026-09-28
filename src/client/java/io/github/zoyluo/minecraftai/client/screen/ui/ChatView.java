@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.client.screen.ui;
+package io.github.zoyluo.minecraftai.client.screen.ui;
 
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 
@@ -59,7 +59,7 @@ public final class ChatView implements PanelComponent {
                 return;
             }
             List<RenderLine> renderLines = layout(renderer);
-            // 气泡自底向上排:scrollOffset=0 贴底显示最新;scrollOffset 增大 => 整体下移,顶部的历史消息进入视野
+            // Bubbles are laid out bottom-to-top: scrollOffset=0 sticks to the bottom showing the latest; as scrollOffset increases => everything shifts down, and older history at the top enters view
             int drawY = y + h - EDGE_PAD + scrollOffset;
             for (int index = renderLines.size() - 1; index >= 0; index--) {
                 RenderLine line = renderLines.get(index);
@@ -78,7 +78,7 @@ public final class ChatView implements PanelComponent {
         if (mouseX < x || mouseX > x + w || mouseY < y || mouseY > y + h || contentHeight <= h) {
             return false;
         }
-        // 向上滚(amount>0)=> 回看更早历史 => scrollOffset 增大;上限 = 内容超出视口的高度
+        // Scrolling up (amount>0) => looking back at earlier history => scrollOffset increases; the upper bound = how far the content overflows the viewport height
         int maxOffset = Math.max(0, contentHeight - h + EDGE_PAD * 2);
         scrollOffset = clamp(scrollOffset + (int) Math.round(amount * 16.0D), 0, maxOffset);
         stickBottom = scrollOffset == 0;
@@ -135,7 +135,7 @@ public final class ChatView implements PanelComponent {
         context.drawHorizontalLine(bx, bx + line.width() - 1, by + line.height() - 1, border);
         context.drawVerticalLine(bx, by, by + line.height() - 1, border);
         context.drawVerticalLine(bx + line.width() - 1, by, by + line.height() - 1, border);
-        // 不再单独占一行画"系统/你/Bob"标签:角色由边框色 + 背景色 + 左右对齐区分(更紧凑,显示更多历史)
+        // No longer draws a "System/You/Bob" label on its own line: role is distinguished by border color + background color + left/right alignment (more compact, shows more history)
         int ty = by + BUBBLE_PAD;
         for (String part : line.parts()) {
             context.drawTextWithShadow(renderer, part, bx + BUBBLE_PAD, ty, Theme.TEXT_STRONG);
@@ -144,9 +144,9 @@ public final class ChatView implements PanelComponent {
     }
 
     private void drawEmpty(DrawContext context, TextRenderer renderer) {
-        String first = Theme.tr("chat.aibot.empty");
+        String first = Theme.tr("chat.minecraftai.empty");
         int maxTextW = Math.max(40, w - EDGE_PAD * 4);
-        String second = trimToWidth(renderer, Theme.tr("chat.aibot.hint"), maxTextW);
+        String second = trimToWidth(renderer, Theme.tr("chat.minecraftai.hint"), maxTextW);
         int emptyW = Math.min(w - EDGE_PAD * 2, Math.max(renderer.getWidth(first), renderer.getWidth(second)) + BUBBLE_PAD * 2);
         int emptyX = x + Math.max(EDGE_PAD, (w - emptyW) / 2);
         int emptyY = y + h / 2 - 18;
@@ -167,7 +167,7 @@ public final class ChatView implements PanelComponent {
         int trackH = h - 12;
         int thumbH = Math.max(18, trackH * h / Math.max(h, contentHeight));
         int maxOffset = Math.max(1, contentHeight - h + EDGE_PAD * 2);
-        // scrollOffset=0(看最新)=> 滑块在底部;offset 增大(回看历史)=> 滑块上移
+        // scrollOffset=0 (viewing latest) => thumb is at the bottom; as offset increases (looking back at history) => thumb moves up
         int thumbY = y + 6 + (trackH - thumbH) * (maxOffset - Math.min(scrollOffset, maxOffset)) / maxOffset;
         context.fill(trackX, y + 6, trackX + 2, y + h - 6, 0xFF252B35);
         context.fill(trackX - 1, thumbY, trackX + 3, thumbY + thumbH, Theme.ACCENT);
@@ -175,10 +175,10 @@ public final class ChatView implements PanelComponent {
 
     private static String roleLabel(String role) {
         return switch (role) {
-            case "user" -> Theme.tr("screen.aibot.role.user");
-            case "bot" -> Theme.tr("screen.aibot.role.bot");
-            case "system" -> Theme.tr("screen.aibot.role.system");
-            default -> role == null || role.isBlank() ? Theme.tr("screen.aibot.role.system") : role;
+            case "user" -> Theme.tr("screen.minecraftai.role.user");
+            case "bot" -> Theme.tr("screen.minecraftai.role.bot");
+            case "system" -> Theme.tr("screen.minecraftai.role.system");
+            default -> role == null || role.isBlank() ? Theme.tr("screen.minecraftai.role.system") : role;
         };
     }
 

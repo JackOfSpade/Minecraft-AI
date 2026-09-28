@@ -1,21 +1,21 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.task.BuildTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.EatTask;
-import io.github.zoyluo.aibot.task.LightAreaTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.SmeltTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskState;
-import io.github.zoyluo.aibot.task.TaskStatus;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.task.BlueprintLoader;
+import io.github.zoyluo.minecraftai.task.BuildTask;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.EatTask;
+import io.github.zoyluo.minecraftai.task.LightAreaTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.SmeltTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskState;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
@@ -54,8 +54,8 @@ public final class IdleCoordinator {
         if (TaskManager.INSTANCE.hasPaused(bot)) {
             return false;
         }
-        // GOALFIX-GF1 P0-A:bot 有活跃目标计划时,空闲分配让位给 GoalExecutor(防步骤间隙抢任务板作业)。
-        if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+        // GOALFIX-GF1 P0-A: When the bot has an active goal plan, idle assignment yields to GoalExecutor (prevents grabbing task-board jobs during the gap between steps).
+        if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
         // Low-level action-only work (for example move_to) has no Task object but still owns the
@@ -127,7 +127,7 @@ public final class IdleCoordinator {
     }
 
     private static void markDirty(AIPlayerEntity bot) {
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
     }
 
     public static Optional<Task> jobToTask(AIPlayerEntity bot, Job job) {

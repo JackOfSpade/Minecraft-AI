@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class MiningEvidenceAuditTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
     private static final Path VERIFY = Path.of(
-            "src/gametest/java/io/github/zoyluo/aibot/command/AIBotVerifySubcommand.java");
+            "src/gametest/java/io/github/zoyluo/minecraftai/command/MinecraftAiVerifySubcommand.java");
 
     @Test
     void diamondRequiresEveryPhysicalAndSurvivalBoundaryAt64() {

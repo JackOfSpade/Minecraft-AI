@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -62,12 +62,12 @@ public final class FarmAction {
         return ActionResult.SUCCESS;
     }
 
-    // 灌溉:用水桶在 pos 放一个水源(简化:直接 setBlockState WATER 源 + 背包 WATER_BUCKET→BUCKET)。
+    // Irrigation: place a water source at pos using a water bucket (simplified: directly setBlockState to a WATER source + inventory WATER_BUCKET→BUCKET).
     public static ActionResult placeWater(AIPlayerEntity bot, BlockPos pos) {
         ServerWorld world = bot.getEntityWorld();
         BlockState at = world.getBlockState(pos);
         if (!at.isAir() && !at.isOf(Blocks.WATER) && world.getFluidState(pos).isEmpty()) {
-            return ActionResult.failed("not_empty"); // 目标被实心方块占,放不了水
+            return ActionResult.failed("not_empty"); // target is occupied by a solid block, water cannot be placed
         }
         if (!InventoryAction.removeItems(bot, Items.WATER_BUCKET, 1)) {
             return ActionResult.failed("missing_water_bucket");
@@ -78,7 +78,7 @@ public final class FarmAction {
         return ActionResult.SUCCESS;
     }
 
-    // 灌溉:从 pos 的水源舀水进空桶(无限水源的"可再生"凭此验证:舀走一格,邻格的源会回填)。
+    // Irrigation: scoop water from the source at pos into an empty bucket (this is how infinite water source "renewability" is verified: scoop one cell away, and the adjacent source refills it).
     public static ActionResult fillBucket(AIPlayerEntity bot, BlockPos pos) {
         ServerWorld world = bot.getEntityWorld();
         if (!isWaterSource(world, pos)) {

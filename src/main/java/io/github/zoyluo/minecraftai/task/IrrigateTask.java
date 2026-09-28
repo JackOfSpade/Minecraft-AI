@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.FarmAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.BlockState;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -18,17 +18,21 @@ import java.util.List;
 import java.util.OptionalInt;
 
 /**
- * 建一个 2×2 无限水源(灌溉 / 取水用)。在 center 所在的地面挖出 1 深的 2×2 坑,
- * 在对角两格各倒 1 桶水;另外两格各与 2 个源正交相邻 → 经几 tick 水流自动变成源 → 4 格全是源。
- * 这样的 2×2 全源水池是"无限水源":舀走任意一格,其余 3 格会把它回填成源;同时灌溉周围 4 格内的耕地。
- * 需要背包 ≥2 个 WATER_BUCKET(倒完变 2 个空 BUCKET)。
+ * Builds a 2x2 infinite water source (for irrigation / water collection). Digs a 1-deep 2x2 pit
+ * into the ground at center, then pours 1 water bucket into each of the two diagonal cells; the
+ * other two cells are each orthogonally adjacent to 2 source blocks -> after a few ticks the
+ * flowing water automatically converts to source blocks -> all 4 cells become source blocks.
+ * A 2x2 pool that is all source blocks like this is an "infinite water source": scooping out any
+ * one cell causes the other 3 to refill it back to a source block; it also irrigates farmland
+ * within 4 blocks around it.
+ * Requires >=2 WATER_BUCKET in inventory (each becomes an empty BUCKET after pouring).
  */
 public final class IrrigateTask extends AbstractTask {
     private enum Phase {GOTO, DIG, PLACE, SETTLE, DONE}
 
-    private static final int SETTLE_TICKS = 20; // 放水后等水流扩散、两空格转为源
+    private static final int SETTLE_TICKS = 20; // After placing water, wait for the flow to spread and the two empty cells to convert into source blocks
     private final BlockPos center;
-    private final List<BlockPos> cells = new ArrayList<>(); // 2×2 的 4 格(同一 y 层)
+    private final List<BlockPos> cells = new ArrayList<>(); // The 4 cells of the 2x2 area (same y layer)
     private final BlockMiner digMiner = new BlockMiner();
     private Phase phase = Phase.GOTO;
     private int digIndex;
@@ -97,8 +101,9 @@ public final class IrrigateTask extends AbstractTask {
         }
         BlockPos stand = adjacentStand(bot, center);
         if (stand == null) {
-            // 没有可站立的相邻格:仍进入 DIG,让 BlockMiner 用当前位置尝试挖掘(够不到会按正常挖掘
-            // 逻辑因超出交互距离而失败,不会瞬间破坏方块)。
+            // No adjacent cell to stand on: still proceed to DIG and let BlockMiner attempt to mine
+            // from the bot's current position (if out of reach, it will fail through the normal
+            // mining logic due to exceeding interaction range, rather than instantly breaking the block).
             note = "unreachable";
             phase = Phase.DIG;
             return;
@@ -120,7 +125,7 @@ public final class IrrigateTask extends AbstractTask {
         }
         BlockPos cell = cells.get(digIndex);
         ServerWorld world = bot.getEntityWorld();
-        // 坑底必须实心(否则水往下漏);四周由现有地面充当挡水墙。
+        // The pit floor must be solid (otherwise water leaks downward); the existing ground on all sides serves as the retaining wall.
         if (!digFloorPlaced) {
             BlockState below = world.getBlockState(cell.down());
             if (below.isAir() || !world.getFluidState(cell.down()).isEmpty()) {
@@ -141,7 +146,7 @@ public final class IrrigateTask extends AbstractTask {
             }
             digFloorPlaced = true;
         }
-        // 坑内清空成空气以容水:真实按硬度/工具逐 tick 挖掘,不瞬间破坏。
+        // Clear the pit interior to air to hold water: mined tick-by-tick based on real hardness/tool speed, not destroyed instantly.
         if (world.getBlockState(cell).isAir()) {
             digIndex++;
             digFloorPlaced = false;
@@ -162,7 +167,7 @@ public final class IrrigateTask extends AbstractTask {
     }
 
     private void place(AIPlayerEntity bot) {
-        // 对角两格放水(cells[0] 与 cells[3]);另两格(cells[1]/[2])各邻 2 源,SETTLE 后自动成源。
+        // Place water in the two diagonal cells (cells[0] and cells[3]); the other two cells (cells[1]/[2]) are each adjacent to 2 source blocks and automatically become source blocks after SETTLE.
         ActionResult a = FarmAction.placeWater(bot, cells.get(0));
         if (a.isFailed()) {
             fail("place_water_failed:" + a.reason());

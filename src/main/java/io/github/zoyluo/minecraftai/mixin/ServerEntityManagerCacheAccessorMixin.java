@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mixin;
+package io.github.zoyluo.minecraftai.mixin;
 
 import net.minecraft.entity.Entity;
 import net.minecraft.server.world.ServerEntityManager;
@@ -10,5 +10,5 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(ServerEntityManager.class)
 public interface ServerEntityManagerCacheAccessorMixin {
     @Accessor("cache")
-    SectionedEntityCache<Entity> aibot$getSectionCache();
+    SectionedEntityCache<Entity> minecraftai$getSectionCache();
 }

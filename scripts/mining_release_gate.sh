@@ -44,7 +44,7 @@ if [[ "${1:-}" == --self-test ]]; then
   ! meets_release_counts 17 20 9 9
   ! meets_release_counts 18 19 9 9
   ! meets_release_counts 18 20 8 9
-  provenance_fixture="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-gate-self-test.XXXXXX")"
+  provenance_fixture="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-gate-self-test.XXXXXX")"
   trap 'rm -f -- "$provenance_fixture"' EXIT
   {
     printf 'schema_version\t2\nresult\tPASS\nmining_provenance_schema\t2\n'

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -42,7 +42,7 @@ public final class BotEditsLedger {
     public static final int DUG_CAP_PER_BOT = 8192;
     /** Minimum ticks between two sidecar snapshots of a dirty ledger. */
     public static final int SNAPSHOT_MIN_INTERVAL_TICKS = 1200;
-    /** File name under {@code config/aibot/}. */
+    /** File name under {@code config/minecraftai/}. */
     public static final String SIDECAR_FILE_NAME = "mining_assist_edits.json";
 
     private final Map<String, CellLru> placed = new HashMap<>();

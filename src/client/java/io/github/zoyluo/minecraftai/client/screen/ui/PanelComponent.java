@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.client.screen.ui;
+package io.github.zoyluo.minecraftai.client.screen.ui;
 
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.widget.ClickableWidget;

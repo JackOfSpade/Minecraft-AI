@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;

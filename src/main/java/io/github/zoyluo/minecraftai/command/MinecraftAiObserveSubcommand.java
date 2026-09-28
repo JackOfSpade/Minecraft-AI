@@ -1,15 +1,15 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.observe.BotProfiler;
-import io.github.zoyluo.aibot.observe.ReplayRecorder;
-import io.github.zoyluo.aibot.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.observe.ReplayRecorder;
+import io.github.zoyluo.minecraftai.observe.TpsGuard;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
@@ -20,8 +20,8 @@ import java.util.Optional;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotObserveSubcommand {
-    private AIBotObserveSubcommand() {
+public final class MinecraftAiObserveSubcommand {
+    private MinecraftAiObserveSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> profile() {
@@ -61,10 +61,10 @@ public final class AIBotObserveSubcommand {
         }
         Map<String, BotProfiler.Stat> stats = BotProfiler.INSTANCE.snapshot(bot.get().getUuid());
         if (stats.isEmpty()) {
-            source.sendFeedback(() -> Text.literal("[AIBot] profile " + name + ": <empty>"), false);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] profile " + name + ": <empty>"), false);
             return 1;
         }
-        StringBuilder builder = new StringBuilder("[AIBot] profile ").append(name).append(":");
+        StringBuilder builder = new StringBuilder("[Minecraft-AI] profile ").append(name).append(":");
         for (Map.Entry<String, BotProfiler.Stat> entry : stats.entrySet()) {
             BotProfiler.Stat stat = entry.getValue();
             builder.append("\n- ").append(entry.getKey())
@@ -84,10 +84,10 @@ public final class AIBotObserveSubcommand {
         }
         List<ReplayRecorder.ReplayEvent> events = ReplayRecorder.INSTANCE.tail(bot.get().getUuid(), count);
         if (events.isEmpty()) {
-            source.sendFeedback(() -> Text.literal("[AIBot] replay " + name + ": <empty>"), false);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] replay " + name + ": <empty>"), false);
             return 1;
         }
-        StringBuilder builder = new StringBuilder("[AIBot] replay ").append(name).append(" last ").append(events.size()).append(":");
+        StringBuilder builder = new StringBuilder("[Minecraft-AI] replay ").append(name).append(" last ").append(events.size()).append(":");
         for (ReplayRecorder.ReplayEvent event : events) {
             builder.append("\n- ").append(event.summary());
         }
@@ -100,7 +100,7 @@ public final class AIBotObserveSubcommand {
             return 0;
         }
         TpsGuard.Snapshot snapshot = TpsGuard.INSTANCE.snapshot(source.getServer());
-        source.sendFeedback(() -> Text.literal("[AIBot] tps estimated="
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] tps estimated="
                 + format(snapshot.estimatedTps())
                 + " avg_tick_ms=" + format(snapshot.averageTickMs())
                 + " degraded=" + snapshot.degraded()

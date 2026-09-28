@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -24,9 +24,12 @@ public final class SiteFinder {
         return findSite(bot, footprintX, footprintZ, searchRadius, false);
     }
 
-    // lenient=true(配合 BuildTask flatten):真实起伏地形罕有现成平地→放宽,选【最平的可用点】
-    //(高差≤5、不踩水/虚空、离出生面±8内),交 FLATTEN 阶段挖高填低整平。
-    // lenient=false 保持严格(平整画布/无整地时不乱选坡地,零回归)。
+    // lenient=true (paired with BuildTask's flatten step): naturally undulating terrain rarely has
+    // ready-made flat ground, so relax the search and pick the flattest available point
+    // (height difference <=5, not standing in water/void, within +-8 of the spawn surface); the
+    // FLATTEN phase then digs down high spots and fills in low ones to level it.
+    // lenient=false stays strict (on a flat canvas / when no flattening is done, don't pick sloped
+    // ground carelessly - zero regressions).
     public static Optional<BlockPos> findSite(AIPlayerEntity bot, int footprintX, int footprintZ, int searchRadius, boolean lenient) {
         if (footprintX <= 0 || footprintZ <= 0 || searchRadius < 0) {
             return Optional.empty();
@@ -74,9 +77,13 @@ public final class SiteFinder {
             }
         }
         if (best == null) {
-            // 诊断 no_flat_site 拒因分类:对每个可站候选 footprint 跑 flatnessScore 同款检查,统计首个拒因——
-            // okFlat=本可接受(平且干净,若>0 说明 best=null 另有缘故)/obstruct=feet或头非空气(草花雪等可清障碍,
-            // flatten CLEAR 本就清→可放宽)/fluid=ground或feet带水(水域,更难)/groundAir=悬空。据此定修向。
+            // Diagnose the rejection reasons behind no_flat_site: run the same flatnessScore-style
+            // check on every standable candidate footprint and tally the first rejection reason for
+            // each -- okFlat = would actually be acceptable (flat and clean; if >0, best=null has
+            // some other cause) / obstruct = feet or head block is non-air (clearable obstructions
+            // like grass/flowers/snow -- flatten's CLEAR stage clears these anyway, so it's safe to
+            // relax) / fluid = ground or feet block has water (a water body, harder to handle) /
+            // groundAir = floating with nothing underneath. Use this to decide which direction to fix.
             int okFlat = 0, obstruct = 0, fluid = 0, groundAir = 0, tooSteep = 0;
             for (int x = origin.getX() - searchRadius; x <= origin.getX() + searchRadius - footprintX + 1; x++) {
                 for (int z = origin.getZ() - searchRadius; z <= origin.getZ() + searchRadius - footprintZ + 1; z++) {
@@ -268,8 +275,11 @@ public final class SiteFinder {
         return true;
     }
 
-    // 诊断用:对 footprint 跑 flatnessScore 同款逐列检查,返回【首个】拒因码——
-    // 0=干净可接受 / 1=feet或头非空气(可清障碍) / 2=ground或feet带流体(水) / 3=ground悬空 / 4=落差>maxRange / -1=不可站。
+    // Diagnostic helper: runs the same column-by-column check as flatnessScore over the footprint and
+    // returns the [first] rejection code encountered --
+    // 0 = clean and acceptable / 1 = feet or head block is non-air (clearable obstruction) /
+    // 2 = ground or feet block has fluid (water) / 3 = ground block is air (floating) /
+    // 4 = height difference > maxRange / -1 = not standable.
     private static int footprintReject(ServerWorld world, BlockPos anchor, int footprintX, int footprintZ, int maxRange) {
         int minY = Integer.MAX_VALUE;
         int maxY = Integer.MIN_VALUE;
@@ -285,7 +295,7 @@ public final class SiteFinder {
                 BlockPos feet = new BlockPos(x, surfaceY, z);
                 if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
                         || !world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()) {
-                    return 1; // 有碰撞箱的实心障碍(放宽后草等无碰撞植被不再算障碍)
+                    return 1; // solid obstruction with a collision box (once relaxed, collision-less vegetation like grass no longer counts as an obstruction)
                 }
                 BlockPos ground = feet.down();
                 if (!world.getFluidState(ground).isEmpty() || !world.getFluidState(feet).isEmpty()) {
@@ -320,10 +330,15 @@ public final class SiteFinder {
                 }
                 int surfaceY = maybeY.getAsInt();
                 BlockPos feet = new BlockPos(x, surfaceY, z);
-                // 放宽:接受 feet/头是"可清植被"(草/花/蕨/雪层等无碰撞箱方块)——bot 能站进去(isStandable 同款
-                // 碰撞箱空判据),flatten 的 CLEAR 阶段也会把它们清掉。原"必须严格空气"把大量平整草地误判成
-                // no_flat_site(实测 8888/31337/7777777 obstruct=700+、地形 spread=0 平的、fluid=0 干的)。
-                // 实心障碍(有碰撞箱)仍拒(站不进去需预清);水由下面 fluid 检查拒(不接受水面站点)。
+                // Relaxed: accept when the feet/head block is "clearable vegetation" (grass/flowers/
+                // ferns/snow layers -- blocks with no collision box) -- the bot can stand right
+                // through them (same empty-collision-box test as isStandable), and flatten's CLEAR
+                // stage will clear them out anyway. The original "must be strict air" rule was
+                // misjudging large amounts of flat grassland as no_flat_site (observed on seeds
+                // 8888/31337/7777777: obstruct=700+, terrain spread=0 [flat], fluid=0 [dry]).
+                // Solid obstructions (with a collision box) are still rejected (the bot can't stand
+                // through them without pre-clearing); water is rejected by the fluid check below
+                // (water-surface sites are not accepted).
                 if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
                         || !world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()) {
                     return Double.MAX_VALUE;

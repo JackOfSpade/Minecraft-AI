@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks the obsidian pipeline to observable, vanilla player interactions. */
 class CreateObsidianSurvivalBoundaryTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
     void createObsidianNeverSynthesizesBlocksFluidsOrBucketInventory() throws IOException {

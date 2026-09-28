@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -56,7 +56,7 @@ public final class ViewSweeper {
 
         Vec3d eye = bot.getEyePos();
         BlockPos feet = bot.getBlockPos();
-        double radius = SenseBudget.sweepRadius(AIBotConfig.get().perception().radius());
+        double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
         String dimension = BotEdits.dimensionKey(bot.getEntityWorld());
         SweepEngine.Context context = new SweepEngine.Context(
                 eye.x, eye.y, eye.z, feet.getX(), feet.getY(), feet.getZ(), radius, serverTick, dimension,

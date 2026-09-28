@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 FEATURE="${1:-food}"
 MAXWAIT="${2:-900}"
-SEED_VALUE="${SEED:-${AIBOT_TEST_SEED:-20260610}}"
-PROFILE_VALUE="${AIBOT_PROFILE:-strict_survival}"
+SEED_VALUE="${SEED:-${MINECRAFTAI_TEST_SEED:-20260610}}"
+PROFILE_VALUE="${MINECRAFTAI_PROFILE:-strict_survival}"
 
 [[ "$MAXWAIT" =~ ^[1-9][0-9]*$ ]] || {
   printf '[foodtest] maxwait_seconds must be a positive integer\n' >&2
@@ -15,7 +15,7 @@ PROFILE_VALUE="${AIBOT_PROFILE:-strict_survival}"
 
 args=(--scenario "$FEATURE" --seed "$SEED_VALUE" --timeout "$MAXWAIT" --profile "$PROFILE_VALUE")
 if [[ "$PROFILE_VALUE" == operator ]]; then
-  args+=(--operator-capabilities "${AIBOT_OPERATOR_CAPABILITIES:-all}")
+  args+=(--operator-capabilities "${MINECRAFTAI_OPERATOR_CAPABILITIES:-all}")
 fi
 if [[ "${WITH_LLM:-0}" == 1 ]]; then
   args+=(--mode llm_story --with-llm)
@@ -23,7 +23,7 @@ else
   args+=(--mode deterministic)
 fi
 
-output="$(mktemp "${TMPDIR:-/tmp}/aibot-foodtest.XXXXXX")"
+output="$(mktemp "${TMPDIR:-/tmp}/minecraftai-foodtest.XXXXXX")"
 trap 'rm -f -- "$output"' EXIT
 set +e
 "$ROOT/scripts/evidence_run.sh" "${args[@]}" | tee "$output"

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;

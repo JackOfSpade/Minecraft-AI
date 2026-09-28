@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
@@ -11,9 +11,9 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.BOT;
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.OVERWORLD;
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.facts;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.BOT;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.OVERWORLD;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.facts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code MiningAssistStateTest}'s accessor tests.
  */
 class PoiDetectorTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
     private static final Path ASSIST = MAIN.resolve("mining/assist");
 
     /** Source without comments, so a Javadoc mentioning a call is not mistaken for the call itself. */

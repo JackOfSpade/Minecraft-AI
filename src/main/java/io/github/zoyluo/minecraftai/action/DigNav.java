@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
@@ -8,20 +8,26 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 /**
- * 挖掘式导航:当纯寻路(A*)走不通(被墙 / 复杂地形 / 自挖隧道 / SEARCH_LIMIT)时,朝目标"挖一格走一格"硬开一条路。
+ * Dig-navigation: when pure pathfinding (A*) can't get through (blocked by walls / complex terrain /
+ * self-dug tunnels / SEARCH_LIMIT), force a path toward the target by "digging one block, walking one block."
  *
- * 这是"AI 玩家手里有镐,被挡住就该挖开走过去"这一本该有的能力——根治反复出现的"被困出不去"
- *(实测:丛林 + 自挖隧道里 move 寻路 SEARCH_LIMIT,bot 卡死、只能靠大脑一格格手动 mine_block 直到耗尽轮次)。
+ * This is the capability an AI player holding a pickaxe should always have: "if blocked, dig through and
+ * walk past it" — it fixes the recurring "stuck with no way out" problem (observed in testing: in jungle
+ * biomes plus self-dug tunnels, move-pathfinding hits SEARCH_LIMIT and the bot freezes, only able to rely
+ * on the brain manually issuing mine_block one block at a time until it runs out of turns).
  *
- * 纯函数 {@link #stepToward}(朝目标的下一格)+ 有状态 {@link #digStep}(调用方持有 {@link BlockMiner});全程主线程(G2)。
+ * Pure function {@link #stepToward} (the next block toward the target) + stateful {@link #digStep}
+ * (the caller holds the {@link BlockMiner}); runs entirely on the main thread (G2).
  */
 public final class DigNav {
     private DigNav() {
     }
 
     /**
-     * 朝 target 挖掘式前进一格:清出朝向格(脚位+头位)→ 已通则走进去(更低则主动下沉,bot 无被动重力)。
-     * 返回 true=本 tick 有进展(在挖或已迈步);false=该方向受阻(如相邻岩浆),调用方应改道或失败。
+     * Advance one block toward target by digging: clear the facing blocks (feet position + head position) ->
+     * once clear, walk into it (descend actively if it's lower, since the bot has no passive gravity).
+     * Returns true = progress was made this tick (currently digging or already stepped); false = that
+     * direction is blocked (e.g. adjacent lava), the caller should reroute or fail.
      */
     public static boolean digStep(AIPlayerEntity bot, BlockMiner miner, BlockPos target) {
         ServerWorld world = bot.getEntityWorld();
@@ -31,11 +37,11 @@ public final class DigNav {
             return false;
         }
         if (adjacentHazardFluid(bot, step)) {
-            return false; // 朝向格挨着已观测到的危险流体(岩浆/水) → 不挖,交还调用方
+            return false; // The facing block is adjacent to an observed hazardous fluid (lava/water) -> don't dig, hand control back to the caller
         }
         BlockPos solid = firstSolid(world, step, step.up());
         if (solid == null) {
-            // 朝向格已是空气 → 迈进去(更低则下沉,平/高则走)。
+            // The facing block is already air -> step into it (descend if lower, walk if level/higher).
             miner.cancel(bot);
             if (step.getY() < feet.getY()) {
                 bot.getActionPack().descendInto(step);
@@ -47,11 +53,14 @@ public final class DigNav {
         BlockMiner.Status st = miner.target() != null && miner.target().equals(solid)
                 ? miner.tick(bot)
                 : begin(bot, miner, solid);
-        // 反应式复查(与 NeighborEnumerator/PathExecutor 挖穿同款):solid 刚被挖成真实空气,
-        // 它的邻位第一次对 bot 的眼睛真正可查。挖前 adjacentHazardFluid 拒的是"已观测"危险,
-        // 未观测的隐藏邻位诚实放行;这里补上挖开瞬间的复查兜底,而不是盲目继续挖/走进去。
+        // Reactive re-check (same pattern as NeighborEnumerator/PathExecutor breakthrough digging):
+        // once solid has just been dug into real air, its neighboring blocks become genuinely visible
+        // to the bot's eyes for the first time. The pre-dig adjacentHazardFluid check only rejects
+        // "observed" hazards; unobserved hidden neighbors are honestly allowed through — here we add
+        // a re-check safety net at the moment of breaking through, instead of blindly continuing to
+        // dig/walk in.
         if (st == BlockMiner.Status.DONE && adjacentHazardFluid(bot, solid)) {
-            return false; // 挖开即暴露已观测到的危险流体 → 交还调用方改道,同前置检查的约定
+            return false; // Breaking through immediately exposes an observed hazardous fluid -> hand back to the caller to reroute, consistent with the pre-check contract
         }
         return st == BlockMiner.Status.DONE || st == BlockMiner.Status.MINING;
     }
@@ -61,7 +70,7 @@ public final class DigNav {
         return miner.tick(bot);
     }
 
-    /** 朝目标的下一格:竖直优先(目标更低且水平已对齐则下挖),否则较大水平分量(避免对角穿墙角)。 */
+    /** The next block toward the target: vertical takes priority (dig down if the target is lower and horizontally aligned), otherwise the larger horizontal component (avoids cutting diagonally through wall corners). */
     public static BlockPos stepToward(BlockPos from, BlockPos target) {
         int dy = target.getY() - from.getY();
         int dx = target.getX() - from.getX();
@@ -84,7 +93,7 @@ public final class DigNav {
         return null;
     }
 
-    // a、b 中第一个需要挖开的(非空气)方块。
+    // The first block among a, b that needs to be dug out (non-air).
     private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b) {
         if (!world.getBlockState(a).isAir()) {
             return a.toImmutable();
@@ -95,10 +104,13 @@ public final class DigNav {
         return null;
     }
 
-    // 门控版(取代原始 adjacentLava):pos 本身贴身可见,如实读取合法(同 Standability 对物理下一步
-    // 的处理);但 pos 的六邻位可能仍藏在未挖的实心方块后面,只有已经真被 bot 观测到才算危险——
-    // 未观测的隐藏邻位诚实放行,交给挖开瞬间的反应式复查(见 digStep 内的 DONE 分支)兜底,而不是
-    // 像旧版那样无门控直读邻位流体状态(能透过没挖过的岩石"看见"岩浆/水)。
+    // Gated version (replaces the original adjacentLava): pos itself is directly adjacent and visible,
+    // so reading it truthfully is legitimate (same handling Standability applies to the next physical
+    // step); but pos's six neighbors may still be hidden behind undug solid blocks, and only count as
+    // hazardous once the bot has actually observed them — unobserved hidden neighbors are honestly
+    // allowed through, left to the reactive re-check at the moment of breaking through (see the DONE
+    // branch inside digStep) as a safety net, rather than reading neighbor fluid state ungated like the
+    // old version did (which could "see" lava/water through rock that had never been dug).
     private static boolean adjacentHazardFluid(AIPlayerEntity bot, BlockPos pos) {
         FluidState here = bot.getEntityWorld().getFluidState(pos);
         if (here.isIn(FluidTags.LAVA) || here.isIn(FluidTags.WATER)) {
@@ -113,7 +125,7 @@ public final class DigNav {
     }
 
     private static boolean isObservedHazardFluid(AIPlayerEntity bot, BlockPos pos) {
-        return io.github.zoyluo.aibot.mining.OreScan.observeDangerFluid(bot, pos)
-                == io.github.zoyluo.aibot.mining.OreScan.Observation.OBSERVED_PRESENT;
+        return io.github.zoyluo.minecraftai.mining.OreScan.observeDangerFluid(bot, pos)
+                == io.github.zoyluo.minecraftai.mining.OreScan.Observation.OBSERVED_PRESENT;
     }
 }

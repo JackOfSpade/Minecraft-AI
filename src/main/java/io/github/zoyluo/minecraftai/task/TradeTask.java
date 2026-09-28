@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mixin.MerchantEntityInvokerMixin;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mixin.MerchantEntityInvokerMixin;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
@@ -165,7 +165,7 @@ public final class TradeTask extends AbstractTask {
         return bot.getEntityWorld()
                 .getEntitiesByClass(VillagerEntity.class, box, entity -> entity.isAlive() && !entity.isBaby())
                 .stream()
-                .filter(entity -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
+                .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
@@ -203,7 +203,7 @@ public final class TradeTask extends AbstractTask {
 
     private boolean afterUsing(VillagerEntity villager, TradeOffer offer) {
         try {
-            ((MerchantEntityInvokerMixin) villager).aibot$invokeAfterUsing(offer);
+            ((MerchantEntityInvokerMixin) villager).minecraftai$invokeAfterUsing(offer);
             return true;
         } catch (LinkageError | RuntimeException ignored) {
             // Keep the reflection path as a runtime fallback for loader or mapping edge cases.

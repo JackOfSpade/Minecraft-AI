@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.PoiPrompt;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.PoiPrompt;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.List;
@@ -30,7 +30,7 @@ import java.util.function.Consumer;
  * consult into a validated {@link PoiPrompt.Verdict} or a failure reason, on the server thread.
  *
  * <h2>Derived config</h2>
- * Positionally {@code new AIBotConfig.Llm(base.apiKey(), base.baseUrl(), advisorModelOrBase,
+ * Positionally {@code new MinecraftAiConfig.Llm(base.apiKey(), base.baseUrl(), advisorModelOrBase,
  * advisor.maxTokens(), 0.0, advisor.timeoutSeconds(), 0, base.retryBackoffMs(), Boolean.FALSE,
  * base.reasoningEffort())}: zero retries (this class enforces its own bound, not the client's
  * retry-then-fallback loop), {@code thinking} forced off (a thinking-capable model must not spend the small
@@ -73,7 +73,7 @@ public final class PoiAdvisor {
     private PoiAdvisor() {
     }
 
-    public void configure(AIBotConfig config) {
+    public void configure(MinecraftAiConfig config) {
         Objects.requireNonNull(config, "config");
         synchronized (lifecycleLock) {
             generation++;
@@ -84,9 +84,9 @@ public final class PoiAdvisor {
                 watchdog.shutdownNow();
             }
             MiningAssistConfig.Advisor advisorCfg = MiningAssistRuntime.config().advisor();
-            AIBotConfig.Llm base = config.llm();
+            MinecraftAiConfig.Llm base = config.llm();
             String model = advisorCfg.model() == null || advisorCfg.model().isBlank() ? base.model() : advisorCfg.model();
-            AIBotConfig.Llm advisorLlm = new AIBotConfig.Llm(
+            MinecraftAiConfig.Llm advisorLlm = new MinecraftAiConfig.Llm(
                     base.apiKey(), base.baseUrl(), model,
                     advisorCfg.maxTokens(), 0.0D, advisorCfg.timeoutSeconds(),
                     0, base.retryBackoffMs(), Boolean.FALSE, base.reasoningEffort());
@@ -241,7 +241,7 @@ public final class PoiAdvisor {
 
     /** True while a stub transport is installed. {@code PoiCoordinator.advisorAvailable} treats this as
      * standing in for "the LLM key is present": a stub transport never needs a real key, and the harness's
-     * real {@code AIBotConfig} may or may not have one configured, which would otherwise make every GameTest
+     * real {@code MinecraftAiConfig} may or may not have one configured, which would otherwise make every GameTest
      * exercising the consult path (design 9: "GameTests for hold, continue, stop, timeout, ...") depend on
      * incidental, environment-specific config it has no business depending on. */
     public static boolean hasTestTransport() {

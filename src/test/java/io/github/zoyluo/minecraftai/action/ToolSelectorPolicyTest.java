@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

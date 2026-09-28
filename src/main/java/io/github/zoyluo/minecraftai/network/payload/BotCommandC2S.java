@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.network.payload;
+package io.github.zoyluo.minecraftai.network.payload;
 
-import io.github.zoyluo.aibot.AIBotMod;
+import io.github.zoyluo.minecraftai.MinecraftAiMod;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
 public record BotCommandC2S(String botName, String action, String arg1, String arg2, int count) implements CustomPayload {
-    public static final Id<BotCommandC2S> ID = new Id<>(Identifier.of(AIBotMod.MOD_ID, "bot_command"));
+    public static final Id<BotCommandC2S> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "bot_command"));
     public static final PacketCodec<RegistryByteBuf, BotCommandC2S> CODEC = PacketCodec.of(BotCommandC2S::write, BotCommandC2S::new);
 
     private BotCommandC2S(RegistryByteBuf buf) {

@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.BoatAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.action.BoatAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 
 /** Stops the current boat and asks vanilla to perform its ordinary passenger dismount. */

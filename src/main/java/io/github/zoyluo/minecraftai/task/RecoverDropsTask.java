@@ -1,30 +1,36 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import net.minecraft.util.math.BlockPos;
 
 /**
- * 死亡找回(corpse-run):重生后赶回死亡点,把掉落的装备/物资捡回来。
- * 真实玩家死后的第一反应——不找回等于装备清零重造,挖矿深处死一次效率断崖。
+ * Corpse-run recovery: after respawning, rush back to the death point and pick up the
+ * dropped gear/items. The natural first instinct after a real player dies - failing to
+ * recover means gear is wiped and has to be remade from scratch, and dying once deep in
+ * a mine is an efficiency cliff.
  *
- * 设计要点:
- *  - 掉落物 6000t(5 分钟)despawn:死亡时刻起算总预算,赶不上就别去白跑;
- *  - 自动恢复只接受 DangerWatcher 证明过的短、浅路线。寻路失败就有界重试并 typed fail，
- *    绝不让裸体 bot 从出生点朝深矿盲挖;
- *  - 完成语义宽松:到点捡完窗口即 complete(哪怕零捡取——岩浆死掉落已烧光是常态),
- *    只播报结果不纠缠;捡不回来不是任务的错,别让 goal 层 replan 死循环。
+ * Design notes:
+ *  - Dropped items despawn after 6000t (5 minutes): the total budget is counted from the
+ *    moment of death; if we can't make it in time, don't bother going at all;
+ *  - Auto-recovery only accepts short, shallow routes that DangerWatcher has vetted. A
+ *    pathing failure gets a bounded retry and then a typed fail - we never let a naked bot
+ *    blind-dig from the spawn point toward the deep mine;
+ *  - Completion semantics are lenient: once the pickup window at the site ends, we complete()
+ *    regardless (even with zero pickups - drops already burned up in lava is the normal case).
+ *    We just report the result and move on without dwelling on it; failing to recover the
+ *    drops isn't the task's fault, so don't let the goal layer replan-loop over it.
  */
 public final class RecoverDropsTask extends AbstractTask {
-    private static final double ARRIVE_SQUARED = 9.0D;   // 3 格内算到场,开捡
-    private static final int MAX_ELAPSED = 3600;          // 赶路总闸 3 分钟
-    private static final int PICKUP_WINDOW = 100;         // 到场后捡取窗口 5s(掉落散布要扫几轮)
-    private static final long DESPAWN_BUDGET = 5600L;     // 掉落 6000t 消失,留 400t 余量
+    private static final double ARRIVE_SQUARED = 9.0D;   // within 3 blocks counts as arrived, start picking up
+    private static final int MAX_ELAPSED = 3600;          // total travel time cutoff: 3 minutes
+    private static final int PICKUP_WINDOW = 100;         // 5s pickup window after arrival (drops are scattered, needs a few sweep passes)
+    private static final long DESPAWN_BUDGET = 5600L;     // drops vanish at 6000t; leave a 400t margin
     private static final int ROUTE_RETRY_TICKS = 20;
     private static final int ROUTE_FAILURE_LIMIT = 3;
     private static final int ROUTE_NO_PROGRESS_LIMIT = 100;
@@ -70,7 +76,7 @@ public final class RecoverDropsTask extends AbstractTask {
 
     @Override
     public boolean isWaiting() {
-        return arrivedTick >= 0; // 到场捡取期站桩,别让 StuckWatcher 误判
+        return arrivedTick >= 0; // standing still during the pickup window on-site; don't let StuckWatcher misfire on this
     }
 
     @Override
@@ -111,15 +117,17 @@ public final class RecoverDropsTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        // (溺水熔断已收编 SurvivalGuard 统一层——水底死亡点跑尸再淹死的死循环由它兜,
-        //  第二次死亡知识库立危险区,反射闸劝住第三次。)
-        // 沿途顺手捡:掉落可能被水流/爆炸冲散在路上
+        // (Drowning fuse handling has been folded into the unified SurvivalGuard layer - it now
+        //  covers the death loop where a corpse-run to an underwater death point drowns the bot
+        //  again; the knowledge base flags the area as dangerous after the second death, and the
+        //  reflex gate talks it out of a third attempt.)
+        // Pick up along the way: drops may have been scattered onto the path by water flow or an explosion
         HarvestCore.forcePickupNearbyAnyOf(bot, null, 4.0D, 2.0D);
 
         if (arrivedTick >= 0) {
             HarvestCore.sweepPickupAnyOf(bot, null, 10.0D, 6);
             if (elapsed - arrivedTick >= PICKUP_WINDOW) {
-                // 掉落物雷达:窗口结束时还有多少没捡走(=0 才算真干净;>0 说明捡取被什么拦了)
+                // Drop radar: how many are still left uncollected when the window ends (=0 means truly clean; >0 means something blocked pickup)
                 CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "recover_drops_report");
                 var leftovers = bot.getEntityWorld().getEntitiesByClass(
                         net.minecraft.entity.ItemEntity.class,
@@ -149,15 +157,16 @@ public final class RecoverDropsTask extends AbstractTask {
         }
 
         if (bot.getEntityWorld().getServer().getTicks() - deathTick > DESPAWN_BUDGET) {
-            fail("drops_expired_enroute"); // 赶不上了,及时止损
+            fail("drops_expired_enroute"); // not going to make it in time, cut losses now
             return;
         }
         if (elapsed > MAX_ELAPSED) {
             fail("recover_timeout");
             return;
         }
-        // 寻路断了(执行器空闲且没到)→ 有界续发。progress 只认真实距离改善，不能再让 elapsed
-        // 冒充跑尸进度并拖到 3 分钟总闸。
+        // Pathing broke off (executor idle and not yet arrived) -> bounded re-issue. Progress only
+        // counts real distance improvement; elapsed time must not be allowed to pass itself off as
+        // corpse-run progress and drag things out to the 3-minute total cutoff.
         if (bot.getActionPack().isPathExecutorIdle()
                 && elapsed - lastRouteProgressTick > ROUTE_NO_PROGRESS_LIMIT) {
             fail("recover_route_unreachable:no_progress");

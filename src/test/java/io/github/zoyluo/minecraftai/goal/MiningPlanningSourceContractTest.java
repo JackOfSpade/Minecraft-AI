@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks down mining dependency and tool-routing invariants in the ordinary JVM test suite. */
 class MiningPlanningSourceContractTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
     void obsidianPlanningBindsAcquisitionAndTargetToolContracts() throws IOException {

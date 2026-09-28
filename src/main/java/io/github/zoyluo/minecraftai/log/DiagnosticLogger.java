@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.log;
+package io.github.zoyluo.minecraftai.log;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.passive.PassiveEntity;
@@ -24,15 +24,15 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 测试回溯用的详细诊断日志。不改动任何既有实体/任务类:
- * - 每 SNAPSHOT_INTERVAL tick 对每个 bot 打一条富快照(位置/血量/饱食/模式/在地/坠落/空气/任务+阶段+进度/手持/背包/路径与挖掘状态)。
- * - 每 tick 与上一 tick 对比,捕捉关键事件:掉血、坠落距离突增、从世界消失/死亡(这正是排查"Bob 突然不见了"所需)。
- * 全部在主线程的 server tick 内调用(G2 线程安全)。
+ * Detailed diagnostic logging for test playback/replay. Does not modify any existing entity/task classes:
+ * - Every SNAPSHOT_INTERVAL ticks, emits one rich snapshot per bot (position/health/hunger/mode/on-ground/fall/air/task+phase+progress/held item/inventory/path and mining state).
+ * - Every tick, compares against the previous tick and catches key events: health loss, sudden fall-distance spikes, disappearing from the world/death (this is exactly what's needed to investigate "Bob suddenly vanished").
+ * All calls happen on the main thread within the server tick (G2 thread-safe).
  */
 public final class DiagnosticLogger {
     public static final DiagnosticLogger INSTANCE = new DiagnosticLogger();
 
-    private static final int SNAPSHOT_INTERVAL = 40; // 2 秒一条富快照
+    private static final int SNAPSHOT_INTERVAL = 40; // one rich snapshot every 2 seconds
     private boolean enabled = true;
 
     private final Map<UUID, Sample> last = new ConcurrentHashMap<>();
@@ -56,8 +56,8 @@ public final class DiagnosticLogger {
         if (!enabled) {
             return;
         }
-        // 服务器停止中:实体会被正常卸载(isAlive 翻 false、从 all() 移除),
-        // 此时不做死亡/消失检测,避免把"关服卸载"误报成 diag_bot_died / diag_bot_vanished。
+        // While the server is stopping, entities get unloaded normally (isAlive flips to false, removed from all()),
+        // so skip death/vanish detection here to avoid misreporting a "server shutdown unload" as diag_bot_died / diag_bot_vanished.
         if (server.isStopping()) {
             last.clear();
             return;
@@ -78,7 +78,7 @@ public final class DiagnosticLogger {
             }
         }
 
-        // 检测"消失":上一 tick 还在、这一 tick 不在 all() 里 —— 这是 Bob 突然不见的核心线索
+        // Detect "vanished": present on the previous tick but missing from all() on this tick -- this is the core clue for Bob suddenly disappearing
         for (Map.Entry<UUID, Sample> entry : last.entrySet()) {
             if (!current.containsKey(entry.getKey())) {
                 Sample gone = entry.getValue();
@@ -92,7 +92,7 @@ public final class DiagnosticLogger {
                         "fall", fmt(gone.fallDistance),
                         "removed", gone.removed,
                         "alive", gone.alive,
-                        "note", "上一tick还在,这一tick已不在AIPlayerManager.all();对照last_* 判断是死亡/掉虚空/被移除");
+                        "note", "present on the previous tick, no longer in AIPlayerManager.all() on this tick; check the last_* fields to determine whether it died, fell into the void, or was removed");
             }
         }
 
@@ -104,7 +104,7 @@ public final class DiagnosticLogger {
         if (prev == null) {
             return;
         }
-        // 掉血
+        // Health loss
         if (now.health < prev.health - 0.01F) {
             BotLog.danger(bot, "diag_health_drop",
                     "from", fmt(prev.health),
@@ -117,7 +117,7 @@ public final class DiagnosticLogger {
                     "submerged", now.submerged,
                     "air", now.air);
         }
-        // 死亡(还在列表但已不 alive)
+        // Death (still in the list but no longer alive)
         if (prev.alive && !now.alive) {
             BotLog.danger(bot, "diag_bot_died",
                     "pos", now.x + "," + now.y + "," + now.z,
@@ -126,7 +126,7 @@ public final class DiagnosticLogger {
                     "in_lava", now.inLava,
                     "air", now.air);
         }
-        // 大幅坠落
+        // Large fall
         if (now.fallDistance > 4.0F && now.fallDistance > prev.fallDistance + 2.0F) {
             BotLog.danger(bot, "diag_falling",
                     "fall", fmt(now.fallDistance),
@@ -134,7 +134,7 @@ public final class DiagnosticLogger {
                     "on_ground", now.onGround,
                     "task", now.taskName + "/" + now.taskPhase);
         }
-        // Y 骤降(疑似掉洞/掉虚空)
+        // Sudden Y drop (suspected fall into a hole/void)
         if (prev.y - now.y > 3) {
             BotLog.danger(bot, "diag_y_drop",
                     "from_y", prev.y,
@@ -146,7 +146,7 @@ public final class DiagnosticLogger {
 
     private void snapshot(AIPlayerEntity bot, Sample s) {
         BotLog.action(bot, "diag_snapshot",
-                // —— 状态 ——
+                // —— status ——
                 "pos", s.x + "," + s.y + "," + s.z,
                 "hp", fmt(s.health) + "/" + fmt(s.maxHealth),
                 "food", s.food,
@@ -157,25 +157,25 @@ public final class DiagnosticLogger {
                 "submerged", s.submerged,
                 "fall", fmt(s.fallDistance),
                 "light", s.light,
-                // —— 目标 ——
+                // —— goal ——
                 "goal", GoalExecutor.INSTANCE.describeActiveGoal(bot),
                 "step", GoalExecutor.INSTANCE.describeActiveStep(bot),
-                // —— 任务 ——
+                // —— task ——
                 "task", s.taskName,
                 "task_state", s.taskState,
                 "task_phase", s.taskPhase,
                 "task_progress", fmt((float) s.taskProgress),
                 "path_idle", s.pathIdle,
                 "mining_idle", s.miningIdle,
-                // —— 周围环境 ——
+                // —— surroundings ——
                 "nearby", scanNearby(bot),
-                // —— 背包 ——
+                // —— inventory ——
                 "held", s.held,
                 "inv", s.inventory);
     }
 
-    // 周围 24 格内生物(打猎/战斗诊断关键):动物数(+最近类型@距离) / 敌怪数(+最近类型@距离)。
-    // 仅在富快照(每 SNAPSHOT_INTERVAL)时扫一次,不进每 tick 的 Sample,避免每刻扫实体拖 TPS。
+    // Living entities within 24 blocks (key for hunting/combat diagnostics): animal count (+ nearest type@distance) / hostile count (+ nearest type@distance).
+    // Only scanned once per rich snapshot (every SNAPSHOT_INTERVAL), not included in the per-tick Sample, to avoid scanning entities every tick and hurting TPS.
     private static String scanNearby(AIPlayerEntity bot) {
         try {
             CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "diagnostic_nearby");
@@ -251,7 +251,7 @@ public final class DiagnosticLogger {
                     || bot.getEntityWorld().getBlockState(at.down()).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA);
             s.light = bot.getEntityWorld().getLightLevel(at);
         } catch (RuntimeException ignored) {
-            // 世界访问失败时保持默认,不影响其它字段
+            // Keep defaults if world access fails; other fields are unaffected
         }
 
         TaskStatus status = TaskManager.INSTANCE.status(bot);

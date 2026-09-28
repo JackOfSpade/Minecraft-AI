@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.client.screen.ui;
+package io.github.zoyluo.minecraftai.client.screen.ui;
 
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.resource.language.I18n;
 
 public final class Theme {
-    // 背景一律全不透明(alpha=FF),杜绝身后明亮世界透上来削弱文字对比、造成"发糊"观感
+    // Backgrounds are always fully opaque (alpha=FF), to prevent the bright world behind from showing through and weakening text contrast, which would cause a "blurry" look
     public static final int SCRIM = 0xDC000000;
     public static final int PANEL_BG = 0xFF161A20;
     public static final int CARD_BG = 0xFF222832;
@@ -14,7 +14,7 @@ public final class Theme {
     public static final int TRACK = 0xFF11141A;
     public static final int BORDER = 0xFF475265;
     public static final int BORDER_BRIGHT = 0xFF6B7689;
-    // 文字整体提亮,标题用纯白,正文近白,次要文字也明显提亮(原 0xFF9AA4B2 偏灰最糊)
+    // Text brightness raised overall: titles use pure white, body text near-white, and secondary text is also noticeably brighter (the original 0xFF9AA4B2 was too gray and blurry)
     public static final int TEXT = 0xFFF3F6FA;
     public static final int TEXT_STRONG = 0xFFFFFFFF;
     public static final int TEXT_DIM = 0xFFBEC8D6;

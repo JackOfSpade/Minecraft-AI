@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.client;
+package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.aibot.network.payload.BotCommandC2S;
-import io.github.zoyluo.aibot.network.payload.BotItemMoveC2S;
-import io.github.zoyluo.aibot.network.payload.BotTeleportC2S;
-import io.github.zoyluo.aibot.network.payload.SetOptionC2S;
-import io.github.zoyluo.aibot.network.payload.SubscribeBotC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotCommandC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotItemMoveC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotTeleportC2S;
+import io.github.zoyluo.minecraftai.network.payload.SetOptionC2S;
+import io.github.zoyluo.minecraftai.network.payload.SubscribeBotC2S;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 
@@ -47,17 +47,17 @@ public final class BotCommandBridge {
 
     private static String fallbackCommand(String botName, String action, String arg1, String arg2, int count) {
         return switch (action) {
-            case "move" -> "aibot task assign " + botName + " move " + arg1;
-            case "mine" -> "aibot task assign " + botName + " mine " + arg1 + " " + count;
-            case "craft" -> "aibot task assign " + botName + " craft " + arg1 + " " + count;
-            case "smelt" -> "aibot task assign " + botName + " smelt " + arg1 + " " + arg2 + " " + count;
-            case "eat" -> "aibot task assign " + botName + " eat";
-            case "sleep" -> "aibot task assign " + botName + " sleep";
-            case "abort" -> "aibot task abort " + botName;
-            case "pause" -> "aibot task pause " + botName;
-            case "resume" -> "aibot task resume " + botName;
-            case "reset" -> "aibot brain reset " + botName;
-            default -> "aibot status";
+            case "move" -> "minecraftai task assign " + botName + " move " + arg1;
+            case "mine" -> "minecraftai task assign " + botName + " mine " + arg1 + " " + count;
+            case "craft" -> "minecraftai task assign " + botName + " craft " + arg1 + " " + count;
+            case "smelt" -> "minecraftai task assign " + botName + " smelt " + arg1 + " " + arg2 + " " + count;
+            case "eat" -> "minecraftai task assign " + botName + " eat";
+            case "sleep" -> "minecraftai task assign " + botName + " sleep";
+            case "abort" -> "minecraftai task abort " + botName;
+            case "pause" -> "minecraftai task pause " + botName;
+            case "resume" -> "minecraftai task resume " + botName;
+            case "reset" -> "minecraftai brain reset " + botName;
+            default -> "minecraftai status";
         };
     }
 
@@ -68,14 +68,14 @@ public final class BotCommandBridge {
         }
     }
 
-    /** 在 owner 与自己的 AI 之间移动物品；服务端统一复核 owner/OP。 */
+    /** Moves items between the owner and their own AI; the server always re-verifies owner/OP status. */
     public static void moveItem(String botName, int direction, int slot, int amount) {
         if (ClientPlayNetworking.canSend(BotItemMoveC2S.ID)) {
             ClientPlayNetworking.send(new BotItemMoveC2S(clean(botName), direction, slot, amount));
         }
     }
 
-    /** 传送。direction:BotTeleportC2S.TO_AI(玩家→AI 附近)/ RECALL_AI(AI→玩家附近)。 */
+    /** Teleport. direction: BotTeleportC2S.TO_AI (player -> near AI) / RECALL_AI (AI -> near player). */
     public static void teleport(String botName, int direction) {
         if (ClientPlayNetworking.canSend(BotTeleportC2S.ID)) {
             ClientPlayNetworking.send(new BotTeleportC2S(clean(botName), direction));

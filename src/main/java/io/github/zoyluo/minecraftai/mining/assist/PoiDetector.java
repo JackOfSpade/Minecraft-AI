@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.registry.Registries;
@@ -134,7 +134,7 @@ public final class PoiDetector {
         long started = System.nanoTime();
         state.setNextPoiEvalTick(serverTick + PoiScorer.EVAL_INTERVAL_TICKS);
         MiningAssistConfig config = MiningAssistRuntime.config();
-        double radius = SenseBudget.sweepRadius(AIBotConfig.get().perception().radius());
+        double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
         String dimension = BotEdits.dimensionKey(world);
         state.enterDimension(dimension);
 

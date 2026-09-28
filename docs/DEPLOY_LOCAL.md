@@ -13,7 +13,7 @@ bash scripts/deploy_profile.sh --no-build   # reuse build/libs
 ## LLM settings
 
 The bot talks to any OpenAI-compatible chat-completions endpoint, or to Gemini when `baseUrl` is on
-Google's `generativelanguage.googleapis.com` host. In `config/aibot.json`:
+Google's `generativelanguage.googleapis.com` host. In `config/minecraftai.json`:
 
 ```json
 "llm": { "apiKey": "...", "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-3.5-flash-lite" }
@@ -21,7 +21,7 @@ Google's `generativelanguage.googleapis.com` host. In `config/aibot.json`:
 
 * The section used to be called `deepseek`. That name is still read (and migrated by the deploy
   script); if both exist, `llm` wins.
-* The API key can also come from the environment: `AIBOT_LLM_API_KEY`, or the legacy
+* The API key can also come from the environment: `MINECRAFTAI_LLM_API_KEY`, or the legacy
   `DEEPSEEK_API_KEY`. The environment overrides the file.
 * The shipped defaults still point at DeepSeek (`https://api.deepseek.com`, `deepseek-v4-flash`).
 
@@ -29,10 +29,10 @@ Google's `generativelanguage.googleapis.com` host. In `config/aibot.json`:
 
 Put the values in a local `.env` (copy `.env.example`). `.env` is gitignored; the game never reads it.
 The deploy script parses it (it is never executed), writes the values into the profile's private
-`config/aibot.json`, and never prints the key. Do not commit `aibot.json` from a profile either.
+`config/minecraftai.json`, and never prints the key. Do not commit `minecraftai.json` from a profile either.
 
 ## Logging
 
 `logging.enabled` is true by default: every launch starts a fresh session under
-`<profile>/logs/aibot/sessions/<timestamp>/` (last 3 sessions kept), next to Minecraft's own
+`<profile>/logs/minecraftai/sessions/<timestamp>/` (last 3 sessions kept), next to Minecraft's own
 `logs/latest.log`. The deploy script re-enables it if a config had it switched off.

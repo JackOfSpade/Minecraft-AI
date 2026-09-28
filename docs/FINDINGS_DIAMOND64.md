@@ -1,56 +1,56 @@
-# diamond64 / obsidian64 全链路稳定性调研(7 子系统并行审查 · 2026-08-07)
+# diamond64 / obsidian64 Full-Pipeline Stability Investigation (7 subsystems, parallel review · 2026-08-07)
 
-> 由 8 个并行审查 agent 产出并汇总(逐条含 file:line 证据)。状态标注由开发过程维护:
-> `[已修]` 已落地并验证 · `[进行中]` · 空白 = 待处理。
+> Produced and aggregated by 8 parallel review agents (each item includes file:line evidence). Status labels are maintained by the development process:
+> `[Fixed]` landed and verified · `[In progress]` · blank = pending.
 
 # Findings (ranked by expected impact on mission completion rate)
 
-Citation shorthand (as used in the source reports): `COT` = src/main/java/io/github/zoyluo/aibot/task/CreateObsidianTask.java, `AWT` = src/main/java/io/github/zoyluo/aibot/task/AcquireWaterTask.java, `OSC` = src/main/java/io/github/zoyluo/aibot/task/ObsidianSearchCursor.java, `GE` = src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java, `GP` = src/main/java/io/github/zoyluo/aibot/goal/GoalPlanner.java. Unprefixed class names (OreDigTask, HarvestCore, etc.) refer to their files under src/main/java/io/github/zoyluo/aibot/.
+Citation shorthand (as used in the source reports): `COT` = src/main/java/io/github/zoyluo/minecraftai/task/CreateObsidianTask.java, `AWT` = src/main/java/io/github/zoyluo/minecraftai/task/AcquireWaterTask.java, `OSC` = src/main/java/io/github/zoyluo/minecraftai/task/ObsidianSearchCursor.java, `GE` = src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java, `GP` = src/main/java/io/github/zoyluo/minecraftai/goal/GoalPlanner.java. Unprefixed class names (OreDigTask, HarvestCore, etc.) refer to their files under src/main/java/io/github/zoyluo/minecraftai/.
 
 ## Blockers
 
-**[已修·阶段1] F1 — Pedestal-landed drop pickup livelock, escalated to whole-mission failure** (blocker; OreDigTask/HarvestCore pickup + GoalExecutor failure policy; from: oredig D1+S2, executor F2)
+**[Fixed · Stage 1] F1 — Pedestal-landed drop pickup livelock, escalated to whole-mission failure** (blocker; OreDigTask/HarvestCore pickup + GoalExecutor failure policy; from: oredig D1+S2, executor F2)
 - Citations: OreDigTask:3315-3417, OreDigTask:3328-3333, OreDigTask:3356, OreDigTask:3364-3373; HarvestCore:419-471 (esp. 430-438, 439-470), HarvestCore:286-301 (unconditional `return true` at 294-301); FakePlayerMotion:239, 248, 264-266, 270; OreDigPickupGameTests:1116-1174; GE:3701-3707.
 - Trigger: a mined drop rests on top of a 1×1 pedestal adjacent to the bot. `pickupStandPos`'s "one-higher" branch requires the below-cell to be standable (it is the pedestal itself), so the candidate ring picks the bot's current cell (distance 0). The `current.equals(stand)` branch does a 0.15-block in-cell nudge that can never cross the cell boundary, unconditionally returns true (swallowing nudge failure), so the fallback at OreDigTask:3364 never fires. Repeats every tick until the 200-tick deadline fails with `ore_dig_drop_unrecovered` — which GE:3701-3707 classifies as fail-closed terminal, killing the entire 64-diamond mission. This is the confirmed root cause of the known intermittent gametest failure.
 - Smallest fix: add a pedestal branch to `pickupStandPos` (return `itemPos` when `itemPos.getY()==current.getY()+1 && !isStandable(below) && isStandable(itemPos)`, letting the existing exact-pickup-path branch climb it); make HarvestCore:294-299 return the real nudge result; in GE, demote `ore_dig_drop_unrecovered` for rare missions to a skipped-drop receipt + one make-up target instead of terminal.
 
-**[已修·阶段3] F2 — Per-batch diamond quota with no surplus carryover structurally caps mission success at ~17–66%** (blocker; budget model; from: evidence)
+**[Fixed · Stage 3] F2 — Per-batch diamond quota with no surplus carryover structurally caps mission success at ~17–66%** (blocker; budget model; from: evidence)
 - Citations: MiningBudget.java:42 (`MAX_RARE_RESOURCE_RETRIES_PER_BATCH=1`), :46-47, :29-30, :34, :40, :103-104; MiningMissionBudget.java:15; OreScan.java:61-107 (vein flood-fill, :85).
 - Trigger: each batch of 8 diamonds must be found within its own 2 resource epochs. Expected yield is ~3–9 diamonds/epoch (6–18 per batch), so quota 8 sits at the low end of the expectation band; estimated single-batch shortfall probability is 10–30%, compounding over 8 batches to roughly 0.8^8≈17% … 0.95^8≈66% mission success — even with zero bugs.
 - Smallest fix: carry diamond surplus across batches (count already-owned diamonds toward the next batch quota) and/or allow drawing extra retry epochs from mission-level margin instead of the hard per-batch retry=1 gate.
 
-**[已修·阶段2] F3 — Descend landing drift is mission-terminal; single-tick knockback window** (blocker; DescendToYTask + GoalExecutor; from: descend A2)
+**[Fixed · Stage 2] F3 — Descend landing drift is mission-terminal; single-tick knockback window** (blocker; DescendToYTask + GoalExecutor; from: descend A2)
 - Citations: DescendToYTask.java:539-546, 818-828, 367-378, 380-392; GE:3678-3679, 3706.
 - Trigger: after `descendInto` succeeds, one tick later feet must be at origin or target; a bare mob knockback (no pause) between task ticks pushing the bot to a third cell fires `descend_landing_pose_drift`, which is fail-closed terminal. A Y=64→-58 descent has ~122 such windows; both missions descend multiple times.
 - Smallest fix: demote drift to a recoverable restart/replan of the descent step instead of mission-terminal.
 
-**[已修·阶段4] F4 — Obsidian flow-control livelock burns the entire task budget** (blocker; CreateObsidianTask; from: obsidian D1)
+**[Fixed · Stage 4] F4 — Obsidian flow-control livelock burns the entire task budget** (blocker; CreateObsidianTask; from: obsidian D1)
 - Citations: COT:670-696, 1128-1148, 61 (`WATER_SPREAD_TICKS=4`), 1150-1165, 2923-2944, 1146, 2545-2550, 56, 495-500.
 - Trigger: at a lava-lake edge with only flowing lava visible, pour plans of geometry 3/4 place water not adjacent to the lava; water spreads 1 block per 5 ticks, so the 4-tick wait always recovers the water with zero world change; the clue is never rejected, `noteTopologyProgress` keeps resetting the 800-tick stall detector, and the ~70–170-tick loop repeats until the 153,600-tick `create_obsidian_timeout`.
 - Smallest fix: when `pourPlan.destination()` is not adjacent to the clue, wait `PROTECTION_SPREAD_TICKS` (20) or distance×5 ticks; or `rejectLava(clue)` when post-recovery fluid state is unchanged.
 
-**[已修·阶段7] F5 — Obsidian `resumeFirst` reconciliation makes "open transaction + missing resource" an unreachable-repair deadlock** (blocker; GoalExecutor/CreateObsidianTask; from: obsidian D2)
+**[Fixed · Stage 7] F5 — Obsidian `resumeFirst` reconciliation makes "open transaction + missing resource" an unreachable-repair deadlock** (blocker; GoalExecutor/CreateObsidianTask; from: obsidian D2)
 - Citations: COT:199-204; GE:3791-3803, 4835-4842; COT:1627-1629, 1674-1680; GE:3903-3909 (MINE_ORE-only tool recovery); COT:1278-1281, 318-320; GE:71, 3777-3783.
 - Trigger: with a transaction open (waterSource/pickupPos/activeBreakPos set), replan deletes all new MAKE_OBSIDIAN steps and inserts the resume step at index 0 — ahead of the resupply steps (new bucket / diamond pick). The resumed task refails instantly (`need_better_tool:`, `create_obsidian_bucket_lost_after_pour`, or onStart fail without bucket); zero progress → 3 consecutive replans → task dead.
 - Smallest fix: when resuming first, keep supply steps that precede MAKE_OBSIDIAN in the fresh plan and match the failure-reason prefix (`need_better_tool:` / `*_missing_water` / `bucket_lost`).
 
-**[已修·阶段5] F6 — Obsidian food budget fixed at 8 units with no underground resupply source** (blocker; GoalPlanner/MiningServiceTask; from: planner F1; interacts with F15)
+**[Fixed · Stage 5] F6 — Obsidian food budget fixed at 8 units with no underground resupply source** (blocker; GoalPlanner/MiningServiceTask; from: planner F1; interacts with F15)
 - Citations: GP:66 (`OBSIDIAN_EXPEDITION_FOOD=8`), 566 (contrast: diamond 72), 1203-1210, 1227-1228; MiningFoodReserve.java:18; MiningServiceTask.java:509/529, 3091-3095; GP:1633-1656 (no CHEST/depot ensured), 1230-1233; GoalStep.java:23-41 (no ascend/return-to-surface step kind).
 - Trigger: 64-block obsidian work exhausts 8 cooked units; the boundary service can only draw from a depot that was never provisioned, and no step kind can return to the surface for food → `mining_service_food_reserve_depleted` / `deep_mining_food_reserve_depleted` with no recovery.
 - Smallest fix: scale obsidian food with missionTarget (like the diamond line) and/or provision the CHEST/depot the boundary service expects.
 
-**[已修·阶段2] F7 — DescendToYTask has no tool gate; broken pick burns the full window then dies as untyped `descend_timeout`** (blocker; DescendToYTask/BlockMiner; from: descend A3)
+**[Fixed · Stage 2] F7 — DescendToYTask has no tool gate; broken pick burns the full window then dies as untyped `descend_timeout`** (blocker; DescendToYTask/BlockMiner; from: descend A3)
 - Citations: DescendToYTask.java:532-537, 894-900, 475-483, 1080-1090; BlockMiner.java:32, 95-101; DigDownTask.java:614-616, 839-840 (contrast: has gate + typed `need_better_tool:`); MiningMissionBudget.java:39-43; GE:3681.
 - Trigger: pick durability runs out mid-descent (routine in a 64-diamond mission). `miner.begin` refreshes the progress clock every ~200-tick BlockMiner timeout cycle; lateral detours are not consumed; the loop only ends at the 12,160–40,000-tick window, then `descend_timeout` is goal-terminal and carries no type for the planner to infer "craft a pick".
 - Smallest fix: add the same ToolTier gate + typed `need_better_tool:` failure as DigDownTask, and only count real block breaks as progress.
 
-**[已修·阶段7] F8 — Orphaned capacity-parent debt makes a successful rare batch fail the whole mission** (blocker; GoalExecutor; from: executor F1)
+**[Fixed · Stage 7] F8 — Orphaned capacity-parent debt makes a successful rare batch fail the whole mission** (blocker; GoalExecutor; from: executor F1)
 - Citations: GE:4272-4382 (esp. 4364-4365), 3872, 3551-3879 (no path clears `capacityParentNamespace`), 5451-5470, 1581-1590, 4992-5034, 4916-4920, 4952, 1571-1575, 552-601, 3435-3440.
 - Trigger: a capacity-handoff service step fails → generic replan clears the queue (destroying the retry step) without clearing `capacityParentNamespace`; if the fresh plan lacks that ore family, settlement is unreachable forever; evidence capture then refuses to update `plan.miningCheckpoint` for all MINE_ORE, so the next completed rare batch fails `rare_batch_commit_checkpoint_invalid` at the moment of success. Restore validation accepts the orphan state, so restarts don't heal it.
 - Smallest fix: roll back/settle the capacity-parent marker whenever generic replan drops the retry step (or the fresh plan lacks the parent family); or degrade `settleCompletedRareBatch` mismatch to re-capture instead of terminal.
 
 **F9 — Recovery gate deadlock: hp≤10 with no food strands the paused mining task forever** (blocker; DangerWatcher/Resupply; from: survival D1)
-- Citations: DangerWatcher.java:460-464, 545, 444-449, 633; AIBotConfig.java:152 (retreatHp=10); EatTask.java:66-73; ResupplyTask.java:149-158, 300-310, 340.
+- Citations: DangerWatcher.java:460-464, 545, 444-449, 633; MinecraftAiConfig.java:152 (retreatHp=10); EatTask.java:66-73; ResupplyTask.java:149-158, 300-310, 340.
 - Trigger: `canResumePausedWork` requires health > 10, but with no food there is no deterministic path to regain HP: EatTask fails `no_food`, hunting needs surface prey, ResupplyTask degrades to CraftTask(BREAD) → `no_supply`. The paused mining task is stranded; only the non-deterministic BrainCoordinator wake remains.
 - Smallest fix: add a deterministic "return to surface and forage" escalation (or allow resume at reduced HP with shelter-first behavior) when the food-recovery chain is exhausted.
 
@@ -59,7 +59,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Trigger: a visible but unreachable creeper (behind a gap/fence at 8–15 blocks) underground: not wall-urgent, visibility forbids completion, escape goal stays null → infinite ESCAPE; `scanBot` early-returns so eat/resupply never run; the bot starves with the mining task paused beneath it.
 - Smallest fix: add a "stalemate N ticks at ≥ safe distance" downgrade exit, and permit hold-eat during ESCAPE stalls.
 
-**[已修·阶段6] F11 — `targetCount==0` fast path bypasses hard timeout and face restore → unbounded post-restart freeze** (blocker; OreDigTask; from: oredig B1)
+**[Fixed · Stage 6] F11 — `targetCount==0` fast path bypasses hard timeout and face restore → unbounded post-restart freeze** (blocker; OreDigTask; from: oredig B1)
 - Citations: OreDigTask onTick:879-881 (before 883-886 hard timeout and 887-890 restoringFace), 1433-1441, 1442-1445, 366-370 (`isWaiting` suppresses StuckWatcher), onStart:746-755.
 - Trigger: last target ore's active break committed → process restart → restart stance cannot observe `active_break_pos` (UNKNOWN preserved) → `finishAlreadyDeliveredBatch` returns without motion or deadline every tick, forever.
 - Smallest fix: in the UNKNOWN branch, perform `returnToSavedFace`-style movement when idle, bounded by `RESTORE_FACE_LIMIT`; on expiry conservatively `clearActiveTargetBreak` per the existing exact-once semantics.
@@ -72,7 +72,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Smallest fix: for MINE/MINE_ORE, define progress by delivered target count (or checkpoint advance), not displacement; compare steps modulo remaining count for `replan_same_step`.
 
 **F13 — DROP_DOWN with fallHeight≥2 on an anchored route is a deterministic plan/execute livelock** (major; PathExecutor/AStarPathfinder; from: descend A1)
-- Citations: PathExecutor.java:213-215, 220-223, 618-653, 670-671; Standability.java:139-140; AStarPathfinder.java:213-233; NeighborEnumerator.java:155-173; AIBotConfig.java:156 (maxSafeFall=3); HuntTask.java:959-962 (affected caller).
+- Citations: PathExecutor.java:213-215, 220-223, 618-653, 670-671; Standability.java:139-140; AStarPathfinder.java:213-233; NeighborEnumerator.java:155-173; MinecraftAiConfig.java:156 (maxSafeFall=3); HuntTask.java:959-962 (affected caller).
 - Trigger: mid-fall cell is unstandable → runtime return-proof start snaps → `runtime_return_start_not_exact` → `route_contract_lost`; planning-time validation never filters fall≥2 nodes, so replan regenerates the same route indefinitely. Hits the hunt/bootstrap phase of both missions on rough terrain.
 - Smallest fix: skip runtime contract validation at intermediate fall cells (or prove from the landing cell), or filter fall≥2 drops from constrained routes at plan time.
 
@@ -82,7 +82,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Smallest fix: on resume with PICKUP expired, broken cell AIR, and no observable ItemEntity in the box, record a skipped-target write-off and continue; at minimum add the reason to the terminal whitelist to stop burning replans.
 
 **F15 — Underground food economy runtime gaps: passive eating + no deterministic surface-return for food** (major; DangerWatcher/HuntTask/MiningServiceTask; from: survival D4+D5; interacts with F6, F9)
-- Citations: DangerWatcher.java:561-604, 1124-1128; AIBotConfig.java:151 (Survival(14,6)); EatTask.java:87-98; HuntTask.java:1939-1947, 352-357, 364-367; GP:143-162; MiningServiceTask.java:2832 (floor only checked at boundaries), 2832-2838, 3071-3088, 3145-3148.
+- Citations: DangerWatcher.java:561-604, 1124-1128; MinecraftAiConfig.java:151 (Survival(14,6)); EatTask.java:87-98; HuntTask.java:1939-1947, 352-357, 364-367; GP:143-162; MiningServiceTask.java:2832 (floor only checked at boundaries), 2832-2838, 3071-3088, 3145-3148.
 - Trigger: during multi-thousand-tick batches hunger sits below 18 (no natural regen); once reserves hit zero mid-batch at Y=-58, hunting is surface-only twice over and nothing between service boundaries recovers food → deterministic starvation path.
 - Smallest fix: an "eat to 18+" hook at OreDig/MiningService tick boundaries, plus a deterministic surface-return-for-food escalation.
 
@@ -111,7 +111,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Trigger: anchored routes beyond a budget-determined radius always fail `runtime_return_failed:TIMEOUT/SEARCH_LIMIT` mid-route; worst case burns 50ms (a full server tick) per cell walked and thrashes the global standability cache.
 - Smallest fix: scale lease budget with distance or reduce proof frequency; stop clearing the global cache per proof.
 
-**[复核否决·阶段4] F21 — RECOVER_WATER / RETURN_TO_RIM resume with stale timers → instant deadline death after combat displacement** (major; CreateObsidianTask; from: obsidian D4)
+**[Rejected on recheck · Stage 4] F21 — RECOVER_WATER / RETURN_TO_RIM resume with stale timers → instant deadline death after combat displacement** (major; CreateObsidianTask; from: obsidian D4)
 - Citations: COT:348-353, 60 (`RECOVERY_LIMIT=100`), 1343-1355, 354-358, 1894-1897.
 - Trigger: safety preemption at the lava lake displaces the bot; resuming into the same phase keeps old `phaseStartedTick`, so the 100-tick window is already expired on the first tick.
 - Smallest fix: unconditionally `enter()` these phases on restore (windows are bounded, so no budget inflation).
@@ -137,7 +137,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Smallest fix: key bootstrap gates on remaining quota (batchCount of the gap), not the original `count`.
 
 **F26 — Hunt pickup receipt fragile across restart (stats + inventory baselines both perishable)** (major; GoalExecutor/HuntPickupCheckpoint; from: executor F7)
-- Citations: GE:1783-1803, 351-363, 1701-1710, 1776-1778 (CLOSED_NO_RAW needs world time ≥240); HuntPickupCheckpoint.java:147-153; DangerWatcher.java:557-611 (eat can consume bound raw meat); no bot-stat persistence in src/main/java/io/github/zoyluo/aibot/persist/.
+- Citations: GE:1783-1803, 351-363, 1701-1710, 1776-1778 (CLOSED_NO_RAW needs world time ≥240); HuntPickupCheckpoint.java:147-153; DangerWatcher.java:557-611 (eat can consume bound raw meat); no bot-stat persistence in src/main/java/io/github/zoyluo/minecraftai/persist/.
 - Trigger: restart drops `Stats.PICKED_UP` (if ServerStatHandler doesn't persist for fake players) and pre-shutdown eating consumed bound units → restore rejects the whole mission (`mission_restore_invalid_hunt_pickup_checkpoint`) or settles FAILED; world-time rollback also invalidates receipts.
 - Smallest fix: persist the stat baseline (or a monotonic pickup counter) in the checkpoint itself; verify stat persistence in a live run (see open questions).
 
@@ -151,8 +151,8 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - Trigger: hp in (8,10] with a single same-level hostile within 8 blocks in a tunnel → falls to EvadeTask which fails `no_valid_escape_route`, 40–80-tick cooldown loop while taking hits.
 - Smallest fix: widen underground shelter admission to hp ≤ retreatHp.
 
-**[已修·阶段9] F29 — Acceptance harness verifies obsidian at 32, not the mission's 64** (major; evidence harness; from: evidence)
-- Citations: MiningEvidenceAudit.java:34 (`OBSIDIAN_TARGET=32`), scenario `obsidian_half_stack_32_from_zero`; mining_acceptance_contract.sh:54-66; AIBotVerifySubcommand.java:1891-1907 (fixed 240,000-tick timeout).
+**[Fixed · Stage 9] F29 — Acceptance harness verifies obsidian at 32, not the mission's 64** (major; evidence harness; from: evidence)
+- Citations: MiningEvidenceAudit.java:34 (`OBSIDIAN_TARGET=32`), scenario `obsidian_half_stack_32_from_zero`; mining_acceptance_contract.sh:54-66; MinecraftAiVerifySubcommand.java:1891-1907 (fixed 240,000-tick timeout).
 - Trigger: if the commitment is 64 obsidian, no existing verification attests it; timeout and thresholds are all calibrated to 32.
 - Smallest fix: either re-scope the mission to 32 or add a 64 scenario with rescaled timeout/thresholds.
 
@@ -201,7 +201,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 
 **F49 — trapped_fight_back re-acquires any same-type mob within 20 blocks (open hunt, violates own contract)** (minor; DangerWatcher/CombatTask; from: survival D3) — DangerWatcher.java:817, 678-680; CombatTask.java:155-158.
 
-**F50 — Obsidian verify timeout margin only 12.5% at the 15-TPS floor** (minor; harness; from: evidence) — AIBotVerifySubcommand.java:1900; mining_acceptance_contract.sh:15, 102-109.
+**F50 — Obsidian verify timeout margin only 12.5% at the 15-TPS floor** (minor; harness; from: evidence) — MinecraftAiVerifySubcommand.java:1900; mining_acceptance_contract.sh:15, 102-109.
 
 # Budget model summary
 
@@ -222,7 +222,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 - AcquireWater: 30,000 ticks / 224 waypoints per expedition (AWT:49, 66).
 - Provisioning: food fixed at 8 cooked units (GP:66) with underground floor 2 (MiningFoodReserve.java:18); 1 replacement diamond pick (3 diamonds via nested ensureMineOre) + 1 acquisition iron pick (GP:1668-1701); 4 stone picks, ~124 cobble, ~86 sticks, ~39 torches + ~31+8 descent torches for 3 descents (GP:1708-1791); 14 sealed logs.
 - Retries/replans: same GoalExecutor budgets as diamond (24 lifetime at 8 batches, 3 consecutive, 3 postcondition).
-- Harness: scenario is 32 blocks, fixed 240,000-tick timeout (AIBotVerifySubcommand.java:1891-1907) = 16,000 s at 15 TPS vs 18,000 s cap → 12.5% margin (F29, F50). No 64-block verification exists.
+- Harness: scenario is 32 blocks, fixed 240,000-tick timeout (MinecraftAiVerifySubcommand.java:1891-1907) = 16,000 s at 15 TPS vs 18,000 s cap → 12.5% margin (F29, F50). No 64-block verification exists.
 
 # Open questions requiring a live run to answer
 
@@ -230,7 +230,7 @@ Citation shorthand (as used in the source reports): `COT` = src/main/java/io/git
 2. **Realized end-to-end tick consumption** of the nominal diamond plan (estimate 0.7–1.0M ticks) and whether the 15-TPS floor holds under runtime return-proof load and SCAN raycasting (F20, F37) — the timeout headroom claim depends on both.
 3. **Does ServerStatHandler persist fake-player stats across server restart?** Decides whether the hunt pickup receipt's statistics leg survives restarts (F26).
 4. **Empirical frequency of descend landing-drift knockback** per 122-window descent under mob pressure (F3), and of fall≥2 DROP_DOWN nodes appearing in anchored hunt routes on natural terrain (F13).
-5. **Is there any GoalExecutor per-tick hard deadline for RUNNING tasks** that would eventually rescue the F11 freeze? The oredig report's grep was inconclusive ("未穷尽验证").
+5. **Is there any GoalExecutor per-tick hard deadline for RUNNING tasks** that would eventually rescue the F11 freeze? The oredig report's grep was inconclusive ("not exhaustively verified").
 6. **Torch consumption per epoch** in high-advance epochs vs the 40/epoch cap — does `ore_dig_torch_epoch_exhausted` fire in practice on good terrain?
 7. **How often is only flowing (non-still) lava observable** at natural lava-lake geometry — determines F4's pre-fix trigger rate and the SEARCH-tunnel overhead assumption (>8–10 branches/block ⇒ timeout).
 8. **Obsidian drop loss rate** (burned on exposed lava / pushed outside the ±8 box) during the degraded PROTECT_PICKUP path (F14).

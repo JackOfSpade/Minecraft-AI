@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks lighting to carried torches so mining cannot consume tool-service sticks. */
 class MiningTorchReserveSourceContractTest {
-    private static final Path TASKS = Path.of("src/main/java/io/github/zoyluo/aibot/task");
+    private static final Path TASKS = Path.of("src/main/java/io/github/zoyluo/minecraftai/task");
 
     @Test
     void oreDigLightingOnlyUsesCarriedTorches() throws IOException {

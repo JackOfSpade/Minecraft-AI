@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks the planner/task boundary that preserves nearby player-built workstations. */
 final class WorkshopPreferenceSourceContractTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
     void planningUsesVisibleStationsBeforeSchedulingTheirRecipes() throws IOException {

@@ -1,20 +1,20 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.observe.ReplayRecorder;
-import io.github.zoyluo.aibot.observe.TpsGuard;
-import io.github.zoyluo.aibot.network.AIBotServerNetworking;
-import io.github.zoyluo.aibot.perception.PerceptionCollector;
-import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
-import io.github.zoyluo.aibot.perception.SpeakerViewCollector;
-import io.github.zoyluo.aibot.task.MemoryStore;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
-import io.github.zoyluo.aibot.runtime.IntentController;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.observe.ReplayRecorder;
+import io.github.zoyluo.minecraftai.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.network.MinecraftAiServerNetworking;
+import io.github.zoyluo.minecraftai.perception.PerceptionCollector;
+import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
+import io.github.zoyluo.minecraftai.perception.SpeakerViewCollector;
+import io.github.zoyluo.minecraftai.task.MemoryStore;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
 import net.minecraft.text.Text;
 import net.minecraft.server.network.ServerPlayerEntity;
 
@@ -75,7 +75,8 @@ public final class BrainCoordinator {
     private final Map<UUID, BotConversation> conversations = new ConcurrentHashMap<>();
     private final Map<UUID, Boolean> manualModes = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextGoalWakeTick = new ConcurrentHashMap<>();
-    // FLOW-2:大脑分配长任务后置 true;任务结束后 idle-watcher 据此自动唤醒大脑决定下一步(无需人催)。
+    // FLOW-2: set true once the brain assigns a long-running task; after the task ends the
+    // idle-watcher uses this to auto-wake the brain to decide the next step (no human nudge needed).
     private final Map<UUID, Boolean> awaitingTask = new ConcurrentHashMap<>();
     private ToolRegistry toolRegistry = new ToolRegistry();
     private ActionDispatcher dispatcher = new ActionDispatcher(toolRegistry);
@@ -84,7 +85,7 @@ public final class BrainCoordinator {
     private BrainCoordinator() {
     }
 
-    public void configure(AIBotConfig config) {
+    public void configure(MinecraftAiConfig config) {
         conversations.values().forEach(conversation -> conversation.decision.invalidate());
         if (executor != null) {
             executor.shutdown();
@@ -173,7 +174,7 @@ public final class BrainCoordinator {
         conversation.lastToolRoundPlanBlockedAction = false;
         conversation.geminiInteractionId = null;
         conversation.pendingGeminiFunctionResults = List.of();
-        io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.clearUserGoal(bot); // B:用户发来新消息→清空原始目标记忆,本条消息触发的首个目标将成为新"用户原始目标"
+        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clearUserGoal(bot); // B: a new message from the user clears the stored original goal; the first goal triggered by this message becomes the new "user's original goal"
         submit(bot, conversation, lease);
         return true;
     }
@@ -238,8 +239,8 @@ public final class BrainCoordinator {
                 boolean replacementWorkActive = shouldContinueAfterControl(
                         dispatchBatch.controlEffect(),
                         TaskManager.INSTANCE.getActive(bot).isPresent(),
-                        io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
-                        io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
                         bot.getActionPack().hasActiveActions());
                 if (!replacementWorkActive) {
                     if (!conversation.decision.complete(lease)) {
@@ -254,8 +255,8 @@ public final class BrainCoordinator {
             }
             boolean workActive = hasRuntimeWork(
                     TaskManager.INSTANCE.getActive(bot).isPresent(),
-                    io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
-                    io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                    io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                    io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
                     bot.getActionPack().hasActiveActions());
             int failedToolCalls = dispatchBatch.failedCallCount() + response.geminiCappedFunctionResults().size();
             boolean actionToolSucceeded = dispatchBatch.executedCalls().stream()
@@ -370,8 +371,9 @@ public final class BrainCoordinator {
             return;
         }
         ReplayRecorder.INSTANCE.onDecision(bot, conversation.lastPerceptionDigest, List.of(), response.content());
-        // FLOW-2:大脑收尾时若仍有活跃任务(这轮是"分配长任务后停下"),标记等待任务完成;
-        // 任务结束后由 idle-watcher 自动唤醒大脑决定下一步,无需人催。
+        // FLOW-2: if the brain is wrapping up and a task is still active (this round is "assigned
+        // a long task then stopped"), mark that it is waiting for the task to finish; after the
+        // task ends the idle-watcher auto-wakes the brain to decide the next step, no human nudge needed.
         if (TaskManager.INSTANCE.getActive(bot).isPresent()) {
             awaitingTask.put(bot.getUuid(), true);
         }
@@ -394,7 +396,7 @@ public final class BrainCoordinator {
             return dispatcher.dispatchBatch(bot, calls, leaseGuard);
         }
 
-        int maxCalls = AIBotConfig.get().brain().maxToolCallsPerTurn();
+        int maxCalls = MinecraftAiConfig.get().brain().maxToolCallsPerTurn();
         List<ChatToolCall> safeCalls = new ArrayList<>();
         for (int index = 0; index < calls.size() && index < maxCalls; index++) {
             ChatToolCall call = calls.get(index);
@@ -654,15 +656,18 @@ public final class BrainCoordinator {
     }
 
     public boolean maybeWakeForFailureOrGoal(AIPlayerEntity bot) {
-        // GOALFIX-GF1 P0-A:bot 有活跃的确定性目标计划时,自动唤醒(FLOW-2/失败注入)一律让位给
-        // GoalExecutor,避免两个编排器在步骤间隙抢 assign。awaitingTask 不清除:目标计划自身完成、
-        // 从 activePlans 移除后,下一次本方法才会据 awaitingTask 唤醒大脑判断整体意图是否达成。
-        if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+        // GOALFIX-GF1 P0-A: whenever the bot has an active deterministic goal plan, auto-wake
+        // (FLOW-2 / failure injection) always defers to GoalExecutor, so the two orchestrators do
+        // not race to assign between steps. awaitingTask is NOT cleared here: only after the goal
+        // plan itself completes and is removed from activePlans will this method next wake the
+        // brain, using awaitingTask, to judge whether the overall intent has been achieved.
+        if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
         boolean hasFailure = TaskManager.INSTANCE.peekFailure(bot).isPresent();
         boolean hasGoal = BotMemoryStore.INSTANCE.of(bot.getUuid()).hasActiveGoal();
-        // FLOW-2:idle-watcher 仅在无活跃任务时调用本方法,故 awaiting=true 即代表"大脑分配的任务已结束"。
+        // FLOW-2: the idle-watcher only calls this method when there is no active task, so
+        // awaiting=true means "the task the brain assigned has already finished".
         boolean taskJustFinished = Boolean.TRUE.equals(awaitingTask.get(bot.getUuid()));
         if (!hasFailure && !shouldWakeForGoal(bot, hasGoal) && !taskJustFinished) {
             return false;
@@ -693,7 +698,8 @@ public final class BrainCoordinator {
             submit(bot, conversation, conversation.decision.beginEpoch());
             return true;
         }
-        // FLOW-2:大脑分配的任务已结束、且无失败无长期目标 → 自动唤醒大脑决定下一步,无需人催。
+        // FLOW-2: the task the brain assigned has finished, with no failure and no long-term
+        // goal -> auto-wake the brain to decide the next step, no human nudge needed.
         if (taskJustFinished) {
             awaitingTask.remove(bot.getUuid());
             TaskStatus status = TaskManager.INSTANCE.status(bot);
@@ -737,7 +743,7 @@ public final class BrainCoordinator {
     }
 
     public void sendPanelChat(AIPlayerEntity bot, String role, String text) {
-        AIBotServerNetworking.INSTANCE.sendBotChat(bot, role, text);
+        MinecraftAiServerNetworking.INSTANCE.sendBotChat(bot, role, text);
     }
 
     /** Sends the bot's actual reply both to the optional panel and to ordinary Minecraft chat. */
@@ -759,7 +765,7 @@ public final class BrainCoordinator {
         boolean callReserved = false;
         try {
             List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
-            AIBotConfig.Brain brainConfig = AIBotConfig.get().brain();
+            MinecraftAiConfig.Brain brainConfig = MinecraftAiConfig.get().brain();
             List<ToolDefinition> toolsSnapshot = toolRegistry.tools(
                     brainConfig,
                     brainConfig.exposesLowLevelTools() || manualMode(bot),
@@ -858,11 +864,14 @@ public final class BrainCoordinator {
                         logStaleDecision(waitingLease, "continuation_timer");
                         return;
                     }
-                    // GOALFIX-CONT:确定性目标计划运行期间,绝不重新唤醒大脑——即便在两个 step 之间
-                    // getActive() 短暂为空的那 1 tick(否则大脑会醒来调 assign_task 把 goal 的当前 step
-                    // abort 掉,正是实测#6的真凶)。纯等待轮询,不计入上限、不强制唤醒;goal 结束后
-                    // hasActivePlan 转 false,下一轮续航自然把结果交还大脑汇报。
-                    if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+                    // GOALFIX-CONT: while a deterministic goal plan is running, never re-wake the
+                    // brain -- not even during the single tick where getActive() is briefly empty
+                    // between two steps (otherwise the brain would wake and call assign_task,
+                    // aborting the goal's current step, which was exactly the real culprit behind
+                    // field test #6). Just keep polling and waiting: it does not count toward the
+                    // limit and does not force a wake; once the goal ends, hasActivePlan flips to
+                    // false and the next continuation round naturally hands the result back to the brain to report.
+                    if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
                         scheduleContinuation(bot, conversation, waitingLease);
                         return;
                     }
@@ -907,7 +916,7 @@ public final class BrainCoordinator {
                             return;
                         }
                         TaskStatus status = TaskManager.INSTANCE.status(bot);
-                        if (status.state() == io.github.zoyluo.aibot.task.TaskState.COMPLETED
+                        if (status.state() == io.github.zoyluo.minecraftai.task.TaskState.COMPLETED
                                 && maybeInjectGoalContinuation(bot, conversation, "The previous task completed: " + status.description() + ". Advance the next step for the long-term goal; call advance_goal first if this step is complete.")) {
                             trimHistory(conversation);
                             submit(bot, conversation, nextLease);
@@ -963,8 +972,8 @@ public final class BrainCoordinator {
     private void finishCallBudget(AIPlayerEntity bot, BotConversation conversation, String trigger) {
         boolean workActive = hasRuntimeWork(
                 TaskManager.INSTANCE.getActive(bot).isPresent(),
-                io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
-                io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
                 bot.getActionPack().hasActiveActions());
         BotLog.warn(LogCategory.COMM, bot, "model_call_budget_exhausted",
                 "calls_used", conversation.callBudget.callsUsed(),
@@ -979,11 +988,11 @@ public final class BrainCoordinator {
             return;
         }
         conversation.budgetExhaustionReported = true;
-        io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.clear(bot);
+        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.resetToIdle(bot);
         bot.getActionPack().stopAll();
         awaitingTask.remove(bot.getUuid());
-        sendBotReply(bot, "I could not start that after three AI attempts. I stopped safely; the AIBot log records each failed tool call.");
+        sendBotReply(bot, "I could not start that after three AI attempts. I stopped safely; the MinecraftAi log records each failed tool call.");
     }
 
     private static String conciseFailureMessage(String message) {
@@ -996,12 +1005,12 @@ public final class BrainCoordinator {
 
     private void ensureConfigured() {
         if (executor == null) {
-            configure(AIBotConfig.get());
+            configure(MinecraftAiConfig.get());
         }
     }
 
     private void trimHistory(BotConversation conversation) {
-        int max = AIBotConfig.get().brain().maxHistoryMessages();
+        int max = MinecraftAiConfig.get().brain().maxHistoryMessages();
         if (conversation.history.size() <= max) {
             return;
         }
@@ -1022,7 +1031,7 @@ public final class BrainCoordinator {
     private boolean maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
         return TaskManager.INSTANCE.consumeFailure(bot)
                 .map(failure -> {
-                    int maxRetries = AIBotConfig.get().brain().maxTaskRetries();
+                    int maxRetries = MinecraftAiConfig.get().brain().maxTaskRetries();
                     String retryHint = failure.count() >= maxRetries
                             ? " The same failure has happened repeatedly; prefer a different approach or explain the limitation with say."
                             : "";
@@ -1055,7 +1064,7 @@ public final class BrainCoordinator {
     }
 
     private boolean maybeInjectGoalResult(AIPlayerEntity bot, BotConversation conversation) {
-        return io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE
+        return io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE
                 .resultAfter(bot, conversation.lastGoalResultSequence)
                 .map(result -> {
                     conversation.lastGoalResultSequence = result.sequence();
@@ -1148,7 +1157,7 @@ public final class BrainCoordinator {
                 3. Prefer high-level deterministic tasks for survival work. For ores or raw ore materials, use mine_ore; it automatically prepares the required pickaxe before mining. For an item/tool goal such as iron_pickaxe or iron_ingot, use achieve_goal. Do not manually decompose these into gather/craft/mine steps unless the goal tool fails.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. A new player message always supersedes prior work. The runtime cancels old tasks, goals, queued goals, and actions before this request is planned, so treat each new message as self-contained. For a compound request in one message, goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) may be queued in that same response. High-level tasks run over multiple ticks; start only one non-goal task at a time and wait for its status before assigning another.
-                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). Then call the action or goal tool that starts the work in the SAME response. A plan/status say alone is invalid and will be retried. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the AIBot panel.
+                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). Then call the action or goal tool that starts the work in the SAME response. A plan/status say alone is invalid and will be retried. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
                 7. For an item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. It is the deterministic dependency planner and will gather, craft, mine, smelt, and use an existing or newly made crafting table as needed. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
                 9. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. The deterministic goal executor will plan gathering, crafting, mining, and smelting. A single mine_ore/achieve_goal call runs the entire multi-step plan autonomously. The only allowed companion call in that same response is the initial say plan required by rule 6; after that, STOP. Do not call inventory, assign_task, mine, or strip_mine. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
@@ -1184,7 +1193,7 @@ public final class BrainCoordinator {
 
         private BotConversation(UUID botId) {
             decision = new DecisionSession(botId);
-            callBudget = new PlayerInstructionCallBudget(AIBotConfig.get().brain().maxTurnsPerRequest());
+            callBudget = new PlayerInstructionCallBudget(MinecraftAiConfig.get().brain().maxTurnsPerRequest());
         }
     }
 

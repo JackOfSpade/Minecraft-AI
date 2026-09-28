@@ -108,8 +108,8 @@ validate_assignment "$TARGET" "$ROLE" "$SEED" "$RUN_INDEX" || {
 
 SCENARIO="$(mining_scenario_for_target "$TARGET")"
 SHARD_ID="$(mining_shard_id "$TARGET" "$ROLE" "$SEED" "$RUN_INDEX")"
-TIMEOUT="${AIBOT_MINING_TIMEOUT:-$(mining_default_verify_timeout_for_target "$TARGET")}"
-STARTUP_TIMEOUT="${AIBOT_MINING_STARTUP_TIMEOUT:-480}"
+TIMEOUT="${MINECRAFTAI_MINING_TIMEOUT:-$(mining_default_verify_timeout_for_target "$TARGET")}"
+STARTUP_TIMEOUT="${MINECRAFTAI_MINING_STARTUP_TIMEOUT:-480}"
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ && "$TIMEOUT" -le "$MINING_MAX_VERIFY_TIMEOUT_SECONDS" \
     && "$STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ && "$STARTUP_TIMEOUT" -le 1800 ]] || {
   printf '[mining-evidence-shard] invalid timeout configuration\n' >&2
@@ -117,7 +117,7 @@ STARTUP_TIMEOUT="${AIBOT_MINING_STARTUP_TIMEOUT:-480}"
 }
 
 cd "$ROOT"
-OUTPUT="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-shard.XXXXXX")"
+OUTPUT="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-shard.XXXXXX")"
 STAGING=""
 PUBLISHED=0
 cleanup() {

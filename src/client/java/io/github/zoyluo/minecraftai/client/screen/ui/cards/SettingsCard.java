@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.client.screen.ui.cards;
+package io.github.zoyluo.minecraftai.client.screen.ui.cards;
 
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.client.BotCommandBridge;
-import io.github.zoyluo.aibot.client.screen.ui.Theme;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.client.BotCommandBridge;
+import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -20,8 +20,8 @@ public final class SettingsCard extends PanelCard {
     private ButtonWidget manualButton;
     private ButtonWidget memoryButton;
     private ButtonWidget reportsButton;
-    private ButtonWidget teleportToButton;  // 传送至 AI(玩家→AI 附近)
-    private ButtonWidget recallButton;      // 召回 AI(AI→玩家附近)
+    private ButtonWidget teleportToButton;  // Teleport to AI (player -> near AI)
+    private ButtonWidget recallButton;      // Recall AI (AI -> near player)
 
     public SettingsCard(String target) {
         this.target = target == null ? "" : target;
@@ -29,7 +29,7 @@ public final class SettingsCard extends PanelCard {
 
     @Override
     protected String titleKey() {
-        return "card.aibot.settings";
+        return "card.minecraftai.settings";
     }
 
     @Override
@@ -51,13 +51,13 @@ public final class SettingsCard extends PanelCard {
 
     @Override
     public void addWidgets(Consumer<ClickableWidget> sink) {
-        manualButton = button("settings.aibot.manual", () -> toggle("manual", snapshot == null || !snapshot.manualMode()));
-        memoryButton = button("settings.aibot.memory", () -> toggle("memory", snapshot == null || !snapshot.memoryToolsEnabled()));
-        reportsButton = button("settings.aibot.reports", () -> toggle("reports", snapshot == null || !snapshot.verboseReportsEnabled()));
-        teleportToButton = button("settings.aibot.tp_to_ai",
-                () -> BotCommandBridge.teleport(target, io.github.zoyluo.aibot.network.payload.BotTeleportC2S.TO_AI));
-        recallButton = button("settings.aibot.recall_ai",
-                () -> BotCommandBridge.teleport(target, io.github.zoyluo.aibot.network.payload.BotTeleportC2S.RECALL_AI));
+        manualButton = button("settings.minecraftai.manual", () -> toggle("manual", snapshot == null || !snapshot.manualMode()));
+        memoryButton = button("settings.minecraftai.memory", () -> toggle("memory", snapshot == null || !snapshot.memoryToolsEnabled()));
+        reportsButton = button("settings.minecraftai.reports", () -> toggle("reports", snapshot == null || !snapshot.verboseReportsEnabled()));
+        teleportToButton = button("settings.minecraftai.tp_to_ai",
+                () -> BotCommandBridge.teleport(target, io.github.zoyluo.minecraftai.network.payload.BotTeleportC2S.TO_AI));
+        recallButton = button("settings.minecraftai.recall_ai",
+                () -> BotCommandBridge.teleport(target, io.github.zoyluo.minecraftai.network.payload.BotTeleportC2S.RECALL_AI));
         layoutWidgets();
         updateLabels();
         sink.accept(teleportToButton);
@@ -69,14 +69,14 @@ public final class SettingsCard extends PanelCard {
 
     @Override
     protected void renderBody(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer, int bx, int by, int bw, int bh) {
-        String bot = snapshot == null ? (target.isBlank() ? Theme.tr("screen.aibot.owner_bot") : target) : snapshot.botName();
-        context.drawTextWithShadow(renderer, Theme.tr("settings.aibot.target", bot), bx, by, Theme.TEXT_DIM);
+        String bot = snapshot == null ? (target.isBlank() ? Theme.tr("screen.minecraftai.owner_bot") : target) : snapshot.botName();
+        context.drawTextWithShadow(renderer, Theme.tr("settings.minecraftai.target", bot), bx, by, Theme.TEXT_DIM);
         if (snapshot == null) {
-            context.drawTextWithShadow(renderer, Theme.tr("status.aibot.waiting"), bx, by + 14, Theme.TEXT_DIM);
+            context.drawTextWithShadow(renderer, Theme.tr("status.minecraftai.waiting"), bx, by + 14, Theme.TEXT_DIM);
         } else {
             String key = "strict_survival".equals(snapshot.operatingProfile())
-                    ? "settings.aibot.profile.strict" : "settings.aibot.profile.operator";
-            context.drawTextWithShadow(renderer, Theme.tr("settings.aibot.profile", Theme.tr(key)),
+                    ? "settings.minecraftai.profile.strict" : "settings.minecraftai.profile.operator";
+            context.drawTextWithShadow(renderer, Theme.tr("settings.minecraftai.profile", Theme.tr(key)),
                     bx, by + 14, "strict_survival".equals(snapshot.operatingProfile()) ? 0xFF65C18C : 0xFFE4A853);
         }
     }
@@ -95,14 +95,14 @@ public final class SettingsCard extends PanelCard {
         }
         int bx = x + Theme.PAD;
         int bw = w - Theme.PAD * 2;
-        // 传送行:两个按钮横排(各占一半)。
+        // Teleport row: two buttons side by side (each takes half the width).
         int half = (bw - 4) / 2;
         int tpY = y + 32;
         teleportToButton.setPosition(bx, tpY);
         teleportToButton.setDimensions(half, BUTTON_H);
         recallButton.setPosition(bx + half + 4, tpY);
         recallButton.setDimensions(half, BUTTON_H);
-        // 三个开关竖排。
+        // Three toggles stacked vertically.
         int by = tpY + 24;
         manualButton.setPosition(bx, by);
         manualButton.setDimensions(bw, BUTTON_H);
@@ -116,15 +116,15 @@ public final class SettingsCard extends PanelCard {
         if (manualButton == null) {
             return;
         }
-        manualButton.setMessage(label("settings.aibot.manual", snapshot != null && snapshot.manualMode()));
-        memoryButton.setMessage(label("settings.aibot.memory", snapshot == null || snapshot.memoryToolsEnabled()));
-        reportsButton.setMessage(label("settings.aibot.reports", snapshot == null || snapshot.verboseReportsEnabled()));
+        manualButton.setMessage(label("settings.minecraftai.manual", snapshot != null && snapshot.manualMode()));
+        memoryButton.setMessage(label("settings.minecraftai.memory", snapshot == null || snapshot.memoryToolsEnabled()));
+        reportsButton.setMessage(label("settings.minecraftai.reports", snapshot == null || snapshot.verboseReportsEnabled()));
         boolean teleportEnabled = snapshot != null && snapshot.effectiveCapabilities().contains("MANUAL_TELEPORT");
         teleportToButton.active = teleportEnabled;
         recallButton.active = teleportEnabled;
     }
 
     private static Text label(String key, boolean enabled) {
-        return Text.literal(Theme.tr(key) + ": " + Theme.tr(enabled ? "settings.aibot.on" : "settings.aibot.off"));
+        return Text.literal(Theme.tr(key) + ": " + Theme.tr(enabled ? "settings.minecraftai.on" : "settings.minecraftai.off"));
     }
 }

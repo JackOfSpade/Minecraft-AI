@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.util.math.BlockPos;

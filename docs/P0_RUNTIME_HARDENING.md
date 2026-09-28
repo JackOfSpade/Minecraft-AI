@@ -1,26 +1,26 @@
 # P0 Runtime Hardening
 
-状态：Implementation complete（当前工作树，尚未提交）  
-目标：以小步、可独立验证的提交，消除当前发布阻断问题。  
-原则：先定义契约，再修改实现；不借 P0 重写现有 Task。
+Status: Implementation complete (current working tree, not yet committed)
+Goal: Eliminate current release-blocking issues via small, independently verifiable commits.
+Principle: Define the contract first, then modify the implementation; do not use P0 as an excuse to rewrite existing Tasks.
 
-## 实施状态
+## Implementation Status
 
-更新于：2026-07-10
+Updated: 2026-07-10
 
-| 范围 | 状态 | 当前证据 |
+| Scope | Status | Current Evidence |
 |---|---|---|
-| P0-07a Test bootstrap | 已完成 | 19 个测试类、68 个 JUnit 测试，另有 3 个 GameTest；失败均返回非零退出码 |
-| P0-01 Decision lease | 已完成 | lease/session 测试覆盖旧回调、重复 callback、continuation、外部 invalidate 和同 UUID 新 runtime |
-| P0-02 Intent control | 已完成 | `IntentController`、Mission paused gate、Task origin、可嵌套 `ExecutionStack`；控制套件 6/6 |
-| P0-03 Authorization | 已完成 | owner/OP 策略统一覆盖 command、chat、C2S、订阅、Tool 与 Job；拒绝进入 SECURITY 审计 |
-| P0-04 Goal postcondition | 已完成 | 9 类 Goal 使用 typed predicate；终态统一为 `COMPLETED/PARTIAL/FAILED/CANCELLED` |
-| P0-05 Lifecycle/persistence | 已完成 | schema v1、原子合并写、legacy migration、Mission/checkpoint/Job lease 恢复；两 JVM 实测 PASS |
-| P0-06 Operating profiles | 已完成 | 新装 strict、legacy operator 兼容、4 项 capability gate、UI/日志审计；双 profile 7/7 |
-| P0-07b CI/nightly | 已完成 | testmod 与生产 jar 隔离；PR、nightly 双 profile/seed、手动计费 LLM 工作流已配置 |
-| P0-08 Evidence | 已完成 | 不可变 bundle、动态端口/runDir、校验/脱敏、batch、显式 pin 与 baseline index 已实现 |
+| P0-07a Test bootstrap | Completed | 19 test classes, 68 JUnit tests, plus 3 GameTests; failures all return non-zero exit codes |
+| P0-01 Decision lease | Completed | lease/session tests cover stale callbacks, duplicate callbacks, continuation, external invalidation, and a new runtime with the same UUID |
+| P0-02 Intent control | Completed | `IntentController`, Mission paused gate, Task origin, nestable `ExecutionStack`; control suite 6/6 |
+| P0-03 Authorization | Completed | owner/OP policy uniformly covers commands, chat, C2S, subscriptions, Tools, and Jobs; denials are logged to the SECURITY audit |
+| P0-04 Goal postcondition | Completed | 9 Goal types use typed predicates; final states are unified as `COMPLETED/PARTIAL/FAILED/CANCELLED` |
+| P0-05 Lifecycle/persistence | Completed | schema v1, atomic merge-write, legacy migration, Mission/checkpoint/Job lease recovery; verified PASS across two JVMs |
+| P0-06 Operating profiles | Completed | strict by default on fresh installs, legacy operator compatibility, 4 capability gates, UI/log auditing; dual-profile 7/7 |
+| P0-07b CI/nightly | Completed | testmod isolated from the production jar; PR and nightly dual profile/seed, manual billed-LLM workflow configured |
+| P0-08 Evidence | Completed | immutable bundle, dynamic port/runDir, validation/redaction, batch, explicit pin, and baseline index implemented |
 
-## 执行顺序
+## Execution Order
 
 ```text
 P0-07a Test bootstrap
@@ -31,213 +31,213 @@ P0-07a Test bootstrap
    ├── P0-03 Authorization
    └── P0-06 Operating mode contract
 
-P0-07b CI/nightly 收口
+P0-07b CI/nightly wrap-up
    └── P0-08 Evidence pipeline
 ```
 
-每个行为工单都先提交可复现的失败测试，再提交实现；P0-07 不是最后补测试，而是贯穿整个阶段。
+Every behavioral work order submits a reproducible failing test first, then the implementation; P0-07 is not tests bolted on at the end — it runs through the entire phase.
 
-## P0-01：隔离过期 LLM 响应
+## P0-01: Isolate Stale LLM Responses
 
-问题证据：
+Problem evidence:
 
-- `BrainCoordinator.handleMessage` 在活跃 Goal 时允许新请求进入；
-- `AsyncDecisionExecutor` 回调没有 request id；
-- 旧请求晚到后仍可进入 `ActionDispatcher`。
+- `BrainCoordinator.handleMessage` allows new requests in while a Goal is active;
+- `AsyncDecisionExecutor` callbacks have no request id;
+- A stale request that arrives late can still enter `ActionDispatcher`.
 
-实现范围：
+Implementation scope:
 
-- 为每个 Bot 增加单调递增的 `decisionEpoch`；
-- 每次新消息、reset、外部 panel/command cancel、despawn 和 server stop 都使旧 epoch 失效；
-- HTTP 回调回到主线程后，先校验 bot 存活、Runtime 身份和 epoch；
-- 过期响应只记录 `stale_decision_dropped`，不得写 history 或 dispatch Tool。
+- Add a monotonically increasing `decisionEpoch` per Bot;
+- Every new message, reset, external panel/command cancel, despawn, and server stop invalidates the old epoch;
+- After the HTTP callback returns to the main thread, first validate bot liveness, Runtime identity, and epoch;
+- A stale response only logs `stale_decision_dropped`; it must not write to history or dispatch a Tool.
 
-LLM 同一批 Tool 内的 `stop/abort_task` 已通过 typed `ControlEffect` 保留当前 APPLYING lease，整批 Tool 完成后再根据是否存在 replacement 决定终止或续航；`stop + 新 Goal` 不会被中途截断。
+Within the same batch of LLM Tools, `stop/abort_task` now goes through a typed `ControlEffect` that preserves the current APPLYING lease; once the whole Tool batch finishes, whether to terminate or continue is decided based on whether a replacement exists — `stop + new Goal` is never cut off midway.
 
-验收：
+Acceptance:
 
-- 构造 A 请求延迟、B 请求先返回，A 的 Tool 永不执行；
-- reset/despawn 后返回的响应不影响新 Bot；
-- 正常单请求路径行为不变。
+- Construct a scenario where request A is delayed and request B returns first; A's Tool must never execute;
+- A response that returns after reset/despawn does not affect the new Bot;
+- Normal single-request path behavior is unchanged.
 
-风险：不能只依赖 `Future.cancel(true)`；网络调用可能不响应中断，epoch 校验必须是最终防线。
+Risk: Cannot rely solely on `Future.cancel(true)`; network calls may not respond to interruption, so epoch validation must be the final line of defense.
 
-## P0-02：统一暂停、取消和替换语义
+## P0-02: Unify Pause, Cancel, and Replace Semantics
 
-当前实现：`cancel_current/cancel_all/replace/pause/resume` 均通过同一事务入口；用户暂停与安全抢占分层保存。
+Current implementation: `cancel_current/cancel_all/replace/pause/resume` all go through the same transactional entry point; user pause and safety preemption are saved in separate layers.
 
-问题证据：
+Problem evidence:
 
-- `stop` 只停止 `ActionPack`；
-- `abort_task` 和面板 `abort` 只中止当前 Task；
-- GoalExecutor 可能把中止视为失败并重新规划。
+- `stop` only stops the `ActionPack`;
+- `abort_task` and the panel's `abort` only abort the current Task;
+- GoalExecutor may treat the abort as a failure and re-plan.
 
-先固定契约：
+First, pin down the contract:
 
-| 操作 | 当前 Mission | 队列 | paused Task | LLM epoch |
+| Operation | Current Mission | Queue | paused Task | LLM epoch |
 |---|---|---|---|---|
-| `pause` | 保留 | 保留 | 保留 | 失效 |
-| `resume` | 继续 | 保留 | 恢复 | 新 epoch |
-| `cancel_current` | 清除 | 保留 | 清除 | 失效 |
-| `cancel_all` | 清除 | 清除 | 清除 | 失效 |
-| `replace` | 清除并换新 | 默认保留显式追加项 | 清除 | 失效并新建 |
+| `pause` | Kept | Kept | Kept | Invalidated |
+| `resume` | Continues | Kept | Restored | New epoch |
+| `cancel_current` | Cleared | Kept | Cleared | Invalidated |
+| `cancel_all` | Cleared | Cleared | Cleared | Invalidated |
+| `replace` | Cleared and replaced | Explicit appended items kept by default | Cleared | Invalidated and a new one created |
 
-注：表中 epoch 描述适用于玩家面板/命令等外部控制。LLM 的同批 `stop + replacement` 为保证批次原子性，会保留当前 APPLYING lease；批次结束后若 replacement 已启动则继续正常 continuation，否则结束该 decision。
+Note: The epoch descriptions in the table apply to external controls such as the player panel/commands. For the LLM's same-batch `stop + replacement`, the current APPLYING lease is preserved to guarantee batch atomicity; once the batch ends, if the replacement has started, normal continuation proceeds, otherwise the decision ends.
 
-P0-02a 已实现：
+P0-02a implemented:
 
-- 唯一 `IntentController` 原子处理 Brain、Goal/queue、BotMemory、claimed Job、active/paused Task、ActionPack、失败缓存和 UI 状态；
-- `stop`、`abort_task`、`cancel_all`、面板直接派工/abort/reset、命令直接派工/abort/reset、despawn/server-stop 已接统一入口；
-- 取消结果使用 `CANCELLED`，内部安全熔断仍使用 `FAILED`；
-- queue 只在下一 server tick 晋升，避免同 tick 重复取消连续吞掉排队目标；
-- `IntentController.replace()` 已接面板直接派工、`/aibot task` 和 `/aibot memory goto`；LLM 生产路径通过同批 `stop + Goal/Action` 实现等价替换；
-- `runtime_control_suite` 验证 200 tick 不复活、重复取消幂等、队列晋升、Goal/action replacement 及 replacement 启动失败回滚。
+- A single `IntentController` atomically handles Brain, Goal/queue, BotMemory, claimed Job, active/paused Task, ActionPack, failure cache, and UI state;
+- `stop`, `abort_task`, `cancel_all`, direct panel dispatch/abort/reset, direct command dispatch/abort/reset, and despawn/server-stop all now go through the unified entry point;
+- Cancellation results use `CANCELLED`; internal safety circuit-breaks still use `FAILED`;
+- The queue is only promoted on the next server tick, avoiding repeated same-tick cancellations from swallowing consecutive queued goals;
+- `IntentController.replace()` is now wired to direct panel dispatch, `/minecraftai task`, and `/minecraftai memory goto`; the LLM production path achieves an equivalent replacement via a same-batch `stop + Goal/Action`;
+- `runtime_control_suite` verifies no revival within 200 ticks, idempotent repeated cancellation, queue promotion, Goal/action replacement, and rollback on replacement start failure.
 
-P0-02b 已实现：
+P0-02b implemented:
 
-- 引入 Mission-level paused gate、Task origin 和可嵌套 ExecutionStack；
-- 安全层允许保命工作，但不得自动恢复用户显式暂停的 Mission；
-- 面板、命令和聊天入口统一 `pause/resume` 语义。
+- Introduce a Mission-level paused gate, Task origin, and a nestable ExecutionStack;
+- The safety layer allows life-saving work but must not automatically resume a Mission the user explicitly paused;
+- Panel, command, and chat entry points share unified `pause/resume` semantics.
 
-`ExecutionStack` 按 LIFO 恢复嵌套安全任务；安全任务结束后若 Mission 仍被用户暂停，不会误恢复。所有 Task 分配入口均携带 `TaskOrigin`，持久化只在存在 active/queued Mission 时保存 pause gate。
+`ExecutionStack` restores nested safety tasks in LIFO order; if the Mission is still user-paused after a safety task ends, it is not mistakenly resumed. Every Task-assignment entry point carries a `TaskOrigin`, and persistence only saves the pause gate when an active/queued Mission exists.
 
-验收：
+Acceptance:
 
-- “别挖了，改盖房”不会先把旧矿挖完，也不会把建房排到错误位置；
-- `cancel_all` 后 200 tick 内无 Goal 复活、无旧 Tool 回调；
-- cancel 后面板显示 idle/cancelled，不残留 FAILED。
+- “Stop mining, build a house instead” does not finish the old mine first, nor does it queue the house-building in the wrong position;
+- Within 200 ticks after `cancel_all`, no Goal is revived and no stale Tool callback fires;
+- After cancel, the panel shows idle/cancelled, with no leftover FAILED.
 
-## P0-03：统一 Bot 授权策略
+## P0-03: Unify Bot Authorization Policy
 
-问题证据：
+Problem evidence:
 
-- 命令和部分面板操作要求 OP；
-- item move、teleport 和 `@Bot` 聊天入口没有一致的 owner/OP 校验；
-- 传入 botName 时可以解析任意 Bot。
+- Commands and some panel operations require OP;
+- item move, teleport, and the `@Bot` chat entry point lack consistent owner/OP validation;
+- Passing a botName can resolve to any Bot.
 
-实现范围：
+Implementation scope:
 
-- 新建 `BotAuthorizationPolicy`；
-- 明确 `VIEW/COMMAND/INVENTORY/TELEPORT/ADMIN` 权限；
-- 默认 owner 可操作自己的 Bot，OP 可管理全部，其他玩家拒绝；
-- 所有 command、chat、C2S payload、订阅和 bot-to-bot 消息统一调用；
-- 拒绝事件记录 actor、bot、operation，不记录敏感消息正文。
+- Create a new `BotAuthorizationPolicy`;
+- Define `VIEW/COMMAND/INVENTORY/TELEPORT/ADMIN` permissions;
+- By default the owner can operate their own Bot, OP can manage all Bots, and other players are denied;
+- All commands, chat, C2S payloads, subscriptions, and bot-to-bot messages call it uniformly;
+- Denial events log actor, bot, and operation, without logging sensitive message bodies.
 
-验收：
+Acceptance:
 
-- 非 owner 无法订阅、下令、取物、放物或传送任意 Bot；
-- owner 和 OP 的允许矩阵全通过；
-- botName 为空和显式名称两条路径行为一致。
+- Non-owners cannot subscribe to, command, take items from, place items into, or teleport any Bot;
+- The owner and OP permission matrices all pass;
+- Behavior is consistent whether botName is empty or an explicit name is given.
 
-风险：需要先决定是否允许共享 Bot；若允许，应使用显式 ACL，不应继续依赖名字。
+Risk: Need to decide up front whether shared Bots are allowed; if so, an explicit ACL should be used instead of continuing to rely on names.
 
-## P0-04：Goal 最终后置条件
+## P0-04: Goal Final Postconditions
 
-问题证据：
+Problem evidence:
 
-- 多数 Goal 在 steps 耗尽时直接报告完成；
-- `Stockpile` 等步骤失败可能被 best-effort 跳过；
-- `PlaceStationsTask` 和 Build 的部分落块可被视为完成。
+- Most Goals report completion as soon as their steps are exhausted;
+- Failures in steps like `Stockpile` can be skipped by best-effort logic;
+- Partial block placement in `PlaceStationsTask` and Build can be treated as complete.
 
-实现范围：
+Implementation scope:
 
-- 每类 Goal 定义 typed `GoalPredicate`；
-- 完成前基于 WorldSnapshot/Inventory/Structure 再验证；
-- 结果分为 `COMPLETED/PARTIAL/FAILED/CANCELLED`；
-- best-effort 只影响是否继续，不得改变最终事实；
-- Build 记录 expected/placed/skipped/mismatched，并进行结构复扫。
+- Define a typed `GoalPredicate` for each Goal type;
+- Re-verify against WorldSnapshot/Inventory/Structure before declaring completion;
+- Results are split into `COMPLETED/PARTIAL/FAILED/CANCELLED`;
+- best-effort only affects whether to continue, and must not change the final facts;
+- Build records expected/placed/skipped/mismatched, and performs a structural rescan.
 
-验收：
+Acceptance:
 
-- 库存不足、箱子未入库、工作站缺件和房屋缺关键块均不能返回 COMPLETED；
-- 已经满足目标时可零步骤完成；
-- UI、日志、LLM 反馈使用同一结果。
+- Insufficient inventory, items not stored in the chest, missing workstation parts, and a house missing key blocks must never return COMPLETED;
+- If the goal is already satisfied, it can complete with zero steps;
+- The UI, logs, and LLM feedback all use the same result.
 
-## P0-05：Runtime cleanup 与 Mission 持久化
+## P0-05: Runtime Cleanup and Mission Persistence
 
-问题证据：
+Problem evidence:
 
-- `BotRecord` 不保存 active Goal、队列或进度；
-- GoalExecutor 的 per-bot Map 未在所有 lifecycle 入口完整清理；
-- 持久化 Job 的 `CLAIMED` 状态重启后可能没有 owner 继续处理。
+- `BotRecord` does not save the active Goal, queue, or progress;
+- GoalExecutor's per-bot Map is not fully cleaned up at every lifecycle entry point;
+- A persisted Job's `CLAIMED` state may have no owner to continue processing it after a restart.
 
-实现范围：
+Implementation scope:
 
-- 持久化声明式 `MissionSpec`、队列、checkpoint metadata，不序列化具体 Task 对象；
-- 重启后重新 plan，并用后置条件跳过已完成步骤；
-- 增加 `schemaVersion` 与迁移；
-- server stop、despawn、death、reset 统一走 Runtime lifecycle；
-- 启动时把没有有效 lease 的 `CLAIMED` Job 重新开放或明确失败；
-- 持久化采用原子写，后台批量 flush。
+- Persist the declarative `MissionSpec`, queue, and checkpoint metadata, without serializing concrete Task objects;
+- Re-plan after restart, and use postconditions to skip already-completed steps;
+- Add `schemaVersion` and migration;
+- server stop, despawn, death, and reset all go through the unified Runtime lifecycle;
+- On startup, reopen `CLAIMED` Jobs that have no valid lease, or explicitly fail them;
+- Persistence uses atomic writes, with background batched flushing.
 
-验收：
+Acceptance:
 
-- 挖矿、建房、排队目标在重启后继续，且不重复消耗已完成产物；
-- 同 JVM 切换世界不复用旧 Runtime；
-- 老格式存档可迁移或给出明确、可恢复错误。
+- Mining, house-building, and queued goals continue after restart, without re-consuming already-produced output;
+- Switching worlds within the same JVM does not reuse the old Runtime;
+- Old-format saves can be migrated, or produce a clear, recoverable error.
 
-完成结果：统一 `runtime.json` 使用 `schemaVersion=1`，后台 750ms 合并写并在 server stop 同步 flush；临时文件唯一、fsync 后原子替换。损坏或未来 schema 进入只读保护，不覆盖原文件。重启从 `MissionSpec` 重新规划并先应用 checkpoint/后置条件；旧 session 的 `CLAIMED` Job 自动重开。`scripts/persistence_restart_test.sh` 已用同一世界连续启动两个 JVM，精确比对非默认 checkpoint map、active Mission、队列与 pause 状态，验证 stale lease 重开，并在 resume 后确认原 Mission 达到 `COMPLETED 4/4`。
+Completion result: The unified `runtime.json` uses `schemaVersion=1`, with a background 750ms merge-write and a synchronous flush on server stop; the temp file is unique and is atomically replaced after fsync. A corrupted or future schema enters read-only protection without overwriting the original file. On restart, planning resumes from `MissionSpec` and applies checkpoint/postconditions first; `CLAIMED` Jobs from an old session are automatically reopened. `scripts/persistence_restart_test.sh` has launched two JVMs back-to-back against the same world, precisely comparing non-default checkpoint maps, the active Mission, the queue, and pause state; it verifies stale-lease reopening and confirms the original Mission reaches `COMPLETED 4/4` after resuming.
 
-## P0-06：运行模式与公平性契约
+## P0-06: Operating Mode and Fairness Contract
 
-已决策：新安装默认 `strict_survival`，`operator` 显式开启；旧配置缺少 profile 时暂按 `operator` 兼容并输出迁移警告。
+Decided: fresh installs default to `strict_survival`, with `operator` requiring explicit opt-in; when an old config is missing a profile, it currently falls back to `operator` for compatibility and emits a migration warning.
 
-实现范围：
+Implementation scope:
 
-- 将 hidden block scan、紧急 teleport、强制拾取等能力标记为 capability flag；
-- 每个验证 run 记录实际模式；
-- `strict_survival` 下只使用允许的感知与动作；
-- `operator` 下保持现有增强能力，但 UI 和文档明确展示；
-- README、Wiki 和配置说明与实际行为一致。
+- Mark capabilities such as hidden block scan, emergency teleport, and forced pickup as capability flags;
+- Each verification run records the actual mode;
+- Under `strict_survival`, only allowed perception and actions are used;
+- Under `operator`, existing enhanced capabilities are retained, but are clearly surfaced in the UI and docs;
+- README, Wiki, and configuration docs match actual behavior.
 
-验收：
+Acceptance:
 
-- 两种模式有独立测试矩阵；
-- strict 模式代码路径无法调用 privileged capability；
-- operator 模式的增强行为可审计、可关闭。
+- The two modes have independent test matrices;
+- strict-mode code paths cannot invoke privileged capabilities;
+- operator-mode enhanced behavior is auditable and can be disabled.
 
-完成结果：配置、环境变量 `AIBOT_PROFILE`、服务端 snapshot 与控制面板使用同一 effective policy。资源/实体发现先经过 `ObservableWorldQuery`；strict 下禁用隐藏扫描、紧急传送、强制拾取与手动传送，死亡回到世界出生点，睡眠尊重服务器 quorum，远程放置和容器/熔炉 mutation 受 reach/visibility 约束。operator 的四项开关可独立关闭，所有 allow/deny 都产生节流后的结构化决策日志。
+Completion result: The config, the `MINECRAFTAI_PROFILE` environment variable, the server-side snapshot, and the control panel all use the same effective policy. Resource/entity discovery first goes through `ObservableWorldQuery`; under strict, hidden scanning, emergency teleport, forced pickup, and manual teleport are disabled, death returns the bot to the world spawn point, sleep respects the server quorum, and remote placement and container/furnace mutation are constrained by reach/visibility. Operator's four toggles can each be disabled independently, and every allow/deny decision produces a throttled, structured decision log entry.
 
-## P0-07：快速测试金字塔与 CI
+## P0-07: Fast Test Pyramid and CI
 
-实现范围：
+Implementation scope:
 
-- 从 `origin/alpha` 的旧测试中借鉴纯策略测试模式，不恢复旧实现；
-- 优先覆盖 Decision lease、取消状态转换、授权矩阵、GoalPredicate/GoalResult、profile 解析、持久化迁移和 Job scope；
-- PR CI：JUnit、compile、remap jar、最小 dedicated-server smoke；
-- Nightly：GameTest/Testmod、多 seed、真实 LLM story 分离执行；
-- 把完整 verify harness 从生产 jar 迁移为测试 source set，生产只保留必要自诊断。
+- Borrow the pure-policy test pattern from the old tests on `origin/alpha`, without restoring the old implementation;
+- Prioritize coverage for Decision lease, cancellation state transitions, the authorization matrix, GoalPredicate/GoalResult, profile parsing, persistence migration, and Job scope;
+- PR CI: JUnit, compile, remap jar, minimal dedicated-server smoke test;
+- Nightly: GameTest/Testmod, multiple seeds, real-LLM story runs executed separately;
+- Migrate the full verify harness out of the production jar into a test source set, keeping only the necessary self-diagnostics in production.
 
-验收：
+Acceptance:
 
-- `./gradlew test` 不再是 `NO-SOURCE`；
-- 每个 P0 bug 至少有一个先红后绿的自动化测试；
-- CI 对失败返回非零状态且保存诊断产物。
+- `./gradlew test` is no longer `NO-SOURCE`;
+- Every P0 bug has at least one automated test that goes from red to green;
+- CI returns a non-zero status on failure and saves diagnostic artifacts.
 
-当前：生产 jar 与 sources jar 均经内容检查，不含 GameTest 类和 `/aibot test`、`/aibot verify`；命令驱动 harness 位于 `src/gametest`。PR CI 运行 JUnit、GameTest、build、两 JVM restart 与 strict evidence；nightly 运行 strict/operator × 多 seed；真实 LLM story 只能手动确认计费后执行。所有 workflow 在失败时上传诊断与 evidence。
+Current: Both the production jar and the sources jar are content-checked to confirm they contain no GameTest classes and no `/minecraftai test` or `/minecraftai verify`; the command-driven harness lives in `src/gametest`. PR CI runs JUnit, GameTest, build, a two-JVM restart, and strict evidence; nightly runs strict/operator × multiple seeds; real-LLM story runs can only be executed after manually confirming the billing. All workflows upload diagnostics and evidence on failure.
 
-## P0-08：可审计能力报告
+## P0-08: Auditable Capability Report
 
-实现范围：
+Implementation scope:
 
-- 每次 run 写不可变目录和 manifest；
-- 记录 `commit_sha/build_version/timestamp/runtime/config_hash/requested_seed/actual_seed/mode`；
-- 统一 harness 锁、动态临时目录、动态端口和 cleanup trap；
-- capability baseline 必须显式 pin run，不允许自动选择“最好的一次”；
-- README 数字由已提交 baseline 自动生成或引用。
+- Each run writes an immutable directory and manifest;
+- Record `commit_sha/build_version/timestamp/runtime/config_hash/requested_seed/actual_seed/mode`;
+- Unify the harness lock, dynamic temp directory, dynamic port, and cleanup trap;
+- A capability baseline must explicitly pin a run; automatically picking the “best run” is not allowed;
+- README numbers are auto-generated from, or reference, a committed baseline.
 
-验收：
+Acceptance:
 
-- fresh clone 能复现 baseline；
-- 报告可追溯到唯一代码与配置；
-- 缺失、损坏或 metadata 不完整的报告被标为 `UNVERIFIED`，不得计入发布门禁。
+- A fresh clone can reproduce the baseline;
+- The report is traceable to a unique code state and configuration;
+- A report that is missing, corrupted, or has incomplete metadata is marked `UNVERIFIED` and must not count toward the release gate.
 
-完成结果：`scripts/evidence_run.sh`、`evidence_batch.sh`、`evidence_validate.sh` 和 `pin_baseline.sh` 共用加锁、动态端口、唯一 runDir、进程树清理与原子发布。bundle 绑定起止 revision/worktree、actual seed、实际 JVM、profile/capabilities、redacted config、日志和多级 checksum。clean worktree 使用 `git archive` 固定源码；dirty 或 fixture 自动降级为 `UNVERIFIED`。`reports/baselines/index.tsv` 是唯一新式 baseline 选择器，能力矩阵不会扫描目录挑最好结果。
+Completion result: `scripts/evidence_run.sh`, `evidence_batch.sh`, `evidence_validate.sh`, and `pin_baseline.sh` share locking, dynamic ports, a unique runDir, process-tree cleanup, and atomic publishing. Each bundle binds the start/end revision/worktree, the actual seed, the actual JVM, profile/capabilities, redacted config, logs, and multi-level checksums. A clean worktree pins the source with `git archive`; a dirty worktree or fixture automatically downgrades to `UNVERIFIED`. `reports/baselines/index.tsv` is the sole modern baseline selector — the capability matrix never scans a directory to pick the best result.
 
 ## P0 Definition of Done
 
-- 上述工单均有独立自动化测试；提交拆分留待用户明确授权 `cp`，当前未擅自 stage/commit；
-- 无 P0/P1 未授权控制路径；
-- stale response、cancel、restart 和 postcondition 套件全绿；
-- capability matrix 能由 pinned manifest 自动生成；
-- ROADMAP、安装文档和 README 不再与真实行为矛盾。
+- Every work order above has an independent automated test; splitting into commits is left for the user to explicitly authorize with `cp` — nothing has been staged or committed without authorization so far;
+- No unauthorized P0/P1 control paths remain;
+- The stale-response, cancel, restart, and postcondition suites are all green;
+- The capability matrix can be auto-generated from a pinned manifest;
+- ROADMAP, the installation docs, and the README no longer contradict actual behavior.

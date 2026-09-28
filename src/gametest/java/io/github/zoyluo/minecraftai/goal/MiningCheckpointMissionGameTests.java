@@ -1,31 +1,31 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.brain.BotReporter;
-import io.github.zoyluo.aibot.brain.BotRuntimeOptions;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.persist.MissionRecord;
-import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
-import io.github.zoyluo.aibot.persist.MissionSpec;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.AbstractTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.DescendToYTask;
-import io.github.zoyluo.aibot.task.EmergencyShelterTask;
-import io.github.zoyluo.aibot.task.HoldTask;
-import io.github.zoyluo.aibot.task.MiningServiceTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.ResupplyTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskState;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.brain.BotReporter;
+import io.github.zoyluo.minecraftai.brain.BotRuntimeOptions;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.persist.MissionRecord;
+import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.AbstractTask;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.DescendToYTask;
+import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
+import io.github.zoyluo.minecraftai.task.HoldTask;
+import io.github.zoyluo.minecraftai.task.MiningServiceTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.ResupplyTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskState;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
@@ -228,7 +228,7 @@ public final class MiningCheckpointMissionGameTests {
                                 + checkpointSummary(restored));
                 require(context, TaskManager.INSTANCE.activeOrigin(bot)
                                 .map(origin -> origin.kind()
-                                        == io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.MISSION
+                                        == io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.MISSION
                                         && originalMission.get().equals(
                                         origin.missionId().toString()))
                                 .orElse(false),
@@ -1277,7 +1277,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_non_pocket_primary_service_replans_without_stale_replay", maxTicks = 220)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_failed_non_pocket_primary_service_replans_without_stale_replay", maxTicks = 220)
     public void failedNonPocketPrimaryServiceReplansWithoutStaleReplay(
             TestContext context) {
         String name = "FailedPrimaryServiceGT";
@@ -1448,7 +1448,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_service_guard_allows_slot_repair_and_remains_durable", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_terminal_service_guard_allows_slot_repair_and_remains_durable", maxTicks = 40)
     public void terminalServiceGuardAllowsSlotRepairAndRemainsDurable(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1483,7 +1483,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_service_guard_survives_craft_restart_and_blocks_without_mutation", maxTicks = 220)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_terminal_service_guard_survives_craft_restart_and_blocks_without_mutation", maxTicks = 220)
     public void terminalServiceGuardSurvivesCraftRestartAndBlocksWithoutMutation(
             TestContext context) {
         String name = "TerminalGuardRepairRestartGT";
@@ -1605,7 +1605,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_foreign_service_is_blocked_but_rotated_axis_is_allowed", maxTicks = 30)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_foreign_service_is_blocked_but_rotated_axis_is_allowed", maxTicks = 30)
     public void foreignServiceIsBlockedButRotatedAxisIsAllowed(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1661,7 +1661,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_settled_service_guard_namespace_restores_fail_closed", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_settled_service_guard_namespace_restores_fail_closed", maxTicks = 80)
     public void settledServiceGuardNamespaceRestoresFailClosed(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1771,7 +1771,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_settled_service_guard_restore_compatibility_is_strict", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_settled_service_guard_restore_compatibility_is_strict", maxTicks = 80)
     public void settledServiceGuardRestoreCompatibilityIsStrict(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1926,7 +1926,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_receipt_keeps_original_reason_across_dimension_drift", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_terminal_receipt_keeps_original_reason_across_dimension_drift", maxTicks = 40)
     public void terminalReceiptKeepsOriginalReasonAcrossDimensionDrift(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -1971,7 +1971,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_active_pocket_waits_for_its_persisted_dimension_before_restore", maxTicks = 60)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_active_pocket_waits_for_its_persisted_dimension_before_restore", maxTicks = 60)
     public void activePocketWaitsForItsPersistedDimensionBeforeRestore(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2045,7 +2045,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_active_pocket_kind_is_inferred_and_semantic_failure_is_quarantined", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_active_pocket_kind_is_inferred_and_semantic_failure_is_quarantined", maxTicks = 80)
     public void activePocketKindIsInferredAndSemanticFailureIsQuarantined(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2145,7 +2145,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_guard_only_restore_uses_typed_reason_only_when_causality_is_unique", maxTicks = 60)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_guard_only_restore_uses_typed_reason_only_when_causality_is_unique", maxTicks = 60)
     public void guardOnlyRestoreUsesTypedReasonOnlyWhenCausalityIsUnique(
             TestContext context) {
         context.runAtTick(1, () -> {
@@ -2200,7 +2200,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_terminal_capacity_guard_survives_repair_restart_and_stops_generic_replan", maxTicks = 240)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_terminal_capacity_guard_survives_repair_restart_and_stops_generic_replan", maxTicks = 240)
     public void terminalCapacityGuardSurvivesRepairRestartAndStopsGenericReplan(
             TestContext context) {
         String name = "TerminalCapacityGuardGT";
@@ -2592,7 +2592,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_non_pocket_auxiliary_service_replans_without_stale_replay", maxTicks = 180)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_failed_non_pocket_auxiliary_service_replans_without_stale_replay", maxTicks = 180)
     public void failedNonPocketAuxiliaryServiceReplansWithoutStaleReplay(
             TestContext context) {
         String name = "ProtectedRareFailedAuxGT";
@@ -2751,18 +2751,21 @@ public final class MiningCheckpointMissionGameTests {
     }
 
     /**
-     * F8:容量 handoff 服务失败 → 通用 replan 清空队列销毁精确 retry 步;fresh 计划不再包含
-     * 父矿族时,capacity-parent 标记必须在同一事务内回滚。修复前该孤儿标记让证据采集永久拒绝
-     * miningCheckpoint 更新,下一个成功提交的稀有批次在成功那一刻死于
-     * rare_batch_commit_checkpoint_invalid。
+     * F8: capacity handoff service failure -> generic replan clears the queue and destroys
+     * the precise retry step; when the fresh plan no longer includes the parent ore family,
+     * the capacity-parent marker must roll back within the same transaction. Before the fix,
+     * that orphaned marker permanently blocked evidence collection from updating
+     * miningCheckpoint, so the next rare batch that successfully committed would die at the
+     * moment of success with rare_batch_commit_checkpoint_invalid.
      */
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 550)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_failed_capacity_handoff_without_parent_family_rolls_back_debt_and_rare_batch_settles", maxTicks = 550)
     public void failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles(
             TestContext context) {
         String name = "CapacityOrphanRollbackGT";
         withRunningOrdinaryService(context, name,
                 (fixture, ignoredGoal, runtime, checkpoint) -> {
-                    // 1. 开放的普通铁矿 capacity parent:已扣 inventory-service 位、无物理台账。
+                    // 1. An open ordinary iron-ore capacity parent: the inventory-service slot
+                    // has already been debited, with no physical ledger.
                     Map<String, String> parent = new LinkedHashMap<>(
                             namespace(checkpoint, "mining."));
                     parent.put("batch_open", "true");
@@ -2772,7 +2775,8 @@ public final class MiningCheckpointMissionGameTests {
                                     .filter(OreDigTask.RestoreMetadata::batchOpen).isPresent(),
                             "orphan fixture could not forge an open capacity parent");
 
-                    // 2. 受保护的稀有(diamond64)主 mining 命名空间(epoch 0,批次开放)。
+                    // 2. The protected rare (diamond64) primary mining namespace
+                    // (epoch 0, batch open).
                     Map<String, String> protectedRare = new LinkedHashMap<>(parent);
                     protectedRare.put("batch_open", "true");
                     protectedRare.put("target_count", "8");
@@ -2785,7 +2789,8 @@ public final class MiningCheckpointMissionGameTests {
                             OreDigTask.inspectCheckpoint(protectedRare, 64).isPresent(),
                             "orphan fixture forged an invalid protected rare cursor");
 
-                    // 3. 预算耗尽的容量服务:恢复后第一 tick 即 mining_service_timeout。
+                    // 3. A capacity service with exhausted budget: it hits
+                    // mining_service_timeout on the very first tick after restore.
                     Map<String, String> failedService = new LinkedHashMap<>(
                             namespace(checkpoint, "task."));
                     for (String key : Set.of(
@@ -2820,8 +2825,9 @@ public final class MiningCheckpointMissionGameTests {
                     forged.put("capacity_parent", "auxiliary");
 
                     AIPlayerEntity bot = fixture.bot();
-                    // 完整的 diamond64 readiness 使 fresh 计划不再需要铁矿族——这正是孤儿
-                    // 触发条件:retry 步被销毁后,队列里没有任何步骤能重新绑定该 debit。
+                    // Full diamond64 readiness means the fresh plan no longer needs the iron
+                    // ore family -- this is exactly the orphan trigger condition: once the
+                    // retry step is destroyed, no step left in the queue can rebind that debit.
                     clearCarriedInventory(bot);
                     giveDiamond64Readiness(bot);
                     Goal longRareGoal = new Goal.HaveItem(Items.DIAMOND, 64);
@@ -2869,8 +2875,11 @@ public final class MiningCheckpointMissionGameTests {
                                     + GoalExecutor.INSTANCE.lastResult(bot)
                                     .map(result -> result.reason()).orElse("plan_lost"));
                     Map<String, String> after = replanned.active().checkpoint();
-                    // capture 可能已把 mining.* 换成新指派同族任务的等价再编码;断言关键事实
-                    // 而非字节相等:受保护稀有游标仍在、批次仍开放、孤儿标记与 aux 债务已回滚。
+                    // capture may have already replaced mining.* with an equivalent
+                    // re-encoding from a newly assigned same-family task; assert the key facts
+                    // rather than byte equality: the protected rare cursor is still present,
+                    // the batch is still open, and the orphan marker and aux debt have rolled
+                    // back.
                     require(context, !after.containsKey("capacity_parent")
                                     && !after.containsKey("capacity_parent_delivered")
                                     && !after.containsKey("capacity_parent_face")
@@ -2884,8 +2893,9 @@ public final class MiningCheckpointMissionGameTests {
                             "orphaned capacity parent survived the generic replan: "
                                     + checkpointSummary(after));
 
-                    // 阶段 2:交付满额的稀有批次在回滚后的账本上正常 commit + settle,
-                    // 而不是死于 rare_batch_commit_checkpoint_invalid。
+                    // Phase 2: a fully delivered rare batch commits and settles normally on
+                    // the rolled-back ledger, instead of dying with
+                    // rare_batch_commit_checkpoint_invalid.
                     Map<String, String> deliveredRare =
                             new LinkedHashMap<>(protectedRare);
                     deliveredRare.put("delivered", "8");
@@ -2911,9 +2921,11 @@ public final class MiningCheckpointMissionGameTests {
                             "commit-window restore did not replay the delivered rare batch: "
                                     + (oreTask == null
                                     ? "none" : oreTask.getClass().getSimpleName()));
-                    // 同步驱动 commit(嵌套 runAtEveryTick 会破坏 GameTest 调度器的迭代器):
-                    // 交付满额的批次在 finishAlreadyDeliveredBatch 快路径上几 tick 内 COMPLETED;
-                    // abort 对 COMPLETED 任务是 no-op,只清空 TaskManager 槽位让 tickBot 结算。
+                    // Drive the commit synchronously (a nested runAtEveryTick would break the
+                    // GameTest scheduler's iterator): a fully delivered batch reaches
+                    // COMPLETED within a few ticks via the finishAlreadyDeliveredBatch fast
+                    // path; abort is a no-op on a COMPLETED task, it just clears the
+                    // TaskManager slot so tickBot can settle.
                     for (int tick = 0; tick < 12
                             && oreTask.state() == TaskState.RUNNING; tick++) {
                         oreTask.tick(bot);
@@ -2949,7 +2961,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_failed_inter_batch_auxiliary_service_preserves_later_same_family_cursor", maxTicks = 220)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_failed_inter_batch_auxiliary_service_preserves_later_same_family_cursor", maxTicks = 220)
     public void failedInterBatchAuxiliaryServicePreservesLaterSameFamilyCursor(
             TestContext context) {
         String name = "ProtectedRareAuxContinueGT";
@@ -3072,7 +3084,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_completed_inter_batch_service_promotes_aux_cursor_to_next_batch", maxTicks = 220)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_completed_inter_batch_service_promotes_aux_cursor_to_next_batch", maxTicks = 220)
     public void completedInterBatchServicePromotesAuxCursorToNextBatch(
             TestContext context) {
         String name = "ProtectedRareAuxCompleteGT";
@@ -4692,7 +4704,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_completed_capacity_retry_defers_safety_and_restores_closed_commit", maxTicks = 180)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_completed_capacity_retry_defers_safety_and_restores_closed_commit", maxTicks = 180)
     public void completedCapacityRetryDefersSafetyAndRestoresClosedCommit(
             TestContext context) {
         String name = "CapacityCompletionSafetyGT";
@@ -4789,7 +4801,7 @@ public final class MiningCheckpointMissionGameTests {
                 });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_satisfied_goal_restores_pocket_first_then_fails_with_original_typed_reason", maxTicks = 650)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_satisfied_goal_restores_pocket_first_then_fails_with_original_typed_reason", maxTicks = 650)
     public void satisfiedGoalRestoresPocketFirstThenFailsWithOriginalTypedReason(
             TestContext context) {
         String name = "GoalPocketTypedFailureGT";
@@ -5373,7 +5385,7 @@ public final class MiningCheckpointMissionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_checkpoint_mission_game_tests_service_restart_returns_to_saved_face_before_second_diamond_batch", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:mining_checkpoint_mission_game_tests_service_restart_returns_to_saved_face_before_second_diamond_batch", maxTicks = 800)
     public void serviceRestartReturnsToSavedFaceBeforeSecondDiamondBatch(TestContext context) {
         ServiceFixture fixture = spawnServiceMiner(context);
         AIPlayerEntity bot = fixture.bot();
@@ -6408,7 +6420,7 @@ public final class MiningCheckpointMissionGameTests {
                         bot.getInventory().getMainStacks().stream(),
                         java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
                 .anyMatch(stack -> stack.isOf(Items.STONE_PICKAXE)
-                        && io.github.zoyluo.aibot.task.MiningServiceTask
+                        && io.github.zoyluo.minecraftai.task.MiningServiceTask
                         .usableDurability(stack) > 0);
     }
 

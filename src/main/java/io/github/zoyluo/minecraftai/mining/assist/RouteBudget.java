@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Server-wide budget for the expensive part of a detour: starting a route (mining-assist design 4.3, C1).

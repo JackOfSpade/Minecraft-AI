@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.brain.ChatResponse;
-import io.github.zoyluo.aibot.brain.ChatToolCall;
+import io.github.zoyluo.minecraftai.brain.ChatResponse;
+import io.github.zoyluo.minecraftai.brain.ChatToolCall;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

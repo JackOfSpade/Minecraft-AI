@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.auth;
+package io.github.zoyluo.minecraftai.auth;
 
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.Actor;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.BotTarget;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.Decision;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.GlobalTarget;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.Operation;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.Actor;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.BotTarget;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.Decision;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.GlobalTarget;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.Operation;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.command.permission.Permission;
 import net.minecraft.command.permission.PermissionLevel;
 import net.minecraft.command.permission.PermissionPredicate;
@@ -24,7 +24,7 @@ public final class BotAuthorizationGate {
 
     private static final int OPERATOR_LEVEL = 2;
     private static final int TRUSTED_CONSOLE_LEVEL = 4;
-    private static final String GENERIC_NOT_FOUND = "[AIBot] 找不到该 Bot 或无权限。";
+    private static final String GENERIC_NOT_FOUND = "[Minecraft-AI] Bot not found or insufficient permission.";
     private final BotAuthorizationPolicy policy = new BotAuthorizationPolicy();
 
     private BotAuthorizationGate() {
@@ -124,7 +124,7 @@ public final class BotAuthorizationGate {
                 "operation", Operation.ADMIN,
                 "channel", cleanChannel(channel),
                 "reason", decision.reason());
-        source.sendError(Text.literal("[AIBot] 该操作需要服务器管理员权限。"));
+        source.sendError(Text.literal("[Minecraft-AI] This operation requires server administrator permission."));
         return false;
     }
 

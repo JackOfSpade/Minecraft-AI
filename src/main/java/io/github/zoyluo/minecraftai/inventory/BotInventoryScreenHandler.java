@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.inventory;
+package io.github.zoyluo.minecraftai.inventory;
 
-import io.github.zoyluo.aibot.AIBotMod;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.MinecraftAiMod;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.entity.ContainerUser;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
@@ -56,7 +56,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
     /** Registered on the common side; only the screen renderer itself is registered client-side. */
     public static final ScreenHandlerType<BotInventoryScreenHandler> TYPE = Registry.register(
             Registries.SCREEN_HANDLER,
-            Identifier.of(AIBotMod.MOD_ID, "bot_inventory"),
+            Identifier.of(MinecraftAiMod.MOD_ID, "bot_inventory"),
             new ScreenHandlerType<>(BotInventoryScreenHandler::new, FeatureFlags.VANILLA_FEATURES));
 
     private final Inventory botInventory;

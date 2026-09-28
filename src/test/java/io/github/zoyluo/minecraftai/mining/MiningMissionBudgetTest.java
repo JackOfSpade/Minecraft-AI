@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
-import io.github.zoyluo.aibot.goal.GoalStep;
+import io.github.zoyluo.minecraftai.goal.GoalStep;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -120,7 +120,7 @@ class MiningMissionBudgetTest {
     @Test
     void verifierBindsTimeoutToTheLiveNominalPlanInsteadOfAMagicLiteral() throws IOException {
         String source = Files.readString(Path.of(
-                "src/gametest/java/io/github/zoyluo/aibot/command/AIBotVerifySubcommand.java"));
+                "src/gametest/java/io/github/zoyluo/minecraftai/command/MinecraftAiVerifySubcommand.java"));
         int start = source.indexOf("private static Result assignDiamondStack64FromZero");
         int end = source.indexOf("private static Result assignRealArmor", start);
         String method = source.substring(start, end);

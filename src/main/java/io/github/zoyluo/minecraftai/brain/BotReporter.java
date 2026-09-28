@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.goal.GoalResult;
-import io.github.zoyluo.aibot.task.TaskState;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalResult;
+import io.github.zoyluo.minecraftai.task.TaskState;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Map;

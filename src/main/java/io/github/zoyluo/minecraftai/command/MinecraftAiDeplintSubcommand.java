@@ -1,17 +1,17 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.goal.GoalPlanner;
-import io.github.zoyluo.aibot.goal.GoalStep;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalPlanner;
+import io.github.zoyluo.minecraftai.goal.GoalStep;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
@@ -28,20 +28,21 @@ import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
 /**
- * S6:依赖链审计器 `/aibot deplint <bot> <spec>`——离线对指定目标跑 {@link GoalPlanner#plan},
- * 打印步骤树 / 未解析项 / 步数,作为"技能依赖链完整性"的回归尺子(每步开发后用它体检)。
+ * S6: dependency-chain auditor `/minecraftai deplint <bot> <spec>` -- runs {@link GoalPlanner#plan}
+ * offline against the given target, printing the step tree / unresolved items / step count, serving
+ * as a regression yardstick for "skill dependency-chain completeness" (use it as a health check after each dev step).
  *
- * spec 形如:mine_ore:diamond:3 / item:cooked_beef:8 / item:bread:3 / pickaxe:iron / armor / workstation / stockpile:iron_ingot:32
+ * spec looks like: mine_ore:diamond:3 / item:cooked_beef:8 / item:bread:3 / pickaxe:iron / armor / workstation / stockpile:iron_ingot:32
  */
-public final class AIBotDeplintSubcommand {
-    private AIBotDeplintSubcommand() {
+public final class MinecraftAiDeplintSubcommand {
+    private MinecraftAiDeplintSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
         return literal("deplint")
                 .then(argument("name", StringArgumentType.word())
                         .then(argument("spec", StringArgumentType.greedyString())
-                                .executes(AIBotDeplintSubcommand::run)));
+                                .executes(MinecraftAiDeplintSubcommand::run)));
     }
 
     private static int run(CommandContext<ServerCommandSource> context) {
@@ -66,7 +67,7 @@ public final class AIBotDeplintSubcommand {
                 "[deplint] goal=" + goal + "  steps=" + steps.size() + "  unresolved=" + unresolved.size()), false);
         context.getSource().sendFeedback(() -> Text.literal("[deplint] " + plan.describeSteps()), false);
         if (unresolved.isEmpty()) {
-            context.getSource().sendFeedback(() -> Text.literal("[deplint] OK · 链完整,无未解析项"), false);
+            context.getSource().sendFeedback(() -> Text.literal("[deplint] OK · chain complete, no unresolved items"), false);
         } else {
             context.getSource().sendError(Text.literal("[deplint] UNRESOLVED · " + String.join(", ", unresolved)));
         }
@@ -118,7 +119,7 @@ public final class AIBotDeplintSubcommand {
         };
     }
 
-    // 接受 "diamond" / "diamond_ore" / "minecraft:diamond_ore"
+    // Accepts "diamond" / "diamond_ore" / "minecraft:diamond_ore"
     private static Block block(String name) {
         Block b = Registries.BLOCK.get(id(name));
         if (b == Blocks.AIR && !name.contains(":") && !name.endsWith("_ore")) {

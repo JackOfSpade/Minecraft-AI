@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.item.Item;
@@ -120,7 +120,7 @@ public final class MineTask extends AbstractTask {
             phase = Phase.PICKING_UP;
             return;
         }
-        // P1-a:挖掘走 BlockMiner(只在空闲发起、绝不重发清零进度);破块/超时进入拾取阶段。
+        // P1-a: mining goes through BlockMiner (only starts when idle, never restarts and resets progress); block break/timeout moves to the pickup phase.
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.DONE || status == BlockMiner.Status.FAILED) {
             pickupTicks = 120;
@@ -173,16 +173,16 @@ public final class MineTask extends AbstractTask {
             fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(targetBlock));
             return;
         }
-        // GOALFIX-GF2:挖前危险闸——目标相邻有岩浆时不破块(破块会引出岩浆烧死自己),安全失败让上层另想办法。
+        // GOALFIX-GF2: pre-mining hazard gate -- do not break the block when lava is adjacent to the target (breaking it would let the lava out and burn us to death); fail safely and let the caller figure out another approach.
         if (lavaAdjacent(bot, targetPos)) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, bot, "mine_hazard_skip",
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.TASK, bot, "mine_hazard_skip",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ());
             fail("mine_hazard_lava");
             return;
         }
         inventoryCountBeforeMining = HarvestCore.countInventoryItems(bot, targetDrops);
         pickupSweepAttempted = false;
-        miner.begin(bot, targetPos); // P1-a:BlockMiner 接管挖掘,mine() 阶段每 tick 推进
+        miner.begin(bot, targetPos); // P1-a: BlockMiner takes over mining; the mine() phase advances it every tick
         phase = Phase.MINING;
     }
 

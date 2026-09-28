@@ -1,19 +1,19 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.BucketAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.action.ToolSelector;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.BucketAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Items;
@@ -485,7 +485,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         double reach = bot.getBlockInteractionRange();
         int range = Math.min(
                 Math.max(1, (int) Math.ceil(reach)),
-                Math.min(16, Math.max(1, AIBotConfig.get().perception().radius())));
+                Math.min(16, Math.max(1, MinecraftAiConfig.get().perception().radius())));
         Vec3d eye = bot.getEyePos();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
@@ -1659,7 +1659,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private BlockPos nearestObservableWaterSource(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        int range = Math.min(16, Math.max(1, AIBotConfig.get().perception().radius()));
+        int range = Math.min(16, Math.max(1, MinecraftAiConfig.get().perception().radius()));
         int minY = Math.max(world.getBottomY(), origin.getY() - range);
         int maxY = Math.min(world.getBottomY() + world.getHeight() - 1, origin.getY() + range);
         BlockPos best = null;

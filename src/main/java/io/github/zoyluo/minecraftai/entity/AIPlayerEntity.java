@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.entity;
+package io.github.zoyluo.minecraftai.entity;
 
 import com.mojang.authlib.GameProfile;
-import io.github.zoyluo.aibot.action.ActionPack;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.inventory.BotInventoryScreenFactory;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
 import net.minecraft.server.MinecraftServer;
@@ -49,7 +49,7 @@ public class AIPlayerEntity extends ServerPlayerEntity {
         return "127.0.0.1";
     }
 
-    public void reviveForAIBotSpawn() {
+    public void reviveForMinecraftAiSpawn() {
         this.unsetRemoved();
     }
 

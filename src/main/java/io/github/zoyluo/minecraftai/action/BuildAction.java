@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogFields;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.block.ShapeContext;
@@ -37,12 +37,12 @@ public final class BuildAction {
     public static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face, Hand hand) {
         double reach = player.getBlockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
-                AIBotConfig.get().perception().radius(), reach);
+                MinecraftAiConfig.get().perception().radius(), reach);
         // Vanilla measures block interaction reach against the block's bounding box, not its
         // center. The center may be outside reach while a face inset is still a legal click.
         ItemStack stack = player.getStackInHand(hand);
         if (stack.isEmpty()) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
             return ActionResult.failed("empty_hand");
         }
         var item = stack.getItem();
@@ -74,7 +74,7 @@ public final class BuildAction {
             return ActionResult.SUCCESS;
         }
         String reason = result.isAccepted() ? "accepted_without_block_change" : result.getClass().getSimpleName();
-        BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.ERROR, player, "place_failed",
+        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed",
                 "pos", LogFields.pos(destination), "reason", reason);
         return ActionResult.failed("interact_block_" + reason);
     }
@@ -102,7 +102,7 @@ public final class BuildAction {
             }
             lastFailure = preferPlacementFailure(lastFailure, result);
         }
-        if (AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL) {
+        if (MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL) {
             return lastFailure;
         }
         ActionResult fallback = directPlaceFallback(player, pos, Hand.MAIN_HAND);
@@ -195,7 +195,8 @@ public final class BuildAction {
         }
         var item = stack.getItem();
         var existing = player.getEntityWorld().getBlockState(pos);
-        // 可替换格(流体源/草丛等)放行:封岩浆就是对浆格直接放块,原版玩家合法操作。
+        // Allow replaceable cells (fluid source blocks, tall grass, etc.): capping lava is just
+        // placing a block directly onto a fluid cell, a legal vanilla player action.
         if (!existing.isAir() && !existing.isReplaceable()) {
             return ActionResult.failed("target_not_air");
         }

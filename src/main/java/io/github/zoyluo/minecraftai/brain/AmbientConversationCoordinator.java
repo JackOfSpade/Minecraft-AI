@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.perception.PerceptionCollector;
-import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.perception.PerceptionCollector;
+import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.ArrayList;
@@ -48,7 +48,7 @@ public final class AmbientConversationCoordinator {
     private AmbientConversationCoordinator() {
     }
 
-    public void configure(AIBotConfig config) {
+    public void configure(MinecraftAiConfig config) {
         Objects.requireNonNull(config, "config");
         synchronized (lifecycleLock) {
             generation++;
@@ -87,7 +87,7 @@ public final class AmbientConversationCoordinator {
     }
 
     private void maybeStart(MinecraftServer server) {
-        AIBotConfig.Conversation cfg = AIBotConfig.get().conversation();
+        MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
         if (!Boolean.TRUE.equals(cfg.enabled())) {
             return;
         }
@@ -160,7 +160,7 @@ public final class AmbientConversationCoordinator {
     }
 
     private void endConversation(MinecraftServer server, String reason) {
-        AIBotConfig.Conversation cfg = AIBotConfig.get().conversation();
+        MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
         BotLog.lifecycle("ambient_conversation_ended", "reason", reason);
         active = null;
         nextEligibleTick = server.getTicks() + Math.max(0, cfg.cooldownTicks());
@@ -173,7 +173,7 @@ public final class AmbientConversationCoordinator {
             endConversation(server, "speaker_gone");
             return;
         }
-        AIBotConfig.Conversation cfg = AIBotConfig.get().conversation();
+        MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
         String previousLine = conversation.transcript.isEmpty()
                 ? null : conversation.transcript.get(conversation.transcript.size() - 1).text();
         conversation.revealAtTick = server.getTicks() + computeDelayTicks(previousLine, cfg);
@@ -227,7 +227,7 @@ public final class AmbientConversationCoordinator {
         }
         String trimmed = line.trim();
         if (mustBeStatement && endsWithQuestion(trimmed)) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.COMM, null,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.COMM, null,
                     "ambient_conversation_last_line_was_a_question", "line", trimmed);
         }
         conversation.pendingLine = trimmed;
@@ -335,7 +335,7 @@ public final class AmbientConversationCoordinator {
     }
 
     /** Reading time (words / reading speed) plus a thinking buffer proportional to length, clamped. */
-    static int computeDelayTicks(String previousLine, AIBotConfig.Conversation cfg) {
+    static int computeDelayTicks(String previousLine, MinecraftAiConfig.Conversation cfg) {
         if (previousLine == null || previousLine.isBlank()) {
             return 0;
         }

@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.persist;
+package io.github.zoyluo.minecraftai.persist;
 
-import io.github.zoyluo.aibot.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.Goal;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
 

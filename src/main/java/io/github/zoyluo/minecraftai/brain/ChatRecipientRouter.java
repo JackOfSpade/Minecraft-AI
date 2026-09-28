@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 
@@ -41,7 +41,7 @@ public final class ChatRecipientRouter {
     private ChatRecipientRouter() {
     }
 
-    public void configure(AIBotConfig config) {
+    public void configure(MinecraftAiConfig config) {
         Objects.requireNonNull(config, "config");
         synchronized (lifecycleLock) {
             generation++;

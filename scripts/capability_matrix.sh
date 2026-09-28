@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 从显式 pin 的 manifest 生成能力矩阵。禁止扫描目录后自动选择最好或最新结果。
-# legacy 汇总值是 manifest 中的 UNVERIFIED 历史快照；生成过程不得读取本地 reliability TSV。
+# Generates the capability matrix from an explicitly pinned manifest. Scanning a directory and auto-selecting the best or most recent result is forbidden.
+# The legacy aggregate value is an UNVERIFIED historical snapshot from the manifest; the generation process must not read local reliability TSVs.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -167,13 +167,13 @@ render() {
   validate_index || return 1
 
   cat <<'EOF'
-# AIBot 能力矩阵
+# MinecraftAi Capability Matrix
 
-此文件由 `reports/capability_baseline_manifest.tsv`、`reports/baselines/index.tsv` 通过 `scripts/capability_matrix.sh` 生成。
+This file is generated from `reports/capability_baseline_manifest.tsv` and `reports/baselines/index.tsv` via `scripts/capability_matrix.sh`.
 
-重要：`reports/baselines/index.tsv` 是普通能力 VERIFIED 单-run 证据的唯一选择器，优先于 legacy manifest；生成器不会自动选择“最好”或“最新”的结果。Mining First 明确禁止单-run pin，必须先通过 `scripts/mining_release_gate.sh` 的固定 20-seed 与哨兵批次门禁。没有合格的聚合证据格式前，两项 Mining First 能力保持 `MISSING`。manifest 保留历史源文件名与 SHA-256 供追溯，但生成器不会读取或依赖这些本地报告；legacy 数据缺少 tested revision、配置 hash 和 actual seed，因此始终为 `UNVERIFIED`。
+Important: `reports/baselines/index.tsv` is the sole selector for VERIFIED single-run evidence of ordinary capabilities, taking priority over the legacy manifest; the generator never auto-selects the “best” or “most recent” result. Mining First explicitly forbids single-run pinning and must first pass the fixed 20-seed and sentinel-batch gate in `scripts/mining_release_gate.sh`. Until a qualifying aggregated-evidence format exists, both Mining First capabilities remain `MISSING`. The manifest retains historical source filenames and SHA-256 hashes for traceability, but the generator does not read or depend on these local reports; legacy data lacks a tested revision, config hash, and actual seed, so it is always `UNVERIFIED`.
 
-| ID | 能力 | 场景 | 结果 | 成熟度 | 证据 | 可信度 | 测试版本 | 日期 | 模式 | Fixture | 备注 |
+| ID | Capability | Scenario | Result | Maturity | Evidence | Confidence | Tested Revision | Date | Mode | Fixture | Note |
 |---|---|---|---:|---|---|---|---|---|---|---|---|
 EOF
 
@@ -199,7 +199,7 @@ EOF
     if pinned_data="$(pinned_baseline "$capability_id" "$scenario")"; then
       local pinned_note
       IFS=$'\t' read -r result evidence provenance date_display mode_display pinned_note <<< "$pinned_data"
-      note="${note}；${pinned_note}"
+      note="${note}; ${pinned_note}"
       actual_seed_verified=yes
     else
       pinned_status=$?
@@ -209,16 +209,16 @@ EOF
       fi
     evidence="\`$evidence_state\` (legacy snapshot)"
     if [[ "$source_file" == "-" && "$evidence_state" == "MISSING" ]]; then
-      provenance="无测试记录"
+      provenance="no test record"
       mode_display="—"
       date_display="—"
       evidence='`MISSING`'
     else
       if [[ "$actual_seed_verified" != "yes" ]]; then
-        provenance="$provenance; seed未回读"
+        provenance="$provenance; seed not read back"
       fi
       if [[ "$run_mode" == "legacy_unspecified" ]]; then
-        mode_display="未知（legacy）"
+        mode_display="unknown (legacy)"
       fi
     fi
     fi
@@ -240,32 +240,32 @@ EOF
 
   cat <<'EOF'
 
-## 判定规则
+## Determination Rules
 
-- `DEMONSTRATED`：在有限 pinned batch 中表现稳定，但尚未达到 release gate。
-- `ALPHA`：主链已跑通，仍有显著环境失败。
-- `EXPERIMENTAL`：能成功，但成功率或过程稳定性不足。
-- `UNSTABLE/BLOCKED`：不能作为用户承诺。
-- `UNVERIFIED`：manifest 仅保留 legacy 汇总、历史源文件名与 hash，缺少可验证的唯一代码、配置或 actual seed 证据。
-- `MISSING`：尚无明确 pin 的可比较批次。
+- `DEMONSTRATED`: stable across a limited pinned batch, but has not yet reached the release gate.
+- `ALPHA`: the main chain runs end-to-end, but still has significant environmental failures.
+- `EXPERIMENTAL`: can succeed, but success rate or process stability is insufficient.
+- `UNSTABLE/BLOCKED`: cannot be presented as a commitment to users.
+- `UNVERIFIED`: the manifest retains only the legacy aggregate, historical source filename, and hash — it lacks verifiable, unique code, config, or actual-seed evidence.
+- `MISSING`: no explicitly pinned, comparable batch exists yet.
 
 ## Release Gates
 
-- Mining First：`diamond_stack_64` 与 `obsidian_half_stack_32` 各至少 20 个固定公开 seed，成功率 `>= 90%`、零死亡、`strict_survival`；
-- controlled contract 只验证数量/持久化/后置条件，prepared 只用于诊断；两者 PASS 不得认证最终能力；
-- 四条黄金链各至少 20 个固定公开 seed，成功率 `>= 90%`；
-- `cancel/replace/restart-resume` 为 `100%`；
-- `PARTIAL` 不得计入 PASS；
-- 所有计入门禁的 run 必须记录 `commit_sha/config_hash/actual_seed/mode`；
-- `UNVERIFIED` 和 `MISSING` 永远不计入发布通过率。
+- Mining First: `diamond_stack_64` and `obsidian_half_stack_32` each require at least 20 fixed, published seeds, a success rate `>= 90%`, zero deaths, under `strict_survival`;
+- The controlled contract only verifies quantity/persistence/postconditions, and prepared is for diagnostics only; a PASS on either must not certify the final capability;
+- Each of the four golden chains requires at least 20 fixed, published seeds, with a success rate `>= 90%`;
+- `cancel/replace/restart-resume` must be `100%`;
+- `PARTIAL` must not count as a PASS;
+- Every run counted toward the gate must record `commit_sha/config_hash/actual_seed/mode`;
+- `UNVERIFIED` and `MISSING` never count toward the release pass rate.
 
-## 更新方式
+## Update Procedure
 
-1. 运行不可变、带 metadata 的多 seed 测试；
-2. 普通能力用 `scripts/pin_baseline.sh` 将 VERIFIED run 显式绑定到 capability ID；Mining First 禁止走此单-run 入口；
-3. 将 immutable bundle 与 `reports/baselines/index.tsv` 一起纳入版本控制；
-4. 运行 `bash scripts/capability_matrix.sh --output docs/CAPABILITY_MATRIX.md`；
-5. P0-07b CI 建立后运行 `bash scripts/capability_matrix.sh --check docs/CAPABILITY_MATRIX.md`。
+1. Run immutable, metadata-tagged multi-seed tests;
+2. For ordinary capabilities, use `scripts/pin_baseline.sh` to explicitly bind a VERIFIED run to the capability ID; Mining First is forbidden from using this single-run entry point;
+3. Commit the immutable bundle together with `reports/baselines/index.tsv` to version control;
+4. Run `bash scripts/capability_matrix.sh --output docs/CAPABILITY_MATRIX.md`;
+5. After P0-07b CI is established, run `bash scripts/capability_matrix.sh --check docs/CAPABILITY_MATRIX.md`.
 EOF
 
   return "$errors"
@@ -298,9 +298,9 @@ fi
 if [[ "$mode" == "output" ]]; then
   target_dir="$(dirname "$target")"
   mkdir -p "$target_dir"
-  tmp="$(mktemp "$target_dir/.aibot-capability.XXXXXX")"
+  tmp="$(mktemp "$target_dir/.minecraftai-capability.XXXXXX")"
 else
-  tmp="$(mktemp "${TMPDIR:-/tmp}/aibot-capability.XXXXXX")"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/minecraftai-capability.XXXXXX")"
 fi
 trap 'rm -f "$tmp"' EXIT
 render > "$tmp"

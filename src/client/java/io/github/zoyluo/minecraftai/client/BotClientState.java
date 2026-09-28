@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.client;
+package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -11,7 +11,7 @@ import java.util.Locale;
 public final class BotClientState {
     public static final BotClientState INSTANCE = new BotClientState();
 
-    private static final int MAX_TRANSCRIPT = 300;  // 保留最近 300 条对话,配合 ChatView 上拉回溯
+    private static final int MAX_TRANSCRIPT = 300;  // Keep the most recent 300 chat lines, to support ChatView's pull-up-to-scroll-back pagination
     private String targetBot = "";
     private BotSnapshotS2C snapshot;
     private final Deque<ChatLine> transcript = new ArrayDeque<>();

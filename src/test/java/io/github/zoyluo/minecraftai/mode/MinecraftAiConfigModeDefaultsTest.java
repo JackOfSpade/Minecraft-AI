@@ -1,18 +1,18 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class AIBotConfigModeDefaultsTest {
+class MinecraftAiConfigModeDefaultsTest {
     @Test
     void generatedConfigShapeUsesTopLevelStrictProfileAndCapabilityFlags() {
-        AIBotConfig defaults = AIBotConfig.defaults();
+        MinecraftAiConfig defaults = MinecraftAiConfig.defaults();
         JsonObject json = JsonParser.parseString(new Gson().toJson(defaults)).getAsJsonObject();
 
         assertEquals(OperatingProfile.STRICT_SURVIVAL, defaults.profile());

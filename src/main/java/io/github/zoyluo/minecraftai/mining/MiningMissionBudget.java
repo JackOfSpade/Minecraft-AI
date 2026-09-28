@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
-import io.github.zoyluo.aibot.goal.GoalPlanner;
-import io.github.zoyluo.aibot.goal.GoalStep;
+import io.github.zoyluo.minecraftai.goal.GoalPlanner;
+import io.github.zoyluo.minecraftai.goal.GoalStep;
 import net.minecraft.block.Blocks;
 
 /**

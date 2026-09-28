@@ -1,22 +1,22 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLogWriter;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.assist.AssistGate;
-import io.github.zoyluo.aibot.mining.assist.AssistMode;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.ObservedOccupancy;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.assist.AssistGate;
+import io.github.zoyluo.minecraftai.mining.assist.AssistMode;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -66,7 +66,7 @@ public final class OreDigOpportunisticGameTests {
     private static final int SHELL = 3;
     private static final BlockState STONE = Blocks.STONE.getDefaultState();
     private static final BlockState AIR = Blocks.AIR.getDefaultState();
-    private static final String ENV_PREFIX = "aibot-gametest:ore_dig_opportunistic_game_tests_";
+    private static final String ENV_PREFIX = "minecraftai-gametest:ore_dig_opportunistic_game_tests_";
 
     // ---------------------------------------------------------------------------------------------
     // 1. A visible valuable is mined, then the bot returns to the exact anchor (design 4.10, I6)
@@ -1245,8 +1245,8 @@ public final class OreDigOpportunisticGameTests {
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {
-            require(AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                    "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+            require(MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                    "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
             for (PrivilegedCapability capability : PrivilegedCapability.values()) {
                 require(!CapabilityRuntime.decide(bot, capability, label).allowed(),
                         "strict_survival unexpectedly allowed " + capability);

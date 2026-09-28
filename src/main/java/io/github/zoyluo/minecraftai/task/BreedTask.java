@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.InteractAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.InteractAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.passive.AnimalEntity;
 import net.minecraft.item.Item;
@@ -94,7 +94,7 @@ public final class BreedTask extends AbstractTask {
                                 && animal.getBreedingAge() == 0
                                 && animal.canEat())
                 .stream()
-                .filter(animal -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, animal))
+                .filter(animal -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, animal))
                 .sorted(Comparator.comparingDouble(bot::distanceTo))
                 .toList();
         if (candidates.size() < 2) {

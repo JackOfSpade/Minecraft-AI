@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 public class LlmApiException extends Exception {
     public LlmApiException(String message) {

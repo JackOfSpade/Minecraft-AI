@@ -1,18 +1,18 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.EatAction;
-import io.github.zoyluo.aibot.action.EquipAction;
-import io.github.zoyluo.aibot.action.InteractAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.EatAction;
+import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.InteractAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.CreeperEntity;
@@ -55,7 +55,7 @@ public final class CombatTask extends AbstractTask {
     // Vanilla Creeper ignition only backs off beyond seven blocks (or after LOS is broken).
     private static final double CREEPER_HEAL_SAFE_DISTANCE = 8.0D;
     private static final int RETREAT_STEP_DISTANCE = 6;
-    private static final int LOST_SIGHT_LIMIT = 50; // 目标被墙挡住(无视线)持续 2.5s → 结束战斗,不傻打到 timeout
+    private static final int LOST_SIGHT_LIMIT = 50; // Target blocked by a wall (no line of sight) for 2.5s straight -> end combat instead of foolishly fighting until timeout
     private static final int DEFENSIVE_MAX_VERTICAL_DROP = 2;
     private static final double DEFENSIVE_MAX_HORIZONTAL_DISTANCE = 8.0D;
     /** Raise the shield a little ahead of CreeperDefenseTask's own late-fuse wall threshold. */
@@ -85,7 +85,7 @@ public final class CombatTask extends AbstractTask {
     /** Transient safety pressure; never owns primary kill credit. */
     private LivingEntity retreatThreat;
     private BlockPos retreatDestination;
-    private int lostSightTicks; // 目标连续无视线(被墙挡)的 tick 数
+    private int lostSightTicks; // Consecutive tick count with no line of sight to the target (blocked by a wall)
     /** True while a reactive shield block (projectile/creeper fuse) is currently being held up. */
     private boolean reactiveShieldRaised;
     private BlockPos peekHideSpot;
@@ -165,9 +165,12 @@ public final class CombatTask extends AbstractTask {
         if (!defensiveEngagementAllowed(bot)) {
             return;
         }
-        // 目标被方块挡住够不到(隔墙/隔隧道)→ 结束战斗,别傻打/空追到 timeout(实测 bug:被阻隔的怪
-        // 让 bot 一直"正在战斗"、中断正常挖矿)。瞬间遮挡不算,持续无视线 2.5s 才收手;够不到即安全,
-        // 用 complete 干净结束让原任务 resume,不 fail 惊动大脑。
+        // Target is blocked by a block and unreachable (behind a wall/tunnel) -> end combat, don't
+        // foolishly keep swinging/chasing into empty air until timeout (observed bug: a blocked
+        // hostile kept the bot stuck "in combat", interrupting normal mining). A momentary occlusion
+        // doesn't count; only a sustained 2.5s of no line of sight ends it. Unreachable is inherently
+        // safe, so use complete() to end cleanly and let the original task resume, instead of fail()
+        // which would alarm the brain.
         if (target != null && target.isAlive() && !CombatCore.hasLineOfSight(bot, target)) {
             if (++lostSightTicks > LOST_SIGHT_LIMIT) {
                 lostSightTicks = 0;
@@ -543,7 +546,7 @@ public final class CombatTask extends AbstractTask {
             }
         }
         int visibleHostiles = observableActiveHostiles(bot).size();
-        if (visibleHostiles > AIBotConfig.get().combat().maxEnemiesToFight()) {
+        if (visibleHostiles > MinecraftAiConfig.get().combat().maxEnemiesToFight()) {
             return disengageOrRetreatFromImmediatePressure(
                     bot, "enemy_limit_exceeded", here);
         }

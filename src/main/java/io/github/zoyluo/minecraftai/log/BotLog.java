@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.log;
+package io.github.zoyluo.minecraftai.log;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import org.slf4j.event.Level;
 
 import java.util.LinkedHashMap;
@@ -109,7 +109,7 @@ public final class BotLog {
 
     /**
      * Every log call automatically inherits the bot's currently active request scope (see {@link
-     * io.github.zoyluo.aibot.runtime.TaskOrigin#scopeId()}) -- no call site anywhere in the
+     * io.github.zoyluo.minecraftai.runtime.TaskOrigin#scopeId()}) -- no call site anywhere in the
      * codebase needs to pass it explicitly. This is what lets a played session's log be filtered
      * down to exactly one player instruction's execution (grep for its scope tag) instead of
      * wading through every bot's interleaved activity.

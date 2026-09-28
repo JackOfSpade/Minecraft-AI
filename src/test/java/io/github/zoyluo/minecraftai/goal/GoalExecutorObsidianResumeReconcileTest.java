@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,9 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * F5:开放黑曜石事务的 replan 重排契约。缺物资失败(need_better_tool / bucket-lost /
- * missing-water)必须让 fresh 计划的补给前缀物理地排在 resume 步之前;其余失败原因保持
- * resume-first 的物理续作顺序。
+ * F5: Reordering contract for replanning an open obsidian transaction. Missing-resource
+ * failures (need_better_tool / bucket-lost / missing-water) must place the fresh plan's
+ * supply prefix physically before the resume step; all other failure reasons keep the
+ * resume-first physical continuation order.
  */
 class GoalExecutorObsidianResumeReconcileTest {
 
@@ -58,7 +59,7 @@ class GoalExecutorObsidianResumeReconcileTest {
 
     @Test
     void missingResourceWithoutAttestedSupplyPrefixResumesAtHead() {
-        // fresh 计划里没有 MAKE_OBSIDIAN → 没有可证实的补给前缀,保持 resume-first。
+        // No MAKE_OBSIDIAN in the fresh plan -> no attestable supply prefix, so keep resume-first.
         List<GoalStep> withoutMake = new ArrayList<>(List.of(
                 GoalStep.hunt(2), GoalStep.cookFood(2)));
         assertEquals(0, GoalExecutor.reconcileObsidianSteps(withoutMake, 32, true, true));
@@ -67,14 +68,14 @@ class GoalExecutorObsidianResumeReconcileTest {
                 GoalStep.hunt(2),
                 GoalStep.cookFood(2)), withoutMake);
 
-        // MAKE 已在队首 → 前缀为空,resume 仍在队首。
+        // MAKE is already at the head of the queue -> prefix is empty, resume still leads.
         List<GoalStep> makeFirst = new ArrayList<>(List.of(
                 GoalStep.makeObsidian(24), GoalStep.placeStations()));
         assertEquals(0, GoalExecutor.reconcileObsidianSteps(makeFirst, 32, true, true));
         assertEquals(List.of(
                 GoalStep.makeObsidian(32), GoalStep.placeStations()), makeFirst);
 
-        // replan 失败时 fresh 步骤为空 → 仅剩 resume 步(与既有行为一致)。
+        // When replan fails, fresh steps are empty -> only the resume step remains (consistent with existing behavior).
         List<GoalStep> empty = new ArrayList<>();
         assertEquals(0, GoalExecutor.reconcileObsidianSteps(empty, 32, true, true));
         assertEquals(List.of(GoalStep.makeObsidian(32)), empty);

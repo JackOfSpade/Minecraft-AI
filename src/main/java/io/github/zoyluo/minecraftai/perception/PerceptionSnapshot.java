@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.perception;
+package io.github.zoyluo.minecraftai.perception;
 
 import com.google.gson.Gson;
 

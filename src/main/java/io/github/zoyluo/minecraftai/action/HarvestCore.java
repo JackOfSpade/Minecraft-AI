@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
@@ -26,7 +26,8 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 public final class HarvestCore {
-    // NAV-OPT(第0层B):可达性"名副其实"——只验证最近 N 个候选,用纯步行小预算 A*,兼顾准确与性能。
+    // NAV-OPT (layer 0B): reachability that's actually reachable -- verify only the nearest N candidates,
+    // using a small-budget pure-walk A* run, balancing accuracy against performance.
     private static final int REACH_VERIFY_LIMIT = 8;
     private static final int REACH_MAX_NODES = 3_000;
     private static final long REACH_MAX_MILLIS = 30L;
@@ -50,13 +51,16 @@ public final class HarvestCore {
                         .filter(choice -> choice != null));
     }
 
-    // MINE-DIG/Fix C:在一组候选方块里找最近可达的(如"任意原木"),供 GatherQuotaTask 跨树种采集。
+    // MINE-DIG/Fix C: finds the nearest reachable block within a set of candidate blocks (e.g. "any log"),
+    // for GatherQuotaTask to gather across tree species.
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Set<Block> targetBlocks, int horizontalRadius, int down, int up) {
         return nearestReachableBlock(bot, targetBlocks, horizontalRadius, down, up, null);
     }
 
-    // EXPLORE/不可达拉黑:带坐标过滤版——posFilter 拒绝的候选直接跳过(如工作记忆里"反复走不到"的目标),
-    // null 不过滤。供 GatherQuotaTask.survey 滤掉拉黑目标,不再重锁同一棵不可达的树死循环。
+    // EXPLORE/unreachable-blacklist: position-filtered variant -- candidates rejected by posFilter are
+    // skipped outright (e.g. targets working memory has "repeatedly failed to reach"), null means no
+    // filtering. Used by GatherQuotaTask.survey to filter out blacklisted targets so it no longer
+    // re-locks onto the same unreachable tree in an infinite loop.
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Set<Block> targetBlocks, int horizontalRadius, int down, int up,
                                                      Predicate<BlockPos> posFilter) {
         return nearestReachableBlock(bot, targetBlocks, horizontalRadius, down, up,
@@ -143,12 +147,12 @@ public final class HarvestCore {
     }
 
     public static boolean forcePickupNearby(AIPlayerEntity bot, Item item) {
-        AIBotConfig.Pickup pickup = AIBotConfig.get().pickup();
+        MinecraftAiConfig.Pickup pickup = MinecraftAiConfig.get().pickup();
         return forcePickupNearby(bot, item, pickup.forceRadiusH(), pickup.forceRadiusV());
     }
 
     public static boolean forcePickupNearbyAnyOf(AIPlayerEntity bot, Set<Item> items) {
-        AIBotConfig.Pickup pickup = AIBotConfig.get().pickup();
+        MinecraftAiConfig.Pickup pickup = MinecraftAiConfig.get().pickup();
         return forcePickupNearbyAnyOf(bot, items, pickup.forceRadiusH(), pickup.forceRadiusV());
     }
 
@@ -309,7 +313,7 @@ public final class HarvestCore {
             // the observed entity pose. Remembered cells have no factual entity pose and stop at
             // their centre instead.
             if (!stand.equals(itemPos) || !requireExactRoute) {
-                io.github.zoyluo.aibot.mode.FakePlayerMotion.nudgeWithinBlockToward(
+                io.github.zoyluo.minecraftai.mode.FakePlayerMotion.nudgeWithinBlockToward(
                         bot, stand, target, "physical_drop_pickup");
             } else {
                 bot.getActionPack().stopMovement();
@@ -345,11 +349,11 @@ public final class HarvestCore {
     }
 
     public static int sweepPickup(AIPlayerEntity bot, Item item, int maxTargets) {
-        return sweepPickup(bot, item, AIBotConfig.get().pickup().sweepRadius(), maxTargets);
+        return sweepPickup(bot, item, MinecraftAiConfig.get().pickup().sweepRadius(), maxTargets);
     }
 
     public static int sweepPickupAnyOf(AIPlayerEntity bot, Set<Item> items, int maxTargets) {
-        return sweepPickupAnyOf(bot, items, AIBotConfig.get().pickup().sweepRadius(), maxTargets);
+        return sweepPickupAnyOf(bot, items, MinecraftAiConfig.get().pickup().sweepRadius(), maxTargets);
     }
 
     public static int totalInventoryCount(AIPlayerEntity bot) {
@@ -520,7 +524,8 @@ public final class HarvestCore {
     }
 
     public static boolean canDirectMine(AIPlayerEntity bot, BlockPos target) {
-        // 允许挖脚下/低处方块(够得着即可)——地表往下挖石头的核心。
+        // Allows mining the block underfoot/below (as long as it's within reach) -- the core of
+        // digging straight down through stone from the surface.
         return canReach(bot, target);
     }
 
@@ -535,8 +540,11 @@ public final class HarvestCore {
         return allowObservableCellFallback && ObservableWorldQuery.canObserveCell(bot, pos);
     }
 
-    // NAV-OPT(第0层B):候选按距离近→远,返回第一个**纯步行真能走到**的;只验证最近 REACH_VERIFY_LIMIT 个
-    // (纯步行小预算 A*),兼顾准确与性能。旧逻辑只看"目标相邻有空格"却不验证 bot 走得到,导致 GOTO 反复失败 stuck。
+    // NAV-OPT (layer 0B): candidates sorted near-to-far, returns the first one the bot can **actually
+    // walk to on foot**; only the nearest REACH_VERIFY_LIMIT candidates are verified (small-budget
+    // pure-walk A*), balancing accuracy against performance. The old logic only checked "an empty
+    // cell is adjacent to the target" without verifying the bot could actually walk there, causing
+    // GOTO to repeatedly fail and get stuck.
     private static TargetChoice firstWalkReachable(AIPlayerEntity bot, BlockPos origin, java.util.stream.Stream<TargetChoice> candidates) {
         return candidates
                 .sorted(Comparator.comparingDouble(choice -> choice.pos().getSquaredDistance(origin)))
@@ -549,14 +557,16 @@ public final class HarvestCore {
     public static boolean isWalkReachable(AIPlayerEntity bot, TargetChoice choice) {
         BlockPos stand = choice.stand();
         if (stand == null || bot.getBlockPos().equals(stand)) {
-            return true; // 够得着直接挖 / 已在站位,无需寻路
+            return true; // Within reach, mine directly / already at the stand position, no pathfinding needed
         }
         return new AStarPathfinder(bot, bot.getEntityWorld(), bot.getBlockPos(), stand,
                 REACH_MAX_NODES, REACH_MAX_MILLIS, false, false).findPath().success();
     }
 
     public static TargetChoice targetChoice(AIPlayerEntity bot, BlockPos target) {
-        // 不再因方块低于自己而拒绝:够得着就直接挖(挖脚下→下落→继续往下挖,掉落物随之落到脚边便于拾取)。
+        // No longer rejects a block for being lower than the bot itself: if it's within reach, mine it
+        // directly (mine underfoot -> fall -> keep mining downward, so drops land right next to the
+        // bot's feet for easy pickup).
         if (canDirectMine(bot, target)) {
             return new TargetChoice(target, null, true);
         }

@@ -1,300 +1,352 @@
-# 开发记录 · 稳定挖 64 钻石 + 64 黑曜石(diamond64 / obsidian64)
+# Dev Log · Stable Mining of 64 Diamonds + 64 Obsidian (diamond64 / obsidian64)
 
-> 本文件是该阶段的**滚动开发记录**:每一阶段做了什么、验证结果、以及**待解决问题清单**。
-> 设计蓝图见 `PLAN.md`;历史阶段见 `PLAN_HISTORY*.md` 与 `M*_VALIDATION_REPORT.md`。
-> 目标(用户确认):strict_survival 下,端到端稳定完成 MineOre[diamond_ore ×64] 与 obsidian ×64;
-> 允许按需扩展觅食、照明、战斗能力。LLM = `deepseek-v4-flash`。
-
----
-
-## 阶段 0 · 基线修复与模型切换(2026-08-07)
-
-**提交**:`d90352e6`(上批 hunt/route-contract 硬化)、`eed0adf2`(本批)
-
-**完成**:
-- `PathExecutor.isExactConstrainedRoute` 抽出为共享精确性契约;`HuntTask` 委托之,
-  单元测试不再触发需要 registry bootstrap 的 `HuntTask.<clinit>`。
-- `MiningCheckpointMissionGameTests` legacy checkpoint 模拟补移除 `snap_dimension`
-  (孤键曾令 restore 正确地 fail-closed:`mission_restore_invalid_replan_snapshot`)。
-- DeepSeek 默认模型 `deepseek-chat` → `deepseek-v4-flash`:
-  - 显式发送 `thinking {enabled, reasoning_effort=low}`(V4 默认 high 且推理与正文共享
-    `max_tokens`,隐式默认会饿死 tool call);`maxTokens` 2048 → 8192。
-  - 响应解析记录 `reasoning_tokens`;`finish_reason=length` 且无任何可执行输出时告警
-    `api_truncated_before_output`。
-  - 用户配置缺 `reasoningEffort` 时不再 NPE(fail 回默认值)。
-
-**验证**:336 单测全绿;576 gametest 全绿(`./gradlew runGameTest`)。
+> This file is the **rolling development log** for this phase: what was done at each stage, validation results, and the **outstanding issues list**.
+> Design blueprint: `PLAN.md`; historical stages: `PLAN_HISTORY*.md` and `M*_VALIDATION_REPORT.md`.
+> Goal (confirmed with the user): under strict_survival, reliably complete MineOre[diamond_ore x64] and obsidian x64 end-to-end;
+> foraging, lighting, and combat capabilities may be extended as needed. LLM = `deepseek-v4-flash`.
 
 ---
 
-## 阶段 1 · P1 拾取恢复滞留修复 + 全链路调研(2026-08-07)
+## Stage 0 · Baseline Fixes and Model Switch (2026-08-07)
 
-**完成**:
-- **P1 根因确认并修复**(两个证据运行):
-  - 形态 A(实锤):掉落物移位后未再被观察,`lastSeen` 停留旧格;`approachKnownPickupCell`
-    解析的 stand 恰为当前格 → 同格 nudge 每 tick 返回 true("正在追")→ 恢复循环在空柱下
-    原地滞留 200 tick 超时。任务失败后 navsafe 偶然挪动一格,原版碰撞立即完成拾取。
-  - 形态 B(原始 flake):身体与石墩分数重叠 → 寻路起点校验静默失败 + 20 tick 冷却,无升级无日志。
-  - 修复(`OreDigTask`):滞留检测(`updatePickupRecoveryStall`,移动所有权/换格重置)+
-    30 tick 阈值升级为**观察扫描**(`startPickupObservationSweepStep`,镜像 Hunt 的
-    sweep:绕 last-seen 环形可观察站位走精确无挖掘路线)+ 滞留限频日志
-    `ore_dig_pickup_recovery_stalled`。`HarvestCore.startExactPickupPath` 提为 public 共享。
-  - 新增确定性 gametest `pedestalLandedDropIsPhysicallyRecovered`(拦截掉落钉到高台,消 RNG);
-    修复前 1/3 失败,修复后连续 5 轮全套 577 用例全绿。
-- **flaky 测试修复**:`oldNearbyRawDropCannotPoisonFreshKillTransaction` — offset 竞技场仅靠
-  假玩家 chunk 票据维持加载,瞬时卸载/重载使闭包持有的实体引用 `isAlive()=false`。
-  改为实体延后生成(tick 40)+ 断言时 `getEntitiesByClass` 现查(仓库既有惯例)。
-- **全链路调研完成**:8 个并行 agent 审查 7 子系统(148 万 tokens),产出
-  [FINDINGS_DIAMOND64.md](FINDINGS_DIAMOND64.md):**11 blocker / 19 major / 20 minor**,
-  含预算模型与 10 个需实跑回答的开放问题。
+**Commits**: `d90352e6` (previous batch of hunt/route-contract hardening), `eed0adf2` (this batch)
 
-**关键结论(节选)**:
-- F2:每批次钻石配额无盈余结转 + 每批次仅 2 个资源 epoch,结构性把任务成功率压到
-  ~17–66%(与 bug 无关的数学上限)—— 最高优先级。
-- F3/F7:下降途中落点漂移、镐耗尽均直接判 mission 终态(应降级为可恢复)。
-- F4/F5/F6:黑曜石链三大死锁(倒水活锁、resumeFirst 排序、食物 8 单位写死)。
-- F29:验收体系只有 obsidian 32 场景,64 需新场景与预算标定(即 P3)。
+**Completed**:
+- `PathExecutor.isExactConstrainedRoute` extracted into a shared exactness contract; `HuntTask` now delegates to it,
+  so unit tests no longer trigger `HuntTask.<clinit>`, which requires registry bootstrap.
+- `MiningCheckpointMissionGameTests` legacy checkpoint simulation: removed the stray `snap_dimension` key
+  (this orphaned key used to make restore correctly fail-closed with `mission_restore_invalid_replan_snapshot`).
+- DeepSeek default model `deepseek-chat` → `deepseek-v4-flash`:
+  - Explicitly send `thinking {enabled, reasoning_effort=low}` (V4 defaults to `high`, and reasoning shares
+    `max_tokens` with the main response, so the implicit default would starve the tool call); `maxTokens` 2048 → 8192.
+  - Response parsing now records `reasoning_tokens`; warn with `api_truncated_before_output` when
+    `finish_reason=length` and there is no executable output at all.
+  - No longer NPEs when the user config is missing `reasoningEffort` (falls back to the default value).
+
+**Validation**: all 336 unit tests green; all 576 gametests green (`./gradlew runGameTest`).
 
 ---
 
-## 阶段 2 · 下潜链路加固:F3 + F7(2026-08-07)
+## Stage 1 · P1 Pickup-Recovery Stall Fix + Full-Chain Investigation (2026-08-07)
 
-**完成**:
-- **F3 落点漂移降级**(`DescendToYTask`):origin/target 之外的第三格站位不再立即
-  `descend_landing_pose_drift` 终结任务 —— 视为外力位移,清空 pending landing、以当前
-  实际站位重新锚定台阶循环,单次下潜内限 8 次(`MAX_LANDING_DRIFT_RECOVERIES`),
-  超限才回落原 fail-closed 语义。事件 `descend_landing_drift_recovered`。
-- **F7 下潜镐门禁**(`DescendToYTask`):两处生产性台阶挖掘(主台阶 + 横移绕行)在
-  `miner.begin` 前检查 `ToolTier.canHarvestWithInventory`,不合格立即类型化失败
-  `need_better_tool:<pickaxe_id>`(与 DigDownTask 契约一致),交 GoalExecutor 倒推补镐;
-  身体被埋的求生清障**不设门禁**(徒手也必须能脱困)。
-- 新增 gametest `knockbackLandingDriftReanchorsInsteadOfFailingTheMission`;
-  两个既有 descend fixture 补发铁镐(真实任务中下潜前必有镐,fixture 与生产语义对齐)。
+**Completed**:
+- **P1 root cause confirmed and fixed** (two evidence runs):
+  - Pattern A (confirmed): after a dropped item shifted position it was never observed again, so `lastSeen`
+    stayed pinned to the old cell; the stand cell resolved by `approachKnownPickupCell` happened to be the
+    current cell → the same-cell nudge returned true ("still approaching") on every tick → the recovery loop
+    stalled in place under an empty column until the 200-tick timeout. After the task failed, navsafe happened
+    to shift one cell and vanilla collision immediately completed the pickup.
+  - Pattern B (original flake): the body's hitbox overlapped the stone pedestal fractionally → the pathing
+    start-point check silently failed, with a 20-tick cooldown, no escalation, and no logging.
+  - Fix (`OreDigTask`): added stall detection (`updatePickupRecoveryStall`, reset on movement ownership /
+    cell change) + escalation at the 30-tick threshold to an **observation sweep**
+    (`startPickupObservationSweepStep`, mirroring Hunt's sweep: walk an exact, non-mining route around the
+    ring of observable stand positions centered on last-seen) + rate-limited stall logging
+    (`ore_dig_pickup_recovery_stalled`). `HarvestCore.startExactPickupPath` promoted to public for shared use.
+  - Added deterministic gametest `pedestalLandedDropIsPhysicallyRecovered` (intercepts the drop and pins it to
+    a pedestal, eliminating RNG); failed 1/3 before the fix, passed all 577 cases across 5 consecutive runs after.
+- **Flaky test fix**: `oldNearbyRawDropCannotPoisonFreshKillTransaction` — the offset arena kept chunks loaded
+  only via a fake player's chunk ticket; a transient unload/reload made the entity reference held by the
+  closure report `isAlive()=false`. Fixed by deferring entity spawn (to tick 40) and re-querying with
+  `getEntitiesByClass` at assertion time (an existing convention in this repo).
+- **Full-chain investigation completed**: 8 parallel agents reviewed 7 subsystems (1.48M tokens), producing
+  [FINDINGS_DIAMOND64.md](FINDINGS_DIAMOND64.md): **11 blockers / 19 major / 20 minor**, including a budget
+  model and 10 open questions that need to be answered by real runs.
 
-**验证**:578 gametest 全绿;336 单测全绿。
+**Key conclusions (excerpt)**:
+- F2: no surplus carryover on the per-batch diamond quota, plus only 2 resource epochs per batch, structurally
+  caps mission success rate at ~17-66% (a mathematical ceiling unrelated to any bug) — highest priority.
+- F3/F7: mid-descent landing drift and pickaxe exhaustion both immediately fail the mission outright
+  (should be downgraded to recoverable).
+- F4/F5/F6: three deadlocks in the obsidian chain (water-pour livelock, resumeFirst ordering, food hardcoded
+  at 8 units).
+- F29: the acceptance suite only has an obsidian-32 scenario; 64 needs a new scenario and budget calibration
+  (i.e., P3).
 
 ---
 
-## 阶段 3 · F2 稀有矿任务级 margin epoch 池(2026-08-07)
+## Stage 2 · Descent Chain Hardening: F3 + F7 (2026-08-07)
 
-**问题**:64 钻任务切成 8 批 × 8 钻,每批只有 2 个有界资源 epoch(初始 + 1 次 retry,
-`MAX_RARE_RESOURCE_RETRIES_PER_BATCH=1`)。钻石产量随机(单 epoch 期望 3–9 颗),单批
-10–30% 概率挖不满配额;epoch 1 窗口超时直接 `finishActive` 终结整个任务——哪怕已挖到
-63/64。结构性把任务成功率压到 ~17–66%(与 bug 无关的数学上限)。
+**Completed**:
+- **F3 landing-drift downgrade** (`DescendToYTask`): a stand position on a third cell other than origin/target
+  no longer immediately terminates the mission with `descend_landing_pose_drift` — it is now treated as an
+  external displacement: pending landing is cleared and the staircase loop is re-anchored at the current
+  actual stand position, capped at 8 recoveries per single descent (`MAX_LANDING_DRIFT_RECOVERIES`); only past
+  that cap does it fall back to the original fail-closed behavior. Event: `descend_landing_drift_recovered`.
+- **F7 descent pickaxe gate** (`DescendToYTask`): both productive staircase-digging sites (the main staircase
+  and the lateral bypass) now check `ToolTier.canHarvestWithInventory` before `miner.begin`; if unqualified,
+  fail immediately with the typed failure `need_better_tool:<pickaxe_id>` (consistent with the DigDownTask
+  contract), letting GoalExecutor backtrack to restock a pickaxe. Survival clearing when the body is buried
+  is **not gated** (must still be escapable bare-handed).
+- Added gametest `knockbackLandingDriftReanchorsInsteadOfFailingTheMission`; two existing descend fixtures now
+  issue an iron pickaxe (a real mission always has a pickaxe before descending, so the fixture now matches
+  production semantics).
 
-**方案:有界的任务级 margin epoch 池**
-- 新增 `MiningBudget.rareMissionEpochMargin(batchCount) = min(batchCount / 2, 2)`
-  (64 目标 → 2,cap 见下),pinned 常量 `DIAMOND_STACK_EPOCH_MARGIN = 2`;每批 epoch
-  上限 = `rareMissionResourceEpochCapacity(batchCount) = 2 + margin`(64 目标 → 4)。
-- `GoalExecutor.scheduleRareResourceRetry`:批内 retry 耗尽后(epoch >= 1),若任务级
-  margin 池还有余额,允许再抽一个 epoch(epoch 2/3/…),机制与既有 retry 完全一致
-  (fresh RARE_ORE_BATCH service + 新 24,000-tick OreDig 窗口,硬预算单调不刷新)。
-  抽取事件 `rare_epoch_margin_drawn`(used/pool)。
-- **持久化账本**:`ActivePlan.rareEpochMarginUsed`,checkpoint 键 `rare_epoch_margin_used`。
-  任务级单调递增:批次 closed commit 不归零(与批内 epoch 相反),只有全新 mission 从 0
-  开始。restore fail-closed:缺失=legacy 0;非 canonical 非负整数、超池、或
-  `epoch - 1 > margin_used`(即出现账本没付过钱的 epoch)一律
-  `mission_restore_invalid_rare_epoch_margin`;`normalizeRestoredRareResourceEpoch` 扩展为
-  margin epoch 必须与 durable open batch 的 epoch 精确一致。
-- **窗口数学**:`MiningMissionBudget.rareOreDigCumulativeHardWindowTicks` 新增显式
-  `maxResourceEpochs` 重载(单参旧接口仍只认 2 个常规 epoch);OreDig checkpoint 解码/
-  `advanceResourceEpoch` 的 epoch 边界改为任务目标推导的 capacity,普通矿批仍钉死 epoch 0。
-- **物资预置(margin epoch 全额上买单,防止变成无界续期)**:
-  - 食物:`RARE_BOOTSTRAP_FOOD` 72 → **80**(18 epoch × 4 + 8 buffer);
-  - 火把:`DIAMOND_STACK_MIN_BOOTSTRAP_TORCHES` 640 → **720**(18 epoch × 40);
-  - 木棍:`DIAMOND_STACK_CHANNEL_REPAIR_STICKS` 224 → **252**,
+**Validation**: all 578 gametests green; all 336 unit tests green.
+
+---
+
+## Stage 3 · F2 Task-Level Margin Epoch Pool for Rare Ores (2026-08-07)
+
+**Problem**: the 64-diamond mission is split into 8 batches x 8 diamonds, and each batch only gets 2 bounded
+resource epochs (the initial one plus 1 retry, `MAX_RARE_RESOURCE_RETRIES_PER_BATCH=1`). Diamond yield is
+random (expected 3-9 per epoch), so a single batch has a 10-30% chance of falling short of quota; if the
+epoch-1 window times out, `finishActive` terminates the entire mission outright — even at 63/64 already
+mined. This structurally caps mission success rate at ~17-66% (a mathematical ceiling unrelated to any bug).
+
+**Approach: a bounded task-level margin epoch pool**
+- Added `MiningBudget.rareMissionEpochMargin(batchCount) = min(batchCount / 2, 2)`
+  (2 for a 64 target; see the cap below), pinned as the constant `DIAMOND_STACK_EPOCH_MARGIN = 2`; the
+  per-batch epoch cap becomes `rareMissionResourceEpochCapacity(batchCount) = 2 + margin` (4 for a 64 target).
+- `GoalExecutor.scheduleRareResourceRetry`: once the in-batch retry is exhausted (epoch >= 1), if the
+  task-level margin pool still has balance, one more epoch may be drawn (epoch 2/3/...), using the exact same
+  mechanism as the existing retry (a fresh RARE_ORE_BATCH service plus a new 24,000-tick OreDig window; the
+  hard budget stays monotonic and never refreshes). Draw event: `rare_epoch_margin_drawn` (used/pool).
+- **Persisted ledger**: `ActivePlan.rareEpochMarginUsed`, checkpoint key `rare_epoch_margin_used`.
+  Monotonically increasing at the task level: it is not reset on a batch's closed commit (unlike the
+  per-batch epoch), only a brand-new mission starts from 0. Restore is fail-closed: missing = legacy 0;
+  a non-canonical, non-negative integer, an over-pool value, or `epoch - 1 > margin_used` (i.e. an epoch
+  the ledger never paid for) all map to `mission_restore_invalid_rare_epoch_margin`;
+  `normalizeRestoredRareResourceEpoch` was extended so a margin epoch must exactly match the epoch of the
+  durable open batch.
+- **Window math**: `MiningMissionBudget.rareOreDigCumulativeHardWindowTicks` gained an explicit
+  `maxResourceEpochs` overload (the old single-argument interface still only recognizes 2 regular epochs);
+  the epoch boundary used in OreDig checkpoint decoding / `advanceResourceEpoch` now comes from the
+  mission-target-derived capacity, while ordinary ore batches still pin epoch at 0.
+- **Supply pre-provisioning (margin epochs are fully paid for up front, to prevent unbounded renewal)**:
+  - Food: `RARE_BOOTSTRAP_FOOD` 72 → **80** (18 epochs x 4 + 8 buffer);
+  - Torches: `DIAMOND_STACK_MIN_BOOTSTRAP_TORCHES` 640 → **720** (18 epochs x 40);
+  - Sticks: `DIAMOND_STACK_CHANNEL_REPAIR_STICKS` 224 → **252**,
     `DIAMOND_STACK_BOOTSTRAP_STICKS` 228 → **256**;
-  - `forQuota`/`rareMissionFoodTarget` 对任意稀有配额同步加 margin 项(如 18 目标:
-    火把 240→280、食物 32→36;32 目标食物 40→48)。
-  - **石材不加 margin(对 brief 的偏离,见下)**。
-- **服务合约**:`ServicePolicy.rareOreBatch` 接受 margin epoch(上限任务推导),margin
-  epoch 复用 epoch-1 retry 的政策形态(食物地板 clamp 到 8、火把/木棍地板不变——margin
-  物资是额外携带的,minimum 是地板不是刷新);`rareServiceFoodMinimum` 对 epoch>=2 clamp。
-- **外层超时**:`diamondStack64FromZero()` retry 项加 margin(retryOreDig/retryService
-  8 → 10),floor 603,200 → 660,800 ticks;live-plan 版本随 nominal plan 自动扩张。
+  - `forQuota`/`rareMissionFoodTarget` add a matching margin term for any rare quota (e.g. for an 18 target:
+    torches 240→280, food 32→36; for a 32 target, food 40→48).
+  - **Stone is not given a margin** (a deviation from the brief; see below).
+- **Service contract**: `ServicePolicy.rareOreBatch` now accepts margin epochs (capped by mission-derived
+  value); a margin epoch reuses the same policy shape as an epoch-1 retry (food floor clamps to 8, torch/stick
+  floors unchanged — margin supplies are carried extra, so the minimum is a floor, not a refresh);
+  `rareServiceFoodMinimum` clamps for epoch>=2.
+- **Outer timeout**: `diamondStack64FromZero()` retry terms now include margin (retryOreDig/retryService
+  8 → 10), floor 603,200 → 660,800 ticks; the live-plan version auto-expands along with the nominal plan.
 
-**对 brief 的两处偏离(均源自 36 格主背包物理墙)**:
-1. **margin 池 = 2 而非 batchCount/2 = 4**。第一轮全量 gametest 以事实证明 4 个 margin
-   epoch 的携带(+160 火把 +56 木棍 = +4 格)让 rare boundary service 的
-   `requiredWorkingFreeSlots` 合约不可满足——多个 64 目标 fixture 在 boundary-zero 直接
-   `mining_service_inventory_reserve_depleted:free=5:required=7` / 强启弃置 pocket 失败
-   (margin 物资全部属于受保护类别,不可弃置)。实测富余仅 2 格 →
-   `RARE_MISSION_EPOCH_MARGIN_CAP = 2`(+80 火把 +28 木棍 +8 食物,恰好 +2 格)。
-   把池扩回 4 需要 mission-depot 银行化 margin 物资(跨层往返新机制),另行立项。
-2. **石材不加 margin**:石材是地下唯一自补给资源,既有设计本就只 bootstrap 首批两个
-   pool(后续批由 service 用挖矿 spoil 现造,epoch>=1 的 service 政策只保 EMERGENCY
-   储备),margin epoch 与 epoch-1 retry 同型,沿用同一来源;且携带上也放不下。
+**Two deviations from the brief (both stemming from the 36-slot main-inventory physical wall)**:
+1. **Margin pool = 2, not batchCount/2 = 4**. The first full gametest pass proved with hard evidence that
+   carrying 4 margin epochs' worth of supplies (+160 torches +56 sticks = +4 slots) makes the rare boundary
+   service's `requiredWorkingFreeSlots` contract unsatisfiable — several 64-target fixtures hit
+   `mining_service_inventory_reserve_depleted:free=5:required=7` right at boundary-zero, or fail when forced
+   to discard a pocket item (all margin supplies belong to a protected category and cannot be discarded).
+   The measured headroom was only 2 slots → `RARE_MISSION_EPOCH_MARGIN_CAP = 2` (+80 torches +28 sticks
+   +8 food, exactly +2 slots). Expanding the pool back to 4 would require banking margin supplies at a
+   mission depot (a new cross-layer round-trip mechanism), left as a separate follow-up.
+2. **No margin on stone**: stone is the only self-resupplying resource underground; the existing design
+   already only bootstraps the first two pools (later batches are crafted on the fly from mining spoil by the
+   service, and the epoch>=1 service policy only guarantees an EMERGENCY reserve) — a margin epoch is the
+   same shape as an epoch-1 retry and draws from the same source; and there is no carrying capacity left
+   for it anyway.
 
-margin=2 下的结构性收益:单批失败需要连续烧穿"批内 retry + 任务仅有的 2 个 margin
-epoch"才终结任务;按调研的 10–30% 单批缺口概率,任务级失败率显著低于原 1-shortfall 即死。
+Structural benefit at margin=2: a single batch failure now needs to burn through both the "in-batch retry"
+and the task's only 2 margin epochs consecutively before the mission is terminated; given the investigated
+10-30% per-batch shortfall probability, the mission-level failure rate is now significantly below the
+original "one shortfall and the mission is dead" behavior.
 
-**验证**:`./gradlew test` 340 单测全绿(新增 margin 池数学、窗口重载、margin 账本
-decode/restore fail-closed、normalize margin epoch 归属、epoch 超时分类共 5 个用例);
-`./gradlew runGameTest` 580 gametest 全绿(新增
-`epochOneTimeoutWithMissionMarginSurvivesAndDrawsOneEpoch`——epoch 1 精确 48,000-tick
-超时 + margin 可用 → 任务存活、原子抽取 1 个 margin epoch、硬预算不刷新;
-`epochTimeoutWithExhaustedMarginPoolStaysTerminal`——margin 耗尽后同型超时仍 terminal;
-既有 `sameBatchEpochOneChannelToolFailureIsTerminalWithoutAnotherService` 注入
-margin_used=2 保持 terminal 语义;checkpoint round-trip 补 margin 键断言)。
-descent-kit 压力 fixture 因 margin 物资多占 3 格改为只携带 1 把木镐(木/石镐退役合约
-不变);`diamond64RestoresMissionKit` 拥挤边界由 free=4 收紧为 free=2。
-两个 diamond64 coal-bootstrap fixture(`diamond64BootstrapCoal…` 与
-`spawnDiamond64CoalBootstrapMiner`)按扩大后的合约补给:720 火把把煤链扩到 12 批,
-channel-repair 镐头需 56×3=168 石材,圆石 160→**192**(仍 3 格),否则规划器会在煤
-OreDig 前插入 挖石头 绕行、撞 fixture 的 tick 80/100 死线;木棍 234→262
-(=BOOTSTRAP_STICKS+6)、原木收敛到 64(1 格)保持携带量贴近 margin 前基线。
-
----
-
-## 阶段 4 · 黑曜石链死锁:F4 + F21(2026-08-07)
-
-**完成**(`CreateObsidianTask`):
-- **F4 倒水活锁**:flat-pool 地形的倒水点离岩浆线索最远 4 格,而原版水每 5 tick 推进
-  一格 —— 固定 4-tick 等待意味着水永远到不了岩浆、回收时世界零变化、同一线索无限重放
-  (每轮还会 `noteTopologyProgress` 重置 800-tick 停滞检测,直到烧穿 153,600-tick 任务
-  预算)。修复:①等待时长按 `max(4, 距离×5+4)` 缩放(`pourSpreadWaitTicks`,上界
-  24 tick);②记录本轮浇灌的线索(`lastPourClue`),排空周期结束仍无转化、无拾取且该
-  线索可观察地仍为岩浆时,`rejectLava` 进入有界拒绝账本(TTL 600)轮换搜索,事件
-  `create_obsidian_barren_pour_rejected`。遮挡不判负(只拒绝"观察到仍是岩浆")。
-- **F21 复核后否决**:曾按调研建议改为 restore 无条件 `enter()`,被既有 checkpoint
-  往返 gametest 当场击落(`restore changed task checkpoint key phase_started`)。复核
-  结论:任务时钟是任务 tick 制,**暂停期间不走表**,安全抢占不会烧相位窗口;跨进程
-  restore 按设计"续剩余窗口而非刷新时钟"(防重启刷预算)。调研对 F21 的定性有误,
-  已回退,findings 标注 `[复核否决]`。教训:agent 结论必须过既有契约测试的裁决。
-
-**验证**:并入 F2 收尾后的统一全量套件验证(见阶段 3/5 记录)。
+**Validation**: `./gradlew test` — all 340 unit tests green (5 new cases added: margin-pool math, window
+overload, margin-ledger decode/restore fail-closed, normalize-margin-epoch attribution, epoch-timeout
+classification); `./gradlew runGameTest` — all 580 gametests green (new
+`epochOneTimeoutWithMissionMarginSurvivesAndDrawsOneEpoch` — epoch 1 times out at exactly the 48,000-tick
+mark with margin available → mission survives, atomically draws 1 margin epoch, hard budget does not
+refresh; `epochTimeoutWithExhaustedMarginPoolStaysTerminal` — the same kind of timeout is still terminal
+once margin is exhausted; the existing `sameBatchEpochOneChannelToolFailureIsTerminalWithoutAnotherService`
+now injects margin_used=2 and keeps the terminal semantics; checkpoint round-trip gained margin-key
+assertions). The descent-kit stress fixture now carries only 1 wooden pickaxe, since margin supplies take up
+3 more slots (the wood/stone pickaxe retirement contract is unchanged); the crowding boundary in
+`diamond64RestoresMissionKit` tightened from free=4 to free=2.
+The two diamond64 coal-bootstrap fixtures (`diamond64BootstrapCoal...` and
+`spawnDiamond64CoalBootstrapMiner`) were resupplied to match the expanded contract: 720 torches extends the
+coal chain to 12 batches, the channel-repair pickaxe heads need 56x3=168 stone, cobblestone 160→**192**
+(still 3 slots) — otherwise the planner would insert a stone-mining detour before the coal OreDig and hit
+the fixture's tick 80/100 deadline; sticks 234→262 (=BOOTSTRAP_STICKS+6), and logs converged to 64 (1 slot)
+to keep the carried amount close to the pre-margin baseline.
 
 ---
 
-## 阶段 5 · F6 黑曜石食物预算按任务量缩放(2026-08-07)
+## Stage 4 · Obsidian Chain Deadlocks: F4 + F21 (2026-08-07)
 
-**完成**:
-- `MiningBudget.obsidianExpeditionFoodTarget(missionTarget)`:每个 8 块 service 段 4 个
-  熟食 + 4 buffer,地板保持旧 8 单位(prepared 短程合约不变)。64 块 → **36** 单位、
-  32 块 → 20、16 块 → 12,均 1 格以内。旧的写死 8 单位在 64 块任务中途必然断粮,深层
-  既无猎物也无预置 depot,`mining_service_food_reserve_depleted` 无解(F6)。
-- 公式落在无 registry 依赖的 `MiningBudget`(可纯单测;GoalPlanner `<clinit>` 需要
-  bootstrap,教训同 HuntTask)。`MiningPlanningSourceContractTest` 改钉缩放调用;
-  新增 `ObsidianFoodBudgetTest`(地板/缩放/取整/单格上限);3 个 planner gametest 的
-  fixture 口粮与断言随常量派生(20 单位)。
+**Completed** (`CreateObsidianTask`):
+- **F4 water-pour livelock**: on flat-pool terrain the pour point can be up to 4 cells from the lava clue,
+  while vanilla water only advances 1 cell every 5 ticks — a fixed 4-tick wait meant the water could never
+  reach the lava, the world showed zero change on recheck, and the same clue was replayed forever (each
+  round also called `noteTopologyProgress`, resetting the 800-tick stall detector, until the
+  153,600-tick mission budget was burned through). Fix: (1) scale the wait duration as
+  `max(4, distance*5+4)` (`pourSpreadWaitTicks`, capped at 24 ticks); (2) record the clue poured this round
+  (`lastPourClue`); if the drain cycle ends with no conversion, no pickup, and the clue is still observably
+  lava, `rejectLava` enters a bounded rejection ledger (TTL 600) and search rotates to another clue, with
+  event `create_obsidian_barren_pour_rejected`. Occlusion does not count as a negative result (only "observed
+  and still lava" triggers rejection).
+- **F21 vetoed after re-review**: the investigation had recommended changing restore to call `enter()`
+  unconditionally; this was immediately shot down by an existing checkpoint round-trip gametest
+  (`restore changed task checkpoint key phase_started`). Re-review conclusion: the mission clock runs on
+  mission ticks, **the clock does not advance while paused**, so a safe preemption never burns phase-window
+  time; cross-process restore is deliberately designed to "resume the remaining window rather than reset the
+  clock" (to prevent restarts from refreshing the budget). The investigation's characterization of F21 was
+  wrong; the change was reverted, and the findings entry is marked `[vetoed after re-review]`. Lesson: an
+  agent's conclusion must survive judgment against the existing contract tests.
 
-**验证**:343 单测全绿;580 gametest 全绿。
-
----
-
-## 阶段 6 · F11 已交付批次的重启冻结(2026-08-07)
-
-**完成**(`OreDigTask.finishAlreadyDeliveredBatch`):
-- `targetCount==0` 快路径先于硬超时执行,其 UNKNOWN 分支(重启后的 restore 站位观察
-  不到 `active_break_pos`)原来每 tick 空转 `return`,没有任何东西能终结它 → 无界冻结。
-- 修复:观察恢复窗口有界化 —— 空转时每 20 tick 沿断块格的可观察环形站位走一步
-  (`startObservationSweepStep`,由 P1 的拾取扫描泛化共用);超过 `RESTORE_FACE_LIMIT`
-  (1200 tick)仍不可观察,则取**少记不多记**的 exact-once 保守结果:
-  `clearActiveTargetBreak`(矿留在世界里,绝不虚计),事件
-  `ore_dig_delivered_batch_break_unobservable`。
-
-**验证**:343 单测全绿;580 gametest 全绿。
-**TODO**:补一个确定性 gametest(restore 注入 targetCount=0 + 断块格被遮挡的 fixture,
-断言有界窗口内脱困)——列入 P5。
+**Validation**: covered by the unified full-suite validation after the F2 wrap-up (see Stage 3/5 records).
 
 ---
 
-## 阶段 7 · 双死锁修复:F5 黑曜石 resumeFirst 缺物资重排 + F8 容量父命名空间孤儿(2026-08-07)
+## Stage 5 · F6 Obsidian Food Budget Scaled to Mission Size (2026-08-07)
 
-**完成**:
+**Completed**:
+- `MiningBudget.obsidianExpeditionFoodTarget(missionTarget)`: 4 cooked-food units plus a 4-unit buffer per
+  8-block service segment, with the floor kept at the old 8 units (the prepared short-run contract is
+  unchanged). 64 blocks → **36** units, 32 blocks → 20, 16 blocks → 12, each within 1 inventory slot. The old
+  hardcoded 8 units was guaranteed to run out mid-mission on a 64-block task, and deep underground there is
+  neither huntable prey nor a pre-placed depot, leaving `mining_service_food_reserve_depleted` unrecoverable
+  (F6).
+- The formula lives in `MiningBudget`, which has no registry dependency (so it is pure-unit-testable;
+  `GoalPlanner`'s `<clinit>` needs bootstrap, the same lesson as with `HuntTask`).
+  `MiningPlanningSourceContractTest` now pins the scaling call; added `ObsidianFoodBudgetTest`
+  (floor/scaling/rounding/single-slot cap); the rations and assertions in 3 planner gametest fixtures now
+  derive from the constant (20 units).
 
-- **F5 黑曜石 resumeFirst 缺物资死锁**(`GoalExecutor.reconcileObsidianSteps`):
-  开放事务(waterSource/pickupPos/activeBreakPos)下的 replan 原来无条件把 resume 步插到
-  index 0 —— 排在 fresh 计划的补给步(新桶/替换钻镐/取水)之前。若失败原因本身就是
-  "缺物资"类,恢复任务第一 tick 以同因重败,3 次零进展 replan 判死整个任务。修复:
-  - 失败原因命中精确前缀集(`need_better_tool:` / `create_obsidian_bucket_lost_after_pour` /
-    `*_missing_water`,新帮助函数 `isObsidianMissingResourceFailure`)且 resume-first 时,
-    保留 fresh 计划中首个 MAKE_OBSIDIAN 之前的补给前缀并让它先物理执行,resume 步插到
-    前缀之后;其余失败原因维持今天的 resume-first(物理续作的正确顺序)。
-  - 重排决策记录独立事件 `goal_obsidian_resume_resupply_first`(reason/supply_steps/target)。
-  - fresh 计划里没有 MAKE_OBSIDIAN(无可证实的补给前缀)或规划失败时,行为与旧逻辑
-    完全一致(resume 置顶)。restore 路径(`rebuildObsidianAcquisition`)不变:重启后若
-    资源仍缺失,第一次失败即走修复后的 replan 重排,单次 replan 内自愈,不会烧穿 3 次。
-- **F8 容量父命名空间孤儿**(`GoalExecutor.handleStepFailure` 通用 replan 段):
-  容量 handoff 服务失败 → 通用 replan `steps.clear()` 销毁精确 retry 步,但从不清
-  `capacityParentNamespace`;若 fresh 计划不再包含父矿族,结算永远不可达 —— 证据采集
-  从此拒绝所有 MINE_ORE 的 `plan.miningCheckpoint` 更新,下一个成功提交的稀有批次在
-  成功那一刻死于 `rare_batch_commit_checkpoint_invalid`。修复(与安装新队列同一事务):
-  - replan 时若 `capacityParentNamespace != null` 且 fresh 计划中不存在能重新绑定该
-    debit 的同族 MINE_ORE 步(fingerprint + `acceptsStepTarget` 与指派期
-    `isCapacityParentRetry` 同判据),回滚标记与全部 watermark
-    (delivered/face/services_used),事件 `goal_capacity_parent_rolled_back`。
-  - AUXILIARY 命名空间连同悬空的 open 普通游标一起丢弃(无物理台账,已交付产物在背包,
-    规划器按库存如实重算;保留反而令重启在缺标记的 aux 命名空间上 fail-closed);
-    MINING 命名空间沿用 `goal_failed_primary_service_retired` 同型的游标退役。
-  - **fail-closed 边界不放松**:父 checkpoint 无法解码、带未结物理台账
-    (pending_pickup/active_break)、或 `rare_mission_target != 0`(标记指向稀有游标的
-    不可解释状态)一律不回滚,维持既有语义。restore 校验未改动 —— 回滚发生在持久化之前的
-    同一事务内,不引入新持久键;既有 `mission_restore_orphaned_capacity_handoff_cursor`
-    等出口原样保留。
-
-**回归测试**:
-- 单测 `GoalExecutorObsidianResumeReconcileTest`(新增 5 用例):补给前缀重排的精确索引与
-  顺序、物理续作 resume-first 不变、无前缀/空计划回退、closed-transaction 原位替换契约、
-  失败原因前缀集的精确范围。
-- gametest `CreateObsidianMissionRecoveryGameTests.missingToolFailureWithOpenTransactionResuppliesBeforeResuming`:
-  restore 一个 target 32 的开放 active-break 事务(世界里真放黑曜石),移除钻镐注入
-  `need_better_tool:minecraft:diamond_pickaxe` → 断言任务存活、补给步先于 resume 被指派、
-  obsidian.* 命名空间原样保留事务身份,CRAFT 补镐完成后 MAKE 以原 target/active_break
-  恢复运行。
-- gametest `MiningCheckpointMissionGameTests.failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles`:
-  伪造 auxiliary 容量父(open 铁矿 debit)+ 受保护 diamond64 稀有游标 + 预算耗尽的容量
-  服务,restore 后服务典型化失败 `mining_service_timeout:` → 通用 replan(fresh 计划经
-  预检不含铁族)→ 断言标记/watermark/aux 命名空间全部回滚、稀有游标保留;再 restore 一个
-  交付满额(delivered=8/8)的稀有批次,断言其 commit 正常结算
-  (`mining.batch_open=false`、epoch 归零),而非死于 `rare_batch_commit_checkpoint_invalid`。
-
-**过程教训**:F8 gametest 第一版在 tick 回调内部再注册 `context.runAtEveryTick`,直接
-NPE 崩掉 GameTest 调度器(`GameTestState.tickTests` 迭代中修改监听表)—— 改为在 probe 内
-同步驱动 commit(`AbstractTask.abort` 对 COMPLETED 是 no-op,仅清 TaskManager 槽位后手动
-`tickBot` 结算)。嵌套注册 tick 监听是本仓库 gametest 的硬禁区。
-
-**验证**:`./gradlew test` 348 单测全绿(343 + 新增 5);`./gradlew runGameTest` 582 用例
-(580 + 新增 2)连续两轮全绿。
+**Validation**: all 343 unit tests green; all 580 gametests green.
 
 ---
 
-## 阶段 9 · P3/F29 黑曜石 64 验收场景落地(2026-08-07)
+## Stage 6 · F11 Restart Freeze on an Already-Delivered Batch (2026-08-07)
 
-**完成**(32 契约保持封存不动,64 为其超集):
-- `MiningEvidenceAudit`:审计会话携带显式 `requiredCount`(旧入口保持 64 钻/32 曜阈值),
-  `Snapshot.passes()` 按会话配额判定 —— 64 承诺复用同一条物理证据链而非另起账本。
-- verify 场景:`obsidian_stack_64_controlled`(数量契约,进 verify all/mining 回归)、
-  `obsidian_stack_64_prepared`(10×7 池 70 源,物资按 64 合约缩放,超时 48,000 tick =
-  32 版单块速率翻倍)、`obsidian_stack_64_from_zero`(超时 316,800 = 240,000 + 增量
-  32 块 × 2,400 摊销;审计配额 64)。两个长跑层均显式 opt-in;封存的 32/钻石验收套件
-  与 PR CI 契约对不变。
-- evidence 链:新 target `obsidian64`(场景映射、≥64 物证阈值、wall-clock 上限 25,200 s
-  ——15 TPS 地板下 ~19% 余量,优于 32 契约的 12.5%)。
-- `docs/MINING_ACCEPTANCE.md` 记录 64 承诺口径与推导。
+**Completed** (`OreDigTask.finishAlreadyDeliveredBatch`):
+- The `targetCount==0` fast path runs before the hard timeout; its UNKNOWN branch (when restore-time
+  observation cannot see `active_break_pos` after a restart) used to just `return` and spin every tick with
+  nothing able to terminate it → an unbounded freeze.
+- Fix: bounded the observation-recovery window — while spinning, take one step every 20 ticks around the
+  observable ring of stand positions for the broken-block cell (`startObservationSweepStep`, generalized and
+  shared from P1's pickup sweep); if it is still unobservable after exceeding `RESTORE_FACE_LIMIT`
+  (1200 ticks), fall back to the conservative **under-count rather than over-count** exact-once result:
+  `clearActiveTargetBreak` (the ore stays in the world; it is never miscounted as collected), with event
+  `ore_dig_delivered_batch_break_unobservable`.
 
-**验证**:348 单测全绿;582 gametest 全绿;shell 语法校验通过。
-**提交**:`a6a01eb1`。认证长跑(20-seed 门禁对 64 同样适用)由用户择机启动:
-`bash scripts/evidence_run.sh --scenario obsidian_stack_64_from_zero`。
+**Validation**: all 343 unit tests green; all 580 gametests green.
+**TODO**: add a deterministic gametest (restore injecting targetCount=0 plus a fixture where the broken-block
+cell is occluded, asserting recovery within the bounded window) — tracked as P5.
 
 ---
 
-## 待解决问题(滚动清单)
+## Stage 7 · Two Deadlock Fixes: F5 Obsidian resumeFirst Missing-Resource Reordering + F8 Capacity-Parent Namespace Orphaning (2026-08-07)
 
-| ID | 严重度 | 问题 | 状态 |
+**Completed**:
+
+- **F5 obsidian resumeFirst missing-resource deadlock** (`GoalExecutor.reconcileObsidianSteps`):
+  under an open transaction (waterSource/pickupPos/activeBreakPos), replan used to unconditionally insert the
+  resume step at index 0 — ahead of the fresh plan's supply steps (new bucket / replacement pickaxe / fetch
+  water). If the failure reason was itself a "missing resource" kind, the recovering mission would fail again
+  for the same reason on its very first tick, and 3 consecutive zero-progress replans would kill the whole
+  mission. Fix:
+  - When the failure reason matches an exact prefix set (`need_better_tool:` /
+    `create_obsidian_bucket_lost_after_pour` / `*_missing_water`, new helper
+    `isObsidianMissingResourceFailure`) and this is a resume-first case, keep the supply prefix from the
+    fresh plan that precedes the first MAKE_OBSIDIAN step and let it execute physically first, inserting the
+    resume step after that prefix; for all other failure reasons, today's resume-first behavior is kept
+    (the correct order for a physical continuation).
+  - The reordering decision is logged as its own event, `goal_obsidian_resume_resupply_first`
+    (reason/supply_steps/target).
+  - When the fresh plan has no MAKE_OBSIDIAN step (no provable supply prefix) or planning fails, behavior is
+    identical to the old logic (resume pinned to the front). The restore path
+    (`rebuildObsidianAcquisition`) is unchanged: if resources are still missing after a restart, the very
+    first failure goes through the fixed replan reordering, self-healing within a single replan instead of
+    burning through 3.
+- **F8 capacity-parent namespace orphaning** (`GoalExecutor.handleStepFailure`'s generic replan path):
+  when a capacity handoff service fails, generic replan's `steps.clear()` destroys the exact retry step but
+  never clears `capacityParentNamespace`; if the fresh plan no longer contains the parent ore family,
+  settlement becomes permanently unreachable — evidence collection then rejects every MINE_ORE
+  `plan.miningCheckpoint` update, and the next rare batch that successfully commits dies at the moment of
+  success with `rare_batch_commit_checkpoint_invalid`. Fix (in the same transaction as installing the new
+  queue):
+  - During replan, if `capacityParentNamespace != null` and the fresh plan contains no same-family MINE_ORE
+    step that can rebind that debit (matched by fingerprint + `acceptsStepTarget`, the same criteria used at
+    assignment time by `isCapacityParentRetry`), roll back the marker and all watermarks
+    (delivered/face/services_used), with event `goal_capacity_parent_rolled_back`.
+  - The AUXILIARY namespace is discarded together with the now-dangling open ordinary cursor (there is no
+    physical ledger entry; already-delivered output is in the inventory and the planner recomputes it
+    faithfully from inventory — keeping it would instead make a restart fail-closed on an aux namespace
+    missing its marker); the MINING namespace retires its cursor the same way as
+    `goal_failed_primary_service_retired`.
+  - **Fail-closed boundaries are not relaxed**: if the parent checkpoint cannot be decoded, carries an
+    unsettled physical ledger entry (pending_pickup/active_break), or has `rare_mission_target != 0` (a
+    marker pointing at an uninterpretable rare-cursor state), no rollback happens, preserving existing
+    semantics. Restore validation is unchanged — the rollback happens within the same transaction, before
+    persistence, and introduces no new persisted keys; existing exits such as
+    `mission_restore_orphaned_capacity_handoff_cursor` are kept as-is.
+
+**Regression tests**:
+- Unit test `GoalExecutorObsidianResumeReconcileTest` (5 new cases): exact index and ordering of the
+  supply-prefix reordering, physical-continuation resume-first unchanged, fallback when there is no prefix /
+  an empty plan, the closed-transaction in-place replacement contract, and the exact scope of the
+  failure-reason prefix set.
+- Gametest `CreateObsidianMissionRecoveryGameTests.missingToolFailureWithOpenTransactionResuppliesBeforeResuming`:
+  restores a target-32 open active-break transaction (obsidian genuinely placed in the world), removes the
+  pickaxe to inject `need_better_tool:minecraft:diamond_pickaxe` → asserts the mission survives, the supply
+  step is assigned before resume, the obsidian.* namespace retains its transaction identity throughout, and
+  after CRAFTing the replacement pickaxe, MAKE resumes running with the original target/active_break.
+- Gametest `MiningCheckpointMissionGameTests.failedCapacityHandoffWithoutParentFamilyRollsBackDebtAndRareBatchSettles`:
+  fabricates an auxiliary capacity parent (an open iron-ore debit) plus a protected diamond64 rare cursor and
+  a budget-exhausted capacity service; after restore the service fails with the typed `mining_service_timeout:`
+  → generic replan (the fresh plan, after precheck, contains no iron family) → asserts the marker/watermarks/
+  aux namespace are all rolled back while the rare cursor is preserved; then restores a rare batch delivered
+  in full (delivered=8/8) and asserts its commit settles normally (`mining.batch_open=false`, epoch reset to
+  zero) instead of dying with `rare_batch_commit_checkpoint_invalid`.
+
+**Process lesson**: the first version of the F8 gametest re-registered `context.runAtEveryTick` from inside a
+tick callback, which directly NPE-crashed the GameTest scheduler (modifying the listener table while
+`GameTestState.tickTests` was iterating it) — fixed by driving the commit synchronously inside the probe
+instead (`AbstractTask.abort` is a no-op on COMPLETED, so it just clears the TaskManager slot and then
+manually settles via `tickBot`). Registering a nested tick listener is a hard no-go in this repo's gametests.
+
+**Validation**: `./gradlew test` — all 348 unit tests green (343 + 5 new); `./gradlew runGameTest` — all 582
+cases (580 + 2 new) green across two consecutive runs.
+
+---
+
+## Stage 9 · P3/F29 Obsidian-64 Acceptance Scenario Delivered (2026-08-07)
+
+**Completed** (the 32 contract stays sealed and untouched; 64 is a superset of it):
+- `MiningEvidenceAudit`: an audit session now carries an explicit `requiredCount` (the legacy entry point
+  keeps the 64-diamond/32-obsidian thresholds); `Snapshot.passes()` is judged against the session's own
+  quota — the 64 commitment reuses the same physical evidence chain rather than starting a new ledger.
+- Verify scenarios: `obsidian_stack_64_controlled` (a quantity contract, part of the verify all/mining
+  regression), `obsidian_stack_64_prepared` (a 10x7 pool of 70 sources, supplies scaled to the 64 contract,
+  48,000-tick timeout = double the per-block rate of the 32 version), `obsidian_stack_64_from_zero`
+  (timeout 316,800 = 240,000 plus the incremental 32 blocks amortized at 2,400 each; audit quota 64). Both
+  long-run tiers are explicit opt-in; the sealed 32/diamond acceptance suite and the PR CI contract are
+  unchanged.
+- Evidence chain: new target `obsidian64` (scenario mapping, a >=64 physical-evidence threshold, wall-clock
+  cap of 25,200 s — about 19% headroom at the 15-TPS floor, better than the 32 contract's 12.5%).
+- `docs/MINING_ACCEPTANCE.md` records the 64-commitment basis and its derivation.
+
+**Validation**: all 348 unit tests green; all 582 gametests green; shell syntax check passed.
+**Commit**: `a6a01eb1`. The certification long-run (the 20-seed gate applies to 64 as well) is to be started
+by the user at their discretion:
+`bash scripts/evidence_run.sh --scenario obsidian_stack_64_from_zero`.
+
+---
+
+## Outstanding Issues (rolling list)
+
+| ID | Severity | Issue | Status |
 |---|---|---|---|
-| P1 | major | 拾取恢复滞留活锁(高台掉落 / 同格 nudge 假进展 / 静默 NO_START)| **已修**(阶段 1) |
-| F1-F50 | 见报告 | 全链路调研发现清单,详见 [FINDINGS_DIAMOND64.md](FINDINGS_DIAMOND64.md);修复进度在该文件逐条标注 | 攻坚中 |
-| P2 | 待评估 | diamond64/obsidian64 全链路稳定性缺口 — 七子系统并行调研进行中(OreDig 恢复、Planner 批次、Executor 重规划预算、Obsidian 岩浆链、Descend 往返、生存中断恢复、预算/证据体系),产出后按影响排序逐项立项。 | 调研中 |
-| P3 | major | 黑曜石目标 32 → 64:验收场景/审计/evidence 链已落地(阶段 9);岩浆源池容量假设(单湖稳定供 64)待 from-zero 实跑核对 | **已修**(阶段 9) |
-| P4 | note | **认证长跑成本**:from-zero 钻石 live plan 已声明 2,120,000 ticks(15 TPS ≈ 39 小时/run),20-seed 门禁是天级算力。本阶段交付"能力与稳定性 + 可复验入口",sealed 批量认证由用户择机启动(`scripts/evidence_batch.sh`)。 | 已知约束 |
+| P1 | major | Pickup-recovery stall livelock (drop landing on a pedestal / same-cell nudge false progress / silent NO_START) | **Fixed** (Stage 1) |
+| F1-F50 | see report | Full-chain investigation findings list, see [FINDINGS_DIAMOND64.md](FINDINGS_DIAMOND64.md); fix progress is annotated item-by-item in that file | in progress |
+| P2 | to be assessed | diamond64/obsidian64 full-chain stability gaps — 7 parallel subsystem investigations underway (OreDig recovery, Planner batching, Executor replan budget, obsidian lava chain, Descend round trips, survival-interruption recovery, budget/evidence system); items will be prioritized by impact once complete. | under investigation |
+| P3 | major | Obsidian target 32 -> 64: acceptance scenarios/audit/evidence chain delivered (Stage 9); the lava-source-pool capacity assumption (a single lake reliably supplying 64) still needs confirmation via a from-zero real run | **Fixed** (Stage 9) |
+| P4 | note | **Certification long-run cost**: the from-zero diamond live plan already declares 2,120,000 ticks (~39 hours/run at 15 TPS); the 20-seed gate is day-scale compute. This phase delivers "capability and stability plus a re-verifiable entry point"; sealed batch certification is to be started by the user at their discretion (`scripts/evidence_batch.sh`). | known constraint |
 
 ---
 
-## 里程碑规划(随调研结果细化)
+## Milestone Plan (to be refined as the investigation proceeds)
 
-- **S1 修复已知不稳定点**:P1 及调研发现的 blocker 级缺陷。
-- **S2 挖矿链路加固**:64 目标全程的批次/预算/checkpoint 一致性。
-- **S3 黑曜石链路加固**:岩浆场景的掉落保全与安全恢复。
-- **S4 生存扩展**:按需扩展觅食(地下食物经济)、照明(火把节奏)、战斗(隧道遭遇)。
-- **S5 端到端证据**:evidence run 连续 N 次 diamond64+obsidian64 通过率验收。
+- **S1 Fix known instabilities**: P1 and the blocker-level defects found by the investigation.
+- **S2 Mining chain hardening**: batch/budget/checkpoint consistency across the full 64-target run.
+- **S3 Obsidian chain hardening**: drop preservation and safe recovery in lava scenarios.
+- **S4 Survival extensions**: extend foraging (underground food economy), lighting (torch cadence), and
+  combat (tunnel encounters) as needed.
+- **S5 End-to-end evidence**: acceptance via N consecutive evidence-run passes of diamond64+obsidian64.

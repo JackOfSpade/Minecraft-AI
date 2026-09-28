@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.client;
+package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.aibot.network.payload.BotChatS2C;
+import io.github.zoyluo.minecraftai.network.payload.BotChatS2C;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 
@@ -16,8 +16,8 @@ public final class BotChatCapture {
             String text = message.getString();
             String target = BotClientState.INSTANCE.targetBot();
             String botPrefix = "<" + target + "> ";
-            if (text.startsWith("[AIBot] ")) {
-                BotClientState.INSTANCE.addTranscript("system", text.substring("[AIBot] ".length()));
+            if (text.startsWith("[Minecraft-AI] ")) {
+                BotClientState.INSTANCE.addTranscript("system", text.substring("[Minecraft-AI] ".length()));
             } else if (text.contains(target + " is thinking") || text.contains("brain error:")) {
                 BotClientState.INSTANCE.addTranscript("system", text);
             } else if (text.startsWith(botPrefix)) {

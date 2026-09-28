@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.observe;
+package io.github.zoyluo.minecraftai.observe;
 
 import com.google.gson.Gson;
-import io.github.zoyluo.aibot.brain.ChatToolCall;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.brain.ChatToolCall;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.util.WorldSavePath;
 
 import java.io.IOException;
@@ -81,7 +81,7 @@ public final class ReplayRecorder {
 
     private void write(AIPlayerEntity bot, ReplayEvent event) {
         try {
-            Path dir = bot.getEntityWorld().getServer().getSavePath(WorldSavePath.ROOT).resolve("aibot").resolve("replay");
+            Path dir = bot.getEntityWorld().getServer().getSavePath(WorldSavePath.ROOT).resolve("minecraftai").resolve("replay");
             Files.createDirectories(dir);
             Path file = dir.resolve(safe(bot.getGameProfile().name()) + "-" + LocalDate.now() + ".jsonl");
             try (Writer writer = Files.newBufferedWriter(file,

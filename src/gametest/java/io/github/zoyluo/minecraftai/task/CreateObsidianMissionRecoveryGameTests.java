@@ -1,22 +1,22 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import com.google.gson.Gson;
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.goal.GoalPlanner;
-import io.github.zoyluo.aibot.goal.GoalStep;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.persist.MissionRecord;
-import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
-import io.github.zoyluo.aibot.persist.MissionSpec;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalPlanner;
+import io.github.zoyluo.minecraftai.goal.GoalStep;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.persist.MissionRecord;
+import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -1438,7 +1438,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_rebuilds_protected_pickup_transaction", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_rebuilds_protected_pickup_transaction", maxTicks = 40)
     public void airAtRestoredActiveBreakRebuildsProtectedPickupTransaction(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakAirGT", 1, true);
         BlockPos target = fixture.start().east();
@@ -1477,7 +1477,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_retains_live_source_for_fresh_protection_window", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_retains_live_source_for_fresh_protection_window", maxTicks = 40)
     public void airAtRestoredActiveBreakRetainsLiveSourceForFreshProtectionWindow(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakWaterGT", 0, false);
@@ -1517,7 +1517,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:create_obsidian_mission_recovery_game_tests_raw_two_pick_settles_final_break_and_physical_pickup_at_raw_one", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:create_obsidian_mission_recovery_game_tests_raw_two_pick_settles_final_break_and_physical_pickup_at_raw_one", maxTicks = 800)
     public void rawTwoPickSettlesFinalBreakAndPhysicalPickupAtRawOne(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianLastDurabilityGT", 0, true);
         BlockPos target = fixture.start().east();
@@ -1672,16 +1672,21 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     /**
-     * F5:开放事务(active break)+ 缺物资失败(need_better_tool)的 replan 必须先物理补给再
-     * resume。修复前 resume 步被插到 fresh 计划的补给前缀之前,恢复任务第一 tick 以同因重败,
-     * 三次零进展 replan 直接终结任务;修复后 CRAFT 补镐先执行,MAKE 以同一事务身份恢复。
+     * F5: For an open transaction (active break) plus a missing-tool failure
+     * (need_better_tool), replan must physically resupply before resuming. Before the fix,
+     * the resume step was inserted ahead of the fresh plan's resupply prefix, so the restored
+     * task failed again from the same cause on its very first tick; after three replans with
+     * zero progress, the task was terminated outright. After the fix, CRAFT (resupply
+     * pickaxe) executes first, then MAKE resumes under the same transaction identity.
      */
     @GameTest(maxTicks = 220)
     public void missingToolFailureWithOpenTransactionResuppliesBeforeResuming(
             TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianResupplyFirstGT", 0, true);
-        // 除钻镐外补齐远征 readiness(火把/武器/密封原木),并预置 3 颗钻石让补给前缀收敛为
-        // 一步 CRAFT diamond_pickaxe(避免在测试竞技场里触发真实下潜采钻链)。
+        // Fill out expedition readiness besides the diamond pickaxe (torch / weapon / sealed
+        // log), and pre-stock 3 diamonds so the resupply prefix collapses to a single CRAFT
+        // diamond_pickaxe step (avoiding triggering a real dive-and-mine-diamond chain inside
+        // the test arena).
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.DIAMOND, 3));
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH, 64));
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.STONE_SWORD));
@@ -1729,10 +1734,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
             Task active = TaskManager.INSTANCE.getActive(fixture.bot()).orElse(null);
             if (!resupplyObserved.get()) {
                 if (active instanceof CreateObsidianTask || active == null) {
-                    return; // 等待注入的 need_better_tool 失败触发 replan。
+                    return; // wait for the injected need_better_tool failure to trigger a replan.
                 }
-                // replan 已发生:补给步(而非 resume)先被指派;开放事务身份必须原样保留在
-                // obsidian.* 命名空间里等待 resume。
+                // replan has occurred: the resupply step (not resume) is assigned first; the
+                // open transaction identity must remain intact in the obsidian.* namespace
+                // awaiting resume.
                 MissionRuntimeRecord captured =
                         GoalExecutor.INSTANCE.captureRuntime(fixture.bot());
                 Map<String, String> checkpoint = captured.active() == null
@@ -1747,7 +1753,9 @@ public final class CreateObsidianMissionRecoveryGameTests {
             }
             if (!(active instanceof CreateObsidianTask)
                     || InventoryAction.countItem(fixture.bot(), Items.DIAMOND_PICKAXE) < 1) {
-                return; // 等待 CRAFT 补镐完成后 MAKE 以原事务恢复。
+                // wait for CRAFT to finish resupplying the pickaxe, then MAKE resumes under
+                // the original transaction.
+                return;
             }
             MissionRuntimeRecord captured =
                     GoalExecutor.INSTANCE.captureRuntime(fixture.bot());
@@ -1994,7 +2002,10 @@ public final class CreateObsidianMissionRecoveryGameTests {
         return checkpoint;
     }
 
-    /** 原目标 32 的开放 active-break 事务(与 activeBreakCheckpoint 同型,但走 Mission restore)。 */
+    /**
+     * Open active-break transaction for the original target32 (same shape as
+     * activeBreakCheckpoint, but goes through Mission restore).
+     */
     private static Map<String, String> openBreakCheckpoint(BlockPos origin,
                                                             BlockPos obsidian,
                                                             BlockPos stand) {

@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.task.OreDigTask;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 

@@ -1,20 +1,20 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotLogSubcommand {
+public final class MinecraftAiLogSubcommand {
     private static final int DEFAULT_OVERFLOW_EVENTS = 6_000;
 
-    private AIBotLogSubcommand() {
+    private MinecraftAiLogSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -34,7 +34,7 @@ public final class AIBotLogSubcommand {
             return 0;
         }
         BotLogWriter writer = BotLogWriter.INSTANCE;
-        source.sendFeedback(() -> Text.literal("[AIBot] log started="
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] log started="
                 + writer.isStarted()
                 + " queue="
                 + writer.queueSize()
@@ -51,7 +51,7 @@ public final class AIBotLogSubcommand {
         }
         BotLog.config("log_rotate_requested", "source", "command");
         BotLogWriter.INSTANCE.forceRotateForTest();
-        source.sendFeedback(() -> Text.literal("[AIBot] log rotation triggered"), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] log rotation triggered"), false);
         return 1;
     }
 
@@ -60,7 +60,7 @@ public final class AIBotLogSubcommand {
             return 0;
         }
         BotLogWriter.INSTANCE.forceOverflowForTest(count);
-        source.sendFeedback(() -> Text.literal("[AIBot] log overflow validation enqueued " + count + " events"), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] log overflow validation enqueued " + count + " events"), false);
         return 1;
     }
 }

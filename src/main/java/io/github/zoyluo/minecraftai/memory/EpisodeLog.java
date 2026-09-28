@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.memory;
+package io.github.zoyluo.minecraftai.memory;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.ArrayDeque;
@@ -12,9 +12,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 情景记忆(三层记忆模型第 2 层):per-bot 的事件时间线——"何时何地发生了什么"。
- * 短期(重启即清,环形 256 条);持久的是蒸馏产物(见 {@link KnowledgeBase}:情景是矿,知识是炼出来的锭)。
- * 每次 record 顺手触发规则蒸馏(确定性、零 LLM 成本)。
+ * Episodic memory (layer 2 of the three-layer memory model): per-bot event timeline —
+ * "what happened, when, and where".
+ * Short-term (cleared on restart, a 256-entry ring buffer); what persists is the distilled
+ * output (see {@link KnowledgeBase}: episodes are the ore, knowledge is the smelted ingot).
+ * Every call to record also triggers rule-based distillation (deterministic, zero LLM cost).
  */
 public final class EpisodeLog {
     public static final EpisodeLog INSTANCE = new EpisodeLog();
@@ -40,11 +42,13 @@ public final class EpisodeLog {
                 deque.pollFirst();
             }
         }
-        // 蒸馏钩子:情景流入 → 语义知识沉淀(死亡聚类→危险区/资源发现→资源点/失败→教训)。
+        // Distillation hook: episodes flow in -> semantic knowledge is deposited
+        // (death clustering -> danger zones / resource found -> resource points / failure -> lessons).
         KnowledgeBase.INSTANCE.distill(bot, event, snapshot(bot.getUuid()));
     }
 
-    /** 测试隔离:清掉该 bot 的情景流(套件场景互染:残留 RESOURCE_FOUND 让蒸馏去重拦下后续场景的预热点)。 */
+    /** Test isolation: clears this bot's episode stream (suite scenarios cross-contaminate:
+     * a leftover RESOURCE_FOUND lets distillation dedup block the next scenario's warm-up point). */
     public void clearFor(UUID botId) {
         events.remove(botId);
     }
@@ -53,7 +57,7 @@ public final class EpisodeLog {
         events.clear();
     }
 
-    /** 最近 n 条(新→旧)。 */
+    /** The most recent n entries (newest to oldest). */
     public List<EpisodeEvent> recent(UUID botId, int n) {
         List<EpisodeEvent> all = snapshot(botId);
         int from = Math.max(0, all.size() - n);

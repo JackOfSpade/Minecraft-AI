@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.network;
+package io.github.zoyluo.minecraftai.network;
 
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.embedded.EmbeddedChannel;

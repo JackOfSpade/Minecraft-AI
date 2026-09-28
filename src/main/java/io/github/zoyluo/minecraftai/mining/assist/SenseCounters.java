@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Observability counters of one bot's sensor over one reporting window (mining-assist design 3.4:

@@ -1,18 +1,18 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
@@ -34,34 +34,41 @@ import java.util.OptionalInt;
 import java.util.Set;
 
 /**
- * DIGDOWN:站着挖竖井,采集 N 个目标方块(如圆石)。专为 GoalExecutor 的 MINE 步设计。
+ * DIGDOWN: stands in place and digs a vertical shaft, collecting N target blocks (e.g. cobblestone).
+ * Designed specifically for GoalExecutor's MINE step.
  *
- * 它不定位特定方块；首次在当前井口正常开挖，只有已观察到的失败入口才会经生存寻路换列:
- *  - 脚下若已是目标块(石头)→ 挖它,计入产出;
- *  - 脚下是泥/草/沙等非目标块 → 也挖掉穿过去(地表 bot 必须先穿过表层土才到石层),
- *    这正是实测#9 "站在草地上、相邻没石头就秒 no_reachable" 的对症修复;
- *  - 挖一格、bot 自然下落一格、再挖下一格,如此往下,直到采够。
+ * It does not target a specific block; the first attempt at the current shaft entry digs normally,
+ * and only an entry already observed to have failed switches columns via survival pathfinding:
+ *  - If the block underfoot is already the target block (stone) -> mine it, count it toward output;
+ *  - If the block underfoot is dirt/grass/sand etc. (a non-target block) -> mine through it too
+ *    (a surface bot must dig through the topsoil layer before reaching stone), which is exactly
+ *    the fix for the case observed in test #9, "standing on grass with no adjacent stone instantly
+ *    fails as no_reachable";
+ *  - Mine one cell, let the bot naturally fall one cell, mine the next cell, and so on downward
+ *    until enough is collected.
  *
- * 安全:开挖每格前查正下方两格是否岩浆/深渊;碰到流体或挖到基岩层失败,交 GoalExecutor 处理。
- * 挖掘走共享原语 {@link BlockMiner}(只在空闲时发起、绝不中途重发清零进度、正确 face)。
+ * Safety: before digging each cell, check the two cells directly below for lava/void; on hitting a
+ * fluid or reaching the bedrock layer, fail and hand off to GoalExecutor.
+ * Digging goes through the shared primitive {@link BlockMiner} (only starts when idle, never
+ * re-issues mid-break and resets progress, always uses the correct face).
  *
- * 自包含状态机(铁律 G1),不在内部 assign;全程主线程(G2)。
+ * Self-contained state machine (iron rule G1); no internal assign; entirely on the main thread (G2).
  */
 public final class DigDownTask extends AbstractTask implements CheckpointableTask {
     private static final int CHECKPOINT_SCHEMA = 4;
     private static final int RETURN_OUTCOME_CHECKPOINT_SCHEMA = 3;
     private static final int WATER_SEAL_CHECKPOINT_SCHEMA = 2;
     private static final int LEGACY_CHECKPOINT_SCHEMA = 1;
-    private static final int MAX_ELAPSED_BASE = 2400;   // 小配额保留 2 分钟硬超时
-    private static final int MAX_ELAPSED_CAP = 24000;   // 大配额仍须有界(20 分钟)
+    private static final int MAX_ELAPSED_BASE = 2400;   // small quotas still keep a 2-minute hard timeout
+    private static final int MAX_ELAPSED_CAP = 24000;   // large quotas must still be bounded (20 minutes)
     private static final int MAX_ELAPSED_PER_BLOCK = 80;
-    private static final int NO_PROGRESS_LIMIT = 200;   // 10s 无进展(没破任何块)即失败
-    private static final int PICKUP_GRACE_TICKS = 30;   // 采够后多等一会儿确保掉落物落袋
-    private static final int MIN_Y = -60;               // 别挖穿到基岩以下
-    private static final int RETURN_LIMIT = 600;        // 普通回程硬上限(30s)
-    private static final int RETURN_SAFETY_LIMIT = 2400; // 安全任务位移后的有界回连上限(2min)
-    private static final int RETURN_STALL_LIMIT = 600;  // 到事实 waypoint 30s 无任何接近即 fail-closed
-    private static final int MAX_DESCENT = 24;          // 下挖深度上限(格):超了还没采够多半是掉落物没捡到,扫拾再判,绝不无限挖到深处被怪围杀
+    private static final int NO_PROGRESS_LIMIT = 200;   // no progress (no block broken) within 10s = fail
+    private static final int PICKUP_GRACE_TICKS = 30;   // after collecting enough, wait a bit longer to let drops land in inventory
+    private static final int MIN_Y = -60;               // don't dig through below bedrock
+    private static final int RETURN_LIMIT = 600;        // ordinary return trip hard cap (30s)
+    private static final int RETURN_SAFETY_LIMIT = 2400; // bounded reconnect cap after a safety-task displacement (2min)
+    private static final int RETURN_STALL_LIMIT = 600;  // fail-closed if 30s pass with zero approach to the factual waypoint
+    private static final int MAX_DESCENT = 24;          // descent depth cap (cells): exceeding it without collecting enough is usually drops not picked up -- sweep and recheck once; never dig endlessly deeper and get surrounded by mobs
     private static final int MAX_TRAIL_POINTS = 512;
     private static final int RETURN_PATH_RETRY = 20;
     private static final int ENTRY_RELOCATION_LIMIT = 600;
@@ -111,17 +118,17 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     private final boolean invalidCheckpoint;
     private final BlockMiner miner = new BlockMiner();
     private static final Direction[] HDIRS = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
-    private int hdirIndex;    // 撞基岩后水平掘进的当前方向
-    private int stairDirIndex; // 台阶斜下的当前水平方向(HDIRS 下标)
-    private boolean horizontalMode; // 下挖到上限/撞基岩后永久转横挖,经主体统一原语+看门狗(治 MAX_DESCENT 每tick自废)
+    private int hdirIndex;    // current direction of horizontal digging after hitting bedrock
+    private int stairDirIndex; // current horizontal direction of the diagonal-down staircase (index into HDIRS)
+    private boolean horizontalMode; // once switched to horizontal digging after reaching the descent cap/hitting bedrock, this switch is permanent, routed through the shared primitive + watchdog (fixes MAX_DESCENT self-resetting every tick)
     private BlockPos rejectedLandingOrigin;
     private int rejectedLandingDirections;
 
     private int invBaseline;
     private int collected;
     private int pickupGrace;
-    private BlockPos startPos;       // 开挖前的井口位置(地表);采够后爬回这里再完成,免得困在井底出不来
-    private int targetY;             // 已真实到达的最低 Y；checkpoint 用它校验轨迹没有被截断/伪造
+    private BlockPos startPos;       // the shaft entry position before digging (surface); once enough is collected, climb back here to complete, so as not to get stuck at the bottom of the shaft
+    private int targetY;             // the lowest Y actually reached; the checkpoint uses it to verify the trail hasn't been truncated/forged
     private Phase phase = Phase.DESCEND;
     private int returnStartTick;
     private int workBudgetOffset;
@@ -161,8 +168,10 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 || restored.targetCount() != this.targetCount);
         Set<Item> drops = new HashSet<>(HarvestCore.expectedDropsFor(Set.of(targetBlock)));
         if (targetBlock == Blocks.STONE) {
-            // 深层(Y<0)全是深板岩(挖了掉 cobbled_deepslate)、远古遗迹是黑石——都算"石料",
-            // 否则深层永远凑不够 cobblestone、做不了熔炉(实测 Y=-59 死循环根因)。
+            // The deep layer (Y<0) is all deepslate (mining it drops cobbled_deepslate), and ancient
+            // ruins are blackstone -- both count as "stone material", otherwise the deep layer could
+            // never gather enough cobblestone to make a furnace (the observed root cause of the
+            // Y=-59 infinite loop).
             drops.add(Items.COBBLED_DEEPSLATE);
             drops.add(Items.BLACKSTONE);
         }
@@ -190,8 +199,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     @Override
     public boolean isWaiting() {
-        // 下挖期 bot 站着挖,位置基本不变;视为 waiting 让 StuckWatcher 不误判,
-        // 由本任务自己的 NO_PROGRESS_LIMIT 看门狗负责卡死保护。
+        // During descent the bot digs in place with its position essentially unchanged; treat it as
+        // waiting so StuckWatcher doesn't misjudge it, leaving this task's own NO_PROGRESS_LIMIT
+        // watchdog responsible for stall protection.
         return true;
     }
 
@@ -284,9 +294,11 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                     "current", bot.getBlockPos().toShortString(),
                     "reason", "pose_moved_before_resume");
         }
-        // strict_survival 不允许预读地下流体。首次入口直接开挖；只有同一 goal 内已经以
-        // WALLED 失败并写入 EpisodeMemory 的入口，才在 replan 时触发物理换列。迁移完成前
-        // 不建立库存基线、轨迹或 checkpoint，重启可安全重选。
+        // strict_survival does not allow pre-reading underground fluids. The first attempt at an
+        // entry digs directly; only an entry that has already failed with WALLED and been written to
+        // EpisodeMemory within the same goal triggers a physical column switch on replan. Before
+        // relocation completes, no inventory baseline, trail, or checkpoint is established, so a
+        // restart can safely reselect.
         int now = bot.getEntityWorld().getServer().getTicks();
         if (EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), bot.getBlockPos(), now)) {
             prepareEntryRelocation(bot);
@@ -409,7 +421,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         collected = 0;
         lastProgressBudget = 0;
         pickupGrace = 0;
-        startPos = bot.getBlockPos();   // 记井口,采够后回这里
+        startPos = bot.getBlockPos();   // remember the shaft entry, return here once enough is collected
         targetY = startPos.getY();
         phase = Phase.DESCEND;
         returnStartTick = 0;
@@ -594,11 +606,18 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             }
             return;
         }
-        // 下挖深度兜底:超过 MAX_DESCENT 还没采够,多半是掉落物没及时捡(collected 不增)→ 大范围扫拾一次再判;
-        // 仍不够则【一次性】永久转水平掘进(置 horizontalMode 标志),绝不继续无限往深里挖(实测无限下挖到 y6 被蜘蛛围杀)。
-        // 关键:此处绝不每 tick cancel+begin+return——旧逻辑那样会绕过下面的 miner.tick(永不推进)和
-        // L207 无进展看门狗(白等满 MAX_DESCENT 硬超时),每 tick 自废零破块(seed20260610 dig_down_timeout 根因)。
-        // 改为只置标志一次,之后正常流经主体统一原语:miner.tick 逐块推进 + 看门狗真卡时 200t 干净失败交回 replan。
+        // Descent-depth fallback: exceeding MAX_DESCENT without collecting enough is usually because
+        // drops weren't picked up in time (collected doesn't increase) -> do one wide-area sweep and
+        // recheck; if it's still not enough, permanently switch to horizontal digging [once only]
+        // (set the horizontalMode flag), and never keep digging endlessly deeper (the observed root
+        // cause of getting surrounded and killed by spiders while digging endlessly down to y6).
+        // Key point: this must never cancel+begin+return every tick -- the old logic did that and
+        // bypassed the miner.tick below (never advancing) and the L207 no-progress watchdog (waiting
+        // the full MAX_DESCENT hard timeout out for nothing), self-resetting to zero blocks broken
+        // every tick (the root cause of the seed20260610 dig_down_timeout). Changed to set the flag
+        // only once; afterward it flows normally through the shared primitive: miner.tick advances
+        // block by block, and if the watchdog genuinely stalls, it fails cleanly at 200t and hands
+        // back to replan.
         if (!horizontalMode && startPos != null && startPos.getY() - bot.getBlockPos().getY() >= MAX_DESCENT) {
             HarvestCore.sweepPickupAnyOf(bot, targetDrops, 12.0D, 64);
             int got = Math.max(0, HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline);
@@ -608,24 +627,28 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 beginReturn(bot);
                 return;
             }
-            horizontalMode = true;        // 永久转横挖,后续走 L236 的 digHorizontal 决策(经 miner.tick + 看门狗)
-            noteWorkProgress();            // 给横挖一个干净的看门狗起算窗口
+            horizontalMode = true;        // permanently switch to horizontal digging; subsequent ticks go through L236's digHorizontal decision (via miner.tick + watchdog)
+            noteWorkProgress();            // give horizontal digging a clean watchdog window to start counting from
             BotLog.action(bot, "dig_down_go_horizontal", "from", bot.getBlockPos().toShortString(),
                     "collected", collected + "/" + targetCount);
         }
 
-        // 海平面/含水层下挖防淹:封堵脚位+头位四周的侧向水(见方法注释)。封了本 tick 收手,下 tick 续挖。
+        // Sea-level/aquifer descent drowning prevention: seal lateral water around the foot and head
+        // cells (see method comment). If a seal happens this tick, stop here; digging continues next tick.
         if (sealLateralWater(bot, world)) {
             return;
         }
-        // 工具闸:挖不动目标(无合格镐)直接失败,交 GoalExecutor 倒推补镐。
+        // Tool gate: if the target can't be mined (no qualifying pickaxe), fail directly and let GoalExecutor backtrack to resupply a pickaxe.
         if (!ToolTier.canHarvestWithInventory(bot, targetBlock.getDefaultState())) {
             failAfterExactReturn(bot, ReturnOutcome.NEED_BETTER_TOOL);
             return;
         }
 
-        // 收集计数:绝对增量(固定基线),刚破的块的掉落物随后落袋会被算进来。
-        // 垂直半径放大:下挖时刚破的 cobblestone 落在上层台阶,2.5 格够不到 → collected 永不增 → 无限下挖到深处被怪围杀。
+        // Collection counting: an absolute delta against a fixed baseline; drops from a just-broken
+        // block landing in inventory afterward get counted in.
+        // Vertical pickup radius widened: while descending, cobblestone from a just-broken block
+        // lands on the upper stair step, out of reach at 2.5 cells -> collected never increases ->
+        // endless descent leading to getting surrounded and killed by mobs.
         refreshCollected(bot);
         if (collected >= grossCollectionTarget()) {
             miner.cancel(bot);
@@ -633,17 +656,21 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             if (pickupGrace++ >= PICKUP_GRACE_TICKS
                     || HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline
                     >= grossCollectionTarget()) {
-                // 采够 → 进入回程,爬回井口再完成(否则困在井底,下一个任务如打猎追地表猎物会出不来→活锁)。
+                // Enough collected -> enter the return trip and climb back to the shaft entry before
+                // completing (otherwise stuck at the bottom of the shaft; the next task, e.g. hunting
+                // surface prey, would be unable to get out -> livelock).
                 beginReturn(bot);
             }
             return;
         }
 
-        // 无进展看门狗:NO_PROGRESS_LIMIT 内没破任何块 → 干净失败,不空转。
+        // No-progress watchdog: no block broken within NO_PROGRESS_LIMIT -> fail cleanly, don't spin idle.
         if (workBudget() - lastProgressBudget > NO_PROGRESS_LIMIT) {
             miner.cancel(bot);
-            // 取证 dump:山地/自然地形 no_progress(实测 424t 零破块)光靠失败原因无法定位——
-            // 把脚位、阶梯方向、下一级三格(头/脚/踏面)的方块、能否破障打出来,供日志诊断几何卡点。
+            // Forensic dump: mountainous/natural-terrain no_progress (observed as 424t with zero
+            // blocks broken) can't be pinpointed from the failure reason alone -- log the foot
+            // position, stair direction, the blocks of the next tier's three cells (head/foot/tread),
+            // and whether the obstruction can be broken, to help diagnose the geometric stall point.
             BlockPos feetNow = bot.getBlockPos();
             Direction dirNow = HDIRS[stairDirIndex];
             BlockPos aheadNow = feetNow.offset(dirNow);
@@ -661,29 +688,36 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
 
-        // 推进当前挖掘。
+        // Advance the current dig.
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.MINING) {
-            return; // 正在挖,等它破/超时
+            return; // still mining, wait for it to break/time out
         }
         if (status == BlockMiner.Status.DONE) {
-            noteWorkProgress(); // 破了一格 = 进展(无论是石头还是表层土)
+            noteWorkProgress(); // a block broken = progress (whether it's stone or topsoil)
         }
-        // DONE / FAILED / IDLE → 决定下一格(脚下柱)。
+        // DONE / FAILED / IDLE -> decide the next cell (the column underfoot).
 
         BlockPos feet = bot.getBlockPos();
         if (horizontalMode || feet.down().getY() <= MIN_Y) {
-            // horizontalMode:下挖到 MAX_DESCENT 上限后永久横挖(见上方一次性置标志处)。
-            // 或到基岩上方、向下已无空间 → 转水平掘进继续挖石料(实测 Y=-59 时第一步 below 就 <= MIN_Y,
-            // 旧逻辑直接 fail collected=0 → MINE stone 失败 → goal replan 死循环)。
-            // 两路皆复用统一 digHorizontal:其 begin 有防重入守卫,经上面 miner.tick 推进 + L207 看门狗止损。
+            // horizontalMode: permanently switches to horizontal digging once the MAX_DESCENT cap is
+            // reached (see the one-time flag set above). Or, just above bedrock with no more room
+            // downward -> switch to horizontal digging to keep collecting stone material (observed:
+            // at Y=-59 the very first step's below was already <= MIN_Y, and the old logic would
+            // directly fail with collected=0 -> MINE stone failure -> goal replan infinite loop).
+            // Both paths reuse the unified digHorizontal: its begin() has a re-entry guard, advanced
+            // via miner.tick above with the L207 watchdog as the stall-loss backstop.
             digHorizontal(bot, world, feet);
             return;
         }
 
-        // 台阶式斜向下挖(拟人 + 安全):绝不直挖脚下——下方可能是水/岩浆,一镐捅穿就溺水/葬身岩浆。
-        // 改挖"下一级台阶"(斜前下方:ahead 头位 + next 脚位),深层这两格通常都是石料,顺带计入 collected;
-        // 下一级或其踏面是水/岩浆就换斜下方向绕,像挖楼梯一样一级一级斜下(与 DescendToYTask 台阶逻辑一致)。
+        // Staircase-style diagonal descent (humanlike + safe): never mine straight down underfoot --
+        // below could be water/lava, and one pickaxe swing through it means drowning/dying in lava.
+        // Instead mine the "next stair step" (diagonally ahead-below: ahead = head cell, next = foot
+        // cell); at depth these two cells are usually stone material, incidentally counted toward
+        // collected; if the next step or its tread is water/lava, switch diagonal direction and go
+        // around it, descending diagonally one step at a time like a staircase (consistent with
+        // DescendToYTask's staircase logic).
         ensureRejectedLandingOrigin(feet);
         if ((rejectedLandingDirections & 1 << stairDirIndex) != 0) {
             if (rotateStair(bot, world, feet)) {
@@ -693,8 +727,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
         Direction dir = HDIRS[stairDirIndex];
-        BlockPos ahead = feet.offset(dir);   // 下一级头位 (x+d, y)
-        BlockPos next = ahead.down();         // 下一级站位 (x+d, y-1)
+        BlockPos ahead = feet.offset(dir);   // next tier's head cell (x+d, y)
+        BlockPos next = ahead.down();         // next tier's standing cell (x+d, y-1)
         if (!isViableStairDirection(bot, feet, dir)) {
             // The tread's own support may have turned out, once observable, to be an already-open
             // cavity or natural cave rather than a hazard fluid (sealed elsewhere) or solid ground.
@@ -704,25 +738,35 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 return;
             }
             if (rotateStair(bot, world, feet)) {
-                return; // 换到既不挨流体、又能形成真实落脚面的斜下方向
+                return; // switched to a diagonal-down direction that neither touches a fluid nor forms a genuine landing surface
             }
-            // 四个斜下方向都被水/岩浆挡 → 转水平掘进(此层还能继续凑石料),实在不行那里再判失败。
+            // All four diagonal-down directions are blocked by water/lava -> switch to horizontal
+            // digging (this layer can still yield more stone material); if that truly fails too, judge failure there instead.
             digHorizontal(bot, world, feet);
             return;
         }
-        // 清出下一级身位:ahead(前方身位,眼睛永远看得见,先挖) → ahead.up()(前上头顶净空) → next(前下踏面)。
-        // ① 顺序:斜坡/上坡里 ahead 是挡在正前方的实心墙遮住通往 next 的视线,先挖被遮的 next 会射线撞墙
-        //    判够不到→FAILED→零破块卡死(seed20260610 主因);ahead 先挖清遮挡。
-        // ② 补挖 ahead.up():只清 next+ahead 每列仅 2 格(Y-1,Y),玩家从上一级下来时头撞前方 Y+1 实心顶,
-        //    下台阶只剩 1 格可走高、正常玩家过不去。补头顶净空→下潜巷道 2 格可通行。firstSolid3 跳流体防溃浆。
+        // Clear the next tier's body space: ahead (the cell directly in front, always visible, mine
+        // first) -> ahead.up() (headroom above the front cell) -> next (the tread below and in front).
+        // (1) Ordering: on a slope/uphill, ahead is a solid wall blocking the line of sight to next;
+        //     mining the occluded next first would ray-cast into the wall and be judged unreachable
+        //     -> FAILED -> zero-blocks-broken stall (the main cause of seed20260610); mine ahead first
+        //     to clear the occlusion.
+        // (2) Additionally mining ahead.up(): clearing only next+ahead leaves just 2 cells per column
+        //     (Y-1, Y), so when a player descends from the upper tier their head hits the solid
+        //     ceiling at Y+1 in front, leaving only 1 walkable cell height on the way down the stair
+        //     -- a normal player can't pass through. Clearing the headroom too -> the descending
+        //     tunnel is 2 cells tall and passable. firstSolid3 skips fluids to prevent a mud/water collapse.
         BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
         if (solid != null) {
             miner.begin(bot, solid);
-            miner.tick(bot); // 立即发起本格挖掘,不浪费一 tick
+            miner.tick(bot); // start mining this cell immediately, don't waste a tick
             return;
         }
-        // 身位已通 → 斜下踏到下一级台阶。bot 无被动重力,仍需主动移一格;斜向 1 格微位移=踏下一级楼梯,
-        // 不是 roam 那种跨图大范围闪现(下沉后刚破块的掉落物正好落入拾取半径,一并修掉 collected=0)。
+        // Body space is clear -> step diagonally down onto the next stair tier. The bot has no
+        // passive gravity, so it still needs an active one-cell move; a 1-cell diagonal
+        // micro-displacement = stepping down one stair, not the kind of large-scale map teleport
+        // roam does (after descending, the just-broken block's drops land right within the pickup
+        // radius, which also fixes the collected=0 problem).
         if (bot.getActionPack().descendInto(next)) {
             TrailUpdate landingUpdate = rememberDescentStep(bot.getBlockPos());
             if (landingUpdate == TrailUpdate.LIMIT) {
@@ -893,7 +937,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         return (int) Math.min(MAX_ELAPSED_CAP, Math.max(MAX_ELAPSED_BASE, scaled));
     }
 
-    // 采够后优先按真实走过的台阶逐格逆行；只有轨迹缺口才对下一 waypoint 做短路径兜底。
+    // Once enough is collected, prefer retracing the actually-walked stair steps cell by cell in
+    // reverse; only a gap in the trail falls back to a short pathfind to the next waypoint.
     private void returnToSurface(AIPlayerEntity bot) {
         miner.cancel(bot);
         BlockPos at = bot.getBlockPos();
@@ -969,9 +1014,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 && isSafeReturnLanding(bot.getEntityWorld(), waypoint)) {
             bot.getActionPack().stopAll();
             boolean moved = dy > 0
-                    ? io.github.zoyluo.aibot.mode.FakePlayerMotion.jumpTo(
+                    ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
                     bot, waypoint, "dig_down_return_trail")
-                    : io.github.zoyluo.aibot.mode.FakePlayerMotion.stepTo(
+                    : io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepTo(
                     bot, waypoint, "dig_down_return_trail");
             if (moved) {
                 returnTrailIndex--;
@@ -1264,14 +1309,20 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 : returnBudgetOffset;
     }
 
-    // 海平面/含水层下挖防淹:阶梯斜下会逐步漂向相邻海洋,水从【侧向】涌入脚位/头位泡死
-    // (实测沙滩 Y63 出生 dig_down 连淹 12 次→guard 抢断→上浮→replan 重挖同列→死循环;
-    // stair 只查正下/正前的水(L260),管不住侧向)。真人挖矿砌墙挡水:每 tick 封堵脚位+头位四周的水,
-    // 从根上防淹,而非泡死再被生存层兜底。干燥地形无水→直接返回零放置、不改行为(geo_deep/shaft/cave 不回归)。
-    // 返回 true=本 tick 封了一格(调用方收手,下 tick 续;BlockMiner 开挖会自动换回镐)。
+    // Sea-level/aquifer descent drowning prevention: diagonal-down staircase digging gradually
+    // drifts toward a neighboring ocean, and water floods in [laterally] at the foot/head cells,
+    // drowning the bot (observed: spawning on a Y63 beach, dig_down drowned 12 times in a row ->
+    // guard preempts -> surfaces -> replan re-digs the same column -> infinite loop; the stair logic
+    // only checks water directly below/ahead [L260], it can't handle lateral inflow). Like a real
+    // miner walling off water: every tick, seal the water around the foot and head cells, preventing
+    // drowning at the root instead of letting the bot drown and relying on the survival layer as a
+    // backstop. Dry terrain with no water -> return false immediately with zero placements, no
+    // behavior change (geo_deep/shaft/cave don't regress).
+    // Returns true = one cell was sealed this tick (caller yields, continues next tick; BlockMiner
+    // digging automatically switches back to the pickaxe).
     private boolean sealLateralWater(AIPlayerEntity bot, ServerWorld world) {
         BlockPos feet = bot.getBlockPos();
-        // ① 侧向:脚位+头位四周(阶梯斜下漂向海洋时水平涌入)。
+        // (1) Lateral: around the foot and head cells (water floods in horizontally as the staircase drifts toward the ocean).
         for (BlockPos level : new BlockPos[]{feet, feet.up()}) {
             for (Direction d : HDIRS) {
                 if (trySealWater(bot, world, level.offset(d))) {
@@ -1279,14 +1330,21 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 }
             }
         }
-        // ② 封顶:头顶上方一格——重水种子只封侧向仍 drown 的根因是水从竖井【上方】灌到头位
-        //(实测 seal 侧向 25 次仍 drown 12);把头顶也堵上,bot 在 1×2 旱泡里下挖,氧不再被顶部灌水耗光。
+        // (2) Cap the top: one cell above the head -- for water-heavy seeds, the root cause of still
+        // drowning after sealing only laterally is water pouring down onto the head cell from
+        // [above] the shaft (observed: sealed laterally 25 times, still drowned 12 times); sealing
+        // the top too keeps the bot digging in a dry 1x2 air pocket, so oxygen is no longer drained
+        // by water pouring in from above.
         return trySealWater(bot, world, feet.up(2));
     }
 
-    // 该格是水则封一块(真人砌墙/封顶挡水)。主手是镐时对水格交互被原版判 PASS 静默吞掉
-    //(同 OreDigTask 封浆教训)→ 先装方块再放。返回 true=封了一格(调用方收手下 tick 续,BlockMiner 自动换回镐);
-    // 无水/无块可封→false(交后续逻辑/生存层兜底,命比这格值钱,不卡死)。
+    // If this cell is water, seal it with a block (real-player wall-building/capping to block
+    // water). When the main hand holds a pickaxe, interacting with a water cell is silently
+    // swallowed by vanilla as PASS (the same lesson learned from OreDigTask's lava sealing) -> equip
+    // the block before placing it. Returns true = one cell was sealed (caller yields and continues
+    // next tick; BlockMiner automatically switches back to the pickaxe); no water/no block available
+    // to seal -> false (hand off to downstream logic/the survival layer as a backstop -- staying
+    // alive is worth more than this one cell, never get stuck over it).
     private boolean trySealWater(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
         boolean lava = isLava(world, pos);
         if (!lava && !isWater(world, pos)) {
@@ -1310,7 +1368,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         BotLog.action(bot, "dig_down_seal_water", "fluid", fluidName, "at", pos.toShortString());
         BrainCoordinator.INSTANCE.sendBotReply(bot,
                 "Sealed off exposed " + fluidName + " while digging -- routing around it.");
-        noteWorkProgress(); // 封堵=进展,别被 NO_PROGRESS 看门狗误杀
+        noteWorkProgress(); // sealing = progress, don't let it get falsely killed by the NO_PROGRESS watchdog
         return true;
     }
 
@@ -1372,8 +1430,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         return true;
     }
 
-    // 台阶斜下:换到下一个既不挨流体、又有真实踏面支撑的方向。天然坡面接悬崖时 ahead/next
-    // 可能全是空气；旧逻辑只查水/岩浆，会永远对同一 unsupported next 调 descendInto。
+    // Staircase diagonal-down: switch to the next direction that neither touches a fluid nor lacks a
+    // genuine tread support. Where a natural slope meets a cliff, ahead/next may both be air; the
+    // old logic only checked water/lava and would call descendInto on the same unsupported next forever.
     private boolean rotateStair(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int i = 0; i < HDIRS.length; i++) {
@@ -1468,8 +1527,10 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         return state.getHardness(world, pos) >= 0.0F && world.getBlockEntity(pos) == null;
     }
 
-    // 撞基岩(向下到底)后转水平掘进:沿一个方向逐格挖石料,挖通就走进去换列继续。深层全深板岩,
-    // 配合构造里把 cobbled_deepslate 计入 targetDrops,即可在 Y<0 凑够做熔炉的石料,不再死循环。
+    // After hitting bedrock (reaching the bottom), switch to horizontal digging: mine stone material
+    // cell by cell along one direction, and once through, walk in and switch columns to continue.
+    // The deep layer is all deepslate, so together with the constructor counting cobbled_deepslate
+    // into targetDrops, enough stone material can be gathered at Y<0 to make a furnace, no more infinite loop.
     private void digHorizontal(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int tries = 0; tries < HDIRS.length; tries++) {
@@ -1479,35 +1540,43 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             }
             Direction dir = HDIRS[hdirIndex];
             BlockPos side = feet.offset(dir);
-            // side/side.up 贴身(脚位/头位邻格),流体状态与站在墙边的真人一样天然可见,无条件可查。
-            // side.down()(踏面)在 side 被挖开前始终藏在实心岩后不可知——绝不在此预读;下面
-            // stepToStandable() 在真要落脚的那一刻才复查它,正是"挖穿才看见"的诚实反应式检查。
+            // side/side.up are adjacent to the body (the foot/head neighbor cells); their fluid
+            // state is just as naturally visible as it would be to a real player standing next to a
+            // wall, so it's checked unconditionally. side.down() (the tread) remains unknowable,
+            // hidden behind solid rock, until side itself is mined open -- never pre-read here;
+            // stepToStandable() below rechecks it only at the exact moment a landing is actually
+            // needed, which is precisely the honest, reactive "only see it once you break through" check.
             if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.up())) {
-                hdirIndex = (hdirIndex + 1) % HDIRS.length; // 这个方向贴身可见水/岩浆,换一个
+                hdirIndex = (hdirIndex + 1) % HDIRS.length; // water/lava is visibly touching the body in this direction, switch to another
                 continue;
             }
             BlockPos solid = firstSolid(world, side, side.up());
             if (solid != null) {
                 if (miner.target() == null || !miner.target().equals(solid)) {
-                    miner.begin(bot, solid); // 由 onTick 顶部的 miner.tick 推进
+                    miner.begin(bot, solid); // advanced by the miner.tick at the top of onTick
                 }
                 return;
             }
-            // 已记录的空格是精确返程轨迹，不是新的采掘前沿。走到旧矿道端点后
-            // 若允许踏回轨迹，方向轮转会令 bot 在整条走廊两端 ping-pong，
-            // 即使位置在变也没有任何新破块。只限制“双空气移动”；若方向上
-            // 出现新的可挖实体块，上面的 solid 分支仍会正常开挖。
+            // An already-recorded empty cell is part of the exact return trail, not a new mining
+            // frontier. After reaching the end of an old tunnel, if stepping back onto the trail were
+            // allowed, direction rotation would make the bot ping-pong between the two ends of the
+            // whole corridor, with no new blocks broken even though its position keeps changing. Only
+            // "double-air movement" is restricted here; if a new mineable solid block appears in a
+            // direction, the solid branch above still digs it normally.
             if (descentTrail.contains(side)) {
                 rejectLandingDirection(feet, hdirIndex);
                 hdirIndex = (hdirIndex + 1) % HDIRS.length;
                 continue;
             }
-            // side 脚位+头位皆空 → 走进去换列,继续水平挖。这里只是相邻一格，
-            // 不能每 tick 重启 startWalkTo：已挖通的长走廊会因控制器反复换目标而前后
-            // 摆动，最终在没有新破块时误触 NO_PROGRESS。改用共享的相邻物理步，
-            // 并在同一 tick 把落脚点写入事实轨迹，保证中断/重启后仍能精确返程。
+            // side's foot and head cells are both empty -> walk in and switch columns, continuing to
+            // dig horizontally. This is only an adjacent cell, so startWalkTo must not be restarted
+            // every tick: an already-dug-through long corridor would sway back and forth as the
+            // controller repeatedly changes target, eventually falsely triggering NO_PROGRESS with no
+            // new block broken. Use the shared adjacent physical step instead, and write the landing
+            // cell into the factual trail on the same tick, guaranteeing an exact return trip even
+            // after an interruption/restart.
             miner.cancel(bot);
-            if (io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            if (io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                     bot, side, "dig_down_horizontal")) {
                 TrailUpdate stepUpdate = rememberDescentStep(bot.getBlockPos());
                 if (stepUpdate == TrailUpdate.LIMIT) {
@@ -1531,8 +1600,10 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         armHorizontalFrontierSettle(bot);
     }
 
-    // 3 参版:依次返回第一个"固体且非流体"的格(流体跳过不挖→防溃浆/溃水)。下潜台阶清三格身位
-    // (ahead 头位 + ahead.up 头顶净空 + next 脚位),保证下潜巷道 2 格可走高、正常玩家能通过。
+    // 3-argument version: returns the first "solid and non-fluid" cell in order (fluid cells are
+    // skipped, never mined -> prevents a mud/water collapse). Clearing the diving stair's three body
+    // cells (ahead = head cell + ahead.up = headroom + next = foot cell) guarantees the descending
+    // tunnel is 2 cells tall and walkable, so a normal player can pass through.
     private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b, BlockPos c) {
         for (BlockPos p : new BlockPos[]{a, b, c}) {
             if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {

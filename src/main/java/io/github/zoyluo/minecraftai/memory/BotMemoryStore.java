@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.memory;
+package io.github.zoyluo.minecraftai.memory;
 
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.StringNbtReader;
 

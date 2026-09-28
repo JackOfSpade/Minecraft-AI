@@ -12,7 +12,7 @@ RELATIVE_RUN_DIR="build/run/restart-$STAMP"
 SERVER_RUN_DIR="$ROOT/$RELATIVE_RUN_DIR"
 REPORT_DIR="$ROOT/build/persistence-restart/$STAMP"
 PORT="$(harness_choose_port)"
-TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aibot-restart.XXXXXX")"
+TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/minecraftai-restart.XXXXXX")"
 FIFO=""
 SERVER_PID=""
 FD_OPEN=0
@@ -50,7 +50,7 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt"
   printf '{\n  "profile": "strict_survival",\n'
   printf '  "operatorCapabilities": { "hiddenBlockScan": false, "emergencyTeleport": false, "forcedPickup": false, "manualTeleport": false },\n'
   printf '  "llm": { "apiKey": "" }\n}\n'
-} > "$SERVER_RUN_DIR/config/aibot.json"
+} > "$SERVER_RUN_DIR/config/minecraftai.json"
 
 start_server() {
   local log_file="$1" ready=0
@@ -59,9 +59,9 @@ start_server() {
   mkfifo "$FIFO"
   exec 9<> "$FIFO"
   FD_OPEN=1
-  env -u AIBOT_LLM_API_KEY -u DEEPSEEK_API_KEY AIBOT_PROFILE=strict_survival AIBOT_TEST_PORT="$PORT" \
+  env -u MINECRAFTAI_LLM_API_KEY -u DEEPSEEK_API_KEY MINECRAFTAI_PROFILE=strict_survival MINECRAFTAI_TEST_PORT="$PORT" \
     "$ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
-    -p "$ROOT" -PaibotHarnessRunDir="$RELATIVE_RUN_DIR" runHarnessServer \
+    -p "$ROOT" -PminecraftaiHarnessRunDir="$RELATIVE_RUN_DIR" runHarnessServer \
     <&9 >> "$log_file" 2>&1 &
   SERVER_PID=$!
   for ((i = 0; i < 480; i++)); do
@@ -122,35 +122,35 @@ phase2="$REPORT_DIR/phase2.log"
 : > "$phase2"
 
 start_server "$phase1"
-printf 'aibot spawn RestartBob assistant\n' >&9
-printf 'aibot harness restart-stage RestartBob\n' >&9
+printf 'minecraftai spawn RestartBob assistant\n' >&9
+printf 'minecraftai harness restart-stage RestartBob\n' >&9
 wait_for_outcome "$phase1" \
-  '[AIBot Harness] restart-stage STARTED' \
-  '[AIBot Harness] restart-stage FAIL' 120 || {
+  '[MinecraftAi Harness] restart-stage STARTED' \
+  '[MinecraftAi Harness] restart-stage FAIL' 120 || {
   printf 'persistence-restart: mission start failed; see %s\n' "$phase1" >&2
   exit 1
 }
 poll_command_until "$phase1" \
-  'aibot harness restart-stage-check RestartBob' \
-  '[AIBot Harness] restart-stage-check PASS' \
-  '[AIBot Harness] restart-stage-check FAIL' 120 || {
+  'minecraftai harness restart-stage-check RestartBob' \
+  '[MinecraftAi Harness] restart-stage-check PASS' \
+  '[MinecraftAi Harness] restart-stage-check FAIL' 120 || {
   printf 'persistence-restart: non-default checkpoint stage failed; see %s\n' "$phase1" >&2
   exit 1
 }
 stop_server
 
 start_server "$phase2"
-printf 'aibot harness restart-check RestartBob\n' >&9
+printf 'minecraftai harness restart-check RestartBob\n' >&9
 wait_for_outcome "$phase2" \
-  '[AIBot Harness] persistence_restart RESTORE_PASS' \
-  '[AIBot Harness] persistence_restart RESTORE_FAIL' 120 || {
+  '[MinecraftAi Harness] persistence_restart RESTORE_PASS' \
+  '[MinecraftAi Harness] persistence_restart RESTORE_FAIL' 120 || {
   printf 'persistence-restart: exact checkpoint/lease restore failed; see %s\n' "$phase2" >&2
   exit 1
 }
 poll_command_until "$phase2" \
-  'aibot harness restart-progress RestartBob' \
-  '[AIBot Harness] restart-progress PASS' \
-  '[AIBot Harness] restart-progress FAIL' 180 || {
+  'minecraftai harness restart-progress RestartBob' \
+  '[MinecraftAi Harness] restart-progress PASS' \
+  '[MinecraftAi Harness] restart-progress FAIL' 180 || {
   printf 'persistence-restart: resumed Mission made no verified progress; see %s\n' "$phase2" >&2
   exit 1
 }

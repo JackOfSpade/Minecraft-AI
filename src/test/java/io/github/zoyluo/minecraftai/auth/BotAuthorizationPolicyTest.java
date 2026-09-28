@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.auth;
+package io.github.zoyluo.minecraftai.auth;
 
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.Actor;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.BotTarget;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.GlobalTarget;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy.Operation;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.Actor;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.BotTarget;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.GlobalTarget;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy.Operation;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;

@@ -14,7 +14,7 @@ loom {
     splitEnvironmentSourceSets()
 
     mods {
-        "aibot" {
+        "minecraftai" {
             sourceSet sourceSets.main
             sourceSet sourceSets.client
         }
@@ -24,7 +24,7 @@ loom {
 fabricApi {
     configureTests {
         createSourceSet.set(true)
-        modId.set('aibot-gametest')
+        modId.set('minecraftai-gametest')
         enableGameTests.set(true)
         enableClientGameTests.set(false)
     }
@@ -32,18 +32,18 @@ fabricApi {
 
 // Interactive/dedicated verification server. It loads the isolated gametest source set but does
 // not enable automatic GameTest execution, so command-driven harnesses stay out of the production jar.
-def harnessRunDir = providers.gradleProperty('aibotHarnessRunDir').orElse('build/run/harness').get()
+def harnessRunDir = providers.gradleProperty('minecraftaiHarnessRunDir').orElse('build/run/harness').get()
 def harnessRunInput = new File(harnessRunDir)
 def harnessRunFile = file(harnessRunDir).canonicalFile
 if (harnessRunInput.isAbsolute()
         || !harnessRunFile.toPath().startsWith(project.projectDir.canonicalFile.toPath())
         || harnessRunFile == project.projectDir.canonicalFile) {
-    throw new GradleException('aibotHarnessRunDir must be a project-relative child directory')
+    throw new GradleException('minecraftaiHarnessRunDir must be a project-relative child directory')
 }
 loom.runs {
     harnessServer {
         server()
-        configName = 'AIBot Harness Server'
+        configName = 'Minecraft-AI Harness Server'
         source sourceSets.gametest
         runDir harnessRunDir
     }
@@ -63,8 +63,8 @@ def prepareHarnessRun = tasks.register('prepareHarnessRun') {
         }
         def properties = new File(dir, 'server.properties')
         if (!properties.exists()) {
-            def seed = System.getenv('AIBOT_TEST_SEED') ?: '20260610'
-            def port = System.getenv('AIBOT_TEST_PORT') ?: '25565'
+            def seed = System.getenv('MINECRAFTAI_TEST_SEED') ?: '20260610'
+            def port = System.getenv('MINECRAFTAI_TEST_PORT') ?: '25565'
             properties.setText(
                     "online-mode=false\nlevel-name=world\nlevel-seed=${seed}\nserver-port=${port}\n", 'UTF-8')
         }
@@ -77,7 +77,7 @@ tasks.named('runHarnessServer') {
 
 loom.runs.named('gameTest') {
     property 'fabric-api.gametest.report-file',
-            file('build/test-results/gametest/TEST-aibot-gametest.xml').absolutePath
+            file('build/test-results/gametest/TEST-minecraftai-gametest.xml').absolutePath
 }
 
 def prepareGameTestRun = tasks.register('prepareGameTestRun') {

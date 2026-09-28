@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -21,10 +21,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 public final class OpenAiCompatibleApiClient {
-    private final AIBotConfig.Llm config;
+    private final MinecraftAiConfig.Llm config;
     private final HttpClient httpClient;
 
-    public OpenAiCompatibleApiClient(AIBotConfig.Llm config) {
+    public OpenAiCompatibleApiClient(MinecraftAiConfig.Llm config) {
         this.config = config;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -224,7 +224,7 @@ public final class OpenAiCompatibleApiClient {
      * effort, and reasoning shares the {@code max_tokens} budget, so relying on the server
      * default would let a long chain of thought truncate the tool call the bot is waiting on.
      */
-    private static JsonObject serializeThinking(AIBotConfig.Llm config) {
+    private static JsonObject serializeThinking(MinecraftAiConfig.Llm config) {
         JsonObject thinking = new JsonObject();
         boolean enabled = Boolean.TRUE.equals(config.thinking());
         thinking.addProperty("type", enabled ? "enabled" : "disabled");
@@ -322,8 +322,9 @@ public final class OpenAiCompatibleApiClient {
                     "reasoning_tokens", reasoningTokens,
                     "cache_hit", cacheHitTokens,
                     "finish_reason", finishReason);
-            // 思考与正文共享额度:被 length 截断且没拿到任何可执行输出时必须显式告警,
-            // 否则调用方只会看到一次“无动作”的空决策。
+            // Thinking and the main response share the token budget: if generation was cut off
+            // by "length" and no executable output was produced at all, we must warn explicitly,
+            // otherwise the caller only ever sees a single silent "no action" decision.
             if ("length".equals(finishReason) && toolCalls.isEmpty()
                     && (content == null || content.isBlank())) {
                 BotLog.warn(LogCategory.API, null, "api_truncated_before_output",

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -38,8 +38,10 @@ public final class RecipeRegistry {
             Items.PALE_OAK_PLANKS);
 
     private static final List<Item> STICKS = List.of(Items.STICK);
-    // 石料族:普通圆石/深板岩圆石/黑石——三者在 MC 里都能做熔炉与石工具(实测:bot 在 Y=-59 全是深板岩,
-    // 旧配方只认 cobblestone,导致深层做不了熔炉、MINE stone 撞基岩、goal replan 死循环)。
+    // Stone-like family: regular cobblestone / cobbled deepslate / blackstone -- all three can make
+    // furnaces and stone tools in MC (observed: at Y=-59 the bot finds only cobbled deepslate; the old
+    // recipe recognized only cobblestone, causing failures to craft furnaces at depth, MINE stone hitting
+    // bedrock, and a goal-replan infinite loop).
     private static final List<Item> STONE_LIKE = List.of(
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.BLACKSTONE);
     private static final Map<Item, Recipe> BY_OUTPUT = new HashMap<>();
@@ -51,23 +53,27 @@ public final class RecipeRegistry {
     private RecipeRegistry() {
     }
 
-    // 两级查找:手写表优先(vanilla 关键链路钉死,确定性零回归);未命中查运行时索引
-    //(RecipeManager 全量,模组/长尾物品兜底——暮色森林等模组配方自动可倒推)。
+    // Two-tier lookup: the handwritten table takes priority (pins down vanilla's critical chains, zero
+    // regression in determinism); on a miss, fall back to the runtime index (full RecipeManager coverage,
+    // a fallback for mod/long-tail items -- e.g. Twilight Forest mod recipes can be auto-derived).
     public static Optional<Recipe> find(Item output) {
         Recipe handwritten = BY_OUTPUT.get(output);
         if (handwritten != null) {
             return Optional.of(handwritten);
         }
-        // 有熔炼链的物品(铁锭/金锭/玻璃…)不走运行时配方兜底:索引会学到"铁块拆 9 锭"这类逆向
-        // 配方(材料种类最少被选中)压过熔炼正道,倒推成 锭→块→锭 死循环(llm_iron 实测
-        // cycle:iron_block plan_failed)。smelt 正道由 acquireBaseItem 的 SmeltChain 分支处理。
+        // Items with a smelting chain (iron ingot / gold ingot / glass ...) skip the runtime recipe
+        // fallback: the index would learn reverse recipes like "break an iron block into 9 ingots"
+        // (picked because it has the fewest ingredient types), overriding the correct smelting path, and
+        // derive an ingot -> block -> ingot infinite loop (observed in llm_iron testing:
+        // cycle:iron_block plan_failed). The correct smelting path is handled by the SmeltChain branch of
+        // acquireBaseItem.
         if (SmeltChain.rawFor(output) != null) {
             return Optional.empty();
         }
         return RuntimeRecipeIndex.find(output);
     }
 
-    // S1:供依赖链审计(/aibot deplint)遍历全部已知配方。
+    // S1: for dependency-chain auditing (/minecraftai deplint) to iterate over all known recipes.
     public static java.util.Collection<Recipe> all() {
         return java.util.Collections.unmodifiableCollection(BY_OUTPUT.values());
     }
@@ -94,7 +100,8 @@ public final class RecipeRegistry {
                 new Ingredient(STICKS, 1)), false));
         put(new Recipe(Items.BOWL, 4, List.of(new Ingredient(PLANKS, 3)), false));
         put(new Recipe(Items.BREAD, 1, List.of(new Ingredient(List.of(Items.WHEAT), 3)), false));
-        // 蛋糕链:糖←甘蔗;桶←3铁;蛋糕=3奶桶+2糖+1蛋+3麦(蛋为被动产物,需背包已有,见 GoalPlanner)。
+        // Cake chain: sugar <- sugar cane; bucket <- 3 iron; cake = 3 milk buckets + 2 sugar + 1 egg + 3
+        // wheat (egg is a passive product, must already be in inventory, see GoalPlanner).
         put(new Recipe(Items.SUGAR, 1, List.of(new Ingredient(List.of(Items.SUGAR_CANE), 1)), false));
         put(new Recipe(Items.BUCKET, 1, List.of(new Ingredient(List.of(Items.IRON_INGOT), 3)), true));
         put(new Recipe(Items.CAKE, 1, List.of(
@@ -120,18 +127,19 @@ public final class RecipeRegistry {
         sword(Items.STONE_SWORD, STONE_LIKE, 2);
         sword(Items.IRON_SWORD, List.of(Items.IRON_INGOT), 2);
 
-        // P3:锄头(2 头料 + 2 木棍),供农业链倒推。
+        // P3: hoe (2 head material + 2 sticks), for farming-chain derivation.
         tool(Items.WOODEN_HOE, PLANKS, 2);
         tool(Items.STONE_HOE, STONE_LIKE, 2);
         tool(Items.IRON_HOE, List.of(Items.IRON_INGOT), 2);
 
-        // 第3层:铁甲(装备前置倒推用)。vanilla 用量——头5/胸8/腿7/脚4,纯金属无木棍。
+        // Layer 3: iron armor (for equipment-prerequisite derivation). Vanilla quantities -- helmet 5 /
+        // chestplate 8 / leggings 7 / boots 4, pure metal, no sticks.
         armorOf(Items.IRON_HELMET, Items.IRON_INGOT, 5);
         armorOf(Items.IRON_CHESTPLATE, Items.IRON_INGOT, 8);
         armorOf(Items.IRON_LEGGINGS, Items.IRON_INGOT, 7);
         armorOf(Items.IRON_BOOTS, Items.IRON_INGOT, 4);
 
-        // S1:钻石/金工具(挖钻后升级、高效挖矿)。
+        // S1: diamond/gold tools (upgrade after mining diamonds, efficient mining).
         tool(Items.DIAMOND_PICKAXE, List.of(Items.DIAMOND), 3);
         tool(Items.DIAMOND_AXE, List.of(Items.DIAMOND), 3);
         tool(Items.DIAMOND_SHOVEL, List.of(Items.DIAMOND), 1);
@@ -140,7 +148,7 @@ public final class RecipeRegistry {
         tool(Items.GOLDEN_PICKAXE, List.of(Items.GOLD_INGOT), 3);
         sword(Items.GOLDEN_SWORD, List.of(Items.GOLD_INGOT), 2);
 
-        // S1:钻石甲 + 金甲(防具升级链 S30/S34 用)。
+        // S1: diamond armor + gold armor (used by the armor-upgrade chain S30/S34).
         armorOf(Items.DIAMOND_HELMET, Items.DIAMOND, 5);
         armorOf(Items.DIAMOND_CHESTPLATE, Items.DIAMOND, 8);
         armorOf(Items.DIAMOND_LEGGINGS, Items.DIAMOND, 7);
@@ -150,12 +158,12 @@ public final class RecipeRegistry {
         armorOf(Items.GOLDEN_LEGGINGS, Items.GOLD_INGOT, 7);
         armorOf(Items.GOLDEN_BOOTS, Items.GOLD_INGOT, 4);
 
-        // S1:盾牌(防具 S32)——6 木板 + 1 铁锭。
+        // S1: shield (armor S32) -- 6 planks + 1 iron ingot.
         put(new Recipe(Items.SHIELD, 1, List.of(
                 new Ingredient(PLANKS, 6),
                 new Ingredient(List.of(Items.IRON_INGOT), 1)), true));
 
-        // S1:养殖/圈养基建(模块 E)——栅栏、干草块。
+        // S1: animal husbandry/pen infrastructure (Module E) -- fence, hay block.
         put(new Recipe(Items.OAK_FENCE, 3, List.of(
                 new Ingredient(PLANKS, 4),
                 new Ingredient(STICKS, 2)), true));
@@ -174,7 +182,7 @@ public final class RecipeRegistry {
         put(new Recipe(output, 1, List.of(new Ingredient(List.of(plank), 5)), false));
     }
 
-    // 护甲(纯金属,无木棍)。material = 铁锭/钻石/金锭。
+    // Armor (pure metal, no sticks). material = iron ingot / diamond / gold ingot.
     private static void armorOf(Item output, Item material, int ingotCount) {
         put(new Recipe(output, 1, List.of(new Ingredient(List.of(material), ingotCount)), true));
     }

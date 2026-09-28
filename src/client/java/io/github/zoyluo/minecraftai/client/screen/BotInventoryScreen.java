@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.client.screen;
+package io.github.zoyluo.minecraftai.client.screen;
 
-import io.github.zoyluo.aibot.inventory.BotInventoryScreenHandler;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.entity.player.PlayerInventory;

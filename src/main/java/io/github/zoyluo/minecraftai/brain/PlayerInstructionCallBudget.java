@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 /**
  * Counts model requests made while carrying out one player instruction.

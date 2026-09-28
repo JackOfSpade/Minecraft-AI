@@ -1,16 +1,16 @@
-package io.github.zoyluo.aibot.client.screen;
+package io.github.zoyluo.minecraftai.client.screen;
 
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.client.BotCommandBridge;
-import io.github.zoyluo.aibot.client.screen.ui.ChatView;
-import io.github.zoyluo.aibot.client.screen.ui.InventoryView;
-import io.github.zoyluo.aibot.client.screen.ui.PanelComponent;
-import io.github.zoyluo.aibot.client.screen.ui.Theme;
-import io.github.zoyluo.aibot.client.screen.ui.cards.GoalView;
-import io.github.zoyluo.aibot.client.screen.ui.cards.QuickActionCard;
-import io.github.zoyluo.aibot.client.screen.ui.cards.SettingsCard;
-import io.github.zoyluo.aibot.client.screen.ui.cards.StatusCard;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.client.BotCommandBridge;
+import io.github.zoyluo.minecraftai.client.screen.ui.ChatView;
+import io.github.zoyluo.minecraftai.client.screen.ui.InventoryView;
+import io.github.zoyluo.minecraftai.client.screen.ui.PanelComponent;
+import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
+import io.github.zoyluo.minecraftai.client.screen.ui.cards.GoalView;
+import io.github.zoyluo.minecraftai.client.screen.ui.cards.QuickActionCard;
+import io.github.zoyluo.minecraftai.client.screen.ui.cards.SettingsCard;
+import io.github.zoyluo.minecraftai.client.screen.ui.cards.StatusCard;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -53,11 +53,11 @@ public final class BotPanelScreen extends Screen {
     private String target = "";
 
     public BotPanelScreen(Mode mode) {
-        super(mode == Mode.GOAL ? Text.literal("目标与执行链")
-                : Text.translatable(mode == Mode.ACTIONS ? "screen.aibot.actions_panel"
-                : mode == Mode.SETTINGS ? "screen.aibot.settings_panel"
-                : mode == Mode.INVENTORY ? "screen.aibot.inventory_panel"
-                : "screen.aibot.panel"));
+        super(mode == Mode.GOAL ? Text.literal("Goal & Execution Chain")
+                : Text.translatable(mode == Mode.ACTIONS ? "screen.minecraftai.actions_panel"
+                : mode == Mode.SETTINGS ? "screen.minecraftai.settings_panel"
+                : mode == Mode.INVENTORY ? "screen.minecraftai.inventory_panel"
+                : "screen.minecraftai.panel"));
         this.mode = mode;
     }
 
@@ -75,37 +75,37 @@ public final class BotPanelScreen extends Screen {
         if (mode == Mode.CHAT_STATUS) {
             int stripY = py + ph - Theme.INPUT_H - Theme.PAD + 1;
             input = new TextFieldWidget(textRenderer, px + leftW + Theme.GUTTER + Theme.PAD, stripY,
-                    Math.max(60, rightW - Theme.PAD * 2 - 54), 18, Text.translatable("chat.aibot.input"));
+                    Math.max(60, rightW - Theme.PAD * 2 - 54), 18, Text.translatable("chat.minecraftai.input"));
             input.setMaxLength(512);
-            input.setSuggestion(Theme.tr("chat.aibot.input"));
-            sendButton = ButtonWidget.builder(Text.translatable("btn.aibot.send"), button -> sendChat())
+            input.setSuggestion(Theme.tr("chat.minecraftai.input"));
+            sendButton = ButtonWidget.builder(Text.translatable("btn.minecraftai.send"), button -> sendChat())
                     .dimensions(px + pw - Theme.PAD - 48, stripY, 48, 18)
                     .build();
             register(input);
             register(sendButton);
         }
-        goalButton = ButtonWidget.builder(Text.literal(mode == Mode.GOAL ? "聊天" : "目标"), button -> {
+        goalButton = ButtonWidget.builder(Text.literal(mode == Mode.GOAL ? "Chat" : "Goal"), button -> {
                     if (client != null) {
                         client.setScreen(new BotPanelScreen(mode == Mode.GOAL ? Mode.CHAT_STATUS : Mode.GOAL));
                     }
                 })
                 .dimensions(px + pw - 178, py + 4, 40, 14)
                 .build();
-        inventoryButton = ButtonWidget.builder(Text.translatable(mode == Mode.INVENTORY ? "btn.aibot.chat" : "btn.aibot.inventory"), button -> {
+        inventoryButton = ButtonWidget.builder(Text.translatable(mode == Mode.INVENTORY ? "btn.minecraftai.chat" : "btn.minecraftai.inventory"), button -> {
                     if (client != null) {
                         client.setScreen(new BotPanelScreen(mode == Mode.INVENTORY ? Mode.CHAT_STATUS : Mode.INVENTORY));
                     }
                 })
                 .dimensions(px + pw - 134, py + 4, 40, 14)
                 .build();
-        settingsButton = ButtonWidget.builder(Text.translatable(mode == Mode.SETTINGS ? "btn.aibot.chat" : "btn.aibot.settings"), button -> {
+        settingsButton = ButtonWidget.builder(Text.translatable(mode == Mode.SETTINGS ? "btn.minecraftai.chat" : "btn.minecraftai.settings"), button -> {
                     if (client != null) {
                         client.setScreen(new BotPanelScreen(mode == Mode.SETTINGS ? Mode.CHAT_STATUS : Mode.SETTINGS));
                     }
                 })
                 .dimensions(px + pw - 90, py + 4, 40, 14)
                 .build();
-        closeButton = ButtonWidget.builder(Text.translatable("btn.aibot.close"), button -> close())
+        closeButton = ButtonWidget.builder(Text.translatable("btn.minecraftai.close"), button -> close())
                 .dimensions(px + pw - 46, py + 4, 38, 14)
                 .build();
         register(goalButton);
@@ -122,8 +122,8 @@ public final class BotPanelScreen extends Screen {
     }
 
     private void register(ClickableWidget widget) {
-        addDrawableChild(widget);   // 注册以接管点击/焦点/输入路由
-        panelWidgets.add(widget);   // 渲染由本类手动负责(见 render),绕开 super.render 的背景模糊 pass
+        addDrawableChild(widget);   // Register so it takes over click/focus/input routing
+        panelWidgets.add(widget);   // Rendering is handled manually by this class (see render), bypassing super.render's background blur pass
     }
 
     @Override
@@ -187,7 +187,7 @@ public final class BotPanelScreen extends Screen {
         if (mode == Mode.CHAT_STATUS) {
             drawInputStrip(context);
         }
-        // 手动渲染控件,不调用 super.render()——绕开 1.21 屏幕背景模糊/暗化 pass(否则面板内容会被模糊,而控件清晰)。
+        // Render widgets manually, without calling super.render() -- this bypasses the 1.21 screen background blur/darken pass (otherwise the panel content would be blurred while the widgets stay sharp).
         for (ClickableWidget widget : panelWidgets) {
             widget.render(context, mouseX, mouseY, delta);
         }
@@ -202,16 +202,16 @@ public final class BotPanelScreen extends Screen {
             pw = docked ? Math.min(300, Math.max(260, (int) (width * 0.28F))) : Math.max(240, width - 20);
             ph = Math.max(150, Math.min(height - 24, 190));
         } else if (mode == Mode.INVENTORY) {
-            // 需容下 9 列 × 18px 网格(162)+ 左右内边距;高度容装备行 + AI 4 行 + 玩家 4 行
+            // Must fit a 9-column x 18px grid (162) plus left/right padding; height must fit the equipment row + AI's 4 rows + player's 4 rows
             pw = docked ? Math.min(240, Math.max(200, (int) (width * 0.24F))) : Math.max(200, width - 20);
             ph = Math.max(220, Math.min(height - 24, 272));
         } else if (mode == Mode.GOAL) {
-            // 目标与执行链:单栏,容下完整步骤链
+            // Goal & Execution Chain: single column, fits the full step chain
             pw = docked ? Math.min(300, Math.max(240, (int) (width * 0.26F))) : Math.max(240, width - 20);
             ph = Math.max(180, Math.min(height - 24, 260));
         } else {
             pw = docked ? Math.min(520, Math.max(360, (int) (width * 0.48F))) : Math.max(240, width - 20);
-            // 关键:ph 必须能装进屏幕(含上下边距),否则底部输入框会被挤出屏幕下沿
+            // Critical: ph must fit on screen (including top/bottom margins), otherwise the bottom input box gets pushed off the bottom edge of the screen
             ph = Math.max(160, Math.min(height - 24, 380));
         }
         px = docked ? width - pw - 12 : (width - pw) / 2;
@@ -242,7 +242,7 @@ public final class BotPanelScreen extends Screen {
             chat = null;
             return;
         }
-        // CHAT_STATUS:只放状态卡(血/饱食/进度/任务)。目标与执行链走顶部"目标"按钮,背包走"背包"按钮。
+        // CHAT_STATUS: only place the status card (health/hunger/progress/task). Goal & Execution Chain is reached via the top "Goal" button, inventory via the "Inventory" button.
         leftCards.add(new StatusCard());
         chat = new ChatView();
     }
@@ -252,12 +252,12 @@ public final class BotPanelScreen extends Screen {
         int leftX = px + Theme.PAD;
         int cardY = py + Theme.TITLE_H + Theme.PAD;
         int cardW = leftW - Theme.PAD * 2;
-        // CHAT_STATUS 左栏底线要给底部输入条留位;其它模式用到面板底
+        // CHAT_STATUS's left column bottom line must leave room for the bottom input strip; other modes use the panel bottom
         int bottom = py + ph - Theme.PAD - (mode == Mode.CHAT_STATUS ? Theme.INPUT_H : 0);
         for (PanelComponent card : leftCards) {
             int remaining = bottom - cardY;
             if (remaining < 40) {
-                break;  // 放不下就不再布局,避免未布局卡以默认 (0,0) 渲染到面板外
+                break;  // Stop laying out once it no longer fits, to avoid an unlaid-out card rendering outside the panel at its default (0,0)
             }
             int cardH = Math.min(card.preferredHeight(), remaining);
             card.setBounds(leftX, cardY, cardW, cardH);
@@ -275,12 +275,12 @@ public final class BotPanelScreen extends Screen {
     private void drawTitleBar(DrawContext context) {
         String name = displayTarget();
         if (mode == Mode.GOAL) {
-            context.drawTextWithShadow(textRenderer, Text.literal("目标与执行链 · " + name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
+            context.drawTextWithShadow(textRenderer, Text.literal("Goal & Execution Chain · " + name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
         } else {
-            String titleKey = mode == Mode.ACTIONS ? "screen.aibot.actions_title"
-                    : mode == Mode.SETTINGS ? "screen.aibot.settings_title"
-                    : mode == Mode.INVENTORY ? "screen.aibot.inventory_title"
-                    : "screen.aibot.title";
+            String titleKey = mode == Mode.ACTIONS ? "screen.minecraftai.actions_title"
+                    : mode == Mode.SETTINGS ? "screen.minecraftai.settings_title"
+                    : mode == Mode.INVENTORY ? "screen.minecraftai.inventory_title"
+                    : "screen.minecraftai.title";
             context.drawTextWithShadow(textRenderer, Theme.tr(titleKey, name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
         }
         context.drawHorizontalLine(px + Theme.PAD, px + pw - Theme.PAD - 1, py + Theme.TITLE_H, Theme.BORDER);
@@ -303,7 +303,7 @@ public final class BotPanelScreen extends Screen {
         if (snapshot != null) {
             return snapshot.botName();
         }
-        return target == null || target.isBlank() ? Theme.tr("screen.aibot.owner_bot") : target;
+        return target == null || target.isBlank() ? Theme.tr("screen.minecraftai.owner_bot") : target;
     }
 
     private void sendChat() {

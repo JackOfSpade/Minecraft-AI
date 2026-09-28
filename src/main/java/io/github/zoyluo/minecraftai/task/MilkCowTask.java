@@ -1,15 +1,15 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MilkCowAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MilkCowAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.entity.passive.CowEntity;
 import net.minecraft.item.Items;
 
 /**
- * 挤奶任务:找最近的成年牛、靠近、用空桶挤出 target 桶牛奶(MILK_BUCKET)。
- * best-effort:没空桶/周围没牛/久无进展时,已挤到 ≥1 桶就完成、一桶没挤到才失败(不阻断上层目标)。
+ * Milk cow task: find the nearest adult cow, approach it, and use an empty bucket to milk out `target` buckets of milk (MILK_BUCKET).
+ * best-effort: when there is no empty bucket / no cow nearby / no progress for a long time, complete if at least 1 bucket has already been milked, and only fail if zero buckets have been milked (does not block the parent goal).
  */
 public final class MilkCowTask extends AbstractTask {
     private static final double SEARCH = 32.0D;
@@ -57,8 +57,8 @@ public final class MilkCowTask extends AbstractTask {
             return;
         }
         if (elapsed - lastProgressTick > NO_PROGRESS_LIMIT) {
-            // note 是最近一次 milk() 失败的具体原因(牛不在挤奶范围/动作被拒等);光看
-            // "milk_no_progress" 只知道 600t 没进展,分不清是一直挤不中同一头牛还是别的原因。
+            // note is the specific reason the most recent milk() call failed (cow out of milking range / action rejected, etc.); looking only at
+            // "milk_no_progress" tells you there has been no progress for 600 ticks, but not whether it is repeatedly missing the same cow or something else.
             finishOrFail("milk_no_progress" + (note.isBlank() ? "" : ":" + note));
             return;
         }
@@ -78,7 +78,7 @@ public final class MilkCowTask extends AbstractTask {
             }
             return;
         }
-        // 走向牛(牛会移动,持续重定向;A* 失败则退化为直线 walk)。
+        // Walk toward the cow (the cow moves, so keep re-targeting; fall back to a straight-line walk if A* fails).
         if (bot.getActionPack().isPathExecutorIdle()) {
             ActionResult path = bot.getActionPack().startPathTo(cow.getBlockPos());
             if (path.isFailed()) {

@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.action.FarmAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.inventory.Inventory;
@@ -45,7 +45,8 @@ public final class FarmTask extends AbstractTask {
     private final Block crop;
     private final boolean keepTending;
     private final boolean harvestOnly;
-    // P3:数量受限模式(GoalExecutor FARM 步用)。produceItem!=null 时,收到 targetHarvest 个产出即 complete。
+    // P3: quantity-limited mode (used by GoalExecutor's FARM step). When produceItem != null,
+    // complete() fires as soon as targetHarvest units of the produce have been collected.
     private final Item produceItem;
     private final int targetHarvest;
     private int produceBaseline;
@@ -59,14 +60,14 @@ public final class FarmTask extends AbstractTask {
     private int completedActions;
     private int lastDepositActionCount;
     private int waitTicks;
-    private boolean waitingForMaturity; // 种完后留在原地等作物自然成熟(数量受限模式),非卡死
+    private boolean waitingForMaturity; // After planting, stay put waiting for crops to mature naturally (quantity-limited mode); not stuck
     private String note = "";
 
     public FarmTask(BlockPos areaCenter, int radius, Item seed, Block crop, boolean keepTending, boolean harvestOnly) {
         this(areaCenter, radius, seed, crop, keepTending, harvestOnly, null, 0);
     }
 
-    /** P3:数量受限构造——produceItem 收到 targetHarvest 个即完成(供 GoalExecutor FARM 步)。 */
+    /** P3: quantity-limited constructor — completes once produceItem reaches targetHarvest units (for GoalExecutor's FARM step). */
     public FarmTask(BlockPos areaCenter, int radius, Item seed, Block crop, boolean keepTending,
                     boolean harvestOnly, Item produceItem, int targetHarvest) {
         this.areaCenter = areaCenter.toImmutable();
@@ -112,20 +113,23 @@ public final class FarmTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        // P3:数量受限模式——收够目标产出即完成(优先于其它阶段判断)。
+        // P3: quantity-limited mode — complete as soon as the target produce count is reached (checked before any other phase logic).
         if (produceItem != null
                 && InventoryAction.countItem(bot, produceItem) - produceBaseline >= targetHarvest) {
             complete();
             return;
         }
         if (!keepTending && produceItem == null && elapsed > 2400) {
-            // 数量受限模式(produceItem!=null)要等作物自然成熟,走下面 12000t 配额超时,不受这条 2400t 短超时制约。
-            // phase/note 一起带上:这条超时在 SURVEY/GOTO/TILL/PLANT/HARVEST/DEPOSIT* 任一阶段都可能触发,
-            // 光看 "farm_timeout" 分不清卡在哪一步、上一次动作失败的原因是什么。
+            // Quantity-limited mode (produceItem != null) needs to wait for crops to mature naturally, so it
+            // uses the 12000t quota timeout below instead and is exempt from this 2400t short timeout.
+            // phase/note are attached together: this timeout can fire in any of SURVEY/GOTO/TILL/PLANT/
+            // HARVEST/DEPOSIT*, and "farm_timeout" alone wouldn't tell us which step it stalled on or why
+            // the last action failed.
             fail("farm_timeout phase=" + phase + (note.isBlank() ? "" : " note=" + note));
             return;
         }
-        // P3:数量受限模式有自己的硬超时(等作物成熟要时间,但不能无限),复用 keepTending 的巡逻逻辑。
+        // P3: quantity-limited mode has its own hard timeout (waiting for crops to mature takes time,
+        // but not forever); it reuses keepTending's patrol logic.
         if (produceItem != null && elapsed > 12000) {
             fail("farm_quota_timeout collected="
                     + (InventoryAction.countItem(bot, produceItem) - produceBaseline) + "/" + targetHarvest);
@@ -152,8 +156,8 @@ public final class FarmTask extends AbstractTask {
         boolean hasSeeds = !harvestOnly && InventoryAction.countItem(bot, seed) > 0;
         BlockPos.stream(areaCenter.add(-radius, -1, -radius), areaCenter.add(radius, 1, radius))
                 .map(BlockPos::toImmutable)
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
-                        || io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos.up()))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
+                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.up()))
                 .forEach(pos -> addTargetIfUseful(world, pos, hasSeeds));
         targets.sort(Comparator.comparingDouble(pos -> pos.ground().getSquaredDistance(bot.getBlockPos())));
         if (targets.isEmpty()) {
@@ -161,15 +165,19 @@ public final class FarmTask extends AbstractTask {
                 fail("missing " + seed + " x1");
                 return;
             }
-            // 等熟(真实地形种田做面包命门):种了但还没熟的作物 + 数量受限还没凑够产出 → 别 DONE,
-            // 留在原地等作物自然成熟(配合 random tick),熟了下次 survey 即生成 HARVEST target 去收。
-            // 旧逻辑种完 targets 空即 DONE、从不等熟(real_wheat 实测 till/plant 6-12 次但 harvest=0);
-            // lab food_farm 靠 perTick 强制催熟才过。超时由上面 12000t 配额兜底,熟不了也不会无限等。
+            // Wait for maturity (a lifeline for real-terrain farming to produce bread): if crops are planted
+            // but not yet mature, and quantity-limited mode still hasn't hit its produce target, don't go
+            // DONE — stay put and let the crops mature naturally (driven by random tick); once mature, the
+            // next survey will generate a HARVEST target to collect them.
+            // The old logic went DONE as soon as targets emptied and never waited for maturity (real_wheat
+            // testing showed 6-12 till/plant cycles but harvest=0); the lab food_farm test only passed
+            // because perTick force-ripened crops. The 12000t quota timeout above is the backstop, so even
+            // if crops never mature we won't wait forever.
             boolean needMore = produceItem != null
                     && InventoryAction.countItem(bot, produceItem) - produceBaseline < targetHarvest;
             if (!harvestOnly && needMore && hasImmatureCrops(bot, world)) {
                 waitingForMaturity = true;
-                return; // 留在 SURVEY,下 tick 继续等熟(不切 DONE);isWaiting() 期间豁免 StuckWatcher
+                return; // Stay in SURVEY and keep waiting for maturity next tick (don't switch to DONE); exempt from StuckWatcher while isWaiting()
             }
             waitingForMaturity = false;
             if (keepTending && hasDepositItems(bot)) {
@@ -286,8 +294,9 @@ public final class FarmTask extends AbstractTask {
                 .orElse(null);
         if (basePos == null) {
             note = "deposit_skipped:no_base";
-            // keepTending 循环里这会每 DEPOSIT_INTERVAL_ACTIONS 次动作静默重演一次;没有这条记录的话,
-            // 产出物永远堆在背包里、看 task_completed/日志完全看不出原因(remembered base 从没设置过)。
+            // In the keepTending loop this would silently repeat every DEPOSIT_INTERVAL_ACTIONS actions;
+            // without this log line, produce would pile up in the inventory forever with no way to tell why
+            // from task_completed/the logs (the remembered base was simply never set).
             BotLog.action(bot, "farm_deposit_no_base");
             finishDeposit();
             return;
@@ -295,7 +304,7 @@ public final class FarmTask extends AbstractTask {
         depositContainers.clear();
         BlockPos.stream(basePos.add(-DEPOSIT_RADIUS, -3, -DEPOSIT_RADIUS), basePos.add(DEPOSIT_RADIUS, 4, DEPOSIT_RADIUS))
                 .map(BlockPos::toImmutable)
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(depositContainers::add);
         depositContainers.sort(Comparator
@@ -312,7 +321,8 @@ public final class FarmTask extends AbstractTask {
         }
         if (depositContainerIndex >= depositContainers.size()) {
             note = "deposit_skipped:no_base_container";
-            // 同上:没有可用容器时静默放弃存放,循环会一直重试同一件事而不留痕迹。
+            // Same as above: with no usable container, depositing is silently abandoned and the loop would
+            // keep retrying the same thing with no trace left behind.
             BotLog.action(bot, "farm_deposit_no_container", "base", compact(basePos));
             finishDeposit();
             return;
@@ -354,7 +364,7 @@ public final class FarmTask extends AbstractTask {
     private void depositTransfer(AIPlayerEntity bot) {
         if (depositContainerPos == null
                 || bot.getEyePos().squaredDistanceTo(depositContainerPos.toCenterPos()) > REACH_SQUARED
-                || !io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, depositContainerPos)) {
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, depositContainerPos)) {
             phase = Phase.DEPOSIT;
             return;
         }
@@ -389,10 +399,13 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         completedActions++;
-        // 收割产出/种子是地上的 ItemEntity(FarmAction.harvest 用 breakBlock dropStacks=true 掉落,不直接入包)。
-        // bot 在 reach 距离(≤4.5 格)收割,脚下 1 格外的掉落 vanilla 自动拾取够不到 → 必须强制拾取,
-        // 否则 countItem(produce) 永不增、收割/种田目标永不完成(farm_wheat_from_scratch 实测超时、背包 0 小麦)。
-        // forcePickup 绕过掉落物的 10-tick 拾取延迟,本 tick 即可入包(与 DigDownTask 同款修法)。
+        // The harvested produce/seed drops as an on-ground ItemEntity (FarmAction.harvest breaks the block
+        // with dropStacks=true, which does not go straight into the inventory). The bot harvests from reach
+        // distance (<= 4.5 blocks), so drops more than 1 block from its feet are out of vanilla's automatic
+        // pickup range -- forced pickup is required, otherwise countItem(produce) never increases and the
+        // harvest/farm goal never completes (farm_wheat_from_scratch testing timed out with 0 wheat in the
+        // inventory). forcePickup bypasses the drop's 10-tick pickup delay so it enters the inventory this
+        // same tick (same fix approach as DigDownTask).
         HarvestCore.forcePickupNearbyAnyOf(bot, java.util.Set.of(harvestItem(), seed), 5.0D, 4.0D);
         if (!harvestOnly && InventoryAction.countItem(bot, seed) > 0) {
             ActionResult plantResult = FarmAction.plant(bot, current.ground(), seed, crop);
@@ -419,15 +432,18 @@ public final class FarmTask extends AbstractTask {
 
     @Override
     public boolean isWaiting() {
-        // 等熟期间 bot 站在田边不动是正常作业(等作物长熟),豁免 StuckWatcher 误杀;卡死交 12000t 配额超时兜底。
+        // While waiting for maturity, the bot standing still at the field edge is normal work (waiting for
+        // crops to grow), so it's exempt from being wrongly flagged by StuckWatcher; a genuine stall is
+        // caught by the 12000t quota timeout as the backstop.
         return (keepTending && phase == Phase.DONE) || waitingForMaturity;
     }
 
-    // 区内是否有"已种但还没熟"的本作物——有就值得留下等熟,别种完就走(治 real_wheat harvest=0)。
+    // Whether the area has any of this crop that's "planted but not yet mature" -- if so it's worth staying
+    // to wait for maturity instead of leaving right after planting (fixes real_wheat harvest=0).
     private boolean hasImmatureCrops(AIPlayerEntity bot, ServerWorld world) {
         return BlockPos.stream(areaCenter.add(-radius, -1, -radius), areaCenter.add(radius, 1, radius))
-                .filter(ground -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, ground)
-                        || io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, ground.up()))
+                .filter(ground -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground)
+                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground.up()))
                 .anyMatch(ground -> {
                     BlockPos cropPos = ground.up();
                     return world.getBlockState(cropPos).isOf(crop) && !FarmAction.isMature(world, cropPos);
@@ -491,7 +507,7 @@ public final class FarmTask extends AbstractTask {
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction).up();
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

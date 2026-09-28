@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.gametest;
+package io.github.zoyluo.minecraftai.gametest;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 

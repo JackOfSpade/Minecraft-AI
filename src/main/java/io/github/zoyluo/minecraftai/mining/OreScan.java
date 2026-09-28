@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -82,7 +82,7 @@ public final class OreScan {
                 continue;
             }
             result.add(current);
-            // 26 邻泛洪:MC 矿脉生成常以斜对角连接(同簇噪声),只查 6 面邻会把一条脉拦腰漏一半。
+            // 26-neighbor flood: MC ore vein generation often connects diagonally (same-cluster noise); checking only the 6 face-adjacent neighbors would cut a vein at the waist and miss half of it.
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dy = -1; dy <= 1; dy++) {
                     for (int dz = -1; dz <= 1; dz++) {

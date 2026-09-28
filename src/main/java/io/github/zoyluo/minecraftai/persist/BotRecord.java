@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.persist;
+package io.github.zoyluo.minecraftai.persist;
 
 public record BotRecord(
         String name,

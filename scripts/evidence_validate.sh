@@ -363,7 +363,7 @@ PY
   redactions="$(harness_manifest_get "$manifest" log_secret_redactions)"
   [[ "$redactions" =~ ^[0-9]+$ ]] || { validation_fail invalid_log_secret_redactions; return 1; }
   [[ "$state" != VERIFIED || "$redactions" -eq 0 ]] || { validation_fail verified_log_required_secret_redaction; return 1; }
-  if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(AIBOT_LLM|DEEPSEEK)_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$canonical/server.log"; then
+  if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(MINECRAFTAI_LLM|DEEPSEEK)_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$canonical/server.log"; then
     validation_fail server_log_contains_credential_like_data
     return 1
   fi
@@ -591,8 +591,8 @@ PY
         ;;
     esac
   fi
-  log_summary_count="$(grep -acE '\[AIBot Verify\] summary' "$canonical/server.log" 2>/dev/null || true)"
-  log_summary="$(grep -aE '\[AIBot Verify\] summary' "$canonical/server.log" 2>/dev/null | tail -1 || true)"
+  log_summary_count="$(grep -acE '\[MinecraftAi Verify\] summary' "$canonical/server.log" 2>/dev/null || true)"
+  log_summary="$(grep -aE '\[MinecraftAi Verify\] summary' "$canonical/server.log" 2>/dev/null | tail -1 || true)"
   log_summary="$(harness_tsv_value "$log_summary")"
   [[ "$log_summary_count" -le 1 ]] || { validation_fail duplicate_terminal_summary; return 1; }
   parsed_log_passed=""
@@ -895,9 +895,9 @@ run_self_test() (
   local assist_evidence legacy_evidence assist_status assist_reason assist_hash
   local output downgrade_status batch batch_output link traversal relative
   local -a generated
-  fixture="$(mktemp "${TMPDIR:-/tmp}/aibot-evidence-self-test.XXXXXX")"
-  mining_fixture="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-evidence-self-test.XXXXXX")"
-  downgrade_fixture="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-downgrade-self-test.XXXXXX")"
+  fixture="$(mktemp "${TMPDIR:-/tmp}/minecraftai-evidence-self-test.XXXXXX")"
+  mining_fixture="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-evidence-self-test.XXXXXX")"
+  downgrade_fixture="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-downgrade-self-test.XXXXXX")"
   generated=()
   cleanup_self_test() {
     local path
@@ -916,12 +916,12 @@ run_self_test() (
       esac
     done
     rmdir "$HARNESS_BATCH_ROOT" 2>/dev/null || true
-    rmdir "$(cd "${TMPDIR:-/tmp}" && pwd -P)/aibot-evidence-runs" 2>/dev/null || true
+    rmdir "$(cd "${TMPDIR:-/tmp}" && pwd -P)/minecraftai-evidence-runs" 2>/dev/null || true
   }
   trap cleanup_self_test EXIT
 
   printf '%s\n' '[Server thread/INFO]: Seed: [424242]' \
-    '[Server thread/INFO]: [AIBot Verify] summary 1/1 PASS {evidence_self_test=PASS}' > "$fixture"
+    '[Server thread/INFO]: [MinecraftAi Verify] summary 1/1 PASS {evidence_self_test=PASS}' > "$fixture"
   output="$("$ROOT/scripts/evidence_run.sh" --scenario evidence_self_test --seed 424242 --fixture-log "$fixture")"
   evidence="$(printf '%s\n' "$output" | sed -n 's/^EVIDENCE_DIR=//p' | tail -1)"
   [[ -d "$evidence" ]]
@@ -1006,9 +1006,9 @@ PY
 
   printf '%s\n' \
     '[Server thread/INFO]: Seed: [424242]' \
-    '[Server thread/INFO]: [AIBot Verify] diamond_stack_64_from_zero RUNNING timeout=18000' \
-    '[Server thread/INFO] (aibot) [AIBot] TASK event=mining_provenance_result bot=EvidenceBot {schema=2, scenario=diamond_stack_64_from_zero, target=diamond, verdict=PASS, observed_ticks=999, game_mode_violations=0, privileged_allowed=0, death_delta=0, diamond_natural_ore_breaks=64, diamond_native_drops=64, diamond_physical_pickups=64, water_placements=0, lava_conversions=0, obsidian_breaks=0, obsidian_physical_pickups=0, vanilla_obsidian_breaks=0, final_inventory=64}' \
-    '[Server thread/INFO]: [AIBot Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' > "$mining_fixture"
+    '[Server thread/INFO]: [MinecraftAi Verify] diamond_stack_64_from_zero RUNNING timeout=18000' \
+    '[Server thread/INFO] (minecraftai) [Minecraft-AI] TASK event=mining_provenance_result bot=EvidenceBot {schema=2, scenario=diamond_stack_64_from_zero, target=diamond, verdict=PASS, observed_ticks=999, game_mode_violations=0, privileged_allowed=0, death_delta=0, diamond_natural_ore_breaks=64, diamond_native_drops=64, diamond_physical_pickups=64, water_placements=0, lava_conversions=0, obsidian_breaks=0, obsidian_physical_pickups=0, vanilla_obsidian_breaks=0, final_inventory=64}' \
+    '[Server thread/INFO]: [MinecraftAi Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' > "$mining_fixture"
   set +e
   output="$("$ROOT/scripts/evidence_run.sh" --scenario diamond_stack_64_from_zero \
     --seed 424242 --timeout 1199 --fixture-log "$mining_fixture" 2>&1)"
@@ -1104,7 +1104,7 @@ PY
 
   printf '%s\n' \
     '[Server thread/INFO]: Seed: [424243]' \
-    '[Server thread/INFO]: [AIBot Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' \
+    '[Server thread/INFO]: [MinecraftAi Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' \
     > "$downgrade_fixture"
   set +e
   output="$("$ROOT/scripts/evidence_run.sh" --scenario diamond_stack_64_from_zero \
@@ -1118,8 +1118,8 @@ PY
 
   printf '%s\n' \
     '[Server thread/INFO]: Seed: [424244]' \
-    '[Server thread/INFO] (aibot) [AIBot] TASK event=mining_provenance_result bot=EvidenceBot {schema=1, scenario=diamond_stack_64_from_zero, target=diamond, verdict=FAIL, observed_ticks=10, game_mode_violations=0, privileged_allowed=0, death_delta=1, diamond_natural_ore_breaks=0, diamond_native_drops=0, diamond_physical_pickups=0, water_placements=0, lava_conversions=0, obsidian_breaks=0, obsidian_physical_pickups=0, vanilla_obsidian_breaks=0, final_inventory=0}' \
-    '[Server thread/INFO]: [AIBot Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' \
+    '[Server thread/INFO] (minecraftai) [Minecraft-AI] TASK event=mining_provenance_result bot=EvidenceBot {schema=1, scenario=diamond_stack_64_from_zero, target=diamond, verdict=FAIL, observed_ticks=10, game_mode_violations=0, privileged_allowed=0, death_delta=1, diamond_natural_ore_breaks=0, diamond_native_drops=0, diamond_physical_pickups=0, water_placements=0, lava_conversions=0, obsidian_breaks=0, obsidian_physical_pickups=0, vanilla_obsidian_breaks=0, final_inventory=0}' \
+    '[Server thread/INFO]: [MinecraftAi Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' \
     > "$downgrade_fixture"
   set +e
   output="$("$ROOT/scripts/evidence_run.sh" --scenario diamond_stack_64_from_zero \
@@ -1133,8 +1133,8 @@ PY
 
   printf '%s\n' \
     '[Server thread/INFO]: Seed: [424245]' \
-    '[Server thread/INFO] (aibot) [AIBot] TASK event=mining_provenance_result bot=EvidenceBot {schema=2, scenario=diamond_stack_64_from_zero, target=diamond, verdict=FAIL, observed_ticks=10, game_mode_violations=0, privileged_allowed=0, death_delta=1, diamond_natural_ore_breaks=0, diamond_native_drops=0, diamond_physical_pickups=0, water_placements=0, lava_conversions=0, obsidian_breaks=0, obsidian_physical_pickups=0, vanilla_obsidian_breaks=0, final_inventory=0}' \
-    '[Server thread/INFO]: [AIBot Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' \
+    '[Server thread/INFO] (minecraftai) [Minecraft-AI] TASK event=mining_provenance_result bot=EvidenceBot {schema=2, scenario=diamond_stack_64_from_zero, target=diamond, verdict=FAIL, observed_ticks=10, game_mode_violations=0, privileged_allowed=0, death_delta=1, diamond_natural_ore_breaks=0, diamond_native_drops=0, diamond_physical_pickups=0, water_placements=0, lava_conversions=0, obsidian_breaks=0, obsidian_physical_pickups=0, vanilla_obsidian_breaks=0, final_inventory=0}' \
+    '[Server thread/INFO]: [MinecraftAi Verify] summary 1/1 PASS {diamond_stack_64_from_zero=PASS}' \
     > "$downgrade_fixture"
   set +e
   output="$("$ROOT/scripts/evidence_run.sh" --scenario diamond_stack_64_from_zero \

@@ -1,99 +1,122 @@
-# 智能日志(Smart Logging)
+# Smart Logging
 
-## 设计目标
+## Design Goals
 
-每条 bot 日志都会自动打上当前请求的 scope 标签(`log/BotLog.java` 的 `scopeOf` 从
-`TaskManager.activeOrigin(bot)` 实时读取,调用方无需手动传参)。调试某一次玩家指令,
-只需按 scope 过滤,不必翻整个 session 的全量日志。日志按服务器每次启动分目录保存在
-`logs/aibot/sessions/<session-id>/`,`AIBotConfig.Logging.maxSessions`(默认 3)控制只保
-留最近几次启动的日志,更早的自动清理(`log/BotLogWriter.java` 的 `pruneOldSessions`)。
+Every bot log line is automatically tagged with the scope of the current request (`scopeOf` in
+`log/BotLog.java` reads it live from `TaskManager.activeOrigin(bot)`, so callers never have to
+pass it manually). To debug a single player command, you just filter by scope instead of digging
+through the entire session's log. Logs are saved in a directory per server startup, under
+`logs/minecraftai/sessions/<session-id>/`; `MinecraftAiConfig.Logging.maxSessions` (default 3)
+controls how many of the most recent startups' logs are kept, with older ones automatically
+pruned (`pruneOldSessions` in `log/BotLogWriter.java`).
 
-设计上刻意"不记录一切",只记录判断某一类请求是否正常完成所必需的信息——日志量与排
-查成本成反比,记多了反而拖慢排查。
+The design deliberately avoids logging everything — it only records the information necessary to
+determine whether a given category of request completed normally. Log volume is inversely related
+to debugging cost: logging too much actually slows down investigation.
 
-## 预期工作流程
+## Expected Workflow
 
-玩家玩一段时间后,把日志交给某个 AI(不限于 Claude,任何能读代码、读日志的助手都
-适用)去核查有没有 bug。
+After a player has played for a while, hand the logs to an AI (not limited to Claude — any
+assistant that can read code and logs works) to check for bugs.
 
-## 自我改进原则
+## Self-Improvement Principle
 
-**核查过程中如果发现某个 scope 的日志不足以判断这次请求是成功还是失败、为什么失
-败——这本身就是日志系统的缺陷,不是可以忽略的小事。** 处理方式和修任何其他 bug 一
-样:找到本该记录这条信息、但当时没记的代码位置,把缺失的 `BotLog.*` 调用加上去,让
-下一次同类请求的日志足够排查。不要只是在这次的排查结论里提一句"日志不够",然后把同
-样的盲区留到下一次。
+**If, during investigation, the log for some scope turns out to be insufficient to tell whether
+the request succeeded or failed, or why it failed — that is itself a defect in the logging
+system, not something to shrug off.** Handle it the same way you'd handle any other bug: find the
+code location that should have recorded this information but didn't, and add the missing
+`BotLog.*` call so the next occurrence of that same kind of request produces a log sufficient for
+debugging. Don't just note "logging was insufficient" in this investigation's conclusion and leave
+the same blind spot for next time.
 
-补充记录时范围要收紧到"这一类请求需要什么",不要因为发现一处缺口就在整个任务或整个
-分类里普遍调高日志详细度——那样违背了"按需记录"的初衷。
+When adding logging, keep the scope tight to "what this specific category of request needs" —
+don't raise the verbosity across an entire task or an entire category just because you found one
+gap; that would defeat the purpose of "log only what's needed".
 
-## 通用任务日志覆盖核查(2026-09-27)
+## General Task Log Coverage Audit (2026-09-27)
 
-`task/TaskManager.java`对每个任务类型都会记 `task_assigned`(含 `describe()`)、
-`task_paused`、`task_resumed`、`task_cancelled`、`task_completed`、`task_failed`
-(含 `failureReason()`)这几条通用事件,所以任何任务哪怕自己一行日志都不写,也有
-起止记录。这次按上面的自我改进原则,逐个核查了当时零日志或日志明显偏薄的任务类
-(`FarmTask`、`FollowTask`、`SleepTask`、`GuardTask`、`StripMineTask`、`CraftTask`
-等约 29 个),标准是"若这次请求真的失败了,只看日志(不看源码)能不能说清是哪一步、
-为什么"。结论按需处理:复用同一个笼统失败原因串跨多个不同成因的,把原因串改得更具
-体,或在失败前补一条带上下文的日志;某个决定(放弃一种打法换另一种、静默跳过、部分
-完成当成功报告)本身会在之后才暴露、且这之前无迹可寻的,在决定发生的地方补一条;已
-经用不同的、自解释的原因串区分各条失败路径的任务,不做任何改动(核查后仍有多个任务
-维持零改动,例如 `HoldTask`、`FishTask`、`EatTask`——本来就够用,不为了"看起来做了
-事"硬加)。没有新增逐 tick 日志,没有对整个任务类别做统一提高详细度的改动。
+`task/TaskManager.java` records these common events for every task type: `task_assigned`
+(including `describe()`), `task_paused`, `task_resumed`, `task_cancelled`, `task_completed`, and
+`task_failed` (including `failureReason()`) — so even a task that doesn't write a single log line
+of its own still has start/end records. Following the self-improvement principle above, we went
+through the task classes that had zero logging or noticeably thin logging at the time
+(`FarmTask`, `FollowTask`, `SleepTask`, `GuardTask`, `StripMineTask`, `CraftTask`, and about 29
+others in total), using the standard "if this request actually failed, can you tell which step and
+why from the logs alone, without reading the source?" Conclusions were handled case by case: where
+a single generic failure-reason string was being reused across multiple distinct causes, the
+string was made more specific, or a log line with context was added before the failure point;
+where a decision (abandoning one approach for another, silently skipping something, reporting
+partial completion as success) would only surface later and left no trace beforehand, a log line
+was added at the point the decision is made; tasks that already distinguish each failure path with
+a distinct, self-explanatory reason string were left unchanged (several tasks remained at zero
+changes after the audit, e.g. `HoldTask`, `FishTask`, `EatTask` — they were already adequate, and
+nothing was added just to look like work had been done). No per-tick logging was added, and no
+task category received a blanket increase in verbosity.
 
-## Mining Assist 日志(P0 影子模式)
+## Mining Assist Logging (P0 Shadow Mode)
 
-Mining Assist 的传感器在真实任务里只观察、只写日志,不改变 bot 的任何行为(说明见 [MINING_ASSIST.md](MINING_ASSIST.md))。这一类请求原先没有日志,所以按上面的原则为它补了下面这些事件;为遵守"按需记录",输出刻意保持低量:没有逐 tick、逐射线、逐次普通发现的日志,只有会话起止、POI 档位变化、稀有发现(每个统计窗口至多 6 条)和每分钟一条的成本摘要。配置项 `miningAssist.sense.shadowLog=false` 关闭其中的影子输出;配置、门控和错误日志不受影响。全部事件可用 `grep 'event=assist_'` 取出。
+Mining Assist's sensor only observes and logs during real tasks — it never changes the bot's
+behavior (see [MINING_ASSIST.md](MINING_ASSIST.md) for details). This category of request
+originally had no logging, so per the principle above we added the events listed below; to honor
+"log only what's needed", the output is deliberately kept low-volume: no per-tick, per-ray, or
+per-ordinary-discovery logs — only session start/end, POI band changes, rare finds (at most 6 per
+statistics window), and one cost summary per minute. The config option
+`miningAssist.sense.shadowLog=false` turns off this shadow output; config, gating, and error logs
+are unaffected. All events can be pulled out with `grep 'event=assist_'`.
 
-| 类别 | event | 何时写出 | 关键字段 |
+| Category | event | When it's written | Key fields |
 |---|---|---|---|
-| CONFIG | `assist_config`、`assist_harness_default` | `assist_config` 启动时一条;测试 harness 调用 `setHarnessDefaultOff` 时再补一条 `assist_harness_default`,说明 harness 默认关闭之后的最终结论 | `mode`、`mode_source`、`harness_off`、`deterministic`、`rays_per_tick`、`global_rays_per_tick`、`adaptive_throttle`、`shadow_log`、`edits_sidecar`;`assist_harness_default` 为 `harness_default_off`、`harness_off`、`mode` |
-| CONFIG(WARN) | `assist_config_warning` | 配置里被忽略、截断或调整的每一项,启动时各一条 | `note` |
-| CONFIG(WARN) | `assist_config_read_failed`、`assist_edits_load_problem` | `aibot.json` 或放置记录文件无法读取(fail-open,按默认/空记录继续) | `path`、`error` 或 `problem` |
-| TASK | `assist_gate` | 某个 bot 的门控结论变化时(每 bot 缓存 20 tick) | `enabled`、`deny`(`mode_off`/`harness_off`/`origin`/`audit_session`/`tps_degraded`)、`mode`、`forced` |
-| TASK | `assist_sense_enabled` | 一次传感会话开始(挖矿类任务、地下、门控放行)。异常围栏丢弃状态后重建的那一次不算新会话,不写(失败那条已经说明) | `task`、`mode`、`dimension`、`feet` |
-| TASK | `assist_sense_disabled` | 会话结束:连续 40 tick 没有传感,短暂中断不写 | `reason`(`not_mining_task`/`gate_closed`/`surface`)、`deny`、`rays_total`、`sweeps_total` |
-| TASK | `assist_state_released` | bot 停止挖矿满 2400 tick,状态被释放 | `idle_ticks`、`rays_total`、`sweeps_total`、`sightings`、`hazards` |
-| TASK | `assist_poi_band` | 影子 POI 评分的档位变化(`NONE`/`POSSIBLE`/`CAVERN_ONLY`/`STRUCTURE_CERTAIN`/`MANDATORY`);安静的 bot 不写。每个 bot 两条之间至少隔 200 tick:间隔内的变化被推迟(间隔过后档位仍与上一条不同才写),来回抖动而回到原档位的不写任何行 | `band`、`t`、`s`、`c`、`e`、`cells`、`label`、`confirmed`、`trigger`、`anchor`、`biome`、`withheld`(自上一条以来被压下的档位变化数) |
-| TASK | `assist_sighting` | 传感器新提名了原始价值不低于 `detour.announceMinValue`(默认 90)的稀有方块;每窗口至多 6 条 | `block`、`pos`、`value`、`dist` |
-| TASK | `assist_cavern_channel_disabled` | 每个 bot 至多一条:洞穴开阔度通道因维度未列入或半径小于 12 而关闭 | `dimension`、`radius`、`reason` |
-| PROFILE | `assist_sense_summary` | 传感期间每 bot 每分钟一条,会话释放时再补一条 `final=true` | `rays`、`steps`、`sweeps`、`breakthroughs`/`breakthroughs_deferred`(40 tick 间隔内被推迟的突破重启)、`peeked_breaks`/`breaks_unconfirmed`(挖掘后该格没有被观察为空位:被拒绝或不可观察,什么都没有假设)、`poi_bands_withheld`、`step_ms_avg`/`step_ms_max`、`poi_ms_avg`/`poi_ms_max`、`throttled_out`、`sightings`、`best_sighting`、`hazards`、`poi_window`、`open_fraction` |
-| ERROR | `assist_tick_failed` | 协调器的异常围栏触发:每 bot 每分钟至多一条,该 bot 的状态被丢弃并暂停传感 100 tick | 异常与栈、`task`、`feet` |
-| ERROR | `assist_hook_failed`、`assist_edits_hook_failed`、`assist_edits_save_failed` | 挖掘/放置钩子或放置记录写盘失败(钩子只记前几次) | `hook`/`where`/`path` |
+| CONFIG | `assist_config`, `assist_harness_default` | One `assist_config` line at startup; when the test harness calls `setHarnessDefaultOff`, an additional `assist_harness_default` line records the final outcome after the harness default is turned off | `mode`, `mode_source`, `harness_off`, `deterministic`, `rays_per_tick`, `global_rays_per_tick`, `adaptive_throttle`, `shadow_log`, `edits_sidecar`; `assist_harness_default` carries `harness_default_off`, `harness_off`, `mode` |
+| CONFIG(WARN) | `assist_config_warning` | One line at startup for each config value that was ignored, truncated, or adjusted | `note` |
+| CONFIG(WARN) | `assist_config_read_failed`, `assist_edits_load_problem` | `minecraftai.json` or the placement-record file could not be read (fails open, continuing with defaults/empty records) | `path`, `error`, or `problem` |
+| TASK | `assist_gate` | When a bot's gating decision changes (cached per bot for 20 ticks) | `enabled`, `deny` (`mode_off`/`harness_off`/`origin`/`audit_session`/`tps_degraded`), `mode`, `forced` |
+| TASK | `assist_sense_enabled` | A sensing session starts (mining-type task, underground, gate allows it). The rebuild that follows the exception guard discarding state does not count as a new session and is not logged (the failure line already covers it) | `task`, `mode`, `dimension`, `feet` |
+| TASK | `assist_sense_disabled` | Session ends: 40 consecutive ticks with no sensing; brief interruptions are not logged | `reason` (`not_mining_task`/`gate_closed`/`surface`), `deny`, `rays_total`, `sweeps_total` |
+| TASK | `assist_state_released` | Bot has stopped mining for a full 2400 ticks and its state is released | `idle_ticks`, `rays_total`, `sweeps_total`, `sightings`, `hazards` |
+| TASK | `assist_poi_band` | A change in the shadow POI score's band (`NONE`/`POSSIBLE`/`CAVERN_ONLY`/`STRUCTURE_CERTAIN`/`MANDATORY`); quiet bots produce nothing. At least 200 ticks must separate two lines for the same bot: changes within that interval are deferred (only written if the band still differs from the last line once the interval has passed); back-and-forth jitter that returns to the original band produces no line at all | `band`, `t`, `s`, `c`, `e`, `cells`, `label`, `confirmed`, `trigger`, `anchor`, `biome`, `withheld` (number of band changes suppressed since the last line) |
+| TASK | `assist_sighting` | The sensor newly nominates a rare block whose raw value is at least `detour.announceMinValue` (default 90); at most 6 lines per window | `block`, `pos`, `value`, `dist` |
+| TASK | `assist_cavern_channel_disabled` | At most one line per bot: the cavern-openness channel is disabled because the dimension isn't in the allowed list or the radius is under 12 | `dimension`, `radius`, `reason` |
+| PROFILE | `assist_sense_summary` | One line per bot per minute during sensing, plus one more with `final=true` when the session is released | `rays`, `steps`, `sweeps`, `breakthroughs`/`breakthroughs_deferred` (breakthrough restarts deferred within the 40-tick interval), `peeked_breaks`/`breaks_unconfirmed` (the cell wasn't observed as empty after mining: rejected or unobservable, nothing assumed), `poi_bands_withheld`, `step_ms_avg`/`step_ms_max`, `poi_ms_avg`/`poi_ms_max`, `throttled_out`, `sightings`, `best_sighting`, `hazards`, `poi_window`, `open_fraction` |
+| ERROR | `assist_tick_failed` | The coordinator's exception guard trips: at most one line per bot per minute; that bot's state is discarded and sensing is paused for 100 ticks | exception and stack trace, `task`, `feet` |
+| ERROR | `assist_hook_failed`, `assist_edits_hook_failed`, `assist_edits_save_failed` | The mining/placement hook fails, or the placement record fails to write to disk (hooks are only logged the first few times) | `hook`/`where`/`path` |
 
-用这些日志回答一次挖矿请求的问题:
+Use these logs to answer questions about a single mining request:
 
-- 传感器有没有跑、为什么没跑:看 `assist_sense_enabled`/`assist_sense_disabled` 的 `reason`,以及 `assist_gate` 的 `deny`;
-- 花了多少:`assist_sense_summary` 的 `step_ms_*`、`poi_ms_*`、`rays`、`throttled_out`(先测量,再谈让它行动,即设计不变量 I11);
-- 它以为看到了什么:`assist_poi_band`、`assist_sighting` 与摘要里的 `best_sighting`。这些只是传感器的提名,不代表 bot 真的挖到了。
+- Whether the sensor ran, and why not: check `reason` on `assist_sense_enabled`/`assist_sense_disabled`, and `deny` on `assist_gate`;
+- How much it cost: `step_ms_*`, `poi_ms_*`, `rays`, `throttled_out` on `assist_sense_summary` (measure first, then talk about letting it act — design invariant I11);
+- What it thought it saw: `assist_poi_band`, `assist_sighting`, and `best_sighting` in the summary. These are only the sensor's nominations — they don't mean the bot actually mined it.
 
-如果某次排查发现这些日志仍不足以判断传感器为什么没有提名一个后来被挖到的矿,按上面的自我改进原则,只在传感这一类请求里补缺失的那条,不要整体调高详细度。
+If an investigation finds these logs still can't explain why the sensor failed to nominate an ore
+that was later mined, follow the self-improvement principle above: add only the missing line for
+this sensing-request category, and don't raise verbosity across the board.
 
-## Mining Assist 日志(P1 顺路捡矿)
+## Mining Assist Logging (P1 Detour Mining)
 
-P1 给挖矿任务加了一段"顺路绕路":走位挖一段路上原生看到的贵重矿(design 4 节),默认仍是
-`sense`(不绕路),要绕路需要把 `miningAssist.mode` 显式设成 `detour`(或 `all`)。下表是 P1
-新增的事件,格式与上面 `assist_*` 一行保持一致,同样不逐 tick 记录,只在阶段边界、跳过、
-异常和结束时各写一条。
+P1 adds an "en-route detour" to the mining task: while pathing, it mines valuable ore it naturally
+spots along the way (see design section 4). The default remains `sense` (no detouring); detouring
+requires explicitly setting `miningAssist.mode` to `detour` (or `all`). The table below lists the
+events P1 adds, formatted consistently with the `assist_*` rows above — likewise no per-tick
+logging, only one line each at phase boundaries, skips, exceptions, and completion.
 
-| 类别 | event | 何时写出 | 关键字段 |
+| Category | event | When it's written | Key fields |
 |---|---|---|---|
-| TASK | `ore_dig_detour_start` | 一次绕路开始 | `block`、`pos`、`value`、`score`、`cluster`、`members`、`pose`、`zero_transit`、`anchor`、`locked` |
-| TASK | `ore_dig_detour_skip` | 某个候选或矿脉成员被跳过(排除、已认领、消失、无法站位、路线太长……);每格每 600 tick 至多一条 | `reason`、`pos`、`block`、`value` |
-| TASK | `ore_dig_detour_route` | 每一次接近、追赶掉落物或返程的寻路尝试 | `leg`(`approach`/`chase`/`return`)、`to`、`result`、`attempt`、`reason` |
-| TASK | `ore_dig_detour_break` | 每挖到一块 | `pos`、`block`、`breaks`、`members`、`lease_left` |
-| TASK | `ore_dig_detour_seal` | 每一次封堵挖出的流体 | `cell`、`seals` |
-| TASK | `ore_dig_detour_drop_lost` | 掉落物等待超时或落点不可站立 | `cell`、`waited`、`reason`(`timeout`/`no_stand`) |
-| TASK | `ore_dig_detour_abort` | 绕路中止(含暂停时的中止) | `reason`(design 4.12 的中止原因)、`phase`、`pos`、`breaks` |
-| TASK | `ore_dig_detour_end` | 一次绕路彻底结束(FINISH) | `reason`、`breaks`、`members`、`seals`、`drops_lost`、`ticks`、`abort` |
-| TASK | `ore_dig_detour_orphan` | 协调器发现发布的绕路已经失去归属(任务被替换、结束或状态过期),代为释放认领并清空发布的元组 | `cause`(`owner_changed`/`not_running`/`phase_idle`/`stale`)、`phase`、`claims_released` |
-| TASK | `ore_dig_detour_cursor_drift` | `restoreAnchorNumbers` 发现走带位置和出发前记的锚点对不上,已经按锚点修正 | `dir`、`leg`、`steps`、`len` |
-| WARN | `ore_dig_detour_return_rebased` | 走位返程连续失败,只能原地放弃这次绕路并禁用本任务后续绕路(响亮记录,便于事后核查) | `reason`、`unsafe`、`at`、`anchor`、`breaks` |
-| DANGER | `ore_dig_detour_lava_claimed` | 绕路自己认领了一次岩浆险情(不再走通用的 Evade/暂停路径) | `lava`、`phase` |
-| TASK | `ore_dig_detour_resume_return` | 暂停后恢复绕路时,走位返回锚点的一次尝试起止 | `face`、`attempt`、`result` |
+| TASK | `ore_dig_detour_start` | A detour begins | `block`, `pos`, `value`, `score`, `cluster`, `members`, `pose`, `zero_transit`, `anchor`, `locked` |
+| TASK | `ore_dig_detour_skip` | A candidate or vein member is skipped (excluded, already claimed, gone, no standable position, route too long, …); at most one line per cell per 600 ticks | `reason`, `pos`, `block`, `value` |
+| TASK | `ore_dig_detour_route` | Every pathfinding attempt to approach, chase a dropped item, or return | `leg` (`approach`/`chase`/`return`), `to`, `result`, `attempt`, `reason` |
+| TASK | `ore_dig_detour_break` | Each block mined | `pos`, `block`, `breaks`, `members`, `lease_left` |
+| TASK | `ore_dig_detour_seal` | Each time a fluid exposed by mining is sealed | `cell`, `seals` |
+| TASK | `ore_dig_detour_drop_lost` | Waiting for a dropped item times out, or its landing spot isn't standable | `cell`, `waited`, `reason` (`timeout`/`no_stand`) |
+| TASK | `ore_dig_detour_abort` | The detour is aborted (including an abort triggered by a pause) | `reason` (the abort reasons from design section 4.12), `phase`, `pos`, `breaks` |
+| TASK | `ore_dig_detour_end` | A detour finishes completely (FINISH) | `reason`, `breaks`, `members`, `seals`, `drops_lost`, `ticks`, `abort` |
+| TASK | `ore_dig_detour_orphan` | The coordinator finds that a published detour has lost its owner (the task was replaced, ended, or its state expired), and releases the claim and clears the published tuple on its behalf | `cause` (`owner_changed`/`not_running`/`phase_idle`/`stale`), `phase`, `claims_released` |
+| TASK | `ore_dig_detour_cursor_drift` | `restoreAnchorNumbers` finds the tracked position no longer matches the anchor recorded before departure, and has corrected it against the anchor | `dir`, `leg`, `steps`, `len` |
+| WARN | `ore_dig_detour_return_rebased` | The return path fails repeatedly, forcing the detour to be abandoned in place and disabling further detours for this task (logged loudly, for after-the-fact review) | `reason`, `unsafe`, `at`, `anchor`, `breaks` |
+| DANGER | `ore_dig_detour_lava_claimed` | The detour claims a lava hazard itself (bypassing the usual Evade/pause path) | `lava`, `phase` |
+| TASK | `ore_dig_detour_resume_return` | When resuming a detour after a pause, the start/end of an attempt to walk back to the anchor | `face`, `attempt`, `result` |
 
-绕路本身不会永久失败任务(design I8):找不到东西可以顺路挖,或者绕路中途撞上任何安全
-门槛,都只是安静地放弃/中止,原来的挖矿任务照常继续。这些事件因此都用来回答"这次绕路
-绕成了没有、为什么没绕、值不值得":有没有找到顺路的矿看 `ore_dig_detour_start`/`_skip`,
-中途出了什么事看 `_abort`/`_route`,一次绕路到底挣了几块矿看 `_end`。
+A detour never permanently fails the task (design invariant I8): if nothing worth mining is found
+along the way, or the detour hits any safety threshold mid-route, it just quietly gives up/aborts
+and the original mining task continues as normal. These events therefore exist to answer "did this
+detour happen, why didn't it, and was it worth it": whether ore worth detouring for was found is
+in `ore_dig_detour_start`/`_skip`, what happened mid-route is in `_abort`/`_route`, and how many
+blocks a detour actually netted is in `_end`.

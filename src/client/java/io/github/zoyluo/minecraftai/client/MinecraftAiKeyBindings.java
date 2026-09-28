@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.client;
+package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.aibot.client.screen.BotPanelScreen;
+import io.github.zoyluo.minecraftai.client.screen.BotPanelScreen;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
@@ -9,24 +9,24 @@ import net.minecraft.client.util.Window;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
-public final class AIBotKeyBindings {
-    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create(Identifier.of("aibot", "main"));
+public final class MinecraftAiKeyBindings {
+    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create(Identifier.of("minecraftai", "main"));
     private static KeyBinding openPanel;
     private static KeyBinding openActions;
     private static boolean altZeroDown;
     private static boolean altNineDown;
 
-    private AIBotKeyBindings() {
+    private MinecraftAiKeyBindings() {
     }
 
     public static void register() {
         openPanel = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.aibot.open_panel",
+                "key.minecraftai.open_panel",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_UNKNOWN,
                 CATEGORY));
         openActions = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.aibot.open_actions",
+                "key.minecraftai.open_actions",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_UNKNOWN,
                 CATEGORY));

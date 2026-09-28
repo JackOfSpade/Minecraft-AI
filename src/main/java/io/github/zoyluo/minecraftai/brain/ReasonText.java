@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import java.util.Locale;
 import java.util.Map;

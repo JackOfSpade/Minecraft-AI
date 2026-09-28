@@ -1,58 +1,60 @@
-package io.github.zoyluo.aibot.client.screen.ui.cards;
+package io.github.zoyluo.minecraftai.client.screen.ui.cards;
 
-import io.github.zoyluo.aibot.client.screen.ui.Theme;
+import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 
 /**
- * 目标视图(GOAL 模式):展示 bot 当前目标的**完整执行链**与所处节点。
- * 与左栏的小 GoalCard 不同,这里按可用高度尽量显示全部步骤,并让当前步滚动居中。
+ * Goal view (GOAL mode): shows the **complete execution chain** of the bot's current goal
+ * and which node it is currently on.
+ * Unlike the small GoalCard in the left column, this view shows as many steps as the available
+ * height allows, and keeps the current step scrolled into the center.
  */
 public final class GoalView extends PanelCard {
     @Override
     protected String titleKey() {
-        return "card.aibot.goal";
+        return "card.minecraftai.goal";
     }
 
     @Override
     protected int bodyHeight() {
-        return 220; // GOAL 全屏视图,占满左栏
+        return 220; // GOAL full-screen view, fills the entire left column
     }
 
     @Override
     protected void renderBody(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer, int bx, int by, int bw, int bh) {
         if (snapshot == null) {
-            context.drawTextWithShadow(renderer, Theme.tr("goal.aibot.empty"), bx, by, Theme.TEXT_DIM);
+            context.drawTextWithShadow(renderer, Theme.tr("goal.minecraftai.empty"), bx, by, Theme.TEXT_DIM);
             return;
         }
         if (snapshot.goalTotalSteps() <= 0) {
             if (snapshot.goalResultStatus().isBlank()) {
-                context.drawTextWithShadow(renderer, Theme.tr("goal.aibot.empty"), bx, by, Theme.TEXT_DIM);
+                context.drawTextWithShadow(renderer, Theme.tr("goal.minecraftai.empty"), bx, by, Theme.TEXT_DIM);
             } else {
                 context.drawTextWithShadow(renderer,
-                        Theme.tr("goal.aibot.result." + snapshot.goalResultStatus().toLowerCase(java.util.Locale.ROOT)),
+                        Theme.tr("goal.minecraftai.result." + snapshot.goalResultStatus().toLowerCase(java.util.Locale.ROOT)),
                         bx, by, "COMPLETED".equals(snapshot.goalResultStatus()) ? Theme.OK
                                 : "PARTIAL".equals(snapshot.goalResultStatus()) ? Theme.SYS
                                 : "FAILED".equals(snapshot.goalResultStatus()) ? Theme.HP : Theme.TEXT_DIM);
                 context.drawTextWithShadow(renderer, trim(renderer, snapshot.goalResultSummary(), bw), bx, by + 16, Theme.TEXT);
                 context.drawTextWithShadow(renderer,
-                        Theme.tr("goal.aibot.evidence", snapshot.goalResultMatched(), snapshot.goalResultRequired()),
+                        Theme.tr("goal.minecraftai.evidence", snapshot.goalResultMatched(), snapshot.goalResultRequired()),
                         bx, by + 32, Theme.TEXT_DIM);
             }
             return;
         }
-        String title = snapshot.goalTitle().isBlank() ? Theme.tr("goal.aibot.untitled") : snapshot.goalTitle();
+        String title = snapshot.goalTitle().isBlank() ? Theme.tr("goal.minecraftai.untitled") : snapshot.goalTitle();
         context.drawTextWithShadow(renderer, trim(renderer, title, bw), bx, by, Theme.TEXT_STRONG);
         int cur = snapshot.goalCurrentStepIndex();
         int total = snapshot.goalTotalSteps();
         int currentNumber = Math.min(cur + 1, total);
-        context.drawTextWithShadow(renderer, Theme.tr("goal.aibot.progress", currentNumber, total), bx, by + 12, Theme.TEXT_DIM);
+        context.drawTextWithShadow(renderer, Theme.tr("goal.minecraftai.progress", currentNumber, total), bx, by + 12, Theme.TEXT_DIM);
 
         int rows = snapshot.goalSteps().size();
         int maxRows = Math.max(1, (bh - 27) / Theme.LINE_H);
         int start = 0;
         if (rows > maxRows) {
-            start = Math.max(0, Math.min(cur - maxRows / 2, rows - maxRows)); // 让当前步滚动居中
+            start = Math.max(0, Math.min(cur - maxRows / 2, rows - maxRows)); // keep the current step scrolled into the center
         }
         for (int i = 0; i < maxRows && start + i < rows; i++) {
             int idx = start + i;

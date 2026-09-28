@@ -1,22 +1,22 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.ToolSelector;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -184,7 +184,7 @@ public final class StripMineTask extends AbstractTask {
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        Optional<String> profileRejection = profileRejectionReason(AIBotConfig.get().profile());
+        Optional<String> profileRejection = profileRejectionReason(MinecraftAiConfig.get().profile());
         if (profileRejection.isPresent()) {
             String reason = profileRejection.orElseThrow();
             fail(reason);
@@ -241,8 +241,10 @@ public final class StripMineTask extends AbstractTask {
             fail("strip_mine_timeout");
             return;
         }
-        // F2:工具前置闸——完全没镐时禁止空手刷坑道(避免"不做工具直接手挖")。
-        // 引导改用 mine_ore(确定性目标会自动备镐再挖),全程自力更生不求助。
+        // F2: tool-prerequisite gate -- with no pickaxe at all, forbid tunneling bare-handed
+        // (avoid "skipping toolmaking and mining by hand directly"). Guide the bot to use
+        // mine_ore instead (a deterministic target auto-prepares a pickaxe before mining) --
+        // staying fully self-sufficient throughout and never asking for help.
         if (ToolTier.bestPickaxeTier(bot) <= ToolTier.NONE) {
             BotLog.action(bot, "strip_mine_tool_gate", "result", "fail", "reason", "no_pickaxe");
             fail("need_pickaxe:use mine_ore to auto-prepare a pickaxe first");
@@ -284,8 +286,10 @@ public final class StripMineTask extends AbstractTask {
         if (shouldDescendToOreLayer(bot)) {
             int targetY = Math.max(bot.getEntityWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
             descentStepsPlanned = Math.max(0, origin.getY() - targetY);
-            // FLOW-1:斜楼梯下挖——每级 横移1格 + 下降1格(1:1),形成可回头走的阶梯,
-            // 而非竖直直坠。每级 DESCEND 步会挖 stand + 其上方 2 格(身位),其下方为实心地面。
+            // FLOW-1: staircase descent-mining -- each step moves 1 block horizontally + drops
+            // 1 block (1:1 ratio), forming stairs the bot can walk back up, rather than falling
+            // straight down vertically. Each DESCEND step mines the stand position plus the 2
+            // blocks above it (body clearance), with solid ground beneath it.
             BlockPos cursor = origin;
             for (int step = 1; step <= descentStepsPlanned; step++) {
                 cursor = cursor.offset(direction).down().toImmutable();
@@ -327,7 +331,7 @@ public final class StripMineTask extends AbstractTask {
             }
             if (OreScan.isOre(bot.getEntityWorld().getBlockState(pos), targetOres)
                     && isExposed(bot.getEntityWorld(), pos)
-                    && io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)) {
+                    && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 return true;
             }
         }
@@ -414,7 +418,8 @@ public final class StripMineTask extends AbstractTask {
             fail("block_out_of_reach: " + shortPos(currentMiningBlock));
             return;
         }
-        // P1-b:挖掘走共享 BlockMiner(只在空闲发起、绝不重发清零进度、正确 face)。
+        // P1-b: mining goes through the shared BlockMiner (only starts when idle, never
+        // re-issues and resets progress, uses the correct face).
         if (miner.target() == null || !miner.target().equals(currentMiningBlock)) {
             miner.begin(bot, currentMiningBlock);
         }
@@ -479,7 +484,7 @@ public final class StripMineTask extends AbstractTask {
             }
             bot.getActionPack().stopAll();
         }
-        // P1-b:矿脉块挖掘也走 BlockMiner。
+        // P1-b: vein-block mining also goes through BlockMiner.
         if (miner.target() == null || !miner.target().equals(currentVeinBlock)) {
             miner.begin(bot, currentVeinBlock);
         }
@@ -490,7 +495,7 @@ public final class StripMineTask extends AbstractTask {
     }
 
     private void light(AIPlayerEntity bot) {
-        if (!AIBotConfig.get().mining().placeTorches()
+        if (!MinecraftAiConfig.get().mining().placeTorches()
                 || distanceCompleted == 0
                 || distanceCompleted % 8 != 0
                 || bot.getEntityWorld().getLightLevel(net.minecraft.world.LightType.BLOCK, bot.getBlockPos()) >= 8) {
@@ -536,7 +541,7 @@ public final class StripMineTask extends AbstractTask {
     }
 
     private boolean shouldReturn(AIPlayerEntity bot) {
-        AIBotConfig.Mining mining = AIBotConfig.get().mining();
+        MinecraftAiConfig.Mining mining = MinecraftAiConfig.get().mining();
         if (freeMainSlots(bot) < mining.returnWhenFreeSlots()) {
             note = "inventory_near_full";
             return true;
@@ -588,7 +593,7 @@ public final class StripMineTask extends AbstractTask {
     private void deposit(AIPlayerEntity bot) {
         if (activeDepotChest == null
                 || bot.getEyePos().squaredDistanceTo(activeDepotChest.toCenterPos()) > REACH_SQUARED
-                || !io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, activeDepotChest)) {
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, activeDepotChest)) {
             phase = Phase.RETURN;
             return;
         }
@@ -649,13 +654,13 @@ public final class StripMineTask extends AbstractTask {
     private void scanNearbyVeins(AIPlayerEntity bot, BlockPos center, int radius) {
         BlockPos.stream(center.add(-radius, -radius, -radius), center.add(radius, radius, radius))
                 .map(BlockPos::toImmutable)
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> OreScan.isOre(bot.getEntityWorld().getBlockState(pos), targetOres))
                 .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())))
                 .findFirst()
                 .ifPresent(seed -> OreScan.veinFrom(bot, seed, targetOres, MAX_VEIN_BLOCKS)
                         .stream()
-                        .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                        .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                         .forEach(pos -> {
                             if (queuedVeinBlocks.add(pos)) {
                                 veinBlocks.addLast(pos);

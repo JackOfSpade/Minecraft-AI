@@ -1,19 +1,19 @@
-package io.github.zoyluo.aibot;
+package io.github.zoyluo.minecraftai;
 
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-final class AIBotConfigBrainCapTest {
+final class MinecraftAiConfigBrainCapTest {
     @Test
     void defaultsToInitialCallPlusTwoRetries() {
-        assertEquals(3, AIBotConfig.defaults().brain().maxTurnsPerRequest());
+        assertEquals(3, MinecraftAiConfig.defaults().brain().maxTurnsPerRequest());
     }
 
     @Test
     void configuredPositiveCapIsNotRaisedToTheDefault() {
-        AIBotConfig.Brain defaults = AIBotConfig.defaults().brain();
-        AIBotConfig.Brain configured = new AIBotConfig.Brain(
+        MinecraftAiConfig.Brain defaults = MinecraftAiConfig.defaults().brain();
+        MinecraftAiConfig.Brain configured = new MinecraftAiConfig.Brain(
                 defaults.maxHistoryMessages(),
                 defaults.maxToolCallsPerTurn(),
                 2,

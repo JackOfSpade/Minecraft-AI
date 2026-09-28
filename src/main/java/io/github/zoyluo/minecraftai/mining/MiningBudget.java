@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
 /**
  * Quota-driven expedition budget. Values are deliberately bounded: the first trip carries enough
@@ -48,16 +48,20 @@ public record MiningBudget(
     /** Rare expeditions batch by eight target items; margin pools derive from this size. */
     public static final int RARE_BATCH_SIZE = 8;
     /**
-     * 36 格主背包是硬物理墙:pinned 64 任务的 bootstrap 携带(640 火把/228 木棍/72 食物
-     * /双 pool 石材/镐具)已把 boundary service 的工作格余量压到两格。每个 margin epoch 的
-     * 火把+木棍+食物约多占一格,超过两个 epoch 会让 rare service 的
-     * requiredWorkingFreeSlots 合约在数学上不可满足(margin 物资不可弃置)。
+     * The 36-slot main inventory is a hard physical wall: the pinned 64-target mission's bootstrap
+     * carry (640 torches / 228 sticks / 72 food / dual-pool stone materials / picks) has already
+     * pushed boundary service's working-slot margin down to two slots. Each margin epoch's
+     * torches + sticks + food take up roughly one more slot; more than two epochs would make rare
+     * service's requiredWorkingFreeSlots contract mathematically unsatisfiable (margin supplies
+     * cannot be discarded).
      */
     public static final int RARE_MISSION_EPOCH_MARGIN_CAP = 2;
     /**
-     * F2 阶段3:钻石产量是随机的,单批 2 个 epoch 有 10–30% 概率挖不满配额,把整个任务
-     * 成功率压到 ~17–66%。任务级 margin 池让整个任务最多再抽 min(batchCount/2, cap) 个
-     * 有界 epoch(64 目标 → 2),粮食/火把/木棍在 bootstrap 一次性预置,不会变成无界续期。
+     * F2 phase 3: diamond yield is random, and a single batch's 2 epochs have a 10-30% chance of
+     * not filling the quota, dragging the whole mission's success rate down to ~17-66%. A
+     * mission-level margin pool lets the whole mission draw at most min(batchCount/2, cap)
+     * additional bounded epochs (64 target -> 2); food/torches/sticks are provisioned once up
+     * front in bootstrap, never becoming an unbounded resupply.
      */
     public static final int DIAMOND_STACK_EPOCH_MARGIN = 2;
     public static final int RARE_EPOCH_FOOD_ALLOWANCE = 4;

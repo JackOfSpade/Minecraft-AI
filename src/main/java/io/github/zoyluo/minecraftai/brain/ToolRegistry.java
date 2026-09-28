@@ -1,66 +1,66 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.EquipAction;
-import io.github.zoyluo.aibot.action.FarmAction;
-import io.github.zoyluo.aibot.action.InteractAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.action.MiningAction;
-import io.github.zoyluo.aibot.action.MovementAction;
-import io.github.zoyluo.aibot.action.ToolSelector;
-import io.github.zoyluo.aibot.coordination.Job;
-import io.github.zoyluo.aibot.coordination.TaskBoard;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.craft.AcquisitionHints;
-import io.github.zoyluo.aibot.craft.CraftingHelper;
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.runtime.IntentControlTransaction;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.task.BoardBoatTask;
-import io.github.zoyluo.aibot.task.BoatFollowTask;
-import io.github.zoyluo.aibot.task.BoatLaunchTask;
-import io.github.zoyluo.aibot.task.BreedTask;
-import io.github.zoyluo.aibot.task.BuildTask;
-import io.github.zoyluo.aibot.task.CombatTask;
-import io.github.zoyluo.aibot.task.ContainerTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.DismountBoatTask;
-import io.github.zoyluo.aibot.task.EatTask;
-import io.github.zoyluo.aibot.task.FishTask;
-import io.github.zoyluo.aibot.task.FarmTask;
-import io.github.zoyluo.aibot.task.GatherQuotaTask;
-import io.github.zoyluo.aibot.task.FollowTask;
-import io.github.zoyluo.aibot.task.GuardTask;
-import io.github.zoyluo.aibot.task.HoldTask;
-import io.github.zoyluo.aibot.task.LightAreaTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MineValuablesTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.SleepTask;
-import io.github.zoyluo.aibot.task.SmeltTask;
-import io.github.zoyluo.aibot.task.StockpileTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.StripMineTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
-import io.github.zoyluo.aibot.task.TradeTask;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.InteractAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.MiningAction;
+import io.github.zoyluo.minecraftai.action.MovementAction;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.coordination.Job;
+import io.github.zoyluo.minecraftai.coordination.TaskBoard;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.craft.AcquisitionHints;
+import io.github.zoyluo.minecraftai.craft.CraftingHelper;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.runtime.IntentControlTransaction;
+import io.github.zoyluo.minecraftai.task.BlueprintLoader;
+import io.github.zoyluo.minecraftai.task.BoardBoatTask;
+import io.github.zoyluo.minecraftai.task.BoatFollowTask;
+import io.github.zoyluo.minecraftai.task.BoatLaunchTask;
+import io.github.zoyluo.minecraftai.task.BreedTask;
+import io.github.zoyluo.minecraftai.task.BuildTask;
+import io.github.zoyluo.minecraftai.task.CombatTask;
+import io.github.zoyluo.minecraftai.task.ContainerTask;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.DismountBoatTask;
+import io.github.zoyluo.minecraftai.task.EatTask;
+import io.github.zoyluo.minecraftai.task.FishTask;
+import io.github.zoyluo.minecraftai.task.FarmTask;
+import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
+import io.github.zoyluo.minecraftai.task.FollowTask;
+import io.github.zoyluo.minecraftai.task.GuardTask;
+import io.github.zoyluo.minecraftai.task.HoldTask;
+import io.github.zoyluo.minecraftai.task.LightAreaTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MineValuablesTask;
+import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.SleepTask;
+import io.github.zoyluo.minecraftai.task.SmeltTask;
+import io.github.zoyluo.minecraftai.task.StockpileTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.StripMineTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
+import io.github.zoyluo.minecraftai.task.TradeTask;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
@@ -96,19 +96,19 @@ public final class ToolRegistry {
         return List.copyOf(tools.values());
     }
 
-    public List<ToolDefinition> tools(AIBotConfig.Brain config) {
+    public List<ToolDefinition> tools(MinecraftAiConfig.Brain config) {
         return tools(config, config.exposesLowLevelTools());
     }
 
-    public List<ToolDefinition> tools(AIBotConfig.Brain config, boolean exposeLowLevelTools) {
+    public List<ToolDefinition> tools(MinecraftAiConfig.Brain config, boolean exposeLowLevelTools) {
         return tools(config, exposeLowLevelTools, config.memoryToolsEnabled(), config.coordinationToolsEnabled());
     }
 
-    public List<ToolDefinition> tools(AIBotConfig.Brain config,
+    public List<ToolDefinition> tools(MinecraftAiConfig.Brain config,
                                       boolean exposeLowLevelTools,
                                       boolean memoryToolsEnabled,
                                       boolean coordinationToolsEnabled) {
-        OperatingProfile profile = AIBotConfig.get().profile();
+        OperatingProfile profile = MinecraftAiConfig.get().profile();
         return tools.values().stream()
                 .filter(tool -> publishTool(profile, tool.name()))
                 .filter(tool -> switch (tool.group()) {
@@ -121,7 +121,7 @@ public final class ToolRegistry {
     }
 
     private void registerDefaults() {
-        register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the AIBot panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must be paired with an action or goal tool in the same response; purpose=status is for progress or completion after work has started.", objectSchema()
+        register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must be paired with an action or goal tool in the same response; purpose=status is for progress or completion after work has started.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .property("purpose", enumStringSchema("answer for a pure question, plan before starting work, or status after work", "answer", "plan", "status"))
                 .required("message")
@@ -143,11 +143,11 @@ public final class ToolRegistry {
 
         register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos goal = blockPos(args);
-            io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
+            io.github.zoyluo.minecraftai.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
             if (pathResult.isInProgress() || pathResult.isSuccess()) {
                 return ok("pathfinding_started");
             }
-            io.github.zoyluo.aibot.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
+            io.github.zoyluo.minecraftai.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
             if (fallback.isInProgress() || fallback.isSuccess()) {
                 return ok("fallback_walk_started: " + pathResult.reason());
             }
@@ -321,7 +321,7 @@ public final class ToolRegistry {
                 .property("count", integerSchema("how many ore blocks to mine"))
                 .required("ore")
                 .build(), (bot, args) -> {
-            if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+            if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
                 Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
                 assignLlm(bot, task);
                 return ok("assigned: " + task.name());
@@ -349,7 +349,7 @@ public final class ToolRegistry {
             return started ? ok("goal_assigned: achieve_goal") : fail("goal_plan_failed");
         });
 
-        register("harvest_crop", "Grow and harvest a crop with deterministic planning. Use for requests like 种小麦/收点小麦/get wheat. Crop is wheat, carrot, or potato. The system auto-prepares a hoe, tills, plants, waits for growth, and harvests; do not decompose manually.", objectSchema()
+        register("harvest_crop", "Grow and harvest a crop with deterministic planning. Use for requests like plant wheat/collect some wheat/get wheat. Crop is wheat, carrot, or potato. The system auto-prepares a hoe, tills, plants, waits for growth, and harvests; do not decompose manually.", objectSchema()
                 .property("crop", stringSchema("crop: wheat, carrot, or potato"))
                 .property("count", integerSchema("how many to harvest"))
                 .required("crop")
@@ -357,14 +357,14 @@ public final class ToolRegistry {
             FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
             net.minecraft.item.Item produce = spec.crop() == net.minecraft.block.Blocks.WHEAT
                     ? net.minecraft.item.Items.WHEAT
-                    : spec.seed(); // 胡萝卜/土豆:产出即种子物品
+                    : spec.seed(); // carrot/potato: the produce item is the same as the seed item
             boolean started = GoalExecutor.INSTANCE.submit(bot,
                     new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
         });
 
         register("provision_food", "Stock food end-to-end; AUTO-PICKS hunting or farming by scanning what's actually around (perception-driven). "
-                + "This is the DEFAULT for ANY general 'get food' request: 找吃的/找点吃的/找吃的去/找吃的去啊/去找吃的/找东西吃/找点东西吃/去搞点吃的/弄点吃的/弄点肉/打点肉吃/去打猎/我饿了/饿了/备点粮/搞点食物/补充食物/get some food/go find food/make food/go hunt. "
+                + "This is the DEFAULT for ANY general 'get food' request: find food/find some food/go find food/go find some food already/go find food/find something to eat/find something to eat/go get something to eat/get something to eat/get some meat/hunt some meat to eat/go hunting/I'm hungry/hungry/stock up on food/get some food/restock food/get some food/go find food/make food/go hunt. "
                 + "Auto-plans (hunt->cook meat OR farm->bread) based on surroundings; do NOT decompose manually. count = how many food items (default 4).", objectSchema()
                 .property("count", integerSchema("how many cooked food items to stock (default 4)"))
                 .build(), (bot, args) -> {
@@ -374,8 +374,8 @@ public final class ToolRegistry {
         });
 
         register("forage", "Forage SPECIFIC wild berries/melon nearby. ONLY when the user EXPLICITLY asks for berries/wild fruit, NOT for general food. "
-                + "Use for 采点野果/采点浆果/摘浆果/采甜浆果/摘西瓜/想吃浆果; needs berry bushes or melons around. "
-                + "For ANY general 找吃的/搞点吃的 request use provision_food instead (it auto-picks hunt or farm). count = how many (default 4).", objectSchema()
+                + "Use for pick some wild fruit/pick some berries/pick berries/pick sweet berries/pick watermelon/want to eat berries; needs berry bushes or melons around. "
+                + "For ANY general find food/get some food request use provision_food instead (it auto-picks hunt or farm). count = how many (default 4).", objectSchema()
                 .property("count", integerSchema("how many wild food to gather (default 4)"))
                 .build(), (bot, args) -> {
             boolean started = GoalExecutor.INSTANCE.submit(bot,
@@ -383,26 +383,26 @@ public final class ToolRegistry {
             return started ? ok("goal_assigned: forage") : fail("goal_plan_failed");
         });
 
-        register("achieve_armor", "Make and equip a full set of iron armor plus an iron sword with deterministic planning. Use for 武装起来/做一身装备/给我穿上盔甲/gear up. Auto-plans mining, smelting and crafting; do not decompose manually.", objectSchema()
+        register("achieve_armor", "Make and equip a full set of iron armor plus an iron sword with deterministic planning. Use for arm yourself up/make a full set of gear/put armor on me/gear up. Auto-plans mining, smelting and crafting; do not decompose manually.", objectSchema()
                 .build(), (bot, args) -> {
             boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Armor());
             return started ? ok("goal_assigned: achieve_armor") : fail("goal_plan_failed");
         });
 
-        register("achieve_workstation", "Set up a base: craft and place a crafting table, furnace and chest nearby. Use for 建个家/搭个工作台/摆好工作台熔炉箱子/set up a base. Auto-plans gathering and crafting; do not decompose manually.", objectSchema()
+        register("achieve_workstation", "Set up a base: craft and place a crafting table, furnace and chest nearby. Use for build a home/set up a crafting table/set up a crafting table, furnace and chest/set up a base. Auto-plans gathering and crafting; do not decompose manually.", objectSchema()
                 .build(), (bot, args) -> {
             boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Workstation());
             return started ? ok("goal_assigned: achieve_workstation") : fail("goal_plan_failed");
         });
 
-        register("build_house", "Build a house/shelter. Use for 盖房子/建个家/造房子/盖个小屋/build a house. The goal system auto-gathers ALL missing materials (wood/stone/glass) then builds — call once then STOP. Either pass blueprint (small_hut default, hut_5x5), OR pass width/depth/height/material for a custom house (e.g. 盖个7格宽的石头房 -> width=7, material=stone_like). material: planks (wood, default) / stone_like / glass.", objectSchema()
+        register("build_house", "Build a house/shelter. Use for build a house/build a home/build a house/build a small hut/build a house. The goal system auto-gathers ALL missing materials (wood/stone/glass) then builds — call once then STOP. Either pass blueprint (small_hut default, hut_5x5), OR pass width/depth/height/material for a custom house (e.g. build a stone house 7 blocks wide -> width=7, material=stone_like). material: planks (wood, default) / stone_like / glass.", objectSchema()
                 .property("blueprint", stringSchema("preset blueprint name: small_hut (default) or hut_5x5; ignored when width/depth/height given"))
                 .property("width", integerSchema("custom house outer width in blocks (3..16)", 3, 16))
                 .property("depth", integerSchema("custom house outer depth in blocks (3..16)", 3, 16))
                 .property("height", integerSchema("custom house wall height in blocks (2..8)", 2, 8))
                 .property("material", stringSchema("wall material palette: planks (default) / stone_like / glass"))
                 .build(), (bot, args) -> {
-            // P3 参数化:给了任意尺寸参数就走 custom:WxDxH:material 规格(缺省边长 5/5/3),否则用预设蓝图。
+            // P3 parameterization: if any size parameter is given, use the custom:WxDxH:material spec (default side lengths 5/5/3); otherwise use a preset blueprint.
             boolean custom = args != null && (args.has("width") || args.has("depth") || args.has("height") || args.has("material"));
             String bp;
             if (custom) {
@@ -418,7 +418,7 @@ public final class ToolRegistry {
             return started ? ok("goal_assigned: build " + bp) : fail("goal_plan_failed");
         });
 
-        register("stockpile", "Obtain N of an item then store everything into a nearby chest. Use for 囤货/囤点/存起来/stockpile N cobblestone. Auto-plans obtaining and depositing; do not decompose manually.", objectSchema()
+        register("stockpile", "Obtain N of an item then store everything into a nearby chest. Use for stockpile goods/stock up a bit/store it away/stockpile N cobblestone. Auto-plans obtaining and depositing; do not decompose manually.", objectSchema()
                 .property("item", stringSchema("item id to stockpile, e.g. minecraft:cobblestone"))
                 .property("count", integerSchema("how many to obtain"))
                 .required("item")
@@ -481,7 +481,7 @@ public final class ToolRegistry {
             Task task = new CombatTask(
                     requiredEntityType(args, "entity_type"),
                     optionalInt(args, "count", 1),
-                    io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
+                    io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp());
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
         });
@@ -661,7 +661,7 @@ public final class ToolRegistry {
             }
             UUID id = TaskBoard.INSTANCE.postForOwner(ownerUuid.get(), requiredString(args, "kind"),
                     paramsObject(args, "params"), optionalString(args, "role", ""));
-            io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+            io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
             return ok("job_posted: " + id);
         });
 
@@ -760,7 +760,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("resume_mining", "Continue mining where the last mining session left off: walks back to the remembered mine face and mines the same ore kinds. Use when the player says things like '继续挖矿'/'接着挖'.", objectSchema()
+        register("resume_mining", "Continue mining where the last mining session left off: walks back to the remembered mine face and mines the same ore kinds. Use when the player says things like 'continue mining'/'keep digging'.", objectSchema()
                 .property("count", integerSchema("how many more ore blocks to mine, default 8"))
                 .build(), (bot, args) -> {
             var mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
@@ -781,7 +781,7 @@ public final class ToolRegistry {
                     }
                 }
             });
-            // 队列接力:先走回作业面,再原矿种续挖(goal 队列自动衔接,中途打断也能再续)。
+            // Queue relay: walk back to the work face first, then resume mining the same ore type (the goal queue chains automatically, and it can resume even if interrupted midway).
             Task back = new MoveTask(bot, face.get().pos());
             assignLlm(bot, back);
             GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(
@@ -801,8 +801,8 @@ public final class ToolRegistry {
             if (!started) {
                 return fail("goal_plan_failed");
             }
-            // 归仓接力:goal 队列自动衔接(挖完即去基地箱入库;无 base 时 Stockpile 自己报 no_base)
-            Item yield = io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(ores)
+            // Return-to-storage relay: the goal queue chains automatically (once mining finishes it goes to deposit at the base chest; if there is no base, Stockpile reports no_base on its own)
+            Item yield = io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(ores)
                     .stream().findFirst().orElse(null);
             if (yield != null) {
                 GoalExecutor.INSTANCE.submit(bot, new Goal.Stockpile(yield, count));
@@ -812,13 +812,13 @@ public final class ToolRegistry {
 
         register("recover_drops", "Run back to the most recent death location and pick up dropped items before they despawn (5 min)", objectSchema()
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            var deaths = io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE
-                    .recentOfType(bot.getUuid(), io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, 1);
+            var deaths = io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE
+                    .recentOfType(bot.getUuid(), io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, 1);
             if (deaths.isEmpty()) {
                 return fail("no_recent_death");
             }
             var death = deaths.get(0);
-            Task task = new io.github.zoyluo.aibot.task.RecoverDropsTask(death.pos(), death.gameTick());
+            Task task = new io.github.zoyluo.minecraftai.task.RecoverDropsTask(death.pos(), death.gameTick());
             assignLlm(bot, task);
             return ok("assigned: recover_drops -> " + death.pos().toShortString());
         });
@@ -854,7 +854,7 @@ public final class ToolRegistry {
                 return fail(legacyMiningRejection.orElseThrow());
             }
             if ("mine_ore".equals(taskType)) {
-                if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
                     Task task = new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
                     assignLlm(bot, task);
                     return ok("assigned: " + task.name());
@@ -867,7 +867,7 @@ public final class ToolRegistry {
                 Block block = blockWithAlias(params, "block", "block_type");
                 if (OreScan.isOreBlock(block)) {
                     int count = optionalInt(params, "count", 1);
-                    if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                    if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
                         Task task = new OreDigTask(OreScan.oreFamily(block), count);
                         assignLlm(bot, task);
                         return ok("assigned: " + task.name());
@@ -882,9 +882,9 @@ public final class ToolRegistry {
         });
 
         register("get_task_status", "Get the current task status", objectSchema().build(), (bot, args) -> {
-            // 优化3:有确定性目标在跑时不喂详细状态——断掉大脑反复轮询的正反馈(实测 get_task_status×19 耗尽轮次);
-            // 目标完成/失败会主动唤醒大脑,期间无需查询。
-            if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+            // Optimization 3: while a deterministic goal is running, don't feed it detailed status -- this breaks the positive-feedback loop of the brain repeatedly polling (measured get_task_status x19 exhausting the turn budget);
+            // the goal proactively wakes the brain on completion/failure, so no polling is needed in between.
+            if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
                 return ok("{\"state\":\"goal_running\",\"note\":\"The goal is running and will report when it completes or fails; do not poll repeatedly.\"}");
             }
             TaskStatus status = TaskManager.INSTANCE.status(bot);
@@ -901,7 +901,7 @@ public final class ToolRegistry {
         });
     }
 
-    private static Task createTask(io.github.zoyluo.aibot.entity.AIPlayerEntity bot, String taskType, JsonObject params) {
+    private static Task createTask(io.github.zoyluo.minecraftai.entity.AIPlayerEntity bot, String taskType, JsonObject params) {
         if (params == null) {
             throw new IllegalArgumentException("missing_or_bad_arg: params");
         }
@@ -912,7 +912,7 @@ public final class ToolRegistry {
             case "attack" -> new CombatTask(
                     requiredEntityType(params, "entity_type"),
                     optionalInt(params, "count", 1),
-                    io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
+                    io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp());
             case "mine" -> {
                 Block block = blockWithAlias(params, "block", "block_type");
                 int count = optionalInt(params, "count", 1);
@@ -925,10 +925,10 @@ public final class ToolRegistry {
             case "clear_grass" -> GatherQuotaTask.clearGrass(requiredPositiveInt(params, "count"));
             case "break_blocks" -> GatherQuotaTask.breakBlocks(
                     requiredBreakableBlock(bot, params, "block"), requiredPositiveInt(params, "count"));
-            case "irrigate" -> new io.github.zoyluo.aibot.task.IrrigateTask(
-                    bot.getBlockPos().offset(bot.getHorizontalFacing(), 2).down()); // 身前 2 格 floor 层挖 2×2 无限水源
-            case "milk_cow" -> new io.github.zoyluo.aibot.task.MilkCowTask(optionalInt(params, "count", 1)); // 挤 count 桶牛奶(需空桶)
-            case "raid_crops" -> new io.github.zoyluo.aibot.task.RaidCropsTask(optionalInt(params, "count", 8)); // 收割附近(村庄/野外)成熟作物
+            case "irrigate" -> new io.github.zoyluo.minecraftai.task.IrrigateTask(
+                    bot.getBlockPos().offset(bot.getHorizontalFacing(), 2).down()); // dig a 2x2 infinite water source in the floor layer, 2 blocks in front of the bot
+            case "milk_cow" -> new io.github.zoyluo.minecraftai.task.MilkCowTask(optionalInt(params, "count", 1)); // milk `count` buckets of milk (requires empty buckets)
+            case "raid_crops" -> new io.github.zoyluo.minecraftai.task.RaidCropsTask(optionalInt(params, "count", 8)); // harvest nearby mature crops (village or wild)
             case "fish" -> new FishTask(optionalInt(params, "max_catches", 1), optionalInt(params, "max_ticks", 6000));
             case "trade" -> new TradeTask(optionalItem(params, "target_item"), optionalInt(params, "max_distance", 16));
             case "stockpile" -> new StockpileTask(optionalBoolean(params, "all_except_tools", true));
@@ -1017,7 +1017,7 @@ public final class ToolRegistry {
             json.addProperty("output_count", step.outputCount());
             json.addProperty("needs_crafting_table", step.recipe().needsCraftingTable());
             com.google.gson.JsonArray ingredients = new com.google.gson.JsonArray();
-            for (io.github.zoyluo.aibot.craft.RecipeRegistry.Ingredient ingredient : step.recipe().ingredients()) {
+            for (io.github.zoyluo.minecraftai.craft.RecipeRegistry.Ingredient ingredient : step.recipe().ingredients()) {
                 JsonObject ingredientJson = new JsonObject();
                 ingredientJson.addProperty("count", ingredient.count() * step.crafts());
                 com.google.gson.JsonArray anyOf = new com.google.gson.JsonArray();
@@ -1044,7 +1044,7 @@ public final class ToolRegistry {
         return root.toString();
     }
 
-    private static ToolDefinition.ToolResult result(io.github.zoyluo.aibot.action.ActionResult actionResult) {
+    private static ToolDefinition.ToolResult result(io.github.zoyluo.minecraftai.action.ActionResult actionResult) {
         if (actionResult.isSuccess() || actionResult.isInProgress()) {
             return ok(actionResult.status().name().toLowerCase());
         }
@@ -1068,7 +1068,7 @@ public final class ToolRegistry {
         if (!isLegacyMiningTask(taskType)) {
             return Optional.empty();
         }
-        return StripMineTask.profileRejectionReason(AIBotConfig.get().profile());
+        return StripMineTask.profileRejectionReason(MinecraftAiConfig.get().profile());
     }
 
     private static boolean isLegacyMiningTask(String taskType) {
@@ -1256,7 +1256,7 @@ public final class ToolRegistry {
         return blocks;
     }
 
-    // 把"矿石方块 id"或"原矿物品(raw_iron/iron_ore 等)"解析成目标矿石家族(含深板岩变体)。
+    // Resolve an "ore block id" or "raw ore item (raw_iron/iron_ore, etc.)" into the target ore family (including deepslate variants).
     static java.util.Set<Block> oreTargetsFrom(String oreOrItem) {
         Identifier id = Identifier.of(oreOrItem.trim());
         Block block = Registries.BLOCK.getOptionalValue(id).orElse(null);

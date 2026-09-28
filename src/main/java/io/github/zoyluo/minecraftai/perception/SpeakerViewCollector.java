@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.perception;
+package io.github.zoyluo.minecraftai.perception;
 
 import com.google.gson.Gson;
 import net.minecraft.block.BlockState;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.hit.BlockHitResult;

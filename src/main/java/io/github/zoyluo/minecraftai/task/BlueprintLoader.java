@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -23,8 +23,10 @@ public final class BlueprintLoader {
     }
 
     public static BlueprintSchema load(String name) throws IOException {
-        // P3 参数化蓝图:名字编码 "custom:宽x深x高:材质"(如 custom:7x5x4:stone)直接生成,不读文件。
-        // 走名字通道的好处:Goal.Build/GoalStep.tag/规划器/执行器零改动,队列与备料链天然适用。
+        // P3 parameterized blueprint: the name encodes "custom:WIDTHxDEPTHxHEIGHT:material"
+        // (e.g. custom:7x5x4:stone) and is generated directly, without reading a file.
+        // Benefit of routing through the name: Goal.Build/GoalStep.tag/the planner/the
+        // executor need zero changes, and the queue and material-prep chain naturally apply.
         if (name != null && name.startsWith("custom:")) {
             BlueprintSchema custom = BlueprintSchema.parametricHouse(name);
             if (custom == null) {

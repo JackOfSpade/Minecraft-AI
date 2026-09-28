@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;

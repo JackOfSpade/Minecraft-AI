@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -118,7 +118,7 @@ public final class ContainerTask extends AbstractTask {
             fail("no_container");
             return;
         }
-        boolean observable = io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos);
+        boolean observable = io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos);
         if (observable && ContainerAction.resolve(bot, containerPos).isEmpty()) {
             fail("no_container_at: " + shortPos(containerPos));
             return;
@@ -145,7 +145,7 @@ public final class ContainerTask extends AbstractTask {
             phase = Phase.FINDING;
             return;
         }
-        boolean observable = io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos);
+        boolean observable = io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos);
         if (observable && ContainerAction.resolve(bot, containerPos).isEmpty()) {
             phase = Phase.FINDING;
             return;
@@ -163,7 +163,7 @@ public final class ContainerTask extends AbstractTask {
     private void transfer(AIPlayerEntity bot) {
         if (containerPos == null
                 || bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) > REACH_SQUARED
-                || !io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
             phase = Phase.FINDING;
             return;
         }
@@ -226,7 +226,7 @@ public final class ContainerTask extends AbstractTask {
     public static Optional<BlockPos> nearestContainerNear(AIPlayerEntity bot, BlockPos center, int radius) {
         BlockPos origin = bot.getBlockPos();
         return BlockPos.stream(center.add(-radius, -3, -radius), center.add(radius, 4, radius))
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .map(BlockPos::toImmutable)
                 .min(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));
@@ -235,7 +235,7 @@ public final class ContainerTask extends AbstractTask {
     private static Optional<BlockPos> rememberedContainer(AIPlayerEntity bot) {
         return BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .placeIn(bot.getEntityWorld(), "depot", "home", "base", "chest")
-                .flatMap(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
+                .flatMap(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
                         && ContainerAction.resolve(bot, pos).isPresent()
                         ? Optional.of(pos.toImmutable())
                         : nearestContainerNear(bot, pos, 4));

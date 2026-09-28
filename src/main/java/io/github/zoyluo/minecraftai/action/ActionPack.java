@@ -1,14 +1,14 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
-import io.github.zoyluo.aibot.pathfinding.FailureReason;
-import io.github.zoyluo.aibot.pathfinding.PathExecutor;
-import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
+import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
+import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -20,11 +20,16 @@ import java.util.Optional;
 public final class ActionPack {
     private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
     private static final int PATHFIND_FAILURE_COOLDOWN_TICKS = 20;
-    // NAV-OPT 两阶段寻路预算:纯步行只搜空气格(空间小,给足额度);挖穿限额更小,压住被困/地下时的 3D 体积爆搜。
+    // NAV-OPT two-phase pathfinding budget: pure walking only searches air cells (small search
+    // space, so give it a generous allowance); the dig-through cap is smaller, to contain the 3D
+    // volume search blowing up when trapped/underground.
     private static final int WALK_MAX_NODES = 10_000;
     private static final int DIG_MAX_NODES = 4_000;
-    // 接近原语专用大预算:接近被包裹的矿必然要挖,直接 DIG 且预算放大(挖掘邻居分支因子小,
-    // 24k 节点覆盖 ~40 格穿山直达;普通 startPathTo 的小预算 DIG 仅作走路兜底,语义不变)。
+    // Large budget dedicated to the approach primitive: approaching ore enclosed in stone
+    // necessarily requires digging, so it goes straight to DIG with an enlarged budget (the
+    // digging neighbor branching factor is small, so 24k nodes covers ~40 blocks of direct
+    // through-mountain travel; the small-budget DIG in ordinary startPathTo is only a walking
+    // fallback, and its semantics are unchanged).
     private static final int DIG_APPROACH_MAX_NODES = 24_000;
     private static final long PATHFIND_MAX_MILLIS = 50L;
 
@@ -99,9 +104,11 @@ public final class ActionPack {
         return ActionResult.IN_PROGRESS;
     }
 
-    // 统一接近原语入口:挖掘感知寻路(大预算 DIG 直达,目标可为"挖开即站"的实心格——见
-    // AStarPathfinder.resolveEndpoint 的挖掘终点豁免)。接近被包裹的矿/穿山直达用这个;
-    // 普通走路仍用 startPathTo(先 WALK 后小预算 DIG)。
+    // Unified entry point for the approach primitive: dig-aware pathfinding (large-budget DIG
+    // straight to the goal; the goal may be a solid cell that is "dug open, then stood on" -- see
+    // the dig-endpoint exemption in AStarPathfinder.resolveEndpoint). Use this for approaching ore
+    // enclosed in stone / going straight through a mountain; ordinary walking still uses
+    // startPathTo (WALK first, then small-budget DIG).
     public ActionResult startDigPathTo(BlockPos goal) {
         return startDigPathTo(goal, 0);
     }
@@ -236,8 +243,11 @@ public final class ActionPack {
         }
         ServerWorld world = player.getEntityWorld();
         BlockPos from = player.getBlockPos();
-        // NAV-OPT 两阶段寻路:先纯步行(禁挖,搜索空间=空气格,收敛快、不会被挖穿邻居撑爆到 SEARCH_LIMIT);
-        // 纯步行无解再允许挖穿兜底(隧道/破障),挖穿预算更小以限制被困/地下时的 3D 体积爆搜。
+        // NAV-OPT two-phase pathfinding: try pure walking first (no digging allowed, search
+        // space = air cells, so it converges fast and won't be blown out to SEARCH_LIMIT by
+        // dig-through neighbors); only if pure walking has no solution do we allow the dig-through
+        // fallback (tunneling/breaking obstacles), with a smaller dig budget to bound the 3D
+        // volume search blowing up when trapped/underground.
         AStarPathfinder walkFinder =
                 new AStarPathfinder(
                         player, world, from, goal, WALK_MAX_NODES, PATHFIND_MAX_MILLIS,
@@ -267,7 +277,7 @@ public final class ActionPack {
             if (dugOutbound && PathExecutor.isReversibleStair(result)) {
                 // The pre-dig world cannot prove the walk-only return yet; the dug stair is
                 // itself that return, so derive the proof from the reversed outbound nodes.
-                java.util.List<io.github.zoyluo.aibot.pathfinding.Node> reversed =
+                java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> reversed =
                         new java.util.ArrayList<>(result.path());
                 java.util.Collections.reverse(reversed);
                 returnProof = new PathfindingResult(
@@ -361,14 +371,14 @@ public final class ActionPack {
         }
         // A valid current start is ordinary pathfinding and must not require an emergency
         // capability. Only the fallback relocation to a different cell is privileged.
-        if (!io.github.zoyluo.aibot.mode.CapabilityRuntime.decide(
-                player, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+        if (!io.github.zoyluo.minecraftai.mode.CapabilityRuntime.decide(
+                player, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                 "action_pack_snap:" + reason).allowed()) {
             return false;
         }
         Optional<BlockPos> snapped = Standability.findNearestStandable(world, current, 8, 128, 32);
         if (snapped.isEmpty()) {
-            BotLog.warn(LogCategory.PATH, player, "path_start_snap_failed", "reason", reason, "from", io.github.zoyluo.aibot.log.LogFields.pos(current));
+            BotLog.warn(LogCategory.PATH, player, "path_start_snap_failed", "reason", reason, "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current));
             return false;
         }
         BlockPos safe = snapped.get();
@@ -392,8 +402,8 @@ public final class ActionPack {
         Standability.clearCache();
         BotLog.path(player, "path_start_snapped",
                 "reason", reason,
-                "from", io.github.zoyluo.aibot.log.LogFields.pos(current),
-                "to", io.github.zoyluo.aibot.log.LogFields.pos(safe));
+                "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current),
+                "to", io.github.zoyluo.minecraftai.log.LogFields.pos(safe));
         return true;
     }
 
@@ -425,8 +435,8 @@ public final class ActionPack {
                 Standability.clearCache();
                 BotLog.path(player, "path_start_physical_snap",
                         "reason", reason,
-                        "from", io.github.zoyluo.aibot.log.LogFields.pos(current),
-                        "to", io.github.zoyluo.aibot.log.LogFields.pos(candidate));
+                        "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current),
+                        "to", io.github.zoyluo.minecraftai.log.LogFields.pos(candidate));
                 return true;
             }
         }
@@ -434,18 +444,22 @@ public final class ActionPack {
     }
 
     /**
-     * 主动把 bot 下沉一格到指定(已为空气的)格子。
-     * 关键:bot 是 ServerPlayerEntity,服务端**不跑 travel()**(真实玩家的移动/重力由客户端驱动,
-     * fake player 没有客户端),因此**没有被动重力**——挖空脚下不会自动下落。竖井下挖类任务
-     *(DigDownTask / OreDigTask.digDownOneLayer)必须靠本方法主动驱动下沉,否则会站着空转直到看门狗失败
-     *(实测:dig_down 全程 y 恒定、200t no_progress 卡死的共享根因)。
-     * 幂等:bot 已在该层或更低则不动。teleport 会清零 fallDistance,不会摔伤。
+     * Actively sinks the bot down one cell into the given (already-air) block.
+     * Key point: the bot is a ServerPlayerEntity, and the server side **does not run travel()**
+     * (a real player's movement/gravity is driven by the client, and a fake player has no
+     * client), so there is **no passive gravity** -- digging out the floor beneath it will not
+     * make it fall automatically. Shaft-digging-down tasks (DigDownTask /
+     * OreDigTask.digDownOneLayer) must actively drive the sink through this method, or the bot
+     * will stand there idling until the watchdog fails (observed in practice: dig_down with y
+     * constant the whole time, stuck at 200t no_progress -- this is the shared root cause).
+     * Idempotent: if the bot is already at or below that layer, it does not move. teleport clears
+     * fallDistance, so no fall damage is taken.
      */
     public boolean descendInto(BlockPos target) {
         if (player.getBlockPos().getY() <= target.getY()) {
             return player.getBlockPos().equals(target);
         }
-        return io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+        return io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                 player, target, "descend_into");
     }
 

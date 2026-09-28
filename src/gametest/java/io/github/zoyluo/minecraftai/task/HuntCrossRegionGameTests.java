@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
@@ -34,7 +34,7 @@ import net.minecraft.text.Text;
 
 /** Proves strict hunting can cross an initially empty perception region and collect physical loot. */
 public final class HuntCrossRegionGameTests {
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_restored_pickup_collects_the_same_bound_drop", maxTicks = 200)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_restored_pickup_collects_the_same_bound_drop", maxTicks = 200)
     public void restoredPickupCollectsTheSameBoundDrop(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -86,7 +86,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_replan_shrunk_quota_still_settles_open_pickup_debt", maxTicks = 200)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_replan_shrunk_quota_still_settles_open_pickup_debt", maxTicks = 200)
     public void replanShrunkQuotaStillSettlesOpenPickupDebt(TestContext context) {
         // A mid-mission replan credits the 2 collected raw meat and re-issues the remainder
         // (4 -> 2). The successor task must settle the OPEN transaction instead of dying at
@@ -137,7 +137,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_closed_receipt_does_not_poison_successor_hunt", maxTicks = 200)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_closed_receipt_does_not_poison_successor_hunt", maxTicks = 200)
     public void closedReceiptDoesNotPoisonSuccessorHunt(TestContext context) {
         // A hunt that already settled its pickup can still fail later (for example
         // hunt_no_progress on the next prey) and export a CLOSED_COLLECTED receipt. The
@@ -186,7 +186,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_distant_prey_is_hunted_across_open_ground", maxTicks = 1600)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_distant_prey_is_hunted_across_open_ground", maxTicks = 1600)
     public void distantPreyIsHuntedAcrossOpenGround(TestContext context) {
         // Surface prey sight must align with SEARCH_RANGE: a real player sees a cow well
         // beyond the interaction-scale perception radius on open ground. The corridor is
@@ -262,7 +262,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_distant_prey_sight_widens_range_but_still_requires_line_of_sight", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_distant_prey_sight_widens_range_but_still_requires_line_of_sight", maxTicks = 40)
     public void distantPreySightWidensRangeButStillRequiresLineOfSight(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -302,13 +302,13 @@ public final class HuntCrossRegionGameTests {
                         0.0F, 0.0F, GameMode.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         context.runAtTick(1, () -> {
-            require(context, io.github.zoyluo.aibot.mode.ObservableWorldQuery
+            require(context, io.github.zoyluo.minecraftai.mode.ObservableWorldQuery
                             .canObserveEntityWithin(bot, openCow, 64),
                     "open-ground prey at 40 blocks was not visible at prey-sight range");
-            require(context, !io.github.zoyluo.aibot.mode.ObservableWorldQuery
+            require(context, !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery
                             .canObserveEntity(bot, openCow),
                     "base entity observation widened beyond the configured perception radius");
-            require(context, !io.github.zoyluo.aibot.mode.ObservableWorldQuery
+            require(context, !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery
                             .canObserveEntityWithin(bot, walledCow, 64),
                     "terrain stopped hiding prey at prey-sight range");
             AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
@@ -316,7 +316,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_prey_approach_proof_digs_near_level_through_obstacles", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_prey_approach_proof_digs_near_level_through_obstacles", maxTicks = 40)
     public void preyApproachProofDigsNearLevelThroughObstacles(TestContext context) {
         // Deterministic proof-level pin (no live hunt timing): a 3-high dirt wall has no
         // walk-only crossing, so SAFE here can only come from the near-level dig fallback.
@@ -362,26 +362,26 @@ public final class HuntCrossRegionGameTests {
         require(context, HuntTask.digBreakthroughFloor(start, beyond, baseY + 4)
                         == baseY + 4,
                 "breakthrough floor must never drop below the caller's minimum");
-        java.util.List<io.github.zoyluo.aibot.pathfinding.Node> stair = new java.util.ArrayList<>();
-        stair.add(new io.github.zoyluo.aibot.pathfinding.Node(
-                start, 0, 0, io.github.zoyluo.aibot.pathfinding.MoveType.WALK, null));
-        stair.add(new io.github.zoyluo.aibot.pathfinding.Node(
-                start.east(), 1, 0, io.github.zoyluo.aibot.pathfinding.MoveType.WALK,
+        java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> stair = new java.util.ArrayList<>();
+        stair.add(new io.github.zoyluo.minecraftai.pathfinding.Node(
+                start, 0, 0, io.github.zoyluo.minecraftai.pathfinding.MoveType.WALK, null));
+        stair.add(new io.github.zoyluo.minecraftai.pathfinding.Node(
+                start.east(), 1, 0, io.github.zoyluo.minecraftai.pathfinding.MoveType.WALK,
                 stair.get(0)));
-        require(context, io.github.zoyluo.aibot.pathfinding.PathExecutor.isReversibleStair(
-                        io.github.zoyluo.aibot.pathfinding.PathfindingResult.success(stair, 2, 1L)),
+        require(context, io.github.zoyluo.minecraftai.pathfinding.PathExecutor.isReversibleStair(
+                        io.github.zoyluo.minecraftai.pathfinding.PathfindingResult.success(stair, 2, 1L)),
                 "a flat two-node walk must count as a reversible stair");
-        java.util.List<io.github.zoyluo.aibot.pathfinding.Node> drop = new java.util.ArrayList<>(stair);
-        drop.add(new io.github.zoyluo.aibot.pathfinding.Node(
+        java.util.List<io.github.zoyluo.minecraftai.pathfinding.Node> drop = new java.util.ArrayList<>(stair);
+        drop.add(new io.github.zoyluo.minecraftai.pathfinding.Node(
                 start.east().down(3), 2, 0,
-                io.github.zoyluo.aibot.pathfinding.MoveType.DIG_THROUGH, drop.get(1)));
-        require(context, !io.github.zoyluo.aibot.pathfinding.PathExecutor.isReversibleStair(
-                        io.github.zoyluo.aibot.pathfinding.PathfindingResult.success(drop, 3, 1L)),
+                io.github.zoyluo.minecraftai.pathfinding.MoveType.DIG_THROUGH, drop.get(1)));
+        require(context, !io.github.zoyluo.minecraftai.pathfinding.PathExecutor.isReversibleStair(
+                        io.github.zoyluo.minecraftai.pathfinding.PathfindingResult.success(drop, 3, 1L)),
                 "a three-block drop must not count as its own return route");
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_near_deadline_restore_does_not_refresh_bound_debt", maxTicks = 320)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_near_deadline_restore_does_not_refresh_bound_debt", maxTicks = 320)
     public void nearDeadlineRestoreDoesNotRefreshBoundDebt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -430,7 +430,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_unloaded_target_is_reacquired_instead_of_inventing_pickup_debt", maxTicks = 1200)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_unloaded_target_is_reacquired_instead_of_inventing_pickup_debt", maxTicks = 1200)
     public void unloadedTargetIsReacquiredInsteadOfInventingPickupDebt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -152));
@@ -515,7 +515,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_rejected_compass_fan_rotates_onto_reversible_ridge", maxTicks = 1400)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_rejected_compass_fan_rotates_onto_reversible_ridge", maxTicks = 1400)
     public void rejectedCompassFanRotatesOntoReversibleRidge(TestContext context) {
         var world = context.getWorld();
         // A low dedicated layer (like the distant-prey strip): the previous 40-up elevated ridge
@@ -608,7 +608,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_remembered_kill_cell_routes_around_new_occluding_wall", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_remembered_kill_cell_routes_around_new_occluding_wall", maxTicks = 900)
     public void rememberedKillCellRoutesAroundNewOccludingWall(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -40));
@@ -689,7 +689,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_observed_wool_pickup_triggers_physical_recovery_of_missed_mutton", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_observed_wool_pickup_triggers_physical_recovery_of_missed_mutton", maxTicks = 700)
     public void observedWoolPickupTriggersPhysicalRecoveryOfMissedMutton(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -176));
@@ -795,7 +795,7 @@ public final class HuntCrossRegionGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_water_rescue_does_not_immediately_retarget_same_prey", maxTicks = 1000)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_water_rescue_does_not_immediately_retarget_same_prey", maxTicks = 1000)
     public void waterRescueDoesNotImmediatelyRetargetSamePrey(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -144));
@@ -870,7 +870,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_fresh_hunt_accepts_factual_high_surface_and_starts_acquiring", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_fresh_hunt_accepts_factual_high_surface_and_starts_acquiring", maxTicks = 100)
     public void freshHuntAcceptsFactualHighSurfaceAndStartsAcquiring(TestContext context) {
         var world = context.getWorld();
         BlockPos template = context.getAbsolutePos(new BlockPos(8, 5, -368));
@@ -931,7 +931,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_fresh_hunt_rejects_sky_visible_deep_mine_as_surface_anchor", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_fresh_hunt_rejects_sky_visible_deep_mine_as_surface_anchor", maxTicks = 100)
     public void freshHuntRejectsSkyVisibleDeepMineAsSurfaceAnchor(TestContext context) {
         var world = context.getWorld();
         // Build the sky-visible-deep geometry explicitly instead of trusting ambient terrain
@@ -988,7 +988,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_satisfied_quota_returns_to_surface_before_publishing_completion", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_satisfied_quota_returns_to_surface_before_publishing_completion", maxTicks = 700)
     public void satisfiedQuotaReturnsToSurfaceBeforePublishingCompletion(TestContext context) {
         var world = context.getWorld();
         BlockPos deep = context.getAbsolutePos(new BlockPos(8, 5, -240));
@@ -1042,7 +1042,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_visible_prey_below_mission_surface_floor_is_never_pursued", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_visible_prey_below_mission_surface_floor_is_never_pursued", maxTicks = 500)
     public void visiblePreyBelowMissionSurfaceFloorIsNeverPursued(TestContext context) {
         var world = context.getWorld();
         // The bot has already walked down to the last legal level of a persisted surface
@@ -1087,7 +1087,7 @@ public final class HuntCrossRegionGameTests {
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD));
         require(context,
-                io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, chicken),
+                io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, chicken),
                 "below-floor chicken was not visible from the legal cliff ledge");
         require(context, unsafePreyCell.getY() < surfaceFloorY,
                 "fixture chicken did not cross the mission surface floor");
@@ -1135,7 +1135,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_killed_prey_drop_in_one_way_pit_fails_without_following_it", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_killed_prey_drop_in_one_way_pit_fails_without_following_it", maxTicks = 700)
     public void killedPreyDropInOneWayPitFailsWithoutFollowingIt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -272));
@@ -1219,7 +1219,7 @@ public final class HuntCrossRegionGameTests {
             }
             ItemEntity beef = trappedBeef.get();
             if (beef != null
-                    && io.github.zoyluo.aibot.mode.ObservableWorldQuery
+                    && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery
                     .canObserveEntity(bot, beef)) {
                 dropWasObserved.set(true);
             }
@@ -1250,7 +1250,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_moving_prey_is_retargeted_on_safe_surface_and_physically_collected", maxTicks = 1200)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_moving_prey_is_retargeted_on_safe_surface_and_physically_collected", maxTicks = 1200)
     public void movingPreyIsRetargetedOnSafeSurfaceAndPhysicallyCollected(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 80, -320));
@@ -1391,7 +1391,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_vanilla_pickup_stat_settles_debt_after_inventory_meat_is_consumed", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_vanilla_pickup_stat_settles_debt_after_inventory_meat_is_consumed", maxTicks = 900)
     public void vanillaPickupStatSettlesDebtAfterInventoryMeatIsConsumed(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -368));
@@ -1526,7 +1526,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_externally_killed_target_never_creates_pickup_debt", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_externally_killed_target_never_creates_pickup_debt", maxTicks = 500)
     public void externallyKilledTargetNeverCreatesPickupDebt(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -400));
@@ -1600,7 +1600,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_old_nearby_raw_drop_cannot_poison_fresh_kill_transaction", maxTicks = 1000)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_old_nearby_raw_drop_cannot_poison_fresh_kill_transaction", maxTicks = 1000)
     public void oldNearbyRawDropCannotPoisonFreshKillTransaction(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -432));
@@ -1700,7 +1700,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_credited_fire_aspect_kill_without_raw_meat_returns_to_acquire", maxTicks = 1000)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_credited_fire_aspect_kill_without_raw_meat_returns_to_acquire", maxTicks = 1000)
     public void creditedFireAspectKillWithoutRawMeatReturnsToAcquire(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 70, -464));
@@ -1785,7 +1785,7 @@ public final class HuntCrossRegionGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:hunt_cross_region_game_tests_bounded_hunt_walks_to_prey_outside_initial_perception", maxTicks = 2000)
+    @GameTest(environment = "minecraftai-gametest:hunt_cross_region_game_tests_bounded_hunt_walks_to_prey_outside_initial_perception", maxTicks = 2000)
     public void boundedHuntWalksToPreyOutsideInitialPerception(TestContext context) {
         var world = context.getWorld();
         // GameTest lays every structure on the positive-Z grid before executing batches. Reserve a

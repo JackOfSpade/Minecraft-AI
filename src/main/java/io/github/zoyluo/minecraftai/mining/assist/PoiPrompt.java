@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.brain.ChatResponse;
-import io.github.zoyluo.aibot.brain.ChatToolCall;
-import io.github.zoyluo.aibot.brain.ToolDefinition;
+import io.github.zoyluo.minecraftai.brain.ChatResponse;
+import io.github.zoyluo.minecraftai.brain.ChatToolCall;
+import io.github.zoyluo.minecraftai.brain.ToolDefinition;
 
 import java.util.List;
 import java.util.Objects;

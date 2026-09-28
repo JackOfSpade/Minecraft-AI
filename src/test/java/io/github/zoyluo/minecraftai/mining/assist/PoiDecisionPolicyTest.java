@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import org.junit.jupiter.api.Test;
 
-import static io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.CavernKeylessPolicy;
-import static io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.UnavailablePolicy;
-import static io.github.zoyluo.aibot.mining.assist.PoiDecisionPolicy.Decision.NOTIFY_ONLY;
-import static io.github.zoyluo.aibot.mining.assist.PoiDecisionPolicy.Decision.STOP;
+import static io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.CavernKeylessPolicy;
+import static io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.UnavailablePolicy;
+import static io.github.zoyluo.minecraftai.mining.assist.PoiDecisionPolicy.Decision.NOTIFY_ONLY;
+import static io.github.zoyluo.minecraftai.mining.assist.PoiDecisionPolicy.Decision.STOP;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Design 6.7: the full fallback matrix, including the fix that makes {@link PoiDecisionPolicy} actually total

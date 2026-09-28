@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.network.payload;
+package io.github.zoyluo.minecraftai.network.payload;
 
-import io.github.zoyluo.aibot.AIBotMod;
+import io.github.zoyluo.minecraftai.MinecraftAiMod;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
 public record SubscribeBotC2S(String botName, boolean subscribe) implements CustomPayload {
-    public static final Id<SubscribeBotC2S> ID = new Id<>(Identifier.of(AIBotMod.MOD_ID, "subscribe_bot"));
+    public static final Id<SubscribeBotC2S> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "subscribe_bot"));
     public static final PacketCodec<RegistryByteBuf, SubscribeBotC2S> CODEC = PacketCodec.of(SubscribeBotC2S::write, SubscribeBotC2S::new);
 
     private SubscribeBotC2S(RegistryByteBuf buf) {

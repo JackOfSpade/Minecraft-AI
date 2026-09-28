@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerInventory;
@@ -170,7 +170,7 @@ public final class InventoryAction {
         return remaining;
     }
 
-    // 有害/有副作用的食物:生鸡肉(30% 中毒)、腐肉、河豚、蜘蛛眼、毒马铃薯——只在没别的可吃时才退而求其次。
+    // Harmful/side-effect foods: raw chicken (30% chance of poisoning), rotten flesh, pufferfish, spider eye, poisonous potato -- only fall back to these when nothing else is edible.
     private static final java.util.Set<Item> HARMFUL_FOODS = java.util.Set.of(
             Items.CHICKEN, Items.ROTTEN_FLESH, Items.PUFFERFISH, Items.SPIDER_EYE, Items.POISONOUS_POTATO);
 
@@ -184,11 +184,11 @@ public final class InventoryAction {
             }
             if (HARMFUL_FOODS.contains(stack.getItem())) {
                 if (harmfulSlot < 0) {
-                    harmfulSlot = slot; // 记下作为最后兜底
+                    harmfulSlot = slot; // record it as the last-resort fallback
                 }
                 continue;
             }
-            return slot; // 优先安全食物(熟肉/面包/生牛猪羊)
+            return slot; // prefer safe food first (cooked meat/bread/raw beef/pork/mutton)
         }
         boolean harmfulOffhand = false;
         ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
@@ -266,8 +266,8 @@ public final class InventoryAction {
         return java.util.Optional.of(entity);
     }
 
-    // P0 背包满自救:丢低值占位方块(圆石/泥土/砂砾族),每种保留 keepEach 个(搭路垫脚仍够用)。
-    // 挖矿挖到背包满="破了块捡不起→计数不涨→白挖到超时"(挖掘类任务的隐形杀手)。
+    // P0 inventory-full self-rescue: drop low-value filler blocks (cobblestone/dirt/gravel family), keeping keepEach of each (still enough for bridging/stepping blocks).
+    // Mining until the inventory is full means "block broken but can't be picked up -> count doesn't increase -> mining wasted until timeout" (the hidden killer of mining tasks).
     private static final net.minecraft.item.Item[] JUNK_ITEMS = {
             net.minecraft.item.Items.COBBLESTONE, net.minecraft.item.Items.COBBLED_DEEPSLATE,
             net.minecraft.item.Items.DIRT, net.minecraft.item.Items.GRAVEL, net.minecraft.item.Items.SAND,
@@ -279,8 +279,8 @@ public final class InventoryAction {
         for (net.minecraft.item.Item junk : JUNK_ITEMS) {
             int have = countItem(player, junk);
             if (have > keepEach && removeItems(player, junk, have - keepEach)) {
-                // 必须按最大堆叠分堆扔:单个 ItemStack/ItemEntity 的 count 上限 99,
-                // 一次性扔 2232 个 → 存档 ItemStack.toNbt 抛 "range [1;99]" → server 崩(实测 geo_flow 崩服根因)。
+                // Must split into chunks by max stack size when dropping: a single ItemStack/ItemEntity's count is capped at 99,
+                // dropping 2232 at once -> ItemStack.toNbt throws "range [1;99]" on save -> server crash (confirmed root cause of the geo_flow server crash).
                 int toDrop = have - keepEach;
                 int max = Math.max(1, new ItemStack(junk).getMaxCount());
                 while (toDrop > 0) {

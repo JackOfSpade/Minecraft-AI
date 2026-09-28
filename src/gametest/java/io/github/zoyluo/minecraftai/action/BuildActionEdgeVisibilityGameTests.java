@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -28,7 +28,7 @@ import net.minecraft.text.Text;
 public final class BuildActionEdgeVisibilityGameTests {
     private static final String BATCH = "buildActionEdgeVisibilityStrict";
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_support_center_and_face_center_may_be_beyond_reach_when_inset_is_legal", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_support_center_and_face_center_may_be_beyond_reach_when_inset_is_legal", maxTicks = 40)
     public void supportCenterAndFaceCenterMayBeBeyondReachWhenInsetIsLegal(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 4));
@@ -66,7 +66,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildReachInset");
     }
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_place_at_uses_exact_inset_when_all_target_face_centers_are_hidden", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_place_at_uses_exact_inset_when_all_target_face_centers_are_hidden", maxTicks = 40)
     public void placeAtUsesExactInsetWhenAllTargetFaceCentersAreHidden(TestContext context) {
         BlockPos base = context.getAbsolutePos(new BlockPos(3, 4, 4));
         clear(context, base);
@@ -113,17 +113,17 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildHiddenEdge");
     }
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_water_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_water_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)
     public void waterSourceMayBeObservableOnlyThroughAnInsetRay(TestContext context) {
         assertFluidOnlyInsetObservable(context, "BuildInsetWater", Blocks.WATER);
     }
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_lava_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_lava_source_may_be_observable_only_through_an_inset_ray", maxTicks = 40)
     public void lavaSourceMayBeObservableOnlyThroughAnInsetRay(TestContext context) {
         assertFluidOnlyInsetObservable(context, "BuildInsetLava", Blocks.LAVA);
     }
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_low_perception_radius_rejects_otherwise_reachable_inset_placement", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_low_perception_radius_rejects_otherwise_reachable_inset_placement", maxTicks = 40)
     public void lowPerceptionRadiusRejectsOtherwiseReachableInsetPlacement(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 4));
         clear(context, feet);
@@ -133,13 +133,13 @@ public final class BuildActionEdgeVisibilityGameTests {
         context.getWorld().setBlockState(support, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         AIPlayerEntity bot = spawn(context, "BuildLowPerception", feet, Vec3d.ofBottomCenter(feet));
         equipTwoCobblestone(bot);
-        AIBotConfig original = AIBotConfig.get();
+        MinecraftAiConfig original = MinecraftAiConfig.get();
 
         try {
             require(context, bot.canInteractWithBlockAt(support, 0.0D),
                     "fixture support is outside vanilla interaction reach");
             setConfig(withPerceptionRadius(original, 1));
-            require(context, AIBotConfig.get().perception().radius() == 1,
+            require(context, MinecraftAiConfig.get().perception().radius() == 1,
                     "fixture failed to lower the configured perception radius");
             require(context, !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, support),
                     "inset observation escaped the one-block perception radius");
@@ -160,7 +160,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_strict_mode_never_uses_direct_hidden_placement_fallback", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_strict_mode_never_uses_direct_hidden_placement_fallback", maxTicks = 40)
     public void strictModeNeverUsesDirectHiddenPlacementFallback(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         clear(context, feet);
@@ -169,7 +169,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         AIPlayerEntity bot = spawn(context, "BuildNoFallback", feet, Vec3d.ofBottomCenter(feet));
         equipTwoCobblestone(bot);
 
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "fixture is not running under strict_survival");
         require(context, ObservableWorldQuery.canObserveCell(bot, unsupported),
                 "unsupported destination is not visible enough to detect direct fallback");
@@ -184,7 +184,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildNoFallback");
     }
 
-    @GameTest(environment = "aibot-gametest:build_action_edge_visibility_game_tests_ordinary_supported_placement_still_uses_vanilla_interaction", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_ordinary_supported_placement_still_uses_vanilla_interaction", maxTicks = 40)
     public void ordinarySupportedPlacementStillUsesVanillaInteraction(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         clear(context, feet);
@@ -244,13 +244,13 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, name);
     }
 
-    private static AIBotConfig withPerceptionRadius(AIBotConfig config, int radius) {
-        AIBotConfig.Perception perception = config.perception();
-        return new AIBotConfig(
+    private static MinecraftAiConfig withPerceptionRadius(MinecraftAiConfig config, int radius) {
+        MinecraftAiConfig.Perception perception = config.perception();
+        return new MinecraftAiConfig(
                 config.profile(),
                 config.operatorCapabilities(),
                 config.llm(),
-                new AIBotConfig.Perception(
+                new MinecraftAiConfig.Perception(
                         radius,
                         perception.maxBlocks(),
                         perception.maxEntities(),
@@ -269,9 +269,9 @@ public final class BuildActionEdgeVisibilityGameTests {
                 config.conversation());
     }
 
-    private static void setConfig(AIBotConfig config) {
+    private static void setConfig(MinecraftAiConfig config) {
         try {
-            Field instance = AIBotConfig.class.getDeclaredField("instance");
+            Field instance = MinecraftAiConfig.class.getDeclaredField("instance");
             instance.setAccessible(true);
             instance.set(null, config);
         } catch (ReflectiveOperationException exception) {

@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.coordination.IdleCoordinator;
-import io.github.zoyluo.aibot.coordination.MiningAssistCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.coordination.IdleCoordinator;
+import io.github.zoyluo.minecraftai.coordination.MiningAssistCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.observe.TpsGuard;
 import net.minecraft.server.MinecraftServer;
 
 public final class BotTickCoordinator {
@@ -20,7 +20,7 @@ public final class BotTickCoordinator {
         boolean runDanger = tick % guard.dangerScanInterval() == 0;
         boolean runBackground = tick % guard.scanInterval() == 0;
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            // SAFE-1:环境安全网最先跑;若正在自救(溺水/岩浆)则本 tick 接管,跳过其它检查。
+            // SAFE-1: the environmental safety net runs first; if the bot is currently self-rescuing (drowning/lava), it takes over this tick, skipping the other checks.
             if (NavSafetyNet.INSTANCE.tickBot(server, bot)) {
                 continue;
             }
@@ -32,7 +32,7 @@ public final class BotTickCoordinator {
                 continue;
             }
             if (!handled && runBackground) {
-                io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot); // 第3层:平时也自动穿上背包里更好的护甲
+                io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot); // Layer 3: also auto-equips better armor from the inventory during normal ticks
                 IdleCoordinator.INSTANCE.tickBot(bot);
             }
         }

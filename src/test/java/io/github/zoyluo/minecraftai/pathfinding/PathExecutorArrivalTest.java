@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;

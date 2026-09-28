@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
-import io.github.zoyluo.aibot.goal.StructureVerifier;
-import io.github.zoyluo.aibot.task.BlueprintSchema;
+import io.github.zoyluo.minecraftai.goal.StructureVerifier;
+import io.github.zoyluo.minecraftai.task.BlueprintSchema;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks down the small, reviewed set of production adapters that may invoke privileged primitives. */
 class PrivilegedBoundarySourceTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
     private static final Pattern DIRECT_TELEPORT = Pattern.compile("\\.teleport\\s*\\(");
 
     @Test
@@ -28,7 +28,7 @@ class PrivilegedBoundarySourceTest {
                 "action/ActionPack.java",
                 "manager/AIPlayerManager.java",
                 "mode/FakePlayerMotion.java",
-                "network/AIBotServerNetworking.java",
+                "network/MinecraftAiServerNetworking.java",
                 "task/DangerWatcher.java",
                 "task/GatherQuotaTask.java",
                 "task/NavSafetyNet.java");
@@ -199,8 +199,8 @@ class PrivilegedBoundarySourceTest {
 
     @Test
     void productionSourceSetDoesNotContainVerificationHarness() throws IOException {
-        assertFalse(Files.exists(MAIN.resolve("command/AIBotTestSubcommand.java")));
-        assertFalse(Files.exists(MAIN.resolve("command/AIBotVerifySubcommand.java")));
+        assertFalse(Files.exists(MAIN.resolve("command/MinecraftAiTestSubcommand.java")));
+        assertFalse(Files.exists(MAIN.resolve("command/MinecraftAiVerifySubcommand.java")));
     }
 
     private static Map<String, String> matchingSources(Pattern pattern) throws IOException {

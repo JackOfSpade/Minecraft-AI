@@ -1,15 +1,15 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningFoodReserve;
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningFoodReserve;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.inventory.Inventory;
@@ -34,7 +34,7 @@ import net.minecraft.entity.EquipmentSlot;
 
 /** Live fail-closed coverage for underground tool and safe-food service. */
 public final class MiningServiceResourceGameTests {
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_disposal_admission_centers_residual_ore_walk_before_publishing_open_debt", maxTicks = 120)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_disposal_admission_centers_residual_ore_walk_before_publishing_open_debt", maxTicks = 120)
     public void disposalAdmissionCentersResidualOreWalkBeforePublishingOpenDebt(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceAdmissionVelocityGT", false);
@@ -95,7 +95,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_natural_open_pocket_without_head_support_seals_floor_first", maxTicks = 320)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_natural_open_pocket_without_head_support_seals_floor_first", maxTicks = 320)
     public void naturalOpenPocketWithoutHeadSupportSealsFloorFirst(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceNaturalPocketSealGT", false);
@@ -180,7 +180,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_unsafe_open_cave_seals_then_uses_opposite_disposal_pocket", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_unsafe_open_cave_seals_then_uses_opposite_disposal_pocket", maxTicks = 500)
     public void unsafeOpenCaveSealsThenUsesOppositeDisposalPocket(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceGeometryRerouteGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -266,7 +266,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_two_unsafe_open_caves_seal_once_each_and_fail_without_ping_pong", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_two_unsafe_open_caves_seal_once_each_and_fail_without_ping_pong", maxTicks = 300)
     public void twoUnsafeOpenCavesSealOnceEachAndFailWithoutPingPong(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceDoubleGeometryGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -333,7 +333,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_lower_only_seal_restart_closes_head_then_fails_ledger_visibility", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_lower_only_seal_restart_closes_head_then_fails_ledger_visibility", maxTicks = 500)
     public void lowerOnlySealRestartClosesHeadThenFailsLedgerVisibility(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceLowerOnlyRestartGT", false);
@@ -449,7 +449,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_pocket_checkpoint_counts_and_phase_authority_are_strictly_bounded", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_pocket_checkpoint_counts_and_phase_authority_are_strictly_bounded", maxTicks = 40)
     public void pocketCheckpointCountsAndPhaseAuthorityAreStrictlyBounded(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePocketCountGT", false);
@@ -605,7 +605,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_open_retry_marker_at_hard_budget_becomes_terminal_and_cannot_reroute", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_open_retry_marker_at_hard_budget_becomes_terminal_and_cannot_reroute", maxTicks = 80)
     public void openRetryMarkerAtHardBudgetBecomesTerminalAndCannotReroute(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceOpenRetryBudgetGT", false);
@@ -662,7 +662,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_seal_retry_marker_at_hard_budget_becomes_terminal_and_cannot_ping_pong", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_seal_retry_marker_at_hard_budget_becomes_terminal_and_cannot_ping_pong", maxTicks = 80)
     public void sealRetryMarkerAtHardBudgetBecomesTerminalAndCannotPingPong(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceSealRetryBudgetGT", false);
@@ -718,7 +718,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_sealed_old_pocket_alternate_start_failure_leaves_valid_non_pocket_checkpoint", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_sealed_old_pocket_alternate_start_failure_leaves_valid_non_pocket_checkpoint", maxTicks = 100)
     public void sealedOldPocketAlternateStartFailureLeavesValidNonPocketCheckpoint(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceRerouteAtomicGT", false);
@@ -786,7 +786,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_restored_open_clear_zero_with_factually_broken_entry_seals_at_hard_window", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_restored_open_clear_zero_with_factually_broken_entry_seals_at_hard_window", maxTicks = 80)
     public void restoredOpenClearZeroWithFactuallyBrokenEntrySealsAtHardWindow(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceOpenMutationBudgetGT", false);
@@ -841,7 +841,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_restored_capture_empty_ledger_seals_at_hard_window", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_restored_capture_empty_ledger_seals_at_hard_window", maxTicks = 80)
     public void restoredCaptureEmptyLedgerSealsAtHardWindow(TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceCaptureMutationBudgetGT", false);
         AIPlayerEntity bot = fixture.bot();
@@ -1349,7 +1349,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_unreachable_unsealed_return_fails_boundedly_and_keeps_restartable_debt", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_unreachable_unsealed_return_fails_boundedly_and_keeps_restartable_debt", maxTicks = 500)
     public void unreachableUnsealedReturnFailsBoundedlyAndKeepsRestartableDebt(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceUnsealedReturnGT", false);
@@ -1443,7 +1443,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_prebaseline_capture_pause_move_restart_returns_in_capture_and_completes", maxTicks = 1200)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_prebaseline_capture_pause_move_restart_returns_in_capture_and_completes", maxTicks = 1200)
     public void prebaselineCapturePauseMoveRestartReturnsInCaptureAndCompletes(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePrebaselineReturnGT", false);
@@ -1528,7 +1528,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_terminal_prebaseline_return_checkpoint_restores_seals_and_fails_original_reason", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_terminal_prebaseline_return_checkpoint_restores_seals_and_fails_original_reason", maxTicks = 700)
     public void terminalPrebaselineReturnCheckpointRestoresSealsAndFailsOriginalReason(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServicePrebaselineTerminalGT", false);
@@ -1611,7 +1611,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_open_geometry_debt_move_restarts_return_and_fails_only_after_double_seal", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_open_geometry_debt_move_restarts_return_and_fails_only_after_double_seal", maxTicks = 700)
     public void openGeometryDebtMoveRestartsReturnAndFailsOnlyAfterDoubleSeal(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceOpenMoveDebtGT", false);
@@ -1700,7 +1700,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_capture_empty_ledger_move_restarts_return_and_fails_only_after_double_seal", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_capture_empty_ledger_move_restarts_return_and_fails_only_after_double_seal", maxTicks = 700)
     public void captureEmptyLedgerMoveRestartsReturnAndFailsOnlyAfterDoubleSeal(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceCaptureMoveDebtGT", false);
@@ -1796,7 +1796,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_straddling_tracked_item_must_enter_raw_sink_before_preseal_stability", maxTicks = 180)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_straddling_tracked_item_must_enter_raw_sink_before_preseal_stability", maxTicks = 180)
     public void straddlingTrackedItemMustEnterRawSinkBeforePresealStability(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceRawSinkGT", false);
@@ -1920,7 +1920,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_settle_phase_in_flight_tracked_entity_cannot_be_impersonated_and_times_out", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_settle_phase_in_flight_tracked_entity_cannot_be_impersonated_and_times_out", maxTicks = 500)
     public void settlePhaseInFlightTrackedEntityCannotBeImpersonatedAndTimesOut(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceSettleEscapeGT", false);
@@ -2048,7 +2048,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_seal_phase_tracked_escape_fails_typed_and_cannot_hide_behind_nearer_spoil", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_seal_phase_tracked_escape_fails_typed_and_cannot_hide_behind_nearer_spoil", maxTicks = 500)
     public void sealPhaseTrackedEscapeFailsTypedAndCannotHideBehindNearerSpoil(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceTrackedEscapeGT", false);
@@ -2320,7 +2320,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_full_inventory_reused_pocket_frees_a_stack_before_collecting_opening_spoil", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_full_inventory_reused_pocket_frees_a_stack_before_collecting_opening_spoil", maxTicks = 900)
     public void fullInventoryReusedPocketFreesAStackBeforeCollectingOpeningSpoil(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceFullPocketGT", false);
@@ -2419,7 +2419,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_non_whitelisted_natural_work_face_spoil_cannot_consume_promised_slot", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_non_whitelisted_natural_work_face_spoil_cannot_consume_promised_slot", maxTicks = 900)
     public void nonWhitelistedNaturalWorkFaceSpoilCannotConsumePromisedSlot(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceClaySpoilGT", false);
@@ -2596,7 +2596,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_disposal_pocket_preserves_both_ore_sides_and_fails_after_double_seal", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_disposal_pocket_preserves_both_ore_sides_and_fails_after_double_seal", maxTicks = 700)
     public void disposalPocketPreservesBothOreSidesAndFailsAfterDoubleSeal(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceBothPocketOreGT", false);
@@ -2717,14 +2717,14 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_second_pocket_entry_ore_retires_only_after_visible_double_closure", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_second_pocket_entry_ore_retires_only_after_visible_double_closure", maxTicks = 700)
     public void secondPocketEntryOreRetiresOnlyAfterVisibleDoubleClosure(
             TestContext context) {
         runSecondPocketMouthOreRetirement(
                 context, "MiningServicePocketEntryOreGT", false);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_second_pocket_upper_ore_retires_only_after_visible_double_closure", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_second_pocket_upper_ore_retires_only_after_visible_double_closure", maxTicks = 700)
     public void secondPocketUpperOreRetiresOnlyAfterVisibleDoubleClosure(
             TestContext context) {
         runSecondPocketMouthOreRetirement(
@@ -2834,7 +2834,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_preserved_ore_failure_keeps_pocket_identity_when_sink_entity_remains", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_preserved_ore_failure_keeps_pocket_identity_when_sink_entity_remains", maxTicks = 500)
     public void preservedOreFailureKeepsPocketIdentityWhenSinkEntityRemains(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceClosedOreEntityDebtGT", false);
@@ -2918,7 +2918,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_disposal_ore_seal_loss_terminates_within_pocket_recovery_window", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_disposal_ore_seal_loss_terminates_within_pocket_recovery_window", maxTicks = 500)
     public void disposalOreSealLossTerminatesWithinPocketRecoveryWindow(
             TestContext context) {
         Fixture fixture = spawn(context, "MiningServiceSealLossGT", false);
@@ -3683,7 +3683,7 @@ public final class MiningServiceResourceGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_rare_service_uses_local_pocket_without_touching_remote_owned_depot", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_rare_service_uses_local_pocket_without_touching_remote_owned_depot", maxTicks = 700)
     public void rareServiceUsesLocalPocketWithoutTouchingRemoteOwnedDepot(
             TestContext context) {
         Fixture fixture = spawn(context, "RareLocalFirstGT", false);
@@ -4122,7 +4122,7 @@ public final class MiningServiceResourceGameTests {
         cleanup(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_service_resource_game_tests_rare_descent_kit_full_inventory_retires_only_cheap_picks_then_mines_diamond", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:mining_service_resource_game_tests_rare_descent_kit_full_inventory_retires_only_cheap_picks_then_mines_diamond", maxTicks = 700)
     public void rareDescentKitFullInventoryRetiresOnlyCheapPicksThenMinesDiamond(
             TestContext context) {
         Fixture fixture = spawn(context, "RareDescentKitPressureGT", false);

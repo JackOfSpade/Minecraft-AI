@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.task.BlueprintSchema;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.task.BlueprintSchema;
 import net.minecraft.block.Block;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.world.ServerWorld;

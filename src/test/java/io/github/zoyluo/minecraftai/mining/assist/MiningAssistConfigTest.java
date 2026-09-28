@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -6,19 +6,19 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Advisor;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.CavernKeylessPolicy;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Detour;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Edits;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Explore;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.ModeSource;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.NoticeRecipients;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Poi;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Route;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Safety;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Sense;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.Tick;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig.UnavailablePolicy;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Advisor;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.CavernKeylessPolicy;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Detour;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Edits;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Explore;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.ModeSource;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.NoticeRecipients;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Poi;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Route;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Safety;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Sense;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.Tick;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.UnavailablePolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -318,7 +318,7 @@ class MiningAssistConfigTest {
             return null;
         }, AssistMode.ALL, false);
 
-        assertEquals(List.of("AIBOT_MINING_ASSIST", "AIBOT_MINING_ASSIST_DETERMINISTIC"), asked);
+        assertEquals(List.of("MINECRAFTAI_MINING_ASSIST", "MINECRAFTAI_MINING_ASSIST_DETERMINISTIC"), asked);
     }
 
     // ---- harness default-off -------------------------------------------------------------------

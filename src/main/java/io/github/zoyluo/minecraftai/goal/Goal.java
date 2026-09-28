@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import net.minecraft.block.Block;
 import net.minecraft.item.Item;
@@ -25,37 +25,37 @@ public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.M
         }
     }
 
-    /** P3:收获 N 个作物(小麦/胡萝卜/土豆)。倒推:有锄头(+种子)→ 开垦/播种/等熟/收割。 */
+    /** P3: harvest N crops (wheat/carrot/potato). Backward-chained: have a hoe (+seeds) -> till/plant/wait to mature/harvest. */
     record HarvestCrop(Block crop, Item seed, Item produce, int count) implements Goal {
         public HarvestCrop {
             count = Math.max(1, count);
         }
     }
 
-    /** Phase1:武装起来——成套护甲 + 剑(目前为铁质,复用 GoalPlanner.ensureArmor 倒推)。 */
+    /** Phase1: gear up -- full armor set + sword (currently iron tier, reuses GoalPlanner.ensureArmor's backward chaining). */
     record Armor() implements Goal {
     }
 
-    /** Phase2:基建——备齐并摆好工作台/熔炉/箱子三件套(生产+存储据点)。 */
+    /** Phase2: infrastructure -- prepare and place the crafting table/furnace/chest trio (a production + storage base). */
     record Workstation() implements Goal {
     }
 
-    /** Phase3:囤货——获取 count 个 item,并(尽力)存进附近箱子。 */
+    /** Phase3: stockpiling -- acquire count of item, and (best-effort) store it in a nearby chest. */
     record Stockpile(Item item, int count) implements Goal {
         public Stockpile {
             count = Math.max(1, count);
         }
     }
 
-    /** 第4层 备粮:猎肉并烤成 cookedCount 个熟食(走 GoalPlanner 的猎→烤闭环)。
-     *  供"去打猎/去搞点吃的/弄点肉"等口语入口(provision_food 工具)。 */
+    /** Layer 4 Provisioning: hunt for meat and cook it into cookedCount servings of cooked food (follows GoalPlanner's hunt -> cook loop).
+     *  Serves colloquial entry points like "go hunting/go get some food/get some meat" (the provision_food tool). */
     record Food(int cookedCount) implements Goal {
         public Food {
             cookedCount = Math.max(1, cookedCount);
         }
     }
 
-    /** 盖房目标:按蓝图建造("盖房子"一句话全链:自动备料→建造),蓝图名如 small_hut/hut_5x5。 */
+    /** Build goal: construct according to a blueprint (the "build a house" one-line full chain: auto-gather materials -> build), blueprint names like small_hut/hut_5x5. */
     record Build(String blueprint) implements Goal {
     }
 }

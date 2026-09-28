@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
@@ -31,7 +31,7 @@ public final class StuckWatcher {
 
     public void tickBot(MinecraftServer server, AIPlayerEntity bot) {
         int now = server.getTicks();
-        int window = AIBotConfig.get().watchdog().stuckWindowTicks();
+        int window = MinecraftAiConfig.get().watchdog().stuckWindowTicks();
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
         if (active.isEmpty() || active.get().state() != TaskState.RUNNING || active.get().isWaiting()) {
             samples.remove(bot.getUuid());

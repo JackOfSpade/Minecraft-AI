@@ -1,15 +1,15 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.Standability;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -58,7 +58,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "ShelterOriginGT");
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_emergency_shelter_cannot_complete_before_roof_and_all_sides_are_physically_sealed", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_emergency_shelter_cannot_complete_before_roof_and_all_sides_are_physically_sealed", maxTicks = 400)
     public void emergencyShelterCannotCompleteBeforeRoofAndAllSidesArePhysicallySealed(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -99,7 +99,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_emergency_shelter_builds_a_foundation_from_a_single_supported_landing", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_emergency_shelter_builds_a_foundation_from_a_single_supported_landing", maxTicks = 500)
     public void emergencyShelterBuildsAFoundationFromASingleSupportedLanding(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         for (int dx = -3; dx <= 3; dx++) {
@@ -150,7 +150,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_emergency_shelter_rejects_insufficient_foundation_budget_before_world_mutation", maxTicks = 20)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_emergency_shelter_rejects_insufficient_foundation_budget_before_world_mutation", maxTicks = 20)
     public void emergencyShelterRejectsInsufficientFoundationBudgetBeforeWorldMutation(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -193,7 +193,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "ShelterBudgetGT");
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_partial_shelter_failure_opens_owned_doorway_before_publishing_failure", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_partial_shelter_failure_opens_owned_doorway_before_publishing_failure", maxTicks = 300)
     public void partialShelterFailureOpensOwnedDoorwayBeforePublishingFailure(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -233,7 +233,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_displaced_partial_shelter_releases_its_stale_anchor_without_spinning", maxTicks = 120)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_displaced_partial_shelter_releases_its_stale_anchor_without_spinning", maxTicks = 120)
     public void displacedPartialShelterReleasesItsStaleAnchorWithoutSpinning(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
@@ -273,7 +273,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_material_loss_before_first_placement_fails_without_inventing_exit_debt", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_shelter_material_loss_before_first_placement_fails_without_inventing_exit_debt", maxTicks = 40)
     public void shelterMaterialLossBeforeFirstPlacementFailsWithoutInventingExitDebt(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -311,7 +311,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_exit_never_mines_preexisting_world_blocks", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_shelter_exit_never_mines_preexisting_world_blocks", maxTicks = 400)
     public void shelterExitNeverMinesPreexistingWorldBlocks(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -347,7 +347,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_skips_foundation_hidden_below_a_preexisting_tunnel_wall", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_shelter_skips_foundation_hidden_below_a_preexisting_tunnel_wall", maxTicks = 400)
     public void shelterSkipsFoundationHiddenBelowAPreexistingTunnelWall(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
@@ -383,7 +383,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_shelter_opens_its_owned_door_before_failing_when_exit_support_disappears", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_shelter_opens_its_owned_door_before_failing_when_exit_support_disappears", maxTicks = 400)
     public void shelterOpensItsOwnedDoorBeforeFailingWhenExitSupportDisappears(
             TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
@@ -618,7 +618,7 @@ public final class UndergroundSafetyGameTests {
         finish(context, bot, "DescendEdgeLoopGT");
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_descend_rolls_back_collapsed_same_level_detour_and_retries_from_origin", maxTicks = 180)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_descend_rolls_back_collapsed_same_level_detour_and_retries_from_origin", maxTicks = 180)
     public void descendRollsBackCollapsedSameLevelDetourAndRetriesFromOrigin(
             TestContext context) {
         BlockPos origin = context.getAbsolutePos(new BlockPos(24, 10, 20));
@@ -678,7 +678,7 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:underground_safety_game_tests_descend_restored_upper_detour_retreats_down_to_persisted_origin", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:underground_safety_game_tests_descend_restored_upper_detour_retreats_down_to_persisted_origin", maxTicks = 80)
     public void descendRestoredUpperDetourRetreatsDownToPersistedOrigin(
             TestContext context) {
         BlockPos origin = context.getAbsolutePos(new BlockPos(30, 9, 20));
@@ -920,8 +920,8 @@ public final class UndergroundSafetyGameTests {
         context.getWorld().setBlockState(
                 blockedHead, Blocks.GRAVEL.getDefaultState(), Block.NOTIFY_ALL);
         Standability.clearCache();
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         require(context, !CapabilityRuntime.decide(
                         bot, PrivilegedCapability.EMERGENCY_TELEPORT,
                         "strict_suffocation_gametest").allowed(),
@@ -991,8 +991,8 @@ public final class UndergroundSafetyGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         bot.setHealth(bot.getMaxHealth());
         bot.setOnGround(true);
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.EMERGENCY_TELEPORT,
                         "descend_gravel_gametest").allowed(),
                 "strict_survival unexpectedly allowed emergency teleport");
@@ -1070,8 +1070,8 @@ public final class UndergroundSafetyGameTests {
         bot.setHealth(bot.getMaxHealth());
         bot.setOnGround(true);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_SHOVEL));
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         require(context, !CapabilityRuntime.decide(bot, PrivilegedCapability.EMERGENCY_TELEPORT,
                         "descend_clear_head_gametest").allowed(),
                 "strict_survival unexpectedly allowed emergency teleport");

@@ -1,31 +1,31 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
-import io.github.zoyluo.aibot.mining.assist.BreakPeek;
-import io.github.zoyluo.aibot.mining.assist.DetourControl;
-import io.github.zoyluo.aibot.mining.assist.DetourLiveness;
-import io.github.zoyluo.aibot.mining.assist.DetourPhase;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistLog;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.OreClaims;
-import io.github.zoyluo.aibot.mining.assist.PoiDetector;
-import io.github.zoyluo.aibot.mining.assist.PoiScorer;
-import io.github.zoyluo.aibot.mining.assist.SensePlan;
-import io.github.zoyluo.aibot.mining.assist.SenseStatus;
-import io.github.zoyluo.aibot.mining.assist.ViewSweeper;
-import io.github.zoyluo.aibot.task.DescendToYTask;
-import io.github.zoyluo.aibot.task.DigDownTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MineValuablesTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskState;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mining.assist.BreakPeek;
+import io.github.zoyluo.minecraftai.mining.assist.DetourControl;
+import io.github.zoyluo.minecraftai.mining.assist.DetourLiveness;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistLog;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.OreClaims;
+import io.github.zoyluo.minecraftai.mining.assist.PoiDetector;
+import io.github.zoyluo.minecraftai.mining.assist.PoiScorer;
+import io.github.zoyluo.minecraftai.mining.assist.SensePlan;
+import io.github.zoyluo.minecraftai.mining.assist.SenseStatus;
+import io.github.zoyluo.minecraftai.mining.assist.ViewSweeper;
+import io.github.zoyluo.minecraftai.task.DescendToYTask;
+import io.github.zoyluo.minecraftai.task.DigDownTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MineValuablesTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskState;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -229,7 +229,7 @@ public final class MiningAssistCoordinator {
 
     /**
      * The exception fence. The bot's assist state is dropped (it may be half updated), the failure is logged
-     * at most once per bot per {@value io.github.zoyluo.aibot.mining.assist.SenseFailureGate#LOG_INTERVAL_TICKS}
+     * at most once per bot per {@value io.github.zoyluo.minecraftai.mining.assist.SenseFailureGate#LOG_INTERVAL_TICKS}
      * ticks, and the bot's sensing pauses for a short cooldown so a persistent fault cannot cost a failing pass
      * on every tick.
      */

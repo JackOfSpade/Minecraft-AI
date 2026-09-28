@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.persist.AtomicSnapshotFile;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.persist.AtomicSnapshotFile;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <ul>
  *   <li><b>Placed cells</b> live in one server-wide {@link BotEditsLedger} keyed by dimension id
- *       ({@code minecraft:overworld}), persisted to {@code config/aibot/mining_assist_edits.json}.
+ *       ({@code minecraft:overworld}), persisted to {@code config/minecraftai/mining_assist_edits.json}.
  *       The server thread captures the JSON string when the ledger is dirty and at least
  *       {@value BotEditsLedger#SNAPSHOT_MIN_INTERVAL_TICKS} ticks have passed, and hands only that
  *       string to a single daemon writer thread (G2: no file I/O on the server thread while ticking).
@@ -42,7 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class BotEdits {
     /** Directory below the Fabric config dir. */
-    public static final String SIDECAR_DIRECTORY = "aibot";
+    public static final String SIDECAR_DIRECTORY = "minecraftai";
     /** Refuse to read a sidecar larger than this (the codec is bounded, the file should be too). */
     public static final long MAX_SIDECAR_BYTES = 8L * 1024L * 1024L;
 
@@ -132,7 +132,7 @@ public final class BotEdits {
     // Sidecar
     // ---------------------------------------------------------------------------------------
 
-    /** {@code <config dir>/aibot/mining_assist_edits.json}. Needs the Fabric loader, so not for unit tests. */
+    /** {@code <config dir>/minecraftai/mining_assist_edits.json}. Needs the Fabric loader, so not for unit tests. */
     public static Path defaultSidecarPath() {
         return FabricLoader.getInstance().getConfigDir()
                 .resolve(SIDECAR_DIRECTORY).resolve(BotEditsLedger.SIDECAR_FILE_NAME);
@@ -276,7 +276,7 @@ public final class BotEdits {
     private static synchronized ExecutorService writerThread() {
         if (writer == null) {
             writer = Executors.newSingleThreadExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "AIBotAssistEditsWriter");
+                Thread thread = new Thread(runnable, "MinecraftAiAssistEditsWriter");
                 thread.setDaemon(true);
                 return thread;
             });

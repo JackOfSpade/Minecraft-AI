@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -403,7 +403,7 @@ class MiningAssistRuntimeTest {
     @Test
     void loadReadsTheMiningAssistSectionOfTheConfigFile(@TempDir Path dir) throws IOException {
         org.junit.jupiter.api.Assumptions.assumeTrue(System.getenv(MiningAssistConfig.ENV_MODE) == null);
-        Path file = dir.resolve("aibot.json");
+        Path file = dir.resolve("minecraftai.json");
         Files.writeString(file, "{\"profile\":\"strict\",\"miningAssist\":{\"mode\":\"detour\",\"sense\":{\"raysPerTick\":24}}}");
         MiningAssistConfig loaded = MiningAssistRuntime.load(file);
         assertEquals(AssistMode.DETOUR, loaded.mode());

@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mixin;
+package io.github.zoyluo.minecraftai.mixin;
 
-import io.github.zoyluo.aibot.AIBotMod;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.MinecraftAiMod;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.server.MinecraftServer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -14,12 +14,12 @@ import java.util.function.BooleanSupplier;
 @Mixin(MinecraftServer.class)
 public abstract class ServerTickProbeMixin {
     @Unique
-    private long aibot$tickCount;
+    private long minecraftai$tickCount;
 
     @Inject(method = "tick(Ljava/util/function/BooleanSupplier;)V", at = @At("HEAD"))
-    private void aibot$onTick(BooleanSupplier shouldKeepTicking, CallbackInfo ci) {
-        if (++aibot$tickCount % 1200L == 0L) {
-            BotLog.lifecycle("mixin_alive", "server_tick", aibot$tickCount);
+    private void minecraftai$onTick(BooleanSupplier shouldKeepTicking, CallbackInfo ci) {
+        if (++minecraftai$tickCount % 1200L == 0L) {
+            BotLog.lifecycle("mixin_alive", "server_tick", minecraftai$tickCount);
         }
     }
 }

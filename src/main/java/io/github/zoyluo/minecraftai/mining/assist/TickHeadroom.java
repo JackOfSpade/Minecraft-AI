@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Server tick work headroom for acting features (design 2.1, 3.4). Pure state machine: the caller

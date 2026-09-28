@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Rate limit of the {@code assist_poi_band} shadow line of one bot. The band is scored from noisy, aged

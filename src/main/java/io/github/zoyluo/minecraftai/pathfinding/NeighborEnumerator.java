@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mining.OreScan;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.OreScan;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.registry.tag.BlockTags;
@@ -26,29 +26,38 @@ public final class NeighborEnumerator {
     private final AIPlayerEntity bot;
     private final boolean canPillar;
     private final boolean allowDig;
-    private BlockPos pathGoal; // 终点格:岩浆预检豁免用(终点贴岩浆由任务层封堵处理,不该让唯一入口无解)
-    // digEnterable()/adjacentHazardFluid() 每 tick 内会被同一批候选格反复问到同一个邻位(挖穿泛洪
-    // 时尤其明显),而 OreScan.observeDangerFluid 的可观测性判定要发真实射线,不能像 Standability
-    // 那样全局缓存(结果依赖 bot 的实时眼位/朝向)。本实例只服务单次 findPath() 调用,搜索期间世界
-    // 与 bot 位置都不变,按格记忆结果是安全的,把重复射线开销降到"每个格子最多问一次"。
+    private BlockPos pathGoal; // Goal cell: used for the lava preflight exemption (lava adjacent to the goal is sealed off by the task layer; the only entrance to a cell must not be left unsolvable)
+    // digEnterable()/adjacentHazardFluid() get asked about the same neighbor cell repeatedly within
+    // a single tick by the same batch of candidate cells (especially noticeable during dig-through
+    // flood fills), and OreScan.observeDangerFluid's observability check has to cast a real ray —
+    // it can't be cached globally like Standability (the result depends on the bot's live eye
+    // position/facing). This instance only serves a single findPath() call; since the world and the
+    // bot's position don't change during the search, memoizing the result per cell is safe, and it
+    // cuts the repeated raycast cost down to "at most one query per cell".
     private final Map<BlockPos, OreScan.Observation> hazardObservationCache = new HashMap<>();
 
     public NeighborEnumerator(AIPlayerEntity bot) {
         this(bot, false, true);
     }
 
-    // NAV-9:canPillar=true 时允许"垫方块上升"邻接(仅当 bot 背包有可放置方块时由 A* 传入)。
+    // NAV-9: when canPillar=true, allow the "place a block to rise" neighbor (only passed in by A* when the bot's inventory has a placeable block).
     public NeighborEnumerator(AIPlayerEntity bot, boolean canPillar) {
         this(bot, canPillar, true);
     }
 
-    // NAV-OPT:allowDig=false 时**禁用 DIG_THROUGH 邻居**——只在空气格上做"纯步行"搜索。
-    // 用于两阶段寻路的第一阶段:绝大多数移动靠纯步行即可达,搜索空间小(只空气格)、收敛快;
-    // 而启用挖穿会把每个相邻实心方块都当邻居,使搜索退化成"3D 体积扩散",被困/地下时极易撑爆到
-    // SEARCH_LIMIT(实测 5 格距离的 move 都 SEARCH_LIMIT 的机制根因)。纯步行无解再开第二阶段挖穿。
+    // NAV-OPT: when allowDig=false, **disable DIG_THROUGH neighbors** — search only on air cells,
+    // i.e. "pure walking". Used for the first phase of two-phase pathfinding: most movement can
+    // reach its destination by pure walking alone, so the search space is small (air cells only)
+    // and converges fast; whereas enabling dig-through treats every adjacent solid block as a
+    // neighbor, degrading the search into "3D volumetric diffusion" that, when trapped or
+    // underground, very easily blows the SEARCH_LIMIT (this is the root cause behind moves as
+    // short as 5 blocks hitting SEARCH_LIMIT, confirmed in testing). Only fall back to the
+    // second, dig-through phase once pure walking has no solution.
     //
-    // bot 仅用于 digEnterable() 的岩浆/水观测门控(可为 null——没有 bot 就没法证明"已观测",
-    // adjacentHazardFluid 会诚实地把每个邻位都判 UNKNOWN 并放行,而不是退化回未门控的原始读取)。
+    // bot is only used for digEnterable()'s lava/water observation gate (may be null — without a
+    // bot there's no way to prove a cell has "been observed", so adjacentHazardFluid will honestly
+    // mark every neighbor UNKNOWN and let it through, rather than falling back to an ungated raw
+    // read).
     public NeighborEnumerator(AIPlayerEntity bot, boolean canPillar, boolean allowDig) {
         this.bot = bot;
         this.canPillar = canPillar;
@@ -80,9 +89,11 @@ public final class NeighborEnumerator {
                 continue;
             }
 
-            // NAV-BRIDGE:水平搭桥跨缺口。target 走不了(非可站)、findDrop 也没找到安全落点(缺口太深/
-            // 悬空太远)、但 target 与其上方确实是真开阔空气(不是墙,只是没有地板)——在 target 正下方
-            // 垫一块再走过去。与 addPillar 共用同一个 canPillar 闸门(两者都要消耗背包里的方块)。
+            // NAV-BRIDGE: horizontal bridging across a gap. target isn't walkable (not standable),
+            // findDrop couldn't find a safe landing either (the gap is too deep / too far to drop
+            // safely), but target and the cell above it really are open air (not a wall, just no
+            // floor) — place a block directly under target and walk across it. Shares the same
+            // canPillar gate as addPillar (both consume a block from the inventory).
             if (canPillar && bridgeable(world, target)) {
                 result.add(new NeighborCandidate(target, MoveType.BRIDGE, 0));
                 continue;
@@ -91,16 +102,21 @@ public final class NeighborEnumerator {
             if (allowDig && digEnterable(world, target)) {
                 result.add(new NeighborCandidate(target, MoveType.DIG_THROUGH, 0));
             }
-            // 斜上挖登(DIG 垂直分量之上行):目标=邻位高一格,挖开其脚头两格后跳进去。
-            // 仅当自己头顶跳跃空间已空才生成(执行器只挖目标两格,不清自己头顶)——坡面/露天爬坡够用,
-            // 全封闭竖井上行交给 pillar。治 geo_slope:坡体内矿(高 3 格)水平 DIG 永远够不到。
+            // Diagonal-up dig-climb (the upward vertical component of DIG): target = the neighbor
+            // cell one block higher; mine open its foot and head cells, then jump in. Only generated
+            // when the bot's own headroom is already clear (the executor only mines the target's two
+            // cells, not the bot's own headroom above it) — good enough for slopes/open-air climbs;
+            // fully enclosed vertical shafts going up are left to pillar. Fixes geo_slope: ore inside
+            // a slope (3 blocks up) can never be reached by a horizontal DIG alone.
             BlockPos upTarget = target.up();
             if (allowDig && digEnterable(world, upTarget) && collisionEmpty(world, current.up(2))) {
                 result.add(new NeighborCandidate(upTarget, MoveType.DIG_THROUGH, 0));
             }
         }
-        // 垂直向下挖落(DIG 垂直分量之下行):挖开脚下一格掉下去站稳。治 geo_deep/埋矿族:
-        // 矿在正下方若干格,水平 DIG 在本层泛洪永远够不到(实测 ore_dig_buried/deep 同源)。
+        // Vertical down dig-drop (the downward vertical component of DIG): mine open the cell
+        // underfoot and drop down onto solid footing. Fixes the geo_deep/buried-ore family: when the
+        // ore is several cells straight down, a horizontal DIG flood-fill on the current layer can
+        // never reach it (confirmed by testing to be the same root cause as ore_dig_buried/deep).
         if (allowDig) {
             BlockPos below = current.down();
             if (isMineable(world, below) && !collisionEmpty(world, below.down())) {
@@ -112,7 +128,7 @@ public final class NeighborEnumerator {
         return result;
     }
 
-    // NAV-3:同高对角移动。仅当目标格可站、且两个正交相邻格都"可穿过"(不切墙角)时才允许。
+    // NAV-3: same-height diagonal movement. Only allowed when the target cell is standable and both orthogonally adjacent cells are "passable" (no cutting through a wall corner).
     private static void addDiagonals(BlockPos current, ServerWorld world, List<NeighborCandidate> result) {
         Direction[][] pairs = {
                 {Direction.NORTH, Direction.EAST},
@@ -135,22 +151,24 @@ public final class NeighborEnumerator {
         }
     }
 
-    // NAV-9:垫方块上升一格(原地)。bot 会在脚下放方块并跳上去。需要头顶两格净空。
+    // NAV-9: rise one cell by placing a block (in place). The bot places a block underfoot and jumps onto it. Requires two clear cells of headroom.
     private void addPillar(BlockPos current, ServerWorld world, List<NeighborCandidate> result) {
         if (!canPillar) {
             return;
         }
         BlockPos up1 = current.up();
         BlockPos up2 = current.up(2);
-        // up1 = 新脚位(当前头位,应为空);up2 = 新头位,需净空
+        // up1 = the new foot position (currently the head position, should be empty); up2 = the new head position, needs to be clear
         if (collisionEmpty(world, up1) && collisionEmpty(world, up2) && !Standability.isDangerous(world.getBlockState(up1))) {
             result.add(new NeighborCandidate(up1, MoveType.PILLAR_UP, 0));
         }
     }
 
-    // NAV-BRIDGE:目标格与其上方都是真开阔空气(collision 全空)才算"缺口",不是被实心墙挡住够不着顶。
-    // 水/岩浆也是 collision 全空,但绝不是"缺口"——同 Standability 的旱地契约,流体格一律排除,
-    // 否则会把湖面/岩浆池误判成可搭桥的开阔空气,直接把 bot 带下水或送进岩浆。
+    // NAV-BRIDGE: only counts as a "gap" when both the target cell and the one above it are truly
+    // open air (collision fully empty) — not a case where a solid wall blocks headroom. Water/lava
+    // also have fully empty collision, but are never a "gap" — following the same dry-land contract
+    // as Standability, fluid cells are always excluded, otherwise a lake surface/lava pool would be
+    // misjudged as open, bridgeable air and walk the bot straight into water or lava.
     private static boolean bridgeable(ServerWorld world, BlockPos target) {
         return collisionEmpty(world, target) && collisionEmpty(world, target.up())
                 && world.getBlockState(target).getFluidState().isEmpty()
@@ -190,7 +208,7 @@ public final class NeighborEnumerator {
         if (!collisionEmpty(world, target.up())) {
             return null;
         }
-        int maxFall = AIBotConfig.get().nav().maxSafeFall();
+        int maxFall = MinecraftAiConfig.get().nav().maxSafeFall();
         for (int fall = 1; fall <= maxFall; fall++) {
             BlockPos landing = target.down(fall);
             if (Standability.isStandable(world, landing)) {
@@ -203,9 +221,13 @@ public final class NeighborEnumerator {
         return null;
     }
 
-    // DIG 可进入:脚位与头位各自"可挖 或 已通行"(但不全空——全空是 WALK/JUMP 的领域),
-    // 且脚下有支撑(挖完站得住)。修"脚空头实"死角:终点=矿正下方时站位空气、头顶是矿,
-    // 原 isMineable 要求脚位非空气 → 四种邻居全拒,goal 节点永不入队,A* 万格泛洪 TIMEOUT(geo_wall 实测)。
+    // DIG-enterable: the foot and head cells must each be "mineable or already passable" (but not
+    // both fully empty — fully empty is WALK/JUMP territory), and there must be support underfoot
+    // (so the bot can stand after mining). Fixes the "empty foot, solid head" dead end: when the
+    // goal is directly below an ore block, the stand position is air and the headspace is ore; the
+    // original isMineable required the foot cell to be non-air → all four neighbor kinds get
+    // rejected, the goal node never enters the queue, and A* flood-fills tens of thousands of cells
+    // before TIMEOUT (confirmed by testing on geo_wall).
     private boolean digEnterable(ServerWorld world, BlockPos target) {
         BlockPos head = target.up();
         boolean footOpen = collisionEmpty(world, target);
@@ -218,8 +240,11 @@ public final class NeighborEnumerator {
         if (!footOk || !headOk || collisionEmpty(world, target.down())) {
             return false;
         }
-        // P0 安全预检(深层挖矿头号死因):挖开这两格后侧面/上方岩浆会涌入——-59 钻石层就是岩浆层,
-        // 实操挖钻石最常见死法。脚/头任一格暴露面贴岩浆/水 → 这条路不挖,A* 自然绕行。
+        // P0 safety preflight (the #1 cause of death in deep mining): after mining open these two
+        // cells, lava from the side/above could pour in — Y=-59, the diamond layer, is also the lava
+        // layer, and this is the most common way players die mining diamonds in practice. If either
+        // the foot or head cell has an exposed face adjacent to lava/water → don't mine this path,
+        // and let A* naturally route around it.
         //
         // Strict-survival gate (companion fix to the DigDownTask/DescendToYTask x-ray closed in
         // a0c4edd): adjacentHazardFluid() below only rejects a direction on a hazard that is
@@ -236,18 +261,20 @@ public final class NeighborEnumerator {
         // dangerous), not the safety boundary; the reactive check is.
         boolean isGoal = pathGoal != null && (target.equals(pathGoal) || head.equals(pathGoal));
         if (!isGoal && (adjacentHazardFluid(target) || adjacentHazardFluid(head))) {
-            return false; // 终点格豁免:贴岩浆的矿仍可达,挖前由任务层先封岩浆(ore_dig_lava_seal)
+            return false; // Goal-cell exemption: ore adjacent to lava is still reachable — the task layer seals the lava before mining (ore_dig_lava_seal)
         }
-        // P0 沙砾坍塌预检:头位上方是悬沙/砾(FallingBlock)→ 挖开即连环下落,砸头窒息+填回通道。
+        // P0 sand/gravel collapse preflight: if the cell above the head position is suspended sand/gravel (FallingBlock) → mining it triggers a chain fall, which can knock out/suffocate the bot and refill the tunnel.
         if (world.getBlockState(head.up()).getBlock() instanceof net.minecraft.block.FallingBlock) {
             return false;
         }
         return true;
     }
 
-    // 暴露面危险流体(岩浆/水):四水平邻+上方任一已观测到危险流体即危险(下方由 target.down
-    // 实心保证不漏)。见 digEnterable() 上方的门控说明:只在真已观测到时拒绝,未观测的邻位一律
-    // UNKNOWN 放行,交给 PathExecutor.tickDigThrough() 的反应式复查兜底。
+    // Hazardous fluid on an exposed face (lava/water): dangerous if any of the four horizontal
+    // neighbors or the cell above has an observed hazardous fluid (the cell below is guaranteed
+    // solid by target.down, so no leak there). See the gating explanation above digEnterable():
+    // only reject when the hazard has actually been observed; any unobserved neighbor is always
+    // let through as UNKNOWN, with PathExecutor.tickDigThrough()'s reactive recheck as the backstop.
     private boolean adjacentHazardFluid(BlockPos pos) {
         if (isObservedHazardFluid(pos.up())) {
             return true;
@@ -270,9 +297,13 @@ public final class NeighborEnumerator {
     }
 
     private static boolean hasHeadroom(ServerWorld world, BlockPos target) {
-        // 挖掘语义的头位:已空 或 可挖(执行器 tickDigThrough 会把脚位+头位都挖开)。
-        // 原"头上两格必须已空"把穿实心山体判成无路——每一步头位都是石头,DIG 邻居一个都生成不出,
-        // 这正是 geo_slope/wall/pocket 全卡 no_progress 的根因(挖掘寻路只能贴地刨坑、不能穿山)。
+        // Head position under digging semantics: already empty OR mineable (the executor
+        // tickDigThrough mines open both the foot and head cells). The original rule "the two cells
+        // above the head must already be empty" judged tunneling through a solid mountain as
+        // impassable — every step's head cell was stone, so not a single DIG neighbor could ever be
+        // generated, which is exactly the root cause behind geo_slope/wall/pocket all getting stuck
+        // on no_progress (dig-pathfinding could only scrape shallow pits along the ground, never
+        // tunnel through a mountain).
         BlockPos head = target.up();
         return collisionEmpty(world, head) || isMineable(world, head);
     }
@@ -285,8 +316,8 @@ public final class NeighborEnumerator {
         if (!state.getFluidState().isEmpty() || Standability.isDangerous(state)) {
             return false;
         }
-        // 矿石本身可挖(终点豁免的配套:目标矿格要能进路径;OreScan 含模组 _ore 后缀)。
-        if (io.github.zoyluo.aibot.mining.OreScan.isOreBlock(state.getBlock())) {
+        // The ore block itself is mineable (paired with the goal exemption: the target ore cell needs to be reachable on the path; OreScan also covers modded _ore suffixes).
+        if (io.github.zoyluo.minecraftai.mining.OreScan.isOreBlock(state.getBlock())) {
             return true;
         }
         return state.isIn(BlockTags.STONE_ORE_REPLACEABLES)

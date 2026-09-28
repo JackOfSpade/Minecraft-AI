@@ -1,26 +1,26 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.FarmAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.craft.AcquisitionHints;
-import io.github.zoyluo.aibot.craft.SmeltChain;
-import io.github.zoyluo.aibot.craft.RecipeRegistry;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mining.MiningChain;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningFoodReserve;
-import io.github.zoyluo.aibot.mining.OreProspector;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.task.BlueprintSchema;
-import io.github.zoyluo.aibot.task.EmergencyShelterTask;
-import io.github.zoyluo.aibot.task.HuntTask;
-import io.github.zoyluo.aibot.task.MiningServiceTask;
-import io.github.zoyluo.aibot.task.WorkshopLocator;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.craft.AcquisitionHints;
+import io.github.zoyluo.minecraftai.craft.SmeltChain;
+import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mining.MiningChain;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningFoodReserve;
+import io.github.zoyluo.minecraftai.mining.OreProspector;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.task.BlueprintLoader;
+import io.github.zoyluo.minecraftai.task.BlueprintSchema;
+import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
+import io.github.zoyluo.minecraftai.task.HuntTask;
+import io.github.zoyluo.minecraftai.task.MiningServiceTask;
+import io.github.zoyluo.minecraftai.task.WorkshopLocator;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -47,25 +47,28 @@ public final class GoalPlanner {
     private GoalPlanner() {
     }
 
-    // 第3层 装备前置用:铁甲四件 + 对应装备槽。
+    // Tier 3 armor prerequisite: full iron armor set (4 pieces) + matching equipment slots.
     private static final List<Item> IRON_ARMOR = List.of(
             Items.IRON_HELMET, Items.IRON_CHESTPLATE, Items.IRON_LEGGINGS, Items.IRON_BOOTS);
-    // 规避加固:挖深矿前备的火把数(供 DangerWatcher 在地下黑暗处点亮防刷怪)。
+    // Hazard hardening: torch count reserved before deep mining (used by DangerWatcher to light up
+    // dark underground areas and prevent mob spawns).
     private static final int TORCH_TARGET = 8;
     private static final EquipmentSlot[] ARMOR_SLOTS = {
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
-    // 第4层 备粮:安全储备口径统一由 MiningFoodReserve 维护；生肉只是待加工中间品。
+    // Tier 4 food provisioning: the safe-reserve accounting is unified in MiningFoodReserve; raw
+    // meat is only an intermediate item awaiting processing.
     private static final List<Item> RAW_MEAT_ITEMS = List.of(
             Items.BEEF, Items.PORKCHOP, Items.MUTTON, Items.CHICKEN, Items.RABBIT);
     private static final int FOOD_TARGET = 4;
     /** Matches DescendToYTask's dark-shaft placement cadence. */
     private static final int DESCEND_TORCH_EVERY = 6;
-    // 黑曜石远征补给是进入取水/钻石链前的硬门槛。食物按任务量缩放,公式与历史依据
-    // (旧 24-item 门 5,284-tick 启动、8 单位地板)见 MiningBudget.obsidianExpeditionFoodTarget。
+    // Obsidian expedition provisioning is a hard gate before entering the water-acquisition/diamond
+    // chain. Food scales with the mission quantity; for the formula and historical basis (the old
+    // 24-item gate's 5,284-tick startup, 8-unit floor) see MiningBudget.obsidianExpeditionFoodTarget.
     private static final int OBSIDIAN_EXPEDITION_STONE_PICKS = 4;
-    private static final int DESCEND_THRESHOLD = 8; // bot 高于矿层超过这么多格,先下竖井到矿层再挖
-    private static final int SPARE_IRON_INGOTS = 3; // 深潜挖矿前多备 1 把铁镐的料(3 铁锭),镐磨穿时深处背包直接合新镐
-    private static final int FOOD_GRASS_SCAN = 32;  // Goal.Food 择源:扫这个半径内有无草(种植面包链的种子来源)
+    private static final int DESCEND_THRESHOLD = 8; // If the bot is above the ore layer by more than this many blocks, descend a shaft to the ore layer before mining.
+    private static final int SPARE_IRON_INGOTS = 3; // Before a deep dive, reserve enough material for one extra iron pickaxe (3 ingots), so a worn-out pick can be recrafted directly from inventory while deep underground.
+    private static final int FOOD_GRASS_SCAN = 32;  // Goal.Food source selection: scan this radius for grass (the seed source for the bread-farming chain).
 
     public record GoalPlan(Goal goal, List<GoalStep> steps, List<String> unresolved) {
         public boolean success() {
@@ -98,28 +101,37 @@ public final class GoalPlanner {
                          Goal goal,
                          GoalSnapshotCollector.Context resumeContext,
                          String missionId) {
-        // Goal.Food 感知择源:规划时扫一眼周围实际有什么,据此选打猎/种植(见 ensureFoodTo),不再绑死打猎
-        //(没动物的地形硬派打猎只会抓瞎)。其余目标不受这两个标志影响。
+        // Goal.Food perception-driven source selection: at planning time, scan what is actually
+        // nearby and choose hunting or farming accordingly (see ensureFoodTo), no longer hardcoded
+        // to hunting (forcing a hunt on animal-less terrain would just flail blindly). No other
+        // goal is affected by these two flags.
         boolean hasPrey = HuntTask.hasPreyNearby(bot);
         boolean hasGrass = OreProspector.nearest(bot,
                 FOOD_GRASS_SCAN, GoalPlanner::isGrassForSeeds) != null;
-        // 荒芜兜底源:针叶林等生物群系动物稀少(实测 hunt 漫游 10 次 1092t 仍 0 猎物)但常有甜浆果丛——
-        // 无动物可猎时浆果是"能立刻吃上"的最后手段。
+        // Barren-biome fallback source: biomes like taiga have sparse animals (measured: 10 hunt-roam
+        // attempts over 1092 ticks still yielded 0 prey) but often have sweet berry bushes nearby --
+        // when there is no prey to hunt, berries are the last resort for "something to eat right now."
         boolean hasBerries = OreProspector.nearest(bot,
                 FOOD_GRASS_SCAN, state -> state.isOf(Blocks.SWEET_BERRY_BUSH)) != null;
-        // 附近矿感知:规划时扫一眼目标矿是否已在身边(48 格)。在 → 不下潜矿层直接挖
-        //(站在铁矿旁还先挖 70 格竖井到 Y16 是蠢的;且竖井穿天然地形洞/水/沙砾极易 descend_blocked,
-        // 实测场景地表化后 descend 类失败爆发,旧 y6 出生点 botY<mineY 恰好从不触发才一直没暴露)。
+        // Nearby-ore perception: at planning time, check whether the target ore is already nearby
+        // (within 48 blocks). If so -> mine directly without descending to the ore layer
+        // (digging a 70-block shaft down to Y16 while standing next to iron ore would be silly; also
+        // a shaft through natural cave/water/gravel terrain is very prone to descend_blocked --
+        // measured runs show a burst of descend-type failures once the world became surface-heavy;
+        // the old Y6 spawn's botY<mineY simply never triggered this path, which is why it stayed
+        // hidden for so long).
         java.util.function.Predicate<Set<Block>> oreNearby = ores -> {
             if (OreProspector.nearest(bot, 48,
                     state -> ores.contains(state.getBlock())) != null) {
                 return true;
             }
-            // 知识库第二意见(语义记忆消费口):实扫 48 格没有,但以前在 96 格内见过该矿 → 同样跳过下潜,
-            // OreDigTask 的 prospect(64)+水平掘进能摸到——"记得哪里有"比"现在看得见"覆盖更广。
+            // Knowledge-base second opinion (semantic-memory consumption point): a live scan within
+            // 48 blocks found nothing, but this ore was seen within 96 blocks before -> also skip the
+            // descent; OreDigTask's prospect(64) + horizontal tunneling can reach it --
+            // "remembering where it was" covers more ground than "seeing it right now."
             for (Block ore : ores) {
                 String id = Registries.BLOCK.getId(ore).toString();
-                if (io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE
+                if (io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
                         .nearestResource(bot.getUuid(), id, bot.getBlockPos(), 96).isPresent()) {
                     return true;
                 }
@@ -127,7 +139,7 @@ public final class GoalPlanner {
             return false;
         };
         return planFromState(bot, goal, inventoryCounts(bot), toolUsableDurability(bot),
-                Math.max(1, AIBotConfig.get().goal().maxPlanDepth()), bot.getBlockPos().getY(),
+                Math.max(1, MinecraftAiConfig.get().goal().maxPlanDepth()), bot.getBlockPos().getY(),
                 hasPrey, hasGrass, hasBerries, canAcquireSurfaceResources(bot),
                 oreNearby, resumeContext, missionId);
     }
@@ -237,20 +249,26 @@ public final class GoalPlanner {
         return new GoalPlan(goal, List.copyOf(mergeGathers(planner.steps)), List.copyOf(planner.unresolved));
     }
 
-    // 割草取种子的草类(种植面包链的起点):附近有草,才把"种植"作为无动物时的食物源。
+    // Grass types cut for seeds (the starting point of the bread-farming chain): only treat
+    // "farming" as a food source when there are no animals if grass is actually present nearby.
     private static boolean isGrassForSeeds(BlockState state) {
         return state.isOf(Blocks.SHORT_GRASS) || state.isOf(Blocks.TALL_GRASS)
                 || state.isOf(Blocks.FERN) || state.isOf(Blocks.LARGE_FERN);
     }
 
-    // 第A层 集中采集(挖钻石失败根因修复):没有地表局部任务时,把所有 GATHER 同类需求合并并提到
-    // 计划最前。HUNT 是例外:动物会移动/消失,从零链必须先采最小木料做剑并就地完成首个 bounded
-    // 捕猎批次，再批量采后续原木；否则先砍几十根燃料会把 bot 带离出生点羊群(seed 3000 实测)。
-    // 但不能等最后一个 HUNT 批次：第二轮猎食可能远征数百格，把 bot 带到无林草原后才要求 18 根
-    // 燃料木。首轮 HUNT 后的 GATHER 立即集中，剩余 HUNT/COOK 保持原顺序。
-    // 深层贵重矿的最佳挖掘高度(1.18+ 地形);非深层矿返回 MAX_VALUE(不触发"先下矿层")。
+    // Tier A consolidated gathering (root-cause fix for diamond-mining failures): when there is no
+    // surface-local task, merge every same-item GATHER requirement and move it to the front of the
+    // plan. HUNT is the exception: animals move and disappear, so a from-zero chain must first gather
+    // the minimal wood to craft a sword and complete the first bounded hunting batch in place, only
+    // then batch-gather the remaining logs; otherwise chopping dozens of fuel logs first would lead
+    // the bot away from the spawn's sheep herd (measured on seed 3000). But it must not wait for the
+    // very last HUNT batch either: the second hunting round can range hundreds of blocks and leave
+    // the bot in a treeless plain before it asks for 18 fuel logs. Consolidate GATHER immediately
+    // after the first HUNT batch; keep the remaining HUNT/COOK steps in their original order.
+    // Best mining Y level for deep valuable ores (1.18+ terrain); returns MAX_VALUE for non-deep
+    // ores (so it never triggers "descend to the ore layer first").
     private static int bestMiningY(Set<Block> ores) {
-        return MiningChain.bestY(ores); // S2:推荐挖掘 Y 层收敛到 MiningChain 单一数据源(混合矿取最深层)
+        return MiningChain.bestY(ores); // S2: the recommended mining Y level converges on MiningChain as the single data source (a mixed-ore set takes the deepest layer).
     }
 
     private static List<GoalStep> mergeGathers(List<GoalStep> steps) {
@@ -274,8 +292,9 @@ public final class GoalPlanner {
     }
 
     private static List<GoalStep> mergeGatherSegment(List<GoalStep> steps, int insertAt) {
-        // GATHER:无前置依赖 → 同段合并并前移。MINE 不跨步骤合并：它可能横跨
-        // “木镐挖首批 3 石→合石镐→石镐挖大批石料”的工具升级边界。
+        // GATHER: has no prerequisites -> merge within the segment and move it forward. MINE is not
+        // merged across steps: it may straddle the tool-upgrade boundary of
+        // "wooden pick mines the first 3 stone -> craft stone pick -> stone pick mines the bulk stone."
         record GatherKey(Item item, boolean bestEffort) {}
         Map<GatherKey, Integer> gatherTotals = new LinkedHashMap<>();
         for (GoalStep step : steps) {
@@ -295,7 +314,7 @@ public final class GoalPlanner {
         for (int i = Math.min(insertAt, steps.size()); i < steps.size(); i++) {
             GoalStep step = steps.get(i);
             if (step.kind() == GoalStep.Kind.GATHER) {
-                continue; // 已提到最前
+                continue; // already moved to the front
             }
             result.add(step);
         }
@@ -312,7 +331,7 @@ public final class GoalPlanner {
             add(counts, stack);
         }
         add(counts, bot.getEquippedStack(EquipmentSlot.OFFHAND));
-        // 第3层:计入已穿装备槽,避免"已穿铁甲"被 ensureArmor 当成缺失而重复制作。
+        // Tier 3: also count already-equipped slots, so ensureArmor doesn't treat "already wearing iron armor" as missing and craft it again.
         for (EquipmentSlot slot : ARMOR_SLOTS) {
             add(counts, bot.getEquippedStack(slot));
         }
@@ -323,10 +342,14 @@ public final class GoalPlanner {
         if (stack.isEmpty()) {
             return;
         }
-        // 即将断的工具/装备(与 ToolSelector 同阈值 damage>=max-1)不计入库存:选镐保全根本不会用它,
-        // planner 若把它当"有镐"就不补新的 → 挖矿 need_better_tool 与"已有镐"死锁(real_armor 实测:
-        // 挖26铁把石镐磨到将断,被当"有石镐"不补 → mine_ore 反复 need_better_tool:stone_pickaxe 失败)。
-        // 不计 → ensurePickaxeTier 用背包圆石补一把新石镐,选镐保全改用新的,链路续上。
+        // A tool/piece of equipment about to break (same threshold as ToolSelector: damage>=max-1)
+        // is not counted toward inventory: pick-selection safety would never use it anyway, and if
+        // the planner treated it as "have a pick" it would not craft a new one -> deadlock between
+        // mining's need_better_tool and "already have a pick" (measured in real_armor: mining 26 iron
+        // wears the stone pick down to near-breaking; being counted as "have a stone pick" meant no
+        // replacement was crafted -> mine_ore repeatedly failed with need_better_tool:stone_pickaxe).
+        // Not counting it -> ensurePickaxeTier crafts a fresh stone pick from cobblestone in
+        // inventory, pick-selection safety switches to the new one, and the chain continues.
         if (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1) {
             return;
         }
@@ -388,9 +411,9 @@ public final class GoalPlanner {
         private int plannedY;
         private final int waterReturnY;
         private boolean initialOrePerceptionValid = true;
-        private final boolean hasPreyNearby;  // 周围有可猎动物(食物择源:有→打猎)
-        private final boolean hasGrassNearby; // 周围有草(食物择源:无动物但有草→种植面包)
-        private final boolean hasBerriesNearby; // 周围有甜浆果丛(食物择源:无动物无现成粮→采浆果兜底)
+        private final boolean hasPreyNearby;  // huntable animals nearby (food source selection: if present -> hunt)
+        private final boolean hasGrassNearby; // grass nearby (food source selection: no animals but grass present -> farm bread)
+        private final boolean hasBerriesNearby; // sweet berry bushes nearby (food source selection: no animals and no ready food -> fall back to picking berries)
         private final boolean surfaceAcquisitionAllowed;
         private final boolean restrictSurfaceAcquisition;
         /**
@@ -400,7 +423,7 @@ public final class GoalPlanner {
          */
         private final boolean nearbyCraftingTable;
         private final boolean nearbyFurnace;
-        private final java.util.function.Predicate<Set<Block>> oreNearby; // 目标矿是否已在身边(48格)→跳过下潜
+        private final java.util.function.Predicate<Set<Block>> oreNearby; // whether the target ore is already nearby (48 blocks) -> skip the descent
         private final GoalSnapshotCollector.Context resumeContext;
         private final String missionId;
         private final List<GoalStep> steps = new ArrayList<>();
@@ -459,25 +482,29 @@ public final class GoalPlanner {
             };
         }
 
-        // P3:收获作物——已有足量产出则空;否则倒推锄头(任意木镐档锄,这里用 wooden_hoe)+ 种子,再下 FARM 步。
+        // P3: harvest a crop -- no-op if already holding enough produce; otherwise back-derive a
+        // hoe (any tier works, here we use wooden_hoe) + seeds, then emit the FARM step.
         private boolean ensureHarvestCrop(Goal.HarvestCrop g, int depth, Set<String> visiting) {
             int owned = counts.getOrDefault(g.produce(), 0);
             int remaining = Math.max(0, g.count() - owned);
             if (remaining <= 0) {
                 return true;
             }
-            // 锄头:背包没有任意锄就倒推一把木锄(FarmAction 用任意 HoeItem,木锄足矣)。
+            // Hoe: if inventory has no hoe at all, back-derive a wooden hoe (FarmAction accepts any HoeItem, so a wooden one is enough).
             if (!hasAnyHoe() && !ensureItem(Items.WOODEN_HOE, 1, depth + 1, visiting)) {
                 return false;
             }
-            ensureSeeds(g.seed(), g.produce(), remaining, depth, visiting); // 种田前先确保种子
+            ensureSeeds(g.seed(), g.produce(), remaining, depth, visiting); // ensure seeds before farming
             addStep(GoalStep.farm(g.crop(), g.seed(), g.produce(), remaining));
             counts.merge(g.produce(), remaining, Integer::sum);
             return true;
         }
 
-        // farm 前确保种子:种子与产出不同(如小麦种子≠小麦)且不足 → 倒推获取(小麦种子走割草);
-        // 种子=产出自身(carrot/potato)则不倒推(否则 produce→farm→seed→produce 死循环),交 FarmTask 运行期就地找。
+        // Ensure seeds before farming: when the seed differs from the produce (e.g. wheat seeds !=
+        // wheat) and is insufficient -> back-derive it (wheat seeds come from cutting grass); when
+        // the seed equals the produce itself (carrot/potato), do not back-derive it (otherwise
+        // produce -> farm -> seed -> produce loops forever) -- leave it to FarmTask to find on the
+        // spot at runtime.
         private void ensureSeeds(Item seed, Item produce, int count, int depth, Set<String> visiting) {
             if (seed == null || seed == produce) {
                 return;
@@ -497,7 +524,7 @@ public final class GoalPlanner {
                     || counts.getOrDefault(Items.NETHERITE_HOE, 0) > 0;
         }
 
-        // 打猎要有武器(空手攻击力仅 1,低效甚至追不上动物)。背包/计划里有任意剑即可。
+        // Hunting requires a weapon (bare-handed attack is only 1 damage -- inefficient and may not even catch up with the animal). Any sword already in inventory or the plan is enough.
         private boolean hasAnySword() {
             return counts.getOrDefault(Items.WOODEN_SWORD, 0) > 0
                     || counts.getOrDefault(Items.STONE_SWORD, 0) > 0
@@ -520,7 +547,7 @@ public final class GoalPlanner {
 
         private boolean ensureMineOre(Set<Block> ores, int count, int depth, Set<String> visiting) {
             Set<Block> expanded = ores == null || ores.isEmpty() ? OreScan.COMMON_ORES : OreScan.expandOreFamilies(ores);
-            Set<Item> drops = io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(expanded);
+            Set<Item> drops = io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(expanded);
             int owned = countAny(drops);
             int remaining = Math.max(0, count - owned);
             if (remaining <= 0) {
@@ -611,8 +638,10 @@ public final class GoalPlanner {
                 return false;
             }
             if (expedition) {
-                // 首趟按配额准备多把镐；批次间 service 会回仓/就地补给，避免一次性把整趟远征
-                // 的所有消耗都塞进 bootstrap。钻石目标所需的是铁镐，不会消耗目标钻石。
+                // The first leg provisions multiple pickaxes per quota; inter-batch service handles
+                // returning to storage or on-site resupply, avoiding cramming the whole expedition's
+                // consumption into the bootstrap in one shot. A diamond goal needs an iron pickaxe,
+                // and does not consume the target diamonds themselves.
                 Item expeditionPickaxe = pickaxeForTier(tier);
                 if (expeditionPickaxe != Items.AIR
                         && !ensureItem(expeditionPickaxe, missionBudget.initialPickaxes(), depth + 1, visiting)) {
@@ -622,9 +651,11 @@ public final class GoalPlanner {
                         && !ensureItem(Items.IRON_INGOT, missionBudget.spareToolIngots(), depth + 1, visiting)) {
                     return false;
                 }
-                // 火把和封堵块只在地表 bootstrap 补齐。地下恢复时重放这两个目标会把
-                // 已消耗的储备翻译成 DigDown/砍树前置，反而阻塞下一批；地下不足由 service
-                // checkpoint 从仓点补给或明确 fail-closed。
+                // Torches and plug blocks are topped up only during the surface bootstrap. Replaying
+                // these two goals on an underground resume would translate already-consumed reserves
+                // into DigDown/tree-chopping prerequisites, which would block the next batch instead;
+                // any underground shortfall is either resupplied from the depot at a service
+                // checkpoint or explicitly fails closed.
                 if (surfaceAcquisitionAllowed || willDescend) {
                     if (longRareExpedition) {
                         int descentTorchReserve = willDescend
@@ -652,12 +683,22 @@ public final class GoalPlanner {
                     }
                 }
             }
-            // 大批量挖矿备足镐(治本·real_armor 26铁挖到9超时):石镐~131耐久,挖24+铁含掘进要磨断多把。
-            // 途中磨穿→resupply 就地合会打断大配额单 mine_ore、丢挖矿进度→ore_dig_timeout。按量预备(含掘进≈1把/12块)
-            // 一把磨穿换备用、不中断,一趟挖完。仅 STONE 档(挖铁/铜,圆石无限廉价)预备;IRON 档(钻石)已由备铁锭兜。
+            // Provision enough pickaxes for a large mining batch (root-cause fix for real_armor:
+            // mining 26 iron timed out at 9 remaining): a stone pick has ~131 durability, and mining
+            // 24+ iron including tunneling wears out multiple picks. If it wears out mid-batch,
+            // resupply-and-craft-in-place would interrupt a large single mine_ore request and lose
+            // mining progress -> ore_dig_timeout. Provision by quantity (roughly 1 pick per 12 blocks
+            // including tunneling), so one worn-out pick swaps for a spare without interruption and
+            // the batch finishes in one pass. Only provisioned at the STONE tier (mining iron/copper,
+            // where cobblestone is cheap and unlimited); the IRON tier (diamond) is already covered
+            // by the spare iron ingot reserve.
             if (tier <= ToolTier.STONE && remaining >= 12) {
-                // 扣除已有的更高档镐(治 real_iron_bulk:预装 5 铁镐≈9 石镐当量,原样按 1+100/12=9 无脑备石镐
-                // → 倒推砍木 → 无树地形 need_oak_planks 速死)。只备缺口;从零(无高档镐)照旧,不破 real_armor 26 铁场景。
+                // Subtract already-owned higher-tier picks (fix for real_iron_bulk: pre-loaded with 5
+                // iron picks, roughly equivalent to 9 stone picks; naively provisioning
+                // 1+100/12=9 stone picks regardless -> back-derives chopping wood -> dies quickly on
+                // treeless terrain with need_oak_planks). Only provision the actual gap; starting from
+                // zero (no higher-tier picks) behaves as before and does not break the real_armor
+                // 26-iron scenario.
                 int needPicks = 1 + remaining / 12;
                 int nonStoneEquiv = counts.getOrDefault(Items.IRON_PICKAXE, 0) * 250 / 131
                         + counts.getOrDefault(Items.DIAMOND_PICKAXE, 0) * 1561 / 131
@@ -667,24 +708,41 @@ public final class GoalPlanner {
                     ensureItem(pickaxeForTier(tier), stoneNeeded, depth + 1, visiting);
                 }
             }
-            // 小配额深矿沿用轻量快速链，只补火把；长期稀有矿远征已在上方走硬食物 readiness，
-            // 但仍不强制铁甲/盾牌，避免把矿前 bootstrap 扩成另一条重型装备任务。
+            // A small-quota deep mine still follows the lightweight fast chain and only tops up
+            // torches; a long rare-ore expedition already went through the hard food-readiness path
+            // above, but iron armor/a shield is still not mandatory, so the pre-mining bootstrap does
+            // not balloon into another heavyweight equipment task.
             if (tier >= ToolTier.IRON && remaining < MiningBudget.EXPEDITION_THRESHOLD) {
-                ensureTorches(depth + 1, visiting); // 小配额沿用轻量快速链
+                ensureTorches(depth + 1, visiting); // a small quota follows the lightweight fast chain
             }
-            // 挖深层矿重构 P1:bot 远高于矿层 → 先下竖井到矿层,再挖。否则在错误高度(实测 Y=48)
-            // 反复"锁定斜下方够不到的矿→水平掘隧道→dist 卡死→no_progress",卡死 11 分钟。
-            // 深潜耐久兜底(治本·real_diamond 手测死因):深处铁镐磨穿后无法就地补给——深层没树做熔炉/燃料,
-            // resupply 倒推"采橡木→合熔炉→熔炼铁锭"在 Y<0 必败(96 格无树)→ 反复 replan 卡死被怪杀。
-            // 解法:深潜前多备 3 铁锭备料(地表一次性多挖/熔炼好)。镐磨穿时深处直接用备料+背包工作台+棍合新镐
-            //(只需 craft,无需树/熔炉/熔炼),不被困死深处。仅深潜才备(就近挖在地表附近,坏了能正常补)。
+            // Deep-ore mining rework P1: if the bot is far above the ore layer -> descend a shaft to
+            // the ore layer first, then mine. Otherwise, at the wrong height (measured at Y=48), it
+            // repeatedly "locks onto an out-of-reach ore diagonally below -> tunnels horizontally ->
+            // distance gets stuck -> no_progress," stalling for 11 minutes.
+            // Deep-dive durability fallback (root-cause fix for a real_diamond death observed by
+            // hand): once an iron pick wears out deep underground it cannot be resupplied in place --
+            // there are no trees down there for a furnace/fuel, so resupply's back-derivation of
+            // "gather oak -> craft furnace -> smelt iron ingot" is guaranteed to fail below Y<0
+            // (no trees within 96 blocks) -> repeated replans get stuck and the bot dies to mobs.
+            // Fix: before a deep dive, reserve 3 spare iron ingots (mined/smelted all at once at the
+            // surface). When the pick wears out deep down, craft a new one directly from the reserve
+            // + a portable crafting table + sticks (only needs a craft, no tree/furnace/smelting), so
+            // it is never trapped down there. Only reserved for deep dives (mining near the surface
+            // can resupply normally if the pick breaks).
             if (tier >= ToolTier.IRON && willDescend
                     && remaining < MiningBudget.EXPEDITION_THRESHOLD) {
                 ensureItem(Items.IRON_INGOT, SPARE_IRON_INGOTS, depth + 1, visiting);
-                // 【实验回退】带铁套加成回攻钻石实测净拖累(real_diamond 0/6 vs 精简基线3/6):深潜前备头胸甲(13铁)
-                // 把链拉太长——bot 在36000t内多挖13铁+熔炼+合甲、还没下潜挖钻就超时(5/6 timeout),且铁甲一次没穿上
-                // (前段就败、根本没走到深潜)。survival收益=0、代价=链翻倍。故撤回备甲,深潜survival改靠反应式
-                // (入浆自救/濒死入土/点火把,遇险才花代价)。下潜穿甲(DescendToYTask.onStart equipBestArmor)保留:零成本,有甲就穿。
+                // [Experiment reverted] Bringing along an iron-armor buff before diving for diamonds
+                // measured as a net drag (real_diamond 0/6 vs. a leaner baseline's 3/6): provisioning
+                // a helmet+chestplate (13 iron) before the dive stretched the chain too long -- the
+                // bot spent extra time within the 36000-tick budget mining 13 more iron, smelting and
+                // crafting armor, and timed out (5/6 timeout) before it even got to mining diamonds;
+                // and the armor was never once worn (the run failed in the earlier stage and never
+                // reached the dive). Survival benefit = 0, cost = the chain doubled. So the armor
+                // reservation was reverted; deep-dive survival now relies on reactive measures
+                // (self-rescue into lava/mud, burying near death, placing torches -- only pay the cost
+                // when actually in danger). Equipping armor on descent
+                // (DescendToYTask.onStart equipBestArmor) is kept: zero cost, wear it if you have it.
             }
             if (ordinaryChannelMission
                     && !ensureFreshOrdinaryChannelKit(budget, depth + 1, visiting)) {
@@ -759,7 +817,7 @@ public final class GoalPlanner {
                     if (batchTarget <= 0) {
                         continue;
                     }
-                    // 直接 append，不能走 addStep：相邻同矿种步骤会被合并回一个 64 配额巨型 Task。
+                    // Append directly, not via addStep: adjacent same-ore steps would get merged back into one giant 64-quota Task.
                     steps.add(GoalStep.mineOre(expanded, batchTarget));
                     cumulative += batchTarget;
                     if (batchIndex + 1 < budget.batchCount()) {
@@ -925,14 +983,21 @@ public final class GoalPlanner {
             counts.merge(Items.STONE_PICKAXE, pickaxes, Integer::sum);
         }
 
-        // 装备前置:库存或已穿都算(inventoryCounts 已计入装备槽)。
-        // full=true(主动 achieve_armor):整套四件 + 铁剑。
-        // full=false(挖矿前置,用户选"折中"):只备头盔+胸甲——挡掉大部分伤害,又让计划短一半、少很多失败点。
+        // Armor prerequisite: counts both inventory and already-worn pieces (inventoryCounts already
+        // includes equipment slots).
+        // full=true (an explicit achieve_armor goal): the full four-piece set + an iron sword.
+        // full=false (mining prerequisite, the "compromise" option): only helmet + chestplate --
+        // blocks most damage while keeping the plan half as long and with far fewer failure points.
         private boolean ensureArmor(boolean full, int depth, Set<String> visiting) {
             List<Item> pieces = full ? IRON_ARMOR : List.of(Items.IRON_HELMET, Items.IRON_CHESTPLATE);
-            // 一趟挖够(治本·real_armor 实测 no_stand_position_for_furnace):先把所有缺甲片/剑所需铁锭【一次性】
-            // 备齐,合并成一次挖矿 + 一次熔炼。否则逐件分批挖→每件挖完铁回炉熔——深处挖完铁找不回地表那个远炉的
-            // 落脚点就卡死(实测做完头盔、给胸甲熔铁时 no_stand_position_for_furnace)。真人也是一趟挖满再统一熔。
+            // Mine enough in one trip (root-cause fix for a real_armor measurement of
+            // no_stand_position_for_furnace): reserve all the iron ingots needed for every missing
+            // armor piece/sword [in one shot], merged into a single mining pass + a single smelting
+            // pass. Otherwise mining piece by piece and returning to the furnace after each one --
+            // after mining deep underground, failing to find a stand position back at that distant
+            // surface furnace would stall the run (measured: after finishing the helmet, smelting
+            // iron for the chestplate hit no_stand_position_for_furnace). A real player would also
+            // mine a full load first and smelt it all together.
             int totalIron = 0;
             for (Item piece : pieces) {
                 if (counts.getOrDefault(piece, 0) <= 0) {
@@ -943,7 +1008,7 @@ public final class GoalPlanner {
                 totalIron += ironIngotCost(Items.IRON_SWORD);
             }
             if (totalIron > 0) {
-                ensureItem(Items.IRON_INGOT, totalIron, depth + 1, visiting); // 一次挖+熔够,后续合甲/剑直接消耗库存,不再分批回炉
+                ensureItem(Items.IRON_INGOT, totalIron, depth + 1, visiting); // mine and smelt enough in one pass; subsequent armor/sword crafts consume straight from inventory without returning to the furnace piecemeal
             }
             for (Item piece : pieces) {
                 if (counts.getOrDefault(piece, 0) <= 0 && !ensureItem(piece, 1, depth + 1, visiting)) {
@@ -957,8 +1022,10 @@ public final class GoalPlanner {
             return true;
         }
 
-        // 算一件成品(甲/剑)配方里需要多少铁锭(用 RecipeRegistry,不硬编码——armorOf=单一 iron_ingot 配料,
-        // sword=iron_ingot×2+棍)。供 ensureArmor 合并预备总铁量,实现"一趟挖满 26 铁再统一熔"。
+        // Computes how many iron ingots a finished item's (armor/sword) recipe needs (via
+        // RecipeRegistry, not hardcoded -- an armor piece's recipe is a single iron_ingot ingredient,
+        // sword = iron_ingot x2 + a stick). Used by ensureArmor to pool the total iron needed,
+        // implementing "mine a full 26 iron in one trip and smelt it all together."
         private int ironIngotCost(Item item) {
             return RecipeRegistry.find(item)
                     .map(r -> r.ingredients().stream()
@@ -968,8 +1035,10 @@ public final class GoalPlanner {
                     .orElse(0);
         }
 
-        // 规避加固:挖深矿(凶险)前备一批火把,供 DangerWatcher 在地下黑暗处点亮防刷怪。
-        // best-effort:能倒推出火把(挖煤+棍)就加进计划;不阻断挖矿目标(有铁镐即能挖煤,基本必成)。
+        // Hazard hardening: before mining deep (dangerous), reserve a batch of torches for
+        // DangerWatcher to light up dark underground areas and prevent mob spawns.
+        // best-effort: if torches can be back-derived (mine coal + sticks), add them to the plan;
+        // this does not block the mining goal (having an iron pick makes mining coal nearly certain).
         private void ensureTorches(int depth, Set<String> visiting) {
             ensureTorchesTo(TORCH_TARGET, depth, visiting);
         }
@@ -1065,7 +1134,7 @@ public final class GoalPlanner {
                     || ensureItem(Items.FURNACE, 1, depth, visiting);
         }
 
-        // Phase2:基建——备齐工作台/熔炉/箱子各一,再下放置步(PlaceStationsTask 摆到 bot 周围)。
+        // Phase 2: infrastructure -- provision one each of crafting table/furnace/chest, then emit the placement step (PlaceStationsTask arranges them around the bot).
         private boolean ensureWorkstation(int depth, Set<String> visiting) {
             if (!ensureCraftingTableAvailable(depth + 1, visiting)) {
                 return false;
@@ -1081,10 +1150,10 @@ public final class GoalPlanner {
             return true;
         }
 
-        // Phase3:囤货——先获取够 count 个 item,再下 STOCKPILE 步把资源存进附近箱子(best-effort)。
+        // Phase 3: stockpiling -- first acquire enough of the item to reach count, then emit the STOCKPILE step to store the resource in a nearby chest (best-effort).
         private boolean ensureStockpile(Goal.Stockpile g, int depth, Set<String> visiting) {
             net.minecraft.util.math.BlockPos base = resumeContext == null
-                    ? io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE
+                    ? io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE
                             .of(bot.getUuid()).placeIn(bot.getEntityWorld(), "base").orElse(bot.getBlockPos())
                     : resumeContext.origin();
             GoalSnapshotCollector.Context stockpileContext = resumeContext == null
@@ -1105,10 +1174,14 @@ public final class GoalPlanner {
             return true;
         }
 
-        // 盖房全链:"盖房子"一句话 = 备料(自动砍树/挖石/熔玻璃,复用 ensureItem 倒推) + 建造一条链。
-        // 材料统计口径:BlueprintLoader.load 已把 ops 全部展开成逐格 placements——
-        // hollow_box=外壳格数、layer/box/fill=区间内全格数,且同坐标去重(显式 placement 覆盖 op 格,
-        // 如 small_hut 门洞的两格 air 覆盖墙体),所以逐 placement 计数与 BuildTask 实际放置完全一致。
+        // Full build chain: the single phrase "build a house" = material provisioning (automatically
+        // chopping wood/mining stone/smelting glass, reusing ensureItem's back-derivation) + a
+        // construction chain.
+        // Material-counting convention: BlueprintLoader.load has already expanded every op into
+        // per-block placements -- hollow_box = shell block count, layer/box/fill = every block count
+        // within the region, with same-coordinate placements deduplicated (an explicit placement
+        // overrides an op's block, e.g. small_hut's two door-opening air blocks override the wall),
+        // so counting placement-by-placement matches exactly what BuildTask actually places.
         private boolean ensureBuild(Goal.Build g, int depth, Set<String> visiting) {
             BlueprintSchema schema;
             try {
@@ -1117,7 +1190,7 @@ public final class GoalPlanner {
                 unresolved.add("blueprint_missing:" + g.blueprint());
                 return false;
             }
-            // 防御:万一拿到未展开 schema(load 已保证展开,这里仅保险)按同一几何再展开一次。
+            // Defensive: in case an unexpanded schema is somehow received (load already guarantees expansion; this is just a safety net), expand it again using the same geometry.
             if (schema.ops() != null && !schema.ops().isEmpty()) {
                 try {
                     schema = BlueprintLoader.expand(schema);
@@ -1126,11 +1199,17 @@ public final class GoalPlanner {
                     return false;
                 }
             }
-            // 备料按 palette 家族合计、exact 块精确分别统计。
-            // 【治建到一半误判缺料乱逛】:palette 占位(如 small_hut 的 "planks")执行期 BuildTask/MaterialPalette
-            // 接受家族任意成员(任意木种木板),但旧逻辑只把整组需求记到 preferredPlanks 单一木种上,重规划时
-            // 见"oak 79 < 需 96"就插采橡木步、无视背包另有 896 块其它木板 → bot 丢下工地往黑暗里追原木耗尽
-            // 预算(real_build 实测 54/116 超时根因)。修:palette 材料按家族 owned 合计判足,够则不插采料步。
+            // Provisioning: palette placeholders are totaled by family; exact blocks are counted
+            // individually.
+            // [Fix for wandering off mid-build over a false material shortage]: a palette placeholder
+            // (e.g. small_hut's "planks") is, at execution time, accepted by BuildTask/MaterialPalette
+            // as any family member (any wood species' planks), but the old logic recorded the entire
+            // group's requirement against a single species via preferredPlanks; on replan, seeing
+            // "oak 79 < needed 96" would insert an oak-gathering step while ignoring the 896 blocks
+            // of other plank species already in inventory -> the bot would abandon the build site and
+            // chase logs into the dark until the budget ran out (root cause of the real_build 54/116
+            // timeout measurement). Fix: palette material sufficiency is now judged by the family's
+            // total owned count; if that is enough, no gathering step is inserted.
             Map<String, Integer> paletteNeeds = new LinkedHashMap<>();
             Map<Item, Integer> exactNeeds = new LinkedHashMap<>();
             for (BlueprintSchema.BlockPlacement placement : schema.placements()) {
@@ -1151,12 +1230,18 @@ public final class GoalPlanner {
                     }
                 }
             }
-            // 备料 best-effort:单种材料倒推失败(unresolved 已记)不挡其它材料,建造执行期缺哪块再 fail 哪块;
-            // 但所有材料都倒推失败则整体判失败(根本没法开工)。
-            // 注意传 depth 而非 depth+1:蓝图材料是 Build 的"顶层交付物"——BuildTask 只会从背包拿成品,
-            // 不像 CraftTask 那样运行期自动把原木展开成木板。craftItem 的 Fix C 会把 depth>0 的中间体
-            // 木板 CRAFT 步抑制掉(交给下游 CraftTask 展开),对 BUILD 这是错的;Build 仅以 depth=0 进入
-            // (ensureGoal 顶层),传 depth 让木板按顶层产物保留 CRAFT 步,否则只囤原木、开工即缺料。
+            // Material provisioning is best-effort: if back-deriving one material fails (recorded in
+            // unresolved), it does not block the others -- whichever block is missing at build
+            // execution time fails on its own; but if every material's back-derivation fails, the
+            // whole thing is judged a failure (there is simply nothing to build with).
+            // Note: this passes depth, not depth+1: blueprint materials are Build's "top-level
+            // deliverable" -- BuildTask only takes finished goods from inventory, unlike CraftTask,
+            // which at runtime automatically expands logs into planks. craftItem's Fix C suppresses
+            // the intermediate planks CRAFT step when depth>0 (leaving the expansion to the
+            // downstream CraftTask); that is wrong for BUILD. Build only ever enters at depth=0 (the
+            // top of ensureGoal), so passing depth lets planks keep their CRAFT step as a top-level
+            // product -- otherwise only logs would be stockpiled and the build would start short of
+            // material.
             boolean anyResolved = paletteNeeds.isEmpty() && exactNeeds.isEmpty();
             for (Map.Entry<String, Integer> entry : paletteNeeds.entrySet()) {
                 int need = entry.getValue();
@@ -1168,14 +1253,14 @@ public final class GoalPlanner {
                     }
                 }
                 if (ownedInFamily >= need) {
-                    anyResolved = true; // 家族合计已够,不插采料步
+                    anyResolved = true; // family total is already sufficient, no gathering step inserted
                     continue;
                 }
                 Item species = paletteDefaultItem(entry.getKey());
                 if (species == null) {
                     continue;
                 }
-                // 只补家族缺口:desiredCount = 该木种现有 + 全家族缺口,ensureItem 内部扣减后只采缺口部分。
+                // Only make up the family's shortfall: desiredCount = this species' current amount + the whole family's deficit; ensureItem's internal subtraction means only the deficit portion gets gathered.
                 int desired = counts.getOrDefault(species, 0) + (need - ownedInFamily);
                 if (ensureItem(species, desired, depth, visiting)) {
                     anyResolved = true;
@@ -1193,10 +1278,13 @@ public final class GoalPlanner {
             return true;
         }
 
-        // 蓝图格 → 规划期备料物品:air 跳过;palette 占位按该家族默认材质备料(规划备默认料,
-        // 执行期 BuildTask/MaterialPalette 接受家族任意成员);其余按 blockId → 方块 → 对应物品
-        // (blockId 写死的placement,BuildTask 也按该方块精确放置,故按字面备料);
-        // 无对应物品(asItem()==AIR,如技术性方块/未知 id)跳过并告警一条。
+        // Blueprint block -> planning-time material item: skip air; a palette placeholder is
+        // provisioned with that family's default material (planning reserves the default material,
+        // while at execution time BuildTask/MaterialPalette accepts any family member); everything
+        // else goes via blockId -> block -> corresponding item (a placement with a hardcoded blockId
+        // is also placed by BuildTask as that exact block, so it is provisioned literally);
+        // when there is no corresponding item (asItem()==AIR, e.g. a technical block or unknown id),
+        // skip it and log one warning.
         private Item buildMaterialFor(BlueprintSchema.BlockPlacement placement) {
             if ("minecraft:air".equals(placement.blockId())) {
                 return null;
@@ -1218,7 +1306,7 @@ public final class GoalPlanner {
             return item;
         }
 
-        // palette → 默认备料物品(与 BlueprintLoader.fallbackBlock 同口径);planks 走树种自适应。
+        // palette -> default material item (uses the same convention as BlueprintLoader.fallbackBlock); planks adapt to whichever wood species is available.
         private Item paletteDefaultItem(String palette) {
             return switch (palette) {
                 case "planks" -> preferredPlanks();
@@ -1230,10 +1318,14 @@ public final class GoalPlanner {
             };
         }
 
-        // 盖房备木板选树种(借鉴 preferredFuelLog):优先背包已有的木板种,其次已有原木对应的木板种
-        // (RecipeRegistry.LOGS/PLANKS 同序对齐),都没有才默认橡木板。意义:GATHER 原木运行期接受任意
-        // 树种,而木板配方树种专属(oak_planks←oak_log)——在桦木林采回桦木后 CRAFT oak_planks 会失败,
-        // 失败触发的重规划读到背包里的桦木,自动改备桦木板;palette 建造接受任意木板,链路自愈。
+        // Choosing the wood species for build planks (borrows the idea from preferredFuelLog): prefer
+        // a plank species already in inventory, then the plank species matching a log already in
+        // inventory (RecipeRegistry.LOGS/PLANKS are index-aligned), defaulting to oak planks only if
+        // neither is present. Rationale: GATHER accepts any wood species for logs at runtime, but a
+        // plank recipe is species-specific (oak_planks <- oak_log) -- gathering birch logs in a birch
+        // forest and then crafting oak_planks would fail; the replan triggered by that failure reads
+        // the birch logs in inventory and automatically switches to provisioning birch planks; palette
+        // construction accepts any plank species, so the chain self-heals.
         private Item preferredPlanks() {
             for (Item planks : RecipeRegistry.PLANKS) {
                 if (counts.getOrDefault(planks, 0) > 0) {
@@ -1248,7 +1340,7 @@ public final class GoalPlanner {
             return Items.OAK_PLANKS;
         }
 
-        // 第4层 备粮(best-effort):挖矿前顺带备粮,凑够默认 FOOD_TARGET 个熟食。
+        // Tier 4 food provisioning (best-effort): provision food alongside mining preparation, up to the default FOOD_TARGET cooked-food count.
         private boolean ensureFood(int depth, Set<String> visiting) {
             return ensureFoodTo(FOOD_TARGET, depth, visiting);
         }
@@ -1297,9 +1389,11 @@ public final class GoalPlanner {
                     bootstrapStonePickBeforeFurnace);
         }
 
-        // 猎→烤闭环:凑够 target 个熟食/面包(高饱食、安全)。挖矿备粮用 FOOD_TARGET;
-        // "去打猎/去搞点吃的"口语入口(Goal.Food)用指定量。
-        // 没动物/没熔炉/没燃料时 GoalExecutor 跳过相应 best-effort 步(见 handleStepFailure),不阻断主目标。
+        // Hunt-to-cook loop: gather target cooked food/bread items (high saturation, safe). Mining
+        // provisioning uses FOOD_TARGET; the casual "go hunting / go get something to eat" entry
+        // point (Goal.Food) uses a specified amount.
+        // When there are no animals/no furnace/no fuel, GoalExecutor skips the corresponding
+        // best-effort step (see handleStepFailure) without blocking the main goal.
         /** Cooked units this plan already provisioned via hunt+cook (species unknown until the kill). */
         private int provisionedFoodUnits;
 
@@ -1325,19 +1419,29 @@ public final class GoalPlanner {
                 return false;
             }
             int needCooked = target - cooked;
-            // 感知驱动择源:没动物但有草 → 种植面包,但**仅当已有快路径材料**(足量小麦只差合成 / 足量种子只差种收)。
-            // 从零割草+等自然生长要 15-20 分钟,对"尽快吃上饭"的 Food 目标必超时(real_food 自然世界实测:
-            // 割草采集失败 + 即便采到也等不熟,连环 FAIL)。没快路径就走打猎:HuntTask 自带 roam 远征,
-            // 64 格只是规划感知半径、不是打猎能力上限,附近没动物会主动走远找。觅食浆果饱食低,暂不作备粮源。
+            // Perception-driven source selection: no animals but grass present -> farm bread, but
+            // **only when a fast-path material is already available** (enough wheat and only crafting
+            // remains / enough seeds and only planting-and-harvesting remains). Starting from zero
+            // (cutting grass and waiting for natural growth) takes 15-20 minutes, which would
+            // certainly time out a Food goal aimed at "eating as soon as possible" (measured in
+            // real_food's natural-world runs: grass-cutting can fail to yield seeds, and even when it
+            // succeeds the crop isn't ready in time -- a cascade of FAILs). If there is no fast path,
+            // fall back to hunting: HuntTask has its own roam expedition; 64 blocks is only the
+            // planning perception radius, not a cap on hunting range -- if there are no animals
+            // nearby it will actively travel further to find some. Foraged berries have low
+            // saturation, so they are not currently used as a provisioning source.
             boolean breadFastPath = counts.getOrDefault(Items.WHEAT, 0) >= needCooked * 3
                     || counts.getOrDefault(Items.WHEAT_SEEDS, 0) >= needCooked * 3;
             if (!hasPreyNearby && hasGrassNearby && breadFastPath) {
                 ensureItem(Items.BREAD, needCooked, depth + 1, visiting);
                 return true;
             }
-            // 荒芜兜底:无动物可猎、面包快路径也没有,但附近有甜浆果丛(针叶林常见)→ 采浆果直接吃。
-            // 饱食低(2 点/颗)按 2:1 折算;不需要熔炉/燃料,是"能立刻吃上"的最后手段
-            //(实测针叶林世界 hunt 漫游 10 次 1092t 仍 0 猎物,整条打猎+烤链白忙)。
+            // Barren fallback: no animals to hunt, and no bread fast path either, but sweet berry
+            // bushes are nearby (common in taiga) -> pick berries and eat them directly. Saturation is
+            // low (2 points per berry), converted at a 2:1 ratio; needs no furnace/fuel, and is the
+            // last resort for "something to eat right now"
+            // (measured in a taiga world: 10 hunt-roam attempts over 1092 ticks still yielded 0 prey,
+            // wasting the entire hunt+cook chain).
             if (!hasPreyNearby && hasBerriesNearby) {
                 ensureItem(Items.SWEET_BERRIES, needCooked * 2, depth + 1, visiting);
                 return true;
@@ -1375,18 +1479,28 @@ public final class GoalPlanner {
                     && !ensurePickaxeTier(ToolTier.STONE, depth + 1, visiting)) {
                 return false;
             }
-            // 烤肉需熔炉:没炉则确定性倒推一座(8 圆石 → 挖石 → 需镐 → 木板/木棍 → 原木 → 砍树),
-            // 让"砍树 + 做基本工具"作为底层能力按正确顺序自动展开;而非 best-effort 跳过后丢给大脑乱凑
-            //(实测:大脑直接 gather 圆石、没先做镐,挖不动)。整条 Food best-effort 兜底,缺料环境降级不卡死。
+            // Cooking meat requires a furnace: if there is none, deterministically back-derive one
+            // (8 cobblestone -> mine stone -> needs a pick -> planks/sticks -> logs -> chop wood),
+            // letting "chop wood + make basic tools" expand automatically as a base capability in the
+            // correct order, rather than being skipped as best-effort and left for the LLM to
+            // improvise (measured: the LLM would gather cobblestone directly without first making a
+            // pick, and be unable to mine it). The whole Food chain is best-effort as a fallback, so a
+            // material-poor environment degrades gracefully instead of getting stuck.
             if (!hasCookingFurnaceAvailable()) {
                 ensureCookingFurnace(depth + 1, visiting);
             }
-            // 烤 needCooked 个熟食需燃料——之前漏了这步,烤大量肉时 SmeltTask out_of_fuel、整条食物链白忙。
-            // 与矿石熔炼 smeltItem 一致:已有煤/炭各≈烤 8 个;不够用原木补(1 原木≈烤 1.5 个),优先已有树种、
-            // best-effort 砍树(无树则 unresolved,执行期 COOK_FOOD 缺燃料再降级,不卡死)。
+            // Cooking needCooked units of food requires fuel -- this step was previously missing, and
+            // cooking a large amount of meat would hit SmeltTask's out_of_fuel, wasting the entire
+            // food chain. Consistent with ore smelting's smeltItem: coal/charcoal already in inventory
+            // each cook roughly 8 units; if insufficient, top up with logs (1 log cooks roughly
+            // 1.5 units), preferring an already-owned wood species, best-effort chopping wood (if
+            // there are no trees, it goes to unresolved; at execution time COOK_FOOD degrades further
+            // on a fuel shortage rather than getting stuck).
             int coalLike = counts.getOrDefault(Items.COAL, 0) + counts.getOrDefault(Items.CHARCOAL, 0);
-            // SmeltTask.remainingToQueue 严格封顶 targetCount，按实际熟食目标备燃料即可；旧的 2 倍
-            // 预算会把 24 份 readiness 放大成 32 根燃料木，seed 3000 实测只是在开工前过度砍树。
+            // SmeltTask.remainingToQueue strictly caps at targetCount, so fuel only needs to be
+            // provisioned for the actual cooked-food target; the old 2x budget would inflate a
+            // 24-unit readiness requirement into 32 fuel logs -- measured on seed 3000, this just
+            // meant excessive tree-chopping before work even started.
             int fuelDeficit = needCooked - coalLike * 8;
             if (fuelDeficit > 0) {
                 Item fuelLog = preferredFuelLog();
@@ -1402,7 +1516,7 @@ public final class GoalPlanner {
                 // the same logs again on underground tool handles.
                 consumeItems(RecipeRegistry.LOGS, logsForFuel);
             }
-            addStep(GoalStep.cookFood(needCooked)); // 烤成熟肉(背包已有生肉也一并烤)
+            addStep(GoalStep.cookFood(needCooked)); // cook into cooked meat (any raw meat already in inventory is cooked along with it)
             provisionedFoodUnits += needCooked;
             return true;
         }
@@ -1478,7 +1592,7 @@ public final class GoalPlanner {
             return resolved;
         }
 
-        // S7:回滚 steps 到指定大小——craftItem 某配方中途失败时清掉本配方已下发的中间步骤,避免半截残留污染计划。
+        // S7: roll back steps to a given size -- when a recipe fails partway through craftItem, clear the intermediate steps it already emitted, avoiding a half-finished leftover polluting the plan.
         private void rollbackSteps(int to) {
             while (steps.size() > to) {
                 steps.remove(steps.size() - 1);
@@ -1487,7 +1601,7 @@ public final class GoalPlanner {
 
         private boolean craftItem(Item item, int missing, RecipeRegistry.Recipe recipe, int depth, Set<String> visiting) {
             int crafts = divideRoundUp(missing, recipe.outputCount());
-            int stepsBefore = steps.size(); // S7:本配方失败时回滚已下发的中间步骤
+            int stepsBefore = steps.size(); // S7: on this recipe's failure, roll back the intermediate steps already emitted
             Map<Item, Integer> countsBefore = new HashMap<>(counts);
             if (recipe.needsCraftingTable() && item != Items.CRAFTING_TABLE) {
                 if (!ensureCraftingTableAvailable(depth + 1, visiting)) {
@@ -1509,11 +1623,15 @@ public final class GoalPlanner {
                 consume(ingredient, need);
             }
             counts.merge(item, recipe.outputCount() * crafts, Integer::sum);
-            // Fix C:中间体木板不下发独立 CRAFT 步——木板配方是树种专属(oak_planks←oak_log),
-            // 但下游 stick/crafting_table/工具配方都接受任意 planks 家族,其 CraftTask 会按背包里实际
-            // 采到的原木种类(可能是桦木/云杉…)自动展开木板。若仍下发 "CRAFT oak_planks" 步,在只有
-            // 桦木的生物群系会失败。仅当木板本身是顶层目标(depth==0,如 achieve_goal planks)才保留,
-            // 否则该目标会没有任何产出步骤。原木的 GATHER 步仍照常下发(在 acquireBaseItem)。
+            // Fix C: an intermediate planks item does not get its own CRAFT step -- a planks recipe
+            // is species-specific (oak_planks <- oak_log), but downstream recipes (stick,
+            // crafting_table, tools) all accept any planks family member, and their CraftTask will
+            // automatically expand planks from whatever log species actually ended up in inventory
+            // (which might be birch, spruce, ...). If a "CRAFT oak_planks" step were still emitted, it
+            // would fail in a biome with only birch. This is kept only when planks is itself the
+            // top-level goal (depth==0, e.g. achieve_goal planks), otherwise that goal would end up
+            // with no output step at all. The GATHER step for logs is still emitted as usual (in
+            // acquireBaseItem).
             if (!(depth > 0 && RecipeRegistry.PLANKS.contains(item))) {
                 addStep(GoalStep.craft(item, recipe.outputCount() * crafts));
             }
@@ -1531,25 +1649,25 @@ public final class GoalPlanner {
                 return true;
             }
             if (item == Items.WHEAT_SEEDS) {
-                // 小麦种子 → 割草获取(GatherQuotaTask 把种子映射到短草/高草/蕨,破坏概率掉种子)。
+                // Wheat seeds -> obtained by cutting grass (GatherQuotaTask maps seeds to short grass/tall grass/ferns, which have a chance to drop seeds when broken).
                 addStep(GoalStep.gather(item, missing));
                 counts.merge(item, missing, Integer::sum);
                 return true;
             }
             if (item == Items.SWEET_BERRIES || item == Items.MELON_SLICE) {
-                // 野食 → 觅食(GatherQuotaTask 把野食映射到甜浆果丛/西瓜,采就近的)。
+                // Wild food -> foraging (GatherQuotaTask maps wild food to sweet berry bushes/melons, harvesting whichever is nearest).
                 addStep(GoalStep.gather(item, missing));
                 counts.merge(item, missing, Integer::sum);
                 return true;
             }
             if (item == Items.SUGAR_CANE) {
-                // 甘蔗 → 割甘蔗(GatherQuotaTask 破坏 sugar_cane 块掉甘蔗;蛋糕链里糖的来源)。
+                // Sugar cane -> cut sugar cane (GatherQuotaTask breaks sugar_cane blocks to drop sugar cane; the sugar source for the cake chain).
                 addStep(GoalStep.gather(item, missing));
                 counts.merge(item, missing, Integer::sum);
                 return true;
             }
             if (item == Items.MILK_BUCKET) {
-                // 牛奶桶 → 先确保等量空桶(空桶可由 3 铁倒推/背包已有),再下挤奶步(周围要有牛,执行期 best-effort)。
+                // Milk bucket -> first ensure an equal number of empty buckets (an empty bucket can be back-derived from 3 iron, or already be in inventory), then emit the milking step (requires a cow nearby, best-effort at execution time).
                 if (!ensureItem(Items.BUCKET, missing, depth + 1, visiting)) {
                     return false;
                 }
@@ -1566,10 +1684,15 @@ public final class GoalPlanner {
                 return true;
             }
             if (item == Items.OBSIDIAN) {
-                // 黑曜石远征顺序是硬契约:先在地表备好初始口粮、廉价掘进镐、封堵块和备用木棍;
-                // 再为桶单独取得 3 铁并物理返回地表找可见水源;水桶到手后补齐完整食物配额
-                // (分期见 MiningBudget.obsidianExpeditionInitialFoodTarget);最后才进入钻石镐深潜链。
-                // bucket recipe 会消费自己的 3 铁,后续铁镐/备用铁因此会被独立倒推,不能挪用桶铁。
+                // The obsidian expedition ordering is a hard contract: first provision initial
+                // rations, cheap tunneling picks, plug blocks and spare sticks at the surface; then
+                // separately obtain 3 iron for the bucket and physically return to the surface to find
+                // a visible water source; once the water bucket is in hand, top up the complete food
+                // quota (see the staged formula in
+                // MiningBudget.obsidianExpeditionInitialFoodTarget); only then enter the
+                // diamond-pick deep-dive chain.
+                // The bucket recipe consumes its own 3 iron, so the subsequent iron pick/spare iron is
+                // back-derived independently and must not borrow the bucket's iron.
                 int missionTarget = saturatedAdd(
                         counts.getOrDefault(Items.OBSIDIAN, 0), missing);
                 ObsidianToolProvision toolProvision = obsidianToolProvision(missing);
@@ -1591,8 +1714,10 @@ public final class GoalPlanner {
                     consumeItem(Items.BUCKET, 1);
                     counts.merge(Items.WATER_BUCKET, 1, Integer::sum);
                 }
-                // 分期备粮的第二段:取水远征已把 bot 带到另一片地表畜群,此处补齐完整远征
-                // 配额,然后才进入铁/钻石深潜链。preflight 的运行时食物门不变,仍要求足额。
+                // Second stage of staged provisioning: the water-fetching expedition has already
+                // brought the bot to another surface herd, so this stage tops up the complete
+                // expedition quota before entering the iron/diamond deep-dive chain. The runtime
+                // preflight food gate is unchanged and still requires the full amount.
                 if (!ensureMiningFoodReserveTo(
                         MiningBudget.obsidianExpeditionFoodTarget(missionTarget),
                         depth + 1, visiting, true)) {
@@ -1612,13 +1737,17 @@ public final class GoalPlanner {
                 counts.merge(Items.OBSIDIAN, missing, Integer::sum);
                 return true;
             }
-            // P2:矿物掉落物 → 对应矿石(统一映射表)。挖该矿所需镐档由 ToolTier 决定,
-            // ensureMineOre 内部会先 ensurePickaxeTier 自动补齐镐链(如钻石需铁镐 → 先倒推铁镐)。
+            // P2: an ore drop item -> its corresponding ore block (via a unified mapping table). The
+            // pickaxe tier needed to mine it is decided by ToolTier; ensureMineOre internally calls
+            // ensurePickaxeTier first to automatically fill in the pickaxe chain (e.g. diamond needs
+            // an iron pick -> back-derive the iron pick first).
             Block oreOf = oreBlockFor(item);
             if (oreOf != null) {
-                // ensureItem 已把 desiredCount 换算成 missing；ensureMineOre 内部还会再减一次
-                // 当前掉落物库存，因此这里必须传“当前 + 缺口”的总目标。传 missing 会在 64
-                // 钻石完成首批 8 后得到 count=8/owned=8，错误规划成空步骤并结束为 PARTIAL。
+                // ensureItem has already converted desiredCount into missing; ensureMineOre will
+                // internally subtract the current drop-item inventory once more, so the total target
+                // passed here must be "current + deficit." Passing missing alone would, after a
+                // 64-diamond mission finishes its first batch of 8, end up with count=8/owned=8,
+                // incorrectly planning an empty step and finishing as PARTIAL.
                 int desiredTotal = counts.getOrDefault(item, 0) + missing;
                 return ensureMineOre(Set.of(oreOf), desiredTotal, depth + 1, visiting);
             }
@@ -1635,25 +1764,33 @@ public final class GoalPlanner {
                 counts.merge(item, missing, Integer::sum);
                 return true;
             }
-            // S4:生肉 → 打猎(best-effort 泛猎;HuntTask 猎 cow/pig/sheep/chicken/rabbit。乐观计入让食物链可倒推,
-            // 运行期实际猎到哪种肉不定,模块 B 的食物消费按"泛食物"处理)。
+            // S4: raw meat -> hunting (best-effort, unspecific hunting; HuntTask hunts cow/pig/sheep/
+            // chicken/rabbit. Counting it optimistically lets the food chain be back-derived; which
+            // meat is actually obtained at runtime is not fixed, and module B's food consumption
+            // treats it as "generic food").
             if (item == Items.BEEF || item == Items.PORKCHOP || item == Items.MUTTON
                     || item == Items.CHICKEN || item == Items.RABBIT) {
                 addStep(GoalStep.hunt(missing));
                 counts.merge(item, missing, Integer::sum);
                 return true;
             }
-            // S4:作物产出 → 就地种田(开垦/播种/等熟/收割)。
+            // S4: crop produce -> farm it in place (till/plant/wait to ripen/harvest).
             FarmAction.CropSpec crop = cropSpecForProduce(item);
             if (crop != null) {
-                // 种田要锄头(FarmAction.till 无锄 → missing_hoe)。此分支是 Goal.Food→面包→小麦 的入口,
-                // 之前只 ensureSeeds、漏了倒推锄头(ensureHarvestCrop 有、这里没)→ FARM 步 till 白忙、面包链断。
-                // best-effort 补一把木锄(与 ensureHarvestCrop 一致;无木料环境锄头 unresolved 不阻断整条 Food,
-                // 仍下发 FARM 步,执行期 till 缺锄再降级,符合食物链"缺料降级不卡死"哲学)。
+                // Farming needs a hoe (FarmAction.till with no hoe -> missing_hoe). This branch is
+                // the entry point for Goal.Food -> bread -> wheat; it previously only called
+                // ensureSeeds and was missing the hoe back-derivation (ensureHarvestCrop has it, this
+                // path did not) -> the FARM step's till would fail for nothing, breaking the bread
+                // chain.
+                // best-effort provisions a wooden hoe (consistent with ensureHarvestCrop; in a
+                // wood-poor environment the hoe going unresolved does not block the whole Food chain
+                // -- the FARM step is still emitted, and till degrades further on a missing hoe at
+                // execution time, following the food chain's "degrade on missing material instead of
+                // getting stuck" philosophy).
                 if (!hasAnyHoe()) {
                     ensureItem(Items.WOODEN_HOE, 1, depth + 1, visiting);
                 }
-                ensureSeeds(crop.seed(), item, missing, depth, visiting); // 种田前先确保种子(小麦种子割草取)
+                ensureSeeds(crop.seed(), item, missing, depth, visiting); // ensure seeds before farming (wheat seeds are obtained by cutting grass)
                 addStep(GoalStep.farm(crop.crop(), crop.seed(), item, missing));
                 counts.merge(item, missing, Integer::sum);
                 return true;
@@ -1685,12 +1822,15 @@ public final class GoalPlanner {
                 beginSurfaceEmergencyShelterWoodReserve();
             }
             int unresolvedBefore = unresolved.size();
-            // 8 个熟食只够 prepared 短程;64 块黑曜石要跨 8 个 service 段,深层既不能猎食也
-            // 没有预置 depot 可取,断粮即 mining_service_food_reserve_depleted 无解。完整配额
-            // (公式与单测在 MiningBudget)分期供给:此处只备 floor+buffer 的初始口粮,取水远征
-            // 把 bot 带到第二片地表畜群后再补齐——把 9 连猎全部压在出生点畜群上,5 个公开
-            // seed 全部耗尽死于 replan_same_step:hunt_no_progress。小目标全额本就 ≤ 初始量,
-            // 保持单门形态。
+            // 8 cooked-food units is only enough for a short "prepared" leg; a 64-block obsidian
+            // mission spans 8 service segments, and deep underground the bot can neither hunt nor
+            // draw from a pre-placed depot, so running out of food means an unrecoverable
+            // mining_service_food_reserve_depleted. The full quota (formula and unit tests live in
+            // MiningBudget) is supplied in stages: this point only provisions the floor+buffer initial
+            // rations, with the water-fetching expedition bringing the bot to a second surface herd
+            // before topping up the rest -- cramming all 9 hunts onto the spawn herd exhausted all 5
+            // public test seeds and died to replan_same_step:hunt_no_progress. A small goal's full
+            // requirement is already <= the initial amount, so it keeps the single-gate form.
             if (!ensureMiningFoodReserveTo(
                     MiningBudget.obsidianExpeditionInitialFoodTarget(missionTarget),
                     depth + 1, visiting, true)
@@ -1994,20 +2134,29 @@ public final class GoalPlanner {
             if (!ensureFurnaceFor(recipe.input(), recipe.output(), depth + 1, visiting)) {
                 return false;
             }
-            // GOALFIX-GF2:需要 missing 个 input 来熔炼 missing 个产物;优先用已有库存,只补缺口
-            // (ensureItem 内部 missing = desired - available),不要在已有量之上再多挖一份。
+            // GOALFIX-GF2: needs missing units of input to smelt missing units of output; prefer
+            // what is already in inventory and only make up the deficit (ensureItem internally
+            // computes missing = desired - available) -- do not mine an extra batch on top of what's
+            // already owned.
             if (!ensureItem(recipe.input(), missing, depth + 1, visiting)) {
                 return false;
             }
-            // 燃料:优先用背包已有的煤/木炭(1 个烧 8 个),只在不足时才砍原木补缺口(1 原木烧 1.5 个)。
-            // (原来无脑砍原木、背包有煤也不用 → 给了煤仍去砍树、无树则 no_resource;实测铁/金锭挂在此。)
+            // Fuel: prefer coal/charcoal already in inventory (1 unit smelts 8), and only chop logs
+            // to cover the shortfall when there isn't enough (1 log smelts roughly 1.5).
+            // (Previously it chopped logs unconditionally without using coal already in inventory --
+            // even given coal it would still go chop trees, and with no trees hit no_resource;
+            // measured to be where iron/gold ingot runs got stuck.)
             int coalLike = counts.getOrDefault(Items.COAL, 0) + counts.getOrDefault(Items.CHARCOAL, 0);
             int fuelDeficit = missing - coalLike * 8;
             int fuelLogs = 0;
             if (fuelDeficit > 0) {
-                // +1 冗余:执行层与账本天然漂移——craft 换板按整原木消耗、smelt chooseFuel 全额
-                // 单品种装填,两头贪心合计常差 1-2 板,链尾'合成木棍'就 need planks 重采;此时场景
-                // 树若已砍光直接 no_resource(iron_pickaxe 套跑实测)。多砍一根木头吸收漂移。
+                // +1 slack: the execution layer and the symbolic ledger naturally drift apart --
+                // craft converts logs to planks in whole-log units, while smelt's chooseFuel greedily
+                // loads a single fuel species at full amount; the two greedy computations together
+                // commonly differ by 1-2 planks, and at the tail of the chain, "craft a stick" then
+                // needs to re-gather planks; if all the trees are already chopped down by then, it
+                // hits no_resource outright (measured in an iron_pickaxe test run). Chopping one extra
+                // log absorbs this drift.
                 // The extra surface log absorbs recipe/accounting drift during initial bootstrap.
                 // Underground replans must consume the already-carried reserve exactly: adding one
                 // per separated smelt stage made a viable eight-log kit request trees at Y=16.
@@ -2187,7 +2336,7 @@ public final class GoalPlanner {
             }
         }
 
-        // GOALFIX-GF3:选熔炼燃料——优先背包已有的任意原木种类(spruce/birch…),都没有则默认橡木。
+        // GOALFIX-GF3: choosing smelting fuel -- prefer any log species already in inventory (spruce/birch/...), defaulting to oak if none is present.
         private Item preferredFuelLog() {
             for (Item log : RecipeRegistry.LOGS) {
                 if (counts.getOrDefault(log, 0) > 0) {
@@ -2253,7 +2402,7 @@ public final class GoalPlanner {
             return Items.AIR;
         }
 
-        // P2:矿物掉落物 → 对应矿石方块。覆盖全部常见矿(深板岩变种由 OreDigTask/expandOreFamilies 处理)。
+        // P2: an ore drop item -> its corresponding ore block. Covers all common ores (deepslate variants are handled by OreDigTask/expandOreFamilies).
         private static Block oreBlockFor(Item item) {
             if (item == Items.RAW_IRON) {
                 return Blocks.IRON_ORE;
@@ -2283,12 +2432,12 @@ public final class GoalPlanner {
         }
 
         private static SmeltRecipe smeltRecipeFor(Item output) {
-            // S5:冶炼映射收敛到 SmeltChain 单一源(矿锭/石/木炭 + 熟肉/玻璃/烤土豆)。
+            // S5: the smelting mapping converges on SmeltChain as a single source (ore->ingot, stone, charcoal + cooked meat, glass, baked potato).
             Item raw = SmeltChain.rawFor(output);
             return raw == null ? null : new SmeltRecipe(raw, output);
         }
 
-        // S4:作物产出 → 作物规格(供 FARM 路由),非支持作物返回 null。
+        // S4: crop produce -> crop spec (used for FARM routing); returns null for an unsupported crop.
         private static FarmAction.CropSpec cropSpecForProduce(Item produce) {
             if (produce == Items.WHEAT) {
                 return FarmAction.cropSpec("wheat");

@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -17,12 +17,12 @@ import java.util.stream.Collectors;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotCommand {
-    private AIBotCommand() {
+public final class MinecraftAiCommand {
+    private MinecraftAiCommand() {
     }
 
     public static void register(CommandDispatcher<ServerCommandSource> dispatcher, CommandRegistryAccess registryAccess) {
-        dispatcher.register(literal("aibot")
+        dispatcher.register(literal("minecraftai")
                 .then(literal("spawn")
                         .then(argument("name", StringArgumentType.word())
                                 .executes(context -> spawn(context.getSource(), StringArgumentType.getString(context, "name"), "worker"))
@@ -41,17 +41,17 @@ public final class AIBotCommand {
                                 .executes(context -> despawn(context.getSource(), StringArgumentType.getString(context, "name")))))
                 .then(literal("list")
                         .executes(context -> list(context.getSource())))
-                .then(AIBotBrainSubcommand.build())
-                .then(AIBotLogSubcommand.build())
-                .then(AIBotPersistSubcommand.build())
-                .then(AIBotJobSubcommand.build())
-                .then(AIBotMemorySubcommand.build())
-                .then(AIBotObserveSubcommand.profile())
-                .then(AIBotObserveSubcommand.replay())
-                .then(AIBotObserveSubcommand.tps())
-                .then(AIBotTaskSubcommand.build())
-                .then(AIBotDeplintSubcommand.build())
-                .then(AIBotSnapshotSubcommand.build()));
+                .then(MinecraftAiBrainSubcommand.build())
+                .then(MinecraftAiLogSubcommand.build())
+                .then(MinecraftAiPersistSubcommand.build())
+                .then(MinecraftAiJobSubcommand.build())
+                .then(MinecraftAiMemorySubcommand.build())
+                .then(MinecraftAiObserveSubcommand.profile())
+                .then(MinecraftAiObserveSubcommand.replay())
+                .then(MinecraftAiObserveSubcommand.tps())
+                .then(MinecraftAiTaskSubcommand.build())
+                .then(MinecraftAiDeplintSubcommand.build())
+                .then(MinecraftAiSnapshotSubcommand.build()));
     }
 
     private static int spawn(ServerCommandSource source, String name, String role) {
@@ -74,11 +74,11 @@ public final class AIBotCommand {
 
         if (spawned.isPresent()) {
             AIPlayerManager.INSTANCE.setRole(spawned.get(), role);
-            source.sendFeedback(() -> Text.literal("[AIBot] Spawned " + name + " role=" + AIPlayerManager.INSTANCE.role(spawned.get())), true);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] Spawned " + name + " role=" + AIPlayerManager.INSTANCE.role(spawned.get())), true);
             return 1;
         }
 
-        source.sendError(Text.literal("[AIBot] 无法生成 " + name + " (名称已被占用)"));
+        source.sendError(Text.literal("[Minecraft-AI] Failed to spawn " + name + " (name already in use)"));
         return 0;
     }
 
@@ -89,7 +89,7 @@ public final class AIBotCommand {
             return 0;
         }
         AIPlayerManager.INSTANCE.setRole(bot.get(), role);
-        source.sendFeedback(() -> Text.literal("[AIBot] " + name + " role=" + AIPlayerManager.INSTANCE.role(bot.get())), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + name + " role=" + AIPlayerManager.INSTANCE.role(bot.get())), false);
         return 1;
     }
 
@@ -101,11 +101,11 @@ public final class AIBotCommand {
         }
         boolean removed = AIPlayerManager.INSTANCE.despawn(source.getServer(), name);
         if (removed) {
-            source.sendFeedback(() -> Text.literal("[AIBot] Despawned " + name), true);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] Despawned " + name), true);
             return 1;
         }
 
-        source.sendError(Text.literal("[AIBot] No such bot: " + name));
+        source.sendError(Text.literal("[Minecraft-AI] No such bot: " + name));
         return 0;
     }
 
@@ -116,7 +116,7 @@ public final class AIBotCommand {
         String names = bots.stream()
                 .map(player -> player.getGameProfile().name() + "(" + AIPlayerManager.INSTANCE.role(player) + ")")
                 .collect(Collectors.joining(", "));
-        source.sendFeedback(() -> Text.literal("[AIBot] " + bots.size() + " bot(s): " + names), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + bots.size() + " bot(s): " + names), false);
         return bots.size();
     }
 }

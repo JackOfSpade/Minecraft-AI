@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogFields;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogFields;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
@@ -52,8 +52,10 @@ public final class AStarPathfinder {
     private final NeighborEnumerator enumerator;
     private final boolean canPillar;
     private final boolean allowDig;
-    // 加权 A*(ε-admissible):挖掘接近场景启发式(欧氏×1)远低于真实挖掘成本(×8),搜索退化成
-    // 全向泛洪 50ms 必 TIMEOUT(geo 矩阵实测)。ε=3 牺牲最优性换收敛速度——挖矿不需要最短路。
+    // Weighted A* (ε-admissible): in mining-approach scenarios the heuristic (Euclidean x1) is
+    // far below the true digging cost (x8), so the search degenerates into omnidirectional
+    // flood-fill and reliably TIMEOUTs at 50ms (confirmed empirically on the geo matrix). ε=3
+    // trades optimality for convergence speed -- mining doesn't need the shortest path.
     private final double heuristicWeight;
     private final int maxNodes;
     private final long maxMillis;
@@ -75,7 +77,7 @@ public final class AStarPathfinder {
         this(bot, world, start, goal, maxNodes, maxMillis, false);
     }
 
-    // NAV-9:canPillar=true 允许垫方块越障(由有方块的调用方传入)。
+    // NAV-9: canPillar=true allows pillaring (placing a block underfoot) to cross obstacles (passed in by callers that have blocks available).
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, boolean canPillar) {
         this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar);
     }
@@ -104,7 +106,7 @@ public final class AStarPathfinder {
         this(bot, world, start, goal, maxNodes, maxMillis, canPillar, true);
     }
 
-    // NAV-OPT:allowDig 区分"纯步行"与"允许挖穿"两种搜索模式,支撑两阶段寻路(纯步行优先、挖穿兜底)。
+    // NAV-OPT: allowDig distinguishes between two search modes, "walk-only" and "dig-through allowed", supporting two-phase pathfinding (walk-only first, dig-through as fallback).
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
         this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
     }
@@ -122,7 +124,7 @@ public final class AStarPathfinder {
         this(bot, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
     }
 
-    // 带权构造(统一接近原语用 ε=3):见 heuristicWeight 注释。
+    // Weighted constructor (the unified approach primitive uses ε=3): see the heuristicWeight comment.
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
         this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, heuristicWeight);
     }
@@ -270,10 +272,14 @@ public final class AStarPathfinder {
         if (Standability.isStandable(world, requested)) {
             return requested;
         }
-        // 挖掘模式的终点豁免(统一接近原语的钥匙):目标不可站但本身可挖(典型=被石头包裹的矿邻位)
-        // 时不 snap——DIG_THROUGH 邻居本就允许"将被挖开的实心格"做路径节点,执行器会把它挖出来。
-        // 原"终点必须有现成可站点"的硬检查正是当年 OreSeek 在包裹矿上连续卡死、被迫发明任务私有
-        // "控制式直挖"的根源(8 格内无站位 → snap null → 整次寻路被拒)。
+        // Goal exemption for dig mode (the key to the unified approach primitive): when the target
+        // isn't standable but is itself diggable (typically = an ore neighbor position encased in
+        // stone), don't snap -- DIG_THROUGH neighbors already allow a "solid cell that will be dug
+        // out" to be a path node, and the executor will dig it out. The original hard check that
+        // "the goal must have a ready-made standable position" was exactly the root cause of
+        // OreSeek repeatedly getting stuck on encased ore back then, forcing the invention of a
+        // task-private "controlled direct-dig" (no standable position within 8 cells -> snap null
+        // -> the whole pathfinding request rejected).
         if (allowDig && !startPoint && isDiggableColumn(requested)) {
             return requested;
         }
@@ -288,7 +294,7 @@ public final class AStarPathfinder {
         return snapped.get();
     }
 
-    // 终点格"挖开即可站":脚位与头位都是(可挖实心 或 已通行),且无流体——挖穿后成为合法站位。
+    // Goal cell "becomes standable once dug out": both the foot and head positions are (diggable solid OR already passable), with no fluid -- after digging through it becomes a legal standing position.
     private boolean isDiggableColumn(BlockPos pos) {
         return diggableOrPassable(pos) && diggableOrPassable(pos.up());
     }
@@ -296,12 +302,12 @@ public final class AStarPathfinder {
     private boolean diggableOrPassable(BlockPos pos) {
         var state = world.getBlockState(pos);
         if (!state.getFluidState().isEmpty()) {
-            return false; // 流体格挖不出立足点(水/岩浆涌入)
+            return false; // a fluid cell can't be dug into a foothold (water/lava would flow in)
         }
         if (state.getCollisionShape(world, pos).isEmpty()) {
-            return true;  // 已通行
+            return true;  // already passable
         }
-        return state.getHardness(world, pos) >= 0; // 可挖(基岩 -1 排除)
+        return state.getHardness(world, pos) >= 0; // diggable (bedrock's -1 is excluded)
     }
 
     private static PathfindingResult cached(CacheKey key, long startTime) {

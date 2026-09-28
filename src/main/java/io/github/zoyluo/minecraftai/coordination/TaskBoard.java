@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;

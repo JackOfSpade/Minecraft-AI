@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Counter-based ray throttle of the sensor (mining-assist design 3.4). Pure integer arithmetic:

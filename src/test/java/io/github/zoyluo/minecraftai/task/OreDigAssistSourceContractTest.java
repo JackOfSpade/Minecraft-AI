@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class OreDigAssistSourceContractTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/OreDigTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/OreDigTask.java");
 
     private static String read(Path path) throws IOException {
         return Files.readString(path);
@@ -290,7 +290,7 @@ class OreDigAssistSourceContractTest {
         int body = source.indexOf("return MIN_Y + 1;", minStandY);
         assertTrue(minStandY >= 0 && body > minStandY);
         String policy = read(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/mining/assist/DetourPolicy.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/mining/assist/DetourPolicy.java"));
         assertTrue(policy.contains("public static final int MIN_STAND_Y = -59;"),
                 "DetourPolicy.MIN_STAND_Y must equal OreDig's MIN_Y + 1 (-60 + 1 = -59)");
     }

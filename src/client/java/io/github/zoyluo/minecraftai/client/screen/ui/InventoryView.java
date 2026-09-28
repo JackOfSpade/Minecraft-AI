@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.client.screen.ui;
+package io.github.zoyluo.minecraftai.client.screen.ui;
 
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.client.BotCommandBridge;
-import io.github.zoyluo.aibot.network.payload.BotItemMoveC2S;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.client.BotCommandBridge;
+import io.github.zoyluo.minecraftai.network.payload.BotItemMoveC2S;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -18,15 +18,18 @@ import net.minecraft.util.Identifier;
 import java.util.List;
 
 /**
- * 交互式背包面板:上半=AI 背包(点击拿出到玩家),下半=玩家背包(点击放入 AI)。
- * 左键=整堆;Shift+左键=单个。槽位以"真实 main 下标"寻址,直接映射到 {@link BotItemMoveC2S} 的 slot 字段。
- * 全程不触碰 ScreenHandler/Screen 容器逻辑——仅发 C2S 由服务端直改 Inventory(遵守铁律 G3)。
+ * Interactive inventory panel: top half = AI inventory (click to take an item to the player),
+ * bottom half = player inventory (click to give an item to the AI).
+ * Left-click = whole stack; Shift+left-click = single item. Slots are addressed by "real main index",
+ * mapping directly onto the slot field of {@link BotItemMoveC2S}.
+ * Never touches ScreenHandler/Screen container logic anywhere in this flow -- only sends C2S packets,
+ * with the Inventory modified directly server-side (per iron rule G3).
  */
 public final class InventoryView implements PanelComponent {
-    private static final int SLOT = 18;       // 单格边长(含 1px 边框,图标 16)
+    private static final int SLOT = 18;       // single-cell side length (incl. 1px border, 16px icon)
     private static final int COLS = 9;
-    private static final int AI_ROWS = 4;     // AI main 36 格 = 4×9
-    private static final int PL_MAIN_ROWS = 3; // 玩家主背包 slots 9..35
+    private static final int AI_ROWS = 4;     // AI main has 36 slots = 4x9
+    private static final int PL_MAIN_ROWS = 3; // player main inventory slots 9..35
     private static final int HOVER = 0x40FFFFFF;
 
     private final String target;
@@ -36,7 +39,7 @@ public final class InventoryView implements PanelComponent {
     private int w;
     private int h;
 
-    // setBounds 时算好的各分区原点,render 与 hit-test 共用,保证像素一致。
+    // Origins for each section, computed in setBounds; shared by render and hit-test to keep pixels consistent.
     private int gridX;
     private int equipRowY;
     private int aiLabelY;
@@ -47,7 +50,7 @@ public final class InventoryView implements PanelComponent {
 
     private BotSnapshotS2C snapshot;
     private final ItemStack[] aiSlots = new ItemStack[AI_ROWS * COLS];
-    private final ItemStack[] equipSlots = new ItemStack[6]; // 0头/1胸/2腿/3脚/4主手/5副手
+    private final ItemStack[] equipSlots = new ItemStack[6]; // 0 head / 1 chest / 2 legs / 3 feet / 4 main hand / 5 off hand
 
     public InventoryView(String target) {
         this.target = target;
@@ -66,8 +69,8 @@ public final class InventoryView implements PanelComponent {
         this.w = w;
         this.h = h;
         this.gridX = x + Math.max(0, (w - COLS * SLOT) / 2);
-        this.equipRowY = y + 11;                  // 装备行(标题在 y)
-        this.aiLabelY = equipRowY + SLOT + 5;     // AI 背包标题
+        this.equipRowY = y + 11;                  // equipment row (title at y)
+        this.aiLabelY = equipRowY + SLOT + 5;     // AI inventory title
         this.aiGridY = aiLabelY + 11;
         int aiBottom = aiGridY + AI_ROWS * SLOT;
         this.plLabelY = aiBottom + 6;
@@ -77,7 +80,7 @@ public final class InventoryView implements PanelComponent {
 
     @Override
     public int preferredHeight() {
-        // 装备:11(标题)+18(一行)+5;AI:11+72;玩家:6+11+54+3+18
+        // Equipment: 11 (title) + 18 (one row) + 5; AI: 11+72; player: 6+11+54+3+18
         return 11 + SLOT + 5 + 11 + AI_ROWS * SLOT + 6 + 11 + PL_MAIN_ROWS * SLOT + 3 + SLOT;
     }
 
@@ -112,8 +115,8 @@ public final class InventoryView implements PanelComponent {
 
         ItemStack hovered = ItemStack.EMPTY;
 
-        // —— AI 装备(头/胸/腿/脚/主手/副手,只展示不转移)——
-        context.drawTextWithShadow(renderer, Theme.tr("inventory.aibot.section_equip"), gridX, y, Theme.TEXT_DIM);
+        // -- AI equipment (head/chest/legs/feet/main hand/off hand, display only, not transferable) --
+        context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.section_equip"), gridX, y, Theme.TEXT_DIM);
         for (int i = 0; i < equipSlots.length; i++) {
             int gx = gridX + i * SLOT;
             boolean hot = inCell(mouseX, mouseY, gx, equipRowY);
@@ -123,8 +126,8 @@ public final class InventoryView implements PanelComponent {
             }
         }
 
-        // —— AI 背包 ——
-        context.drawTextWithShadow(renderer, Theme.tr("inventory.aibot.section_ai"), gridX, aiLabelY, Theme.TEXT_DIM);
+        // -- AI inventory --
+        context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.section_ai"), gridX, aiLabelY, Theme.TEXT_DIM);
         for (int slot = 0; slot < aiSlots.length; slot++) {
             int gx = gridX + (slot % COLS) * SLOT;
             int gy = aiGridY + (slot / COLS) * SLOT;
@@ -135,8 +138,8 @@ public final class InventoryView implements PanelComponent {
             }
         }
 
-        // —— 玩家背包 ——
-        context.drawTextWithShadow(renderer, Theme.tr("inventory.aibot.section_self"), gridX, plLabelY, Theme.TEXT_DIM);
+        // -- Player inventory --
+        context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.section_self"), gridX, plLabelY, Theme.TEXT_DIM);
         if (playerInv != null) {
             for (int row = 0; row < PL_MAIN_ROWS; row++) {
                 for (int col = 0; col < COLS; col++) {
@@ -174,10 +177,10 @@ public final class InventoryView implements PanelComponent {
         if (!left && !right) {
             return false;
         }
-        boolean single = left && MinecraftClient.getInstance().isShiftPressed(); // Shift+左键=单个
-        boolean half = right;                            // 右键=半堆
+        boolean single = left && MinecraftClient.getInstance().isShiftPressed(); // Shift+left-click = single item
+        boolean half = right;                            // right-click = half stack
 
-        // AI 槽:拿出
+        // AI slots: take out
         for (int slot = 0; slot < aiSlots.length; slot++) {
             int gx = gridX + (slot % COLS) * SLOT;
             int gy = aiGridY + (slot / COLS) * SLOT;
@@ -189,7 +192,7 @@ public final class InventoryView implements PanelComponent {
                 return true;
             }
         }
-        // 玩家主背包:放入
+        // Player main inventory: give item
         PlayerInventory inv = playerInventory();
         for (int row = 0; row < PL_MAIN_ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
@@ -201,7 +204,7 @@ public final class InventoryView implements PanelComponent {
                 }
             }
         }
-        // 玩家快捷栏:放入
+        // Player hotbar: give item
         for (int col = 0; col < COLS; col++) {
             int gx = gridX + col * SLOT;
             if (inCell(mouseX, mouseY, gx, plHotbarY)) {
@@ -222,7 +225,7 @@ public final class InventoryView implements PanelComponent {
         }
     }
 
-    // 整堆=0(服务端取整堆);单个=1;半堆=向上取整的一半。
+    // Whole stack = 0 (server takes the whole stack); single = 1; half stack = half, rounded up.
     private static int amountFor(ItemStack src, boolean single, boolean half) {
         if (single) {
             return 1;

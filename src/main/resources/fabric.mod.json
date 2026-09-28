@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "aibot",
+  "id": "minecraftai",
   "version": "${version}",
   "name": "Minecraft-AI",
   "description": "Forked from zoyluo/mc_aiplayer.",
@@ -12,14 +12,14 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "io.github.zoyluo.aibot.AIBotMod"
+      "io.github.zoyluo.minecraftai.MinecraftAiMod"
     ],
     "client": [
-      "io.github.zoyluo.aibot.client.AIBotClient"
+      "io.github.zoyluo.minecraftai.client.MinecraftAiClient"
     ]
   },
   "mixins": [
-    "aibot.mixins.json"
+    "minecraftai.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=0.18.4",

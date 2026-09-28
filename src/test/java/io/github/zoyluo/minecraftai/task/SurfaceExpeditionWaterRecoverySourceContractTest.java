@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks gathering and hunting to one shared, physical water-recovery handoff. */
 class SurfaceExpeditionWaterRecoverySourceContractTest {
-    private static final Path TASKS = Path.of("src/main/java/io/github/zoyluo/aibot/task");
+    private static final Path TASKS = Path.of("src/main/java/io/github/zoyluo/minecraftai/task");
 
     @Test
     void surfaceTasksPauseExplorationUntilSharedRescueReturnsToDryGround() throws IOException {

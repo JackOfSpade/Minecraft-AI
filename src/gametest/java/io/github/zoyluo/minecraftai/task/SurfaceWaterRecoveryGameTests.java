@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.FluidBlock;
@@ -25,7 +25,7 @@ import net.minecraft.text.Text;
 
 /** Live proof that a clientless fake player leaves shallow water through adjacent physical motion. */
 public final class SurfaceWaterRecoveryGameTests {
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_proactive_rescue_steps_onto_dry_ground", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_proactive_rescue_steps_onto_dry_ground", maxTicks = 80)
     public void proactiveRescueStepsOntoDryGround(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -32));
@@ -63,7 +63,7 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_connected_shore_beats_an_unneeded_vertical_air_stroke", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_connected_shore_beats_an_unneeded_vertical_air_stroke", maxTicks = 40)
     public void connectedShoreBeatsAnUnneededVerticalAirStroke(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 8, -106));
@@ -112,7 +112,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_emergency_vertical_step_requires_low_air", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_emergency_vertical_step_requires_low_air", maxTicks = 40)
     public void emergencyVerticalStepRequiresLowAir(TestContext context) {
         WaterShaftFixture fixture = sealedWaterShaftFixture(context, -126);
         AIPlayerEntity bot = fixture.bot();
@@ -137,7 +137,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_rescue_routes_around_a_wall_even_when_the_first_step_moves_away_from_shore", maxTicks = 160)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_rescue_routes_around_a_wall_even_when_the_first_step_moves_away_from_shore", maxTicks = 160)
     public void rescueRoutesAroundAWallEvenWhenTheFirstStepMovesAwayFromShore(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -38));
@@ -210,7 +210,7 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_descend_seals_ingress_and_hands_off_a_dry_ore_layer", maxTicks = 160)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_seals_ingress_and_hands_off_a_dry_ore_layer", maxTicks = 160)
     public void descendSealsIngressAndHandsOffADryOreLayer(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -44));
@@ -281,7 +281,7 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_descend_does_not_retry_safety_rejected_landing", maxTicks = 100)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_does_not_retry_safety_rejected_landing", maxTicks = 100)
     public void descendDoesNotRetrySafetyRejectedLanding(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -56));
@@ -348,7 +348,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_descend_relocates_from_a_shoreline_dead_star_before_mutating", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_relocates_from_a_shoreline_dead_star_before_mutating", maxTicks = 80)
     public void descendRelocatesFromAShorelineDeadStarBeforeMutating(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -50));
@@ -439,7 +439,7 @@ public final class SurfaceWaterRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_descend_fresh_entry_relocation_cannot_cut_a_diagonal_corner", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_fresh_entry_relocation_cannot_cut_a_diagonal_corner", maxTicks = 40)
     public void descendFreshEntryRelocationCannotCutADiagonalCorner(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -62));
@@ -496,7 +496,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_descend_never_mines_the_water_seal_it_just_placed", maxTicks = 120)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_never_mines_the_water_seal_it_just_placed", maxTicks = 120)
     public void descendNeverMinesTheWaterSealItJustPlaced(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -68));
@@ -557,7 +557,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_descend_horizontal_fallback_never_mines_its_owned_water_seal", maxTicks = 60)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_horizontal_fallback_never_mines_its_owned_water_seal", maxTicks = 60)
     public void descendHorizontalFallbackNeverMinesItsOwnedWaterSeal(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -76));
@@ -619,7 +619,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_dig_down_preserves_its_water_seal_and_protected_workstation", maxTicks = 80)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_dig_down_preserves_its_water_seal_and_protected_workstation", maxTicks = 80)
     public void digDownPreservesItsWaterSealAndProtectedWorkstation(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -80));
@@ -679,7 +679,7 @@ public final class SurfaceWaterRecoveryGameTests {
         context.complete();
     }
 
-    @GameTest(environment = "aibot-gametest:surface_water_recovery_game_tests_horizontal_fallback_never_mines_the_owned_water_seal", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_horizontal_fallback_never_mines_the_owned_water_seal", maxTicks = 40)
     public void horizontalFallbackNeverMinesTheOwnedWaterSeal(TestContext context) {
         var world = context.getWorld();
         BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -94));

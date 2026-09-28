@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.observe;
+package io.github.zoyluo.minecraftai.observe;
 
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.server.MinecraftServer;
 
 public final class TpsGuard {

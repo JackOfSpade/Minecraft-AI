@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Locks the dedicated Creeper owner to strict-survival observation and authority boundaries. */
 class CreeperDefenseSourceContractTest {
     private static final Path TASK = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/CreeperDefenseTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/CreeperDefenseTask.java");
     private static final Path WATCHER = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/DangerWatcher.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/DangerWatcher.java");
 
     @Test
     void entityFactsStayBehindTheObservableSixteenBlockBoundary() throws IOException {

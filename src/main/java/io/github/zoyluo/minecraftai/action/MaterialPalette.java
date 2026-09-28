@@ -1,12 +1,13 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.craft.RecipeRegistry;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Items;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.FallingBlock;
 
 import java.util.List;
 import java.util.Map;
@@ -231,24 +232,36 @@ public final class MaterialPalette {
      */
     public static OptionalInt pickEmergencyShelterBlockSlot(AIPlayerEntity bot) {
         for (Item item : SHELTER_EASY_BLOCKS) {
+            if (isFallingBlock(item)) {
+                continue;
+            }
             OptionalInt slot = InventoryAction.findItem(bot, item);
             if (slot.isPresent()) {
                 return slot;
             }
         }
         for (Item item : RecipeRegistry.PLANKS) {
+            if (isFallingBlock(item)) {
+                continue;
+            }
             OptionalInt slot = InventoryAction.findItem(bot, item);
             if (slot.isPresent()) {
                 return slot;
             }
         }
         for (Item item : RecipeRegistry.LOGS) {
+            if (isFallingBlock(item)) {
+                continue;
+            }
             OptionalInt slot = InventoryAction.findItem(bot, item);
             if (slot.isPresent()) {
                 return slot;
             }
         }
         for (Item item : SHELTER_TOOL_BLOCKS) {
+            if (isFallingBlock(item)) {
+                continue;
+            }
             if (hasHealthySuitableTool(bot, item)) {
                 OptionalInt slot = InventoryAction.findItem(bot, item);
                 if (slot.isPresent()) {
@@ -263,12 +276,31 @@ public final class MaterialPalette {
     public static int countEmergencyShelterBlocks(AIPlayerEntity bot) {
         int total = countShelterBlocks(bot);
         for (Item item : RecipeRegistry.PLANKS) {
+            if (isFallingBlock(item)) {
+                continue;
+            }
             total += InventoryAction.countItem(bot, item);
         }
         for (Item item : RecipeRegistry.LOGS) {
+            if (isFallingBlock(item)) {
+                continue;
+            }
             total += InventoryAction.countItem(bot, item);
         }
         return total;
+    }
+
+    /**
+     * An emergency shelter must never seal itself with a block that can fall out from under its
+     * own placement -- least of all the roof, which by construction has nothing solid beneath it
+     * until the moment it becomes the very last placement closing the envelope. {@link
+     * FallingBlock} is vanilla's own marker for sand, gravel, anvils, concrete powder and the
+     * like; excluding it here protects every placement (foundation, wall and roof alike), not
+     * just the roof specifically, since a foundation or wall cell can transiently have nothing
+     * solid beneath it too while the shell is still being sealed.
+     */
+    private static boolean isFallingBlock(Item item) {
+        return item instanceof BlockItem blockItem && blockItem.getBlock() instanceof FallingBlock;
     }
 
     private static boolean hasHealthySuitableTool(AIPlayerEntity bot, Item blockItem) {

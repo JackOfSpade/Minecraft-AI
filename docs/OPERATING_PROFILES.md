@@ -1,10 +1,10 @@
-# AIBot 运行模式
+# Minecraft-AI Operating Profiles
 
-AIBot 有两种运行模式：默认的 `strict_survival` 与兼容用途的 `operator`。模式控制的是特权边界，不改变 Goal/Task 的基本架构。
+Minecraft-AI has two operating profiles: the default `strict_survival` and the compatibility-oriented `operator`. The profile controls the privilege boundary; it does not change the basic Goal/Task architecture.
 
-## 配置
+## Configuration
 
-推荐在 `aibot.json` 中显式写出 profile：
+We recommend explicitly writing the profile in `minecraftai.json`:
 
 ```json
 {
@@ -18,38 +18,38 @@ AIBot 有两种运行模式：默认的 `strict_survival` 与兼容用途的 `op
 }
 ```
 
-也可以用环境变量为当前进程覆盖文件：
+The file can also be overridden for the current process using an environment variable:
 
 ```bash
-AIBOT_PROFILE=strict_survival ./gradlew runServer
+MINECRAFTAI_PROFILE=strict_survival ./gradlew runServer
 ```
 
-合法值只有 `strict_survival` 和 `operator`。配置在启动时解析；更改文件或环境变量后应重启服务端。
+The only valid values are `strict_survival` and `operator`. Configuration is parsed at startup; the server should be restarted after changing the file or the environment variable.
 
-## 解析与迁移规则
+## Resolution and Migration Rules
 
-| 输入状态 | 最终 profile | 行为 |
+| Input State | Final Profile | Behavior |
 |---|---|---|
-| 新安装、尚无配置文件 | `strict_survival` | 写出带显式 strict profile 的默认配置。 |
-| 已有文件，profile 合法 | 文件值 | 正常加载。 |
-| 已有 legacy 文件，完全缺少 `profile` | `operator` | 仅用于向后兼容，并记录 `operating_profile_legacy_compatibility` 警告。应尽快显式迁移。 |
-| 文件中的 profile 类型或值非法 | `strict_survival` | Fail closed，并记录 `operating_profile_invalid`。 |
-| `AIBOT_PROFILE` 合法 | 环境变量值 | 覆盖文件或 legacy 解析结果。 |
-| `AIBOT_PROFILE` 非空但非法 | `strict_survival` | Fail closed，不回退到文件中的 operator，并记录 `operating_profile_environment_invalid`。 |
-| 配置无法解析 | `strict_survival`，或合法环境覆盖值 | 记录配置读取错误；绝不因解析失败扩大权限。 |
+| Fresh install, no config file yet | `strict_survival` | Writes out a default config with an explicit strict profile. |
+| Existing file, valid profile | File value | Loads normally. |
+| Existing legacy file, `profile` field entirely missing | `operator` | For backward compatibility only, and logs an `operating_profile_legacy_compatibility` warning. Should be migrated explicitly as soon as possible. |
+| Profile type or value in the file is invalid | `strict_survival` | Fail closed, and logs `operating_profile_invalid`. |
+| `MINECRAFTAI_PROFILE` is valid | Environment variable value | Overrides the file or the legacy resolution result. |
+| `MINECRAFTAI_PROFILE` is non-empty but invalid | `strict_survival` | Fail closed; does not fall back to the file's `operator`, and logs `operating_profile_environment_invalid`. |
+| Configuration cannot be parsed | `strict_survival`, or a valid environment override value | Logs a configuration read error; a parse failure must never expand privileges. |
 
-“旧配置缺字段时兼容为 operator”只适用于**已经存在且可解析、并且确实没有 `profile` 字段**的文件。`null`、错误类型和未知字符串都不属于 legacy missing，不能获得 operator 权限。
+"Old configs missing the field fall back to operator for compatibility" applies only to files that **already exist, are parseable, and genuinely lack a `profile` field**. `null`, wrong types, and unknown strings do not count as legacy-missing and must not receive operator privileges.
 
 ## Capability matrix
 
-| Capability | `strict_survival` | `operator` 默认 | `operator` 显式关闭后 |
+| Capability | `strict_survival` | `operator` default | `operator` explicitly disabled |
 |---|---:|---:|---:|
-| `hiddenBlockScan` | 拒绝 | 允许 | 拒绝 |
-| `emergencyTeleport` | 拒绝 | 允许 | 拒绝 |
-| `forcedPickup` | 拒绝 | 允许 | 拒绝 |
-| `manualTeleport` | 拒绝 | 允许 | 拒绝 |
+| `hiddenBlockScan` | Deny | Allow | Deny |
+| `emergencyTeleport` | Deny | Allow | Deny |
+| `forcedPickup` | Deny | Allow | Deny |
+| `manualTeleport` | Deny | Allow | Deny |
 
-operator 的四个默认值为 `true`，用于保持旧版本行为；它们是四个独立开关，不是一个总开关。例如，只允许手动传送：
+The four `operator` defaults are `true`, to preserve legacy behavior; they are four independent switches, not one master switch. For example, to allow only manual teleport:
 
 ```json
 {
@@ -63,39 +63,39 @@ operator 的四个默认值为 `true`，用于保持旧版本行为；它们是�
 }
 ```
 
-### 四项能力的含义
+### Meaning of the Four Capabilities
 
-- `hiddenBlockScan`：允许绕过 strict 的可观察性过滤进行资源探测。strict 模式下，方块必须在配置半径内、暴露且命中视线 raycast；实体必须在半径内且可见。
-- `emergencyTeleport`：允许危险处理或导航兜底执行长距离紧急传送。strict 模式下，相关路径会尝试普通动作，无法安全处理时明确失败。
-- `forcedPickup`：允许直接把附近掉落物转移到 Bot 背包。strict 模式只使用正常的世界拾取过程。
-- `manualTeleport`：允许通过控制面板/网络动作发起手动传送。未生效时，UI 按钮会被禁用，服务端仍会再次拒绝请求。
+- `hiddenBlockScan`: Allows bypassing strict's observability filtering to probe for resources. In strict mode, blocks must be within the configured radius, exposed, and hit by a line-of-sight raycast; entities must be within radius and visible.
+- `emergencyTeleport`: Allows hazard handling or navigation fallback to perform a long-distance emergency teleport. In strict mode, the relevant code paths instead attempt normal actions and fail explicitly when they cannot be handled safely.
+- `forcedPickup`: Allows directly transferring nearby dropped items into the bot's inventory. Strict mode only uses the normal world pickup process.
+- `manualTeleport`: Allows initiating a manual teleport via the control panel/network action. When not in effect, the UI button is disabled, and the server still rejects the request again on its own.
 
-## Strict survival 语义
+## Strict Survival Semantics
 
-`strict_survival` 不只是隐藏 UI 按钮。服务端 capability gate 会在动作发生前再次判断：
+`strict_survival` is not just about hiding UI buttons. The server-side capability gate re-checks before the action occurs:
 
-- 资源与实体扫描先经过近距离、暴露和视线过滤；
-- 禁止紧急传送、手动传送与强制拾取；
-- 死亡按生命周期在世界出生点恢复，不用传送能力制造原地复活；
-- 不通过强制跳夜或远程 world mutation 绕开生存约束。
+- Resource and entity scans are first filtered by proximity, exposure, and line of sight;
+- Emergency teleport, manual teleport, and forced pickup are prohibited;
+- Death recovery follows the lifecycle and respawns at the world spawn point, without using teleport capability to fake an in-place respawn;
+- Survival constraints are not bypassed via a forced time-skip or remote world mutation.
 
-服务器自身的 Bot 创建、持久化恢复和正常死亡生命周期不是玩家可调用的 operator capability；它们属于静态生命周期边界。
+The server's own bot creation, persistence recovery, and normal death lifecycle are not player-invocable operator capabilities; they belong to the static lifecycle boundary.
 
-## Mining Assist 与 profile
+## Mining Assist and Profiles
 
-Mining Assist（[MINING_ASSIST.md](MINING_ASSIST.md)）不新增任何 operator capability，也不放宽任何 profile。它的视线射线（`castViewRay`）只从 Bot 自己的眼睛发出第一命中射线，长度不超过感知半径，不调用 `CapabilityRuntime.decide`，因此在两种 profile 下完全一致。挖掘后的邻格窥视和实体证据复用现有的 `OreScan.observe` / `canObserveEntity` 观察证明，它们的结果遵循当前 profile 的 capability 决定，与其他挖矿任务相同（`operator` 下若启用了 `hiddenBlockScan`，这些观察也随之放宽）。它不使用结构查询、传送或强制拾取。
+Mining Assist ([MINING_ASSIST.md](MINING_ASSIST.md)) does not add any new operator capability and does not relax any profile. Its line-of-sight ray (`castViewRay`) only casts a first-hit ray from the bot's own eyes, with a length not exceeding the perception radius, and it never calls `CapabilityRuntime.decide`, so it behaves identically under both profiles. The post-mining neighbor-cell peek and entity evidence reuse the existing `OreScan.observe` / `canObserveEntity` observation proofs, whose results follow the current profile's capability decision, the same as other mining tasks (under `operator`, if `hiddenBlockScan` is enabled, these observations are relaxed accordingly too). It does not use structure queries, teleport, or forced pickup.
 
-默认模式仍是 `sense`（只记录影子日志，不改变任何 Bot 行为），要等 GameTest 与四 bot 成本闸门跑绿之后才会切到 `detour`，这是编排者的最后一步，不在本仓库这次改动里。用 `AIBOT_MINING_ASSIST=off` 或 `miningAssist.mode` 关闭它；GameTest、verify 与证据运行默认关闭（`assist_mine_lane` 之外的脚本一律固定 `off`）。它与 profile 一样在启动时解析，更改后应重启服务端。P1 的顺路绕路（`detour`/`all` 模式）同样不新增 capability、不放宽任何 profile——它只用既有的 `OreScan.observe`/`ObservableWorldQuery` 观察证明和已有的走位寻路，没有传送、没有强制拾取、没有隐藏扫描；两种 profile 下行为一致。
+The default mode is still `sense` (it only records shadow logs and does not change any bot behavior); the switch to `detour` will happen only once GameTest and the four-bot cost gate are passing green, which is the orchestrator's final step and is not part of this repo's current change. Disable it with `MINECRAFTAI_MINING_ASSIST=off` or `miningAssist.mode`; GameTest, verify, and evidence runs default to disabled (scripts other than `assist_mine_lane` are always pinned to `off`). Like the profile, it is resolved at startup, and the server should be restarted after changing it. P1's opportunistic detour (`detour`/`all` modes) likewise adds no capability and relaxes no profile — it only uses the existing `OreScan.observe`/`ObservableWorldQuery` observation proofs and the existing waypoint pathfinding, with no teleport, no forced pickup, and no hidden scanning; behavior is identical under both profiles.
 
-## 可观测性与审计
+## Observability and Auditing
 
-启动时会记录 `operating_profile_resolved`，包含 profile 来源、配置开关和 effective capabilities；具体迁移/非法配置 warning 由相邻的独立配置事件记录。运行时 capability gate 会输出节流后的结构化 `capability_decision` 记录，说明 capability、profile、allow/deny 与 reason。
+At startup, `operating_profile_resolved` is logged, containing the profile source, config switches, and effective capabilities; specific migration/invalid-config warnings are logged by adjacent, separate configuration events. At runtime, the capability gate emits throttled, structured `capability_decision` records stating the capability, profile, allow/deny, and reason.
 
-游戏内 snapshot 和 Bob 控制面板展示 `operatingProfile` 与 `effectiveCapabilities`。不要只依据配置文件判断权限；排查问题时应以启动日志和 UI 中的最终生效值为准。
+In-game snapshots and the Bob control panel display `operatingProfile` and `effectiveCapabilities`. Do not judge permissions from the config file alone; when troubleshooting, treat the startup log and the final effective values shown in the UI as authoritative.
 
-## 验证
+## Verification
 
-测试专用 harness 同时覆盖 strict 与 operator：
+The test-only harness covers both strict and operator:
 
 ```bash
 bash scripts/evidence_run.sh \
@@ -108,6 +108,6 @@ bash scripts/evidence_run.sh \
   --operator-capabilities all
 ```
 
-operator 也可传入逗号分隔的子集，例如 `--operator-capabilities manualTeleport`；`none` 表示四项全部关闭。strict 不接受启用 operator capability 的参数。
+operator can also take a comma-separated subset, for example `--operator-capabilities manualTeleport`; `none` means all four are disabled. strict does not accept a parameter that enables an operator capability.
 
-当前工作树留存的 strict/operator 本地诊断均为 `7/7 PASS`，但因为运行时工作树不干净，bundle 正确标记为 `UNVERIFIED`。该结果证明 harness 与策略在这次本地状态下通过，不等同于已发布 commit 的能力认证。
+The strict/operator local diagnostics retained in the current working tree are both `7/7 PASS`, but because the working tree was not clean at runtime, the bundle is correctly marked `UNVERIFIED`. This result demonstrates that the harness and policy passed under this local state; it is not equivalent to a capability certification of a published commit.

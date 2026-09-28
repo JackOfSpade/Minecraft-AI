@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
 import org.junit.jupiter.api.Test;
 

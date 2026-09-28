@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,9 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class CombatShieldAndPriorityContractTest {
     private static final Path COMBAT_TASK = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/CombatTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/CombatTask.java");
     private static final Path DANGER_WATCHER = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/DangerWatcher.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/DangerWatcher.java");
 
     @Test
     void reactiveShieldOnlyRunsDuringMeleeOrientedPhasesNeverWhileDrawingABow() throws IOException {

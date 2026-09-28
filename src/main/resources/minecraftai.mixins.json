@@ -1,7 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "package": "io.github.zoyluo.aibot.mixin",
+  "package": "io.github.zoyluo.minecraftai.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "ServerTickProbeMixin",

@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.gametest;
+package io.github.zoyluo.minecraftai.gametest;
 
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
-import io.github.zoyluo.aibot.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -16,10 +16,10 @@ import net.minecraft.text.Text;
 /**
  * Minimal world-backed smoke tests for the isolated GameTest source set.
  *
- * <p>These tests deliberately avoid random state, external services and AIBot persistence so a
+ * <p>These tests deliberately avoid random state, external services and MinecraftAi persistence so a
  * failure always reflects the compiled mod/runtime rather than a reused world.</p>
  */
-public final class AIBotDeterministicGameTests {
+public final class MinecraftAiDeterministicGameTests {
     @GameTest(maxTicks = 20)
     public void blockMutationIsVisible(TestContext context) {
         context.setBlockState(1, 1, 1, Blocks.STONE);

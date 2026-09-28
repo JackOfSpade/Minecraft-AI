@@ -1,27 +1,27 @@
-package io.github.zoyluo.aibot.client;
+package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.aibot.client.screen.BotInventoryScreen;
-import io.github.zoyluo.aibot.client.screen.BotPanelScreen;
-import io.github.zoyluo.aibot.inventory.BotInventoryScreenHandler;
-import io.github.zoyluo.aibot.network.payload.AIPayloads;
+import io.github.zoyluo.minecraftai.client.screen.BotInventoryScreen;
+import io.github.zoyluo.minecraftai.client.screen.BotPanelScreen;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler;
+import io.github.zoyluo.minecraftai.network.payload.AIPayloads;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
 
-public final class AIBotClient implements ClientModInitializer {
+public final class MinecraftAiClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         BotInventoryScreenHandler.initialize();
         HandledScreens.register(BotInventoryScreenHandler.TYPE, BotInventoryScreen::new);
         AIPayloads.register();
-        AIBotKeyBindings.register();
-        AIBotClientNetworking.register();
+        MinecraftAiKeyBindings.register();
+        MinecraftAiClientNetworking.register();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 
     private void onClientTick(MinecraftClient client) {
-        BotPanelScreen.Mode mode = AIBotKeyBindings.pollToggle(client);
+        BotPanelScreen.Mode mode = MinecraftAiKeyBindings.pollToggle(client);
         if (mode == null) {
             return;
         }

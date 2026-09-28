@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.util;
+package io.github.zoyluo.minecraftai.util;
 
 import com.mojang.authlib.GameProfile;
 

@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
+import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -58,7 +58,7 @@ final class ChatRecipientRouterCapabilityTest {
     void remoteRecipientChoiceConsumesOneCallForEachActualRecipient() throws IOException {
         ChatRecipientRouter.Decision remote = ChatRecipientRouter.remoteDecision(
                 ChatRecipientRouter.Target.EVERYONE, null);
-        String capture = Files.readString(Path.of("src/main/java/io/github/zoyluo/aibot/brain/ChatCaptureListener.java"));
+        String capture = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/brain/ChatCaptureListener.java"));
 
         assertEquals(1, remote.routingModelCallCost());
         assertTrue(capture.contains("decision.routingModelCallCost()"));

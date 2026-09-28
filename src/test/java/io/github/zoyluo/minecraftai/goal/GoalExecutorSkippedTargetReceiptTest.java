@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
@@ -94,7 +94,7 @@ class GoalExecutorSkippedTargetReceiptTest {
                 null,
                 null,
                 new BlockPos(-4, 12, 8),
-                "identity:完整",
+                "identity:complete",
                 true);
         List<GoalExecutor.SkippedTargetReceipt> receipts =
                 List.of(new GoalExecutor.SkippedTargetReceipt(

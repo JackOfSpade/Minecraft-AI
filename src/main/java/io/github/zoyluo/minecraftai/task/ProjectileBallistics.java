@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 /**
  * Solves for the launch pitch of a vanilla arrow so it actually reaches a target's height instead

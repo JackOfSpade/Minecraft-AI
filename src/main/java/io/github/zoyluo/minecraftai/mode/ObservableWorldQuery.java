@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.hit.BlockHitResult;
@@ -75,7 +75,7 @@ public final class ObservableWorldQuery {
             return true;
         }
         double observationRange = Math.min(
-                Math.max(1, AIBotConfig.get().perception().radius()),
+                Math.max(1, MinecraftAiConfig.get().perception().radius()),
                 bot.getBlockInteractionRange());
         double observationRangeSquared = observationRange * observationRange;
         Vec3d eye = bot.getEyePos();
@@ -120,7 +120,7 @@ public final class ObservableWorldQuery {
                                                       Direction face,
                                                       net.minecraft.util.math.Vec3d endpoint,
                                                       int range) {
-        int radius = Math.max(Math.max(1, AIBotConfig.get().perception().radius()), range);
+        int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
         if (bot.getEyePos().squaredDistanceTo(endpoint) > (double) radius * radius) {
             return false;
         }
@@ -158,7 +158,7 @@ public final class ObservableWorldQuery {
     }
 
     private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range) {
-        int radius = Math.max(Math.max(1, AIBotConfig.get().perception().radius()), range);
+        int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
         if (bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) > (double) radius * radius) {
             return false;
         }
@@ -174,7 +174,7 @@ public final class ObservableWorldQuery {
                 "observable_entity_query").allowed()) {
             return true;
         }
-        int radius = Math.max(1, AIBotConfig.get().perception().radius());
+        int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
         return bot.squaredDistanceTo(entity) <= (double) radius * radius && bot.canSee(entity);
     }
 
@@ -190,7 +190,7 @@ public final class ObservableWorldQuery {
                 "observable_entity_query").allowed()) {
             return true;
         }
-        int radius = Math.max(Math.max(1, AIBotConfig.get().perception().radius()), range);
+        int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
         return bot.squaredDistanceTo(entity) <= (double) radius * radius && bot.canSee(entity);
     }
 
@@ -232,7 +232,7 @@ public final class ObservableWorldQuery {
      */
     public static ViewHit castViewRay(AIPlayerEntity bot, double dx, double dy, double dz,
                                       double range, ViewShape shape) {
-        double limit = Math.min(range, Math.max(1, AIBotConfig.get().perception().radius()));
+        double limit = Math.min(range, Math.max(1, MinecraftAiConfig.get().perception().radius()));
         double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (!(limit > 0.0D) || !(length > 1.0E-9D)) {
             return ViewHit.unknown();

@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

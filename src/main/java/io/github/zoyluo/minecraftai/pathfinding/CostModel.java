@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
-import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -13,19 +13,19 @@ public final class CostModel {
     public static double stepCost(MoveType type, int fallHeight) {
         return switch (type) {
             case WALK -> 1.0D;
-            // 对角 ≈ √2:比走两步直角(2.0)便宜,让 A* 优先抄近路,减少蛇形、更快到达。
+            // Diagonal ≈ √2: cheaper than two orthogonal steps (2.0), so A* prefers the shortcut, reducing zig-zagging and reaching the goal faster.
             case DIAGONAL -> 1.41D;
             case JUMP_UP -> 1.5D;
             case DROP_DOWN -> {
-                if (fallHeight > AIBotConfig.get().nav().maxSafeFall()) {
+                if (fallHeight > MinecraftAiConfig.get().nav().maxSafeFall()) {
                     yield 1000.0D;
                 }
                 yield 0.5D + 0.3D * fallHeight;
             }
             case DIG_THROUGH -> 8.0D;
-            // 垫方块上升:代价高(消耗方块 + 慢),仅在地形无法翻越时 A* 才会选它。
+            // Pillaring up: high cost (consumes a block + slow); A* only picks this when the terrain can't otherwise be traversed.
             case PILLAR_UP -> 6.0D;
-            // 水平搭桥跨越缺口:同 PILLAR_UP 同一档代价——都要消耗一个方块,仅在没有天然落脚点时才选它。
+            // Bridging horizontally across a gap: same cost tier as PILLAR_UP -- both consume a block; only chosen when there is no natural foothold.
             case BRIDGE -> 6.0D;
         };
     }

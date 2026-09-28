@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Locks strict placement to vanilla reach and exact, physically visible support-face hits. */
 class BuildActionVisibilitySourceTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/action/BuildAction.java");
+            "src/main/java/io/github/zoyluo/minecraftai/action/BuildAction.java");
 
     @Test
     void supportCenterDistanceCannotRejectAReachableFaceInset() throws IOException {

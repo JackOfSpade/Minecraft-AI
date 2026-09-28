@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -62,8 +62,9 @@ public final class LightAreaTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 1800) {
-            // phase+placed 一起带上:超时在 SCAN/WALK/PLACE 任一阶段都可能触发,光看
-            // "light_area_timeout" 分不清是扫不到目标、走不到某个火把点,还是放置反复失败。
+            // Include phase+placed together: the timeout can fire in any of the SCAN/WALK/PLACE phases,
+            // and just looking at "light_area_timeout" alone can't tell whether we failed to find a target,
+            // failed to walk to a torch spot, or placement kept failing.
             fail("light_area_timeout phase=" + phase + " placed=" + placed + "/" + maxTorches);
             return;
         }
@@ -86,10 +87,10 @@ public final class LightAreaTask extends AbstractTask {
     private void scan(AIPlayerEntity bot) {
         targets.clear();
         BlockPos origin = bot.getBlockPos();
-        int threshold = AIBotConfig.get().night().torchLightThreshold();
+        int threshold = MinecraftAiConfig.get().night().torchLightThreshold();
         BlockPos.stream(origin.add(-radius, -2, -radius), origin.add(radius, 3, radius))
                 .map(BlockPos::toImmutable)
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos.down()))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.down()))
                 .filter(pos -> canPlaceTorchAt(bot, pos, threshold))
                 .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)))
                 .limit(maxTorches)
@@ -98,7 +99,7 @@ public final class LightAreaTask extends AbstractTask {
     }
 
     private void walk(AIPlayerEntity bot) {
-        if (target == null || !canPlaceTorchAt(bot, target, AIBotConfig.get().night().torchLightThreshold())) {
+        if (target == null || !canPlaceTorchAt(bot, target, MinecraftAiConfig.get().night().torchLightThreshold())) {
             target = targets.poll();
             standPos = null;
         }
@@ -115,8 +116,9 @@ public final class LightAreaTask extends AbstractTask {
             standPos = adjacentStandPos(bot, target);
         }
         if (standPos == null) {
-            // 放弃这个火把点、下 tick 换下一个:如果最终超时在 WALK,单看
-            // "light_area_timeout phase=WALK" 分不清是一直走不到同一个点,还是接连跳过了好几个够不到的点。
+            // Give up on this torch spot and switch to the next one on the next tick: if it eventually
+            // times out in WALK, just looking at "light_area_timeout phase=WALK" alone can't tell whether
+            // we kept failing to reach the same spot, or skipped several unreachable spots in a row.
             BotLog.action(bot, "light_area_target_unreachable", "pos", target.toShortString());
             target = null;
             return;
@@ -160,12 +162,12 @@ public final class LightAreaTask extends AbstractTask {
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
-        if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), target)) {
+        if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), target)) {
             return target;
         }
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction);
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

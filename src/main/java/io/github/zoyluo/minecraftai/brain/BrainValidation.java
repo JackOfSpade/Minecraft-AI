@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 
 import java.util.List;
 
@@ -11,8 +11,8 @@ public final class BrainValidation {
     }
 
     public static ValidationResult apiFailure(AIPlayerEntity bot) {
-        AIBotConfig.Llm current = AIBotConfig.get().llm();
-        AIBotConfig.Llm invalid = new AIBotConfig.Llm(
+        MinecraftAiConfig.Llm current = MinecraftAiConfig.get().llm();
+        MinecraftAiConfig.Llm invalid = new MinecraftAiConfig.Llm(
                 "",
                 current.baseUrl(),
                 current.model(),

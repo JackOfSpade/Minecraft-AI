@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.task.HuntSearchCursor;
+import io.github.zoyluo.minecraftai.task.HuntSearchCursor;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -279,10 +279,10 @@ class GoalExecutorHuntCursorPersistenceTest {
     void completedAndSkippedStepTransitionsCaptureBeforeDispatch()
             throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
 
         int completed = source.indexOf(
-                "plan.completedSteps++; // Phase A:完成一步=进展信号");
+                "plan.completedSteps++; // Phase A: completing a step = a progress signal");
         int completedEnd = source.indexOf(
                 "if (status.state() == TaskState.FAILED)", completed);
         String completedTransition = source.substring(completed, completedEnd);
@@ -292,7 +292,7 @@ class GoalExecutorHuntCursorPersistenceTest {
 
         int skipped = source.indexOf("goal_step_skipped_besteffort");
         int skippedEnd = source.indexOf(
-                "// Phase A 进度感知预算", skipped);
+                "// Phase A progress-aware budget", skipped);
         String skippedTransition = source.substring(skipped, skippedEnd);
         assertTrue(skippedTransition.contains(
                 "clearCompletedTaskCheckpoint(plan);"),
@@ -314,7 +314,7 @@ class GoalExecutorHuntCursorPersistenceTest {
     void repairReplanAndServiceSchedulesUseWriteAheadCapture()
             throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
 
         assertTrue(sourceSection(
                         source,
@@ -335,7 +335,7 @@ class GoalExecutorHuntCursorPersistenceTest {
                 {"goal_rare_inventory_service_scheduled",
                         "/**\n     * Inserts a capacity-only ORE_BATCH service"},
                 {"goal_mining_capacity_handoff_scheduled",
-                        "// 优化2:目标最近"}
+                        "// Optimization 2: whether the goal has failed"}
         }) {
             assertTrue(sourceSection(source, bounds[0], bounds[1]).contains(
                             "captureTransitionAndAssignNext(bot, plan);"),

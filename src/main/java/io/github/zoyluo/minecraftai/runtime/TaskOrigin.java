@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.runtime;
+package io.github.zoyluo.minecraftai.runtime;
 
 import java.util.UUID;
 
@@ -25,7 +25,7 @@ public record TaskOrigin(Kind kind, UUID missionId, UUID jobId, String reason) {
 
     /**
      * A stable, human-greppable tag identifying the request this origin belongs to, for smart
-     * log scoping (see {@link io.github.zoyluo.aibot.log.BotLog}). {@code missionId}/{@code jobId}
+     * log scoping (see {@link io.github.zoyluo.minecraftai.log.BotLog}). {@code missionId}/{@code jobId}
      * already stay constant across every sub-task of one player-issued instruction (GoalExecutor
      * threads the same missionId through every step's TaskOrigin), so reusing it here means every
      * log line emitted anywhere during that instruction's execution can be filtered to exactly that

@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 
 public abstract class AbstractTask implements Task {
     protected TaskState state = TaskState.PENDING;

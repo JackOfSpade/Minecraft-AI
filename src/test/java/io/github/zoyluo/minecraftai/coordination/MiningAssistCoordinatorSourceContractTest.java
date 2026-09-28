@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MiningAssistCoordinatorSourceContractTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/coordination/MiningAssistCoordinator.java");
+            "src/main/java/io/github/zoyluo/minecraftai/coordination/MiningAssistCoordinator.java");
 
     private static String source() throws IOException {
         return Files.readString(SOURCE);
@@ -69,7 +69,7 @@ class MiningAssistCoordinatorSourceContractTest {
         String source = source();
         for (String token : List.of(
                 "sendMessage(",
-                "io.github.zoyluo.aibot.brain",
+                "io.github.zoyluo.minecraftai.brain",
                 "BrainCoordinator",
                 "PoiAdvisor",
                 "GoalExecutor",
@@ -141,9 +141,9 @@ class MiningAssistCoordinatorSourceContractTest {
         }
         assertEquals(classes, found, "exactly the five classes of design 6.1, in this order");
         assertFalse(method.contains("StripMineTask"), "StripMineTask is legacy and strict-rejected");
-        assertFalse(source.contains("import io.github.zoyluo.aibot.task.StripMineTask;"));
+        assertFalse(source.contains("import io.github.zoyluo.minecraftai.task.StripMineTask;"));
         for (String name : classes) {
-            assertTrue(source.contains("import io.github.zoyluo.aibot.task." + name + ";"), name);
+            assertTrue(source.contains("import io.github.zoyluo.minecraftai.task." + name + ";"), name);
         }
         assertEquals(5, count(source, " instanceof "), "no other type test anywhere in the coordinator");
     }
@@ -229,7 +229,7 @@ class MiningAssistCoordinatorSourceContractTest {
     void theCoordinatorIsInTheGuardedSetOfTheObservationContractAndExists() throws IOException {
         assertTrue(Files.exists(SOURCE));
         String contract = Files.readString(Path.of(
-                "src/test/java/io/github/zoyluo/aibot/mining/assist/AssistObservationSourceContractTest.java"));
+                "src/test/java/io/github/zoyluo/minecraftai/mining/assist/AssistObservationSourceContractTest.java"));
         assertTrue(contract.contains("\"coordination/MiningAssistCoordinator.java\""),
                 "the banned-token scan must cover the coordinator");
     }

@@ -1,41 +1,41 @@
-package io.github.zoyluo.aibot.runtime;
+package io.github.zoyluo.minecraftai.runtime;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.brain.AmbientConversationCoordinator;
-import io.github.zoyluo.aibot.brain.BotReporter;
-import io.github.zoyluo.aibot.brain.BotRuntimeOptions;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.brain.ChatRecipientRouter;
-import io.github.zoyluo.aibot.brain.PoiAdvisor;
-import io.github.zoyluo.aibot.coordination.IdleCoordinator;
-import io.github.zoyluo.aibot.coordination.PoiCoordinator;
-import io.github.zoyluo.aibot.coordination.TaskBoard;
-import io.github.zoyluo.aibot.craft.RuntimeRecipeIndex;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.BotLogWriter;
-import io.github.zoyluo.aibot.log.DiagnosticLogger;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.memory.EpisodeLog;
-import io.github.zoyluo.aibot.memory.KnowledgeBase;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.network.AIBotServerNetworking;
-import io.github.zoyluo.aibot.observe.BotProfiler;
-import io.github.zoyluo.aibot.observe.ReplayRecorder;
-import io.github.zoyluo.aibot.observe.TpsGuard;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
-import io.github.zoyluo.aibot.persist.BotPersistence;
-import io.github.zoyluo.aibot.task.DangerWatcher;
-import io.github.zoyluo.aibot.task.EmergencyShelterTask;
-import io.github.zoyluo.aibot.task.EpisodeMemory;
-import io.github.zoyluo.aibot.task.NavSafetyNet;
-import io.github.zoyluo.aibot.task.StuckWatcher;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator;
+import io.github.zoyluo.minecraftai.brain.BotReporter;
+import io.github.zoyluo.minecraftai.brain.BotRuntimeOptions;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.brain.ChatRecipientRouter;
+import io.github.zoyluo.minecraftai.brain.PoiAdvisor;
+import io.github.zoyluo.minecraftai.coordination.IdleCoordinator;
+import io.github.zoyluo.minecraftai.coordination.PoiCoordinator;
+import io.github.zoyluo.minecraftai.coordination.TaskBoard;
+import io.github.zoyluo.minecraftai.craft.RuntimeRecipeIndex;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.log.DiagnosticLogger;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.memory.EpisodeLog;
+import io.github.zoyluo.minecraftai.memory.KnowledgeBase;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.network.MinecraftAiServerNetworking;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.observe.ReplayRecorder;
+import io.github.zoyluo.minecraftai.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.persist.BotPersistence;
+import io.github.zoyluo.minecraftai.task.DangerWatcher;
+import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
+import io.github.zoyluo.minecraftai.task.EpisodeMemory;
+import io.github.zoyluo.minecraftai.task.NavSafetyNet;
+import io.github.zoyluo.minecraftai.task.StuckWatcher;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.server.MinecraftServer;
 
 /** Single ordering authority for world start/stop and Bot reset/death/despawn cleanup. */
@@ -45,7 +45,7 @@ public final class RuntimeLifecycleCoordinator {
     private RuntimeLifecycleCoordinator() {
     }
 
-    public void onServerStarted(MinecraftServer server, AIBotConfig config) {
+    public void onServerStarted(MinecraftServer server, MinecraftAiConfig config) {
         clearWorldRuntime();
         BotLogWriter.INSTANCE.start(config);
         BrainCoordinator.INSTANCE.configure(config);
@@ -154,7 +154,7 @@ public final class RuntimeLifecycleCoordinator {
         KnowledgeBase.INSTANCE.forget(bot.getUuid());
         ReplayRecorder.INSTANCE.clear(bot.getUuid());
         BotProfiler.INSTANCE.clear(bot.getUuid());
-        AIBotServerNetworking.INSTANCE.clearBot(bot.getUuid());
+        MinecraftAiServerNetworking.INSTANCE.clearBot(bot.getUuid());
     }
 
     private static void clearWorldRuntime() {
@@ -173,7 +173,7 @@ public final class RuntimeLifecycleCoordinator {
         DiagnosticLogger.INSTANCE.clearAll();
         ReplayRecorder.INSTANCE.clearAll();
         BotProfiler.INSTANCE.clearAll();
-        AIBotServerNetworking.INSTANCE.clear();
+        MinecraftAiServerNetworking.INSTANCE.clear();
         CapabilityRuntime.clearAll();
         MiningEvidenceAudit.clearAll();
         MiningAssistRuntime.clearWorldRuntime();

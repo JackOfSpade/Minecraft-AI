@@ -1,20 +1,20 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.assist.AssistMode;
-import io.github.zoyluo.aibot.mining.assist.DetourPhase;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.ObservedOccupancy;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.assist.AssistMode;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -65,7 +65,7 @@ public final class OreDigFrontierGameTests {
     private static final int SHELL = 3;
     private static final BlockState STONE = Blocks.STONE.getDefaultState();
     private static final BlockState AIR = Blocks.AIR.getDefaultState();
-    private static final String ENV_PREFIX = "aibot-gametest:ore_dig_frontier_game_tests_";
+    private static final String ENV_PREFIX = "minecraftai-gametest:ore_dig_frontier_game_tests_";
 
     // Half-extent of the main open cavern both tests spawn the bot at the centre of: big enough that the
     // estimated open volume (FreeRunStats.volume, design 5.4's "open volume >= 1200") reliably clears the
@@ -708,8 +708,8 @@ public final class OreDigFrontierGameTests {
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {
-            require(io.github.zoyluo.aibot.AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                    "GameTest must run under strict_survival, got " + io.github.zoyluo.aibot.AIBotConfig.get().profile());
+            require(io.github.zoyluo.minecraftai.MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                    "GameTest must run under strict_survival, got " + io.github.zoyluo.minecraftai.MinecraftAiConfig.get().profile());
             for (PrivilegedCapability capability : PrivilegedCapability.values()) {
                 require(!CapabilityRuntime.decide(bot, capability, label).allowed(),
                         "strict_survival unexpectedly allowed " + capability);

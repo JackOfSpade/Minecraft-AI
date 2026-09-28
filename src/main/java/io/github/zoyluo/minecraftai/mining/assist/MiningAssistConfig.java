@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /**
  * Immutable mining-assist settings (design section 7) read from the optional top-level
- * {@code "miningAssist"} object of {@code config/aibot.json}, plus the resolved {@link AssistMode}.
+ * {@code "miningAssist"} object of {@code config/minecraftai.json}, plus the resolved {@link AssistMode}.
  *
  * <p>Parsing never throws and never rejects the file: unknown keys are ignored, wrong-typed values
  * fall back to the default, out-of-range numbers are clamped to sane bounds, and every such event is
@@ -23,17 +23,17 @@ import java.util.regex.Pattern;
  * the per-bot {@code forceEnable}, the harness switch and the TPS test override live in the runtime
  * holder that owns the current instance.</p>
  *
- * <p><b>Mode precedence.</b> A non-blank {@code AIBOT_MINING_ASSIST} env value beats the file key
+ * <p><b>Mode precedence.</b> A non-blank {@code MINECRAFTAI_MINING_ASSIST} env value beats the file key
  * {@code miningAssist.mode}, which beats the shipped phase default. An explicit value that is not a
  * known mode resolves to {@link AssistMode#OFF} (fail closed) with a warning. The harness
  * default-off ({@link #harnessOff()}) is in effect only when neither env nor file gave a mode.</p>
  */
 public final class MiningAssistConfig {
     /** Env var that overrides {@code miningAssist.mode}. */
-    public static final String ENV_MODE = "AIBOT_MINING_ASSIST";
+    public static final String ENV_MODE = "MINECRAFTAI_MINING_ASSIST";
     /** Env var ({@code 1}) that forces the deterministic flag on. */
-    public static final String ENV_DETERMINISTIC = "AIBOT_MINING_ASSIST_DETERMINISTIC";
-    /** Optional top-level key of the whole aibot.json. */
+    public static final String ENV_DETERMINISTIC = "MINECRAFTAI_MINING_ASSIST_DETERMINISTIC";
+    /** Optional top-level key of the whole minecraftai.json. */
     public static final String FILE_SECTION = "miningAssist";
     /** Upper bound on {@code poi.cavernDimensions} entries kept. */
     public static final int MAX_CAVERN_DIMENSIONS = 16;
@@ -289,7 +289,7 @@ public final class MiningAssistConfig {
     /**
      * Builds the effective configuration.
      *
-     * @param fileRoot          the whole parsed {@code aibot.json} (its top-level {@code "miningAssist"}
+     * @param fileRoot          the whole parsed {@code minecraftai.json} (its top-level {@code "miningAssist"}
      *                          object is read); may be null
      * @param env               environment lookup, injected so tests need no real environment; may be null
      * @param shippedDefault    the mode of the current shipping phase, used when env and file give none
@@ -567,7 +567,7 @@ public final class MiningAssistConfig {
 
     /**
      * The deterministic flag as a pure function: true when the harness default-off is active, when
-     * the bot is force-enabled, or when env {@code AIBOT_MINING_ASSIST_DETERMINISTIC} is exactly
+     * the bot is force-enabled, or when env {@code MINECRAFTAI_MINING_ASSIST_DETERMINISTIC} is exactly
      * {@code 1} (surrounding whitespace ignored). When true there is no time-based throttling, no
      * millisecond route budget, and the {@code TickHeadroom} start gate always passes.
      */

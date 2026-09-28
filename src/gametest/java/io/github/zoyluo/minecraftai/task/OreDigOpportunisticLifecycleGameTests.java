@@ -1,23 +1,23 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLogWriter;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.assist.AssistMode;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
-import io.github.zoyluo.aibot.mining.assist.DetourPhase;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.OreClaims;
-import io.github.zoyluo.aibot.mining.assist.SenseBudget;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.assist.AssistMode;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.OreClaims;
+import io.github.zoyluo.minecraftai.mining.assist.SenseBudget;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -73,7 +73,7 @@ import java.util.regex.Pattern;
  * engine field.</p>
  */
 public final class OreDigOpportunisticLifecycleGameTests {
-    private static final Logger LOG = LoggerFactory.getLogger("aibot-detour-gametest");
+    private static final Logger LOG = LoggerFactory.getLogger("minecraftai-detour-gametest");
     private static final int SHELL = 3;
     private static final BlockState STONE = Blocks.STONE.getDefaultState();
     private static final BlockState AIR = Blocks.AIR.getDefaultState();
@@ -83,7 +83,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 9. Slow mine, a lost drop and a long return never trip OreDig's own NO_PROGRESS_LIMIT (I14)
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_slow_mine_and_drop_lost_and_long_return_never_trip_no_progress", maxTicks = 4200)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_slow_mine_and_drop_lost_and_long_return_never_trip_no_progress", maxTicks = 4200)
     public void slowMineAndDropLostAndLongReturnNeverTripNoProgress(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -3, 18, -3, 3, 4);
@@ -200,7 +200,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 10. Pause mid-detour resumes to the exact anchor; the strip fields never move
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_pause_mid_detour_resumes_to_anchor", maxTicks = 2000)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_pause_mid_detour_resumes_to_anchor", maxTicks = 2000)
     public void pauseMidDetourResumesToAnchor(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(31, -3, 10, -3, 3, 4);
@@ -289,7 +289,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 11. Restart from a mid-detour checkpoint returns to the anchor, not to the interrupted detour
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_restart_mid_detour_returns_to_anchor", maxTicks = 2100)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_restart_mid_detour_returns_to_anchor", maxTicks = 2100)
     public void restartMidDetourReturnsToAnchor(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(32, -3, 10, -3, 3, 4);
@@ -371,12 +371,12 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 12/13. fail()/complete() bypass onAbort (I8/M29): the coordinator's orphan cleanup still releases claims
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_fail_mid_detour_releases_claims", maxTicks = 1100)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_fail_mid_detour_releases_claims", maxTicks = 1100)
     public void failMidDetourReleasesClaims(TestContext context) {
         terminalExitReleasesClaims(context, "DetourFailGT", "gametest_detour_fail", true);
     }
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_complete_mid_detour_releases_claims", maxTicks = 1100)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_complete_mid_detour_releases_claims", maxTicks = 1100)
     public void completeMidDetourReleasesClaims(TestContext context) {
         terminalExitReleasesClaims(context, "DetourCompleteGT", "gametest_detour_complete", false);
     }
@@ -471,7 +471,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 14. The drop chase is contract-bound (walk-only, <= 2 attempts) and never terminal
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_drop_recovery_contract_bound_and_non_terminal", maxTicks = 3200)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_drop_recovery_contract_bound_and_non_terminal", maxTicks = 3200)
     public void dropRecoveryContractBoundAndNonTerminal(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(34, -3, 12, -3, 3, 4);
@@ -573,7 +573,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 15. Two bots, one vein: OreClaims lets exactly one of them actually mine it
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_two_bots_one_vein_exactly_one_breaker", maxTicks = 2500)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_two_bots_one_vein_exactly_one_breaker", maxTicks = 2500)
     public void twoBotsOneVeinExactlyOneBreaker(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(35, -6, 6, -3, 3, 4);
@@ -644,7 +644,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 16. Inventory below the reserve stops a detour from starting; freeing space allows it
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_inventory_reserve_stops_detour", maxTicks = 2300)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_inventory_reserve_stops_detour", maxTicks = 2300)
     public void inventoryReserveStopsDetour(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(36, -3, 8, -3, 3, 4);
@@ -733,7 +733,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 17. A walk-only return that keeps failing rebases in place and disables further detours
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_return_failure_rebases_in_place_and_disables_detours", maxTicks = 3800)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_return_failure_rebases_in_place_and_disables_detours", maxTicks = 3800)
     public void returnFailureRebasesInPlaceAndDisablesDetours(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(37, -3, 10, -3, 3, 4);
@@ -861,7 +861,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 18. Degraded TPS aborts an in-flight detour and sends the bot back toward the anchor
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_degraded_tps_aborts_in_flight_detour", maxTicks = 1800)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_degraded_tps_aborts_in_flight_detour", maxTicks = 1800)
     public void degradedTpsAbortsInFlightDetour(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(38, -3, 12, -3, 3, 4);
@@ -932,7 +932,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 19. A hurt edge aborts an APPROACH but the same condition never aborts a RETURN
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:ore_dig_opportunistic_lifecycle_hurt_edge_aborts_approach_but_not_return", maxTicks = 2200)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_hurt_edge_aborts_approach_but_not_return", maxTicks = 2200)
     public void hurtEdgeAbortsApproachButNotReturn(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(39, -3, 12, -3, 3, 4);
@@ -1267,7 +1267,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
                 require(p.tick < 200, "the sealed fixture never became underground by the world's sky test");
                 return false;
             }
-            int ring = (int) Math.ceil(SenseBudget.sweepRadius(AIBotConfig.get().perception().radius()) / 16.0D);
+            int ring = (int) Math.ceil(SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius()) / 16.0D);
             boolean loaded = true;
             for (int dx = -ring; dx <= ring && loaded; dx++) {
                 for (int dz = -ring; dz <= ring && loaded; dz++) {
@@ -1288,8 +1288,8 @@ public final class OreDigOpportunisticLifecycleGameTests {
         }
 
         void assertStrict(AIPlayerEntity bot) {
-            require(AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                    "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+            require(MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                    "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
             for (PrivilegedCapability capability : PrivilegedCapability.values()) {
                 require(!CapabilityRuntime.decide(bot, capability, "ore_dig_opportunistic_lifecycle_gametest").allowed(),
                         "strict_survival unexpectedly allowed " + capability);

@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.client;
+package io.github.zoyluo.minecraftai.client;
 
-import io.github.zoyluo.aibot.network.payload.BotChatS2C;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.network.payload.BotChatS2C;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
-public final class AIBotClientNetworking {
-    private AIBotClientNetworking() {
+public final class MinecraftAiClientNetworking {
+    private MinecraftAiClientNetworking() {
     }
 
     public static void register() {

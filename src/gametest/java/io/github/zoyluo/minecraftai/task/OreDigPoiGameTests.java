@@ -1,33 +1,33 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.brain.PoiAdvisor;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLogWriter;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.assist.AssistMode;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.PoiCache;
-import io.github.zoyluo.aibot.mining.assist.PoiConsultBudget;
-import io.github.zoyluo.aibot.mining.assist.PoiDetector;
-import io.github.zoyluo.aibot.mining.assist.PoiLabeler;
-import io.github.zoyluo.aibot.mining.assist.PoiPrompt;
-import io.github.zoyluo.aibot.mining.assist.PoiRegistry;
-import io.github.zoyluo.aibot.mining.assist.PoiScorer;
-import io.github.zoyluo.aibot.coordination.PoiCoordinator;
-import io.github.zoyluo.aibot.coordination.MiningAssistCoordinator;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.brain.PoiAdvisor;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.assist.AssistMode;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.PoiCache;
+import io.github.zoyluo.minecraftai.mining.assist.PoiConsultBudget;
+import io.github.zoyluo.minecraftai.mining.assist.PoiDetector;
+import io.github.zoyluo.minecraftai.mining.assist.PoiLabeler;
+import io.github.zoyluo.minecraftai.mining.assist.PoiPrompt;
+import io.github.zoyluo.minecraftai.mining.assist.PoiRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.PoiScorer;
+import io.github.zoyluo.minecraftai.coordination.PoiCoordinator;
+import io.github.zoyluo.minecraftai.coordination.MiningAssistCoordinator;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -131,7 +131,7 @@ public final class OreDigPoiGameTests {
      * {@code IntentController} pauses the bot, {@code TaskManager.isUserPaused} becomes true, and a
      * {@code poi_stop} log line names the mineshaft label.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_mineshaft_palette_triggers_certain_stop_and_notify",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_mineshaft_palette_triggers_certain_stop_and_notify",
             maxTicks = 900)
     public void mineshaftPaletteTriggersCertainStopAndNotify(TestContext context) {
         Harness h = new Harness(context);
@@ -216,7 +216,7 @@ public final class OreDigPoiGameTests {
      * failing organically in real-server testing: the fixture, not {@code PoiScorer}/{@code PoiCoordinator},
      * had put the warden too close).</p>
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_warden_risk_always_stops", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_risk_always_stops", maxTicks = 900)
     public void wardenRiskAlwaysStops(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(20, -9, WARDEN_STANDOFF_BLOCKS + 1, -1, 1, 3);
@@ -304,7 +304,7 @@ public final class OreDigPoiGameTests {
      * {@code STOP_IF_STRUCTURE}) still notify-only's it once the fallback's {@code habitationLike} override
      * fires (design 6.7: "not habitation-like" gates the STOP rows). The bot must keep working, never pause.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_player_base_downgrades_to_consult_not_stop",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_player_base_downgrades_to_consult_not_stop",
             maxTicks = 900)
     public void playerBaseDowngradesToConsultNotStop(TestContext context) {
         Harness h = new Harness(context);
@@ -368,7 +368,7 @@ public final class OreDigPoiGameTests {
 
     /** A DECLINED cavern-only site recorded at the exact anchor a mandatory candidate later appears at never
      * suppresses it: mandatory is decided before {@code PoiRegistry.suppressed} is ever consulted. */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_declined_cavern",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_declined_cavern",
             maxTicks = 200)
     public void wardenStopNotSuppressedAfterDeclinedCavern(TestContext context) {
         Harness h = new Harness(context);
@@ -412,7 +412,7 @@ public final class OreDigPoiGameTests {
     /** After the player resumes an earlier, unrelated, non-mandatory stop, a fresh mandatory candidate
      * elsewhere still stops the bot: resuming one case never leaves any latch or registry state that could
      * blunt an unrelated later mandatory stop. */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_player_continue",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_player_continue",
             maxTicks = 200)
     public void wardenStopNotSuppressedAfterPlayerContinue(TestContext context) {
         Harness h = new Harness(context);
@@ -481,7 +481,7 @@ public final class OreDigPoiGameTests {
      * live hold's dedupe state -- before the genuine-unload variant {@code clearBotUnload} is used for the
      * restart itself.</p>
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_restart_during_stop_rebuilds_case", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_restart_during_stop_rebuilds_case", maxTicks = 300)
     public void restartDuringStopRebuildsCase(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(60, -3, 3, -3, 3, 3);
@@ -574,7 +574,7 @@ public final class OreDigPoiGameTests {
     /** The vanilla "continue" chat phrase closes an open POI case purely through
      * {@code IntentController.routePlayerControlPhrase -> resume}; no {@code PoiCoordinator} code is involved in
      * the resume decision itself, only in tending the bookkeeping afterward. */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_continue_phrase_resumes_to_anchor", maxTicks = 200)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_continue_phrase_resumes_to_anchor", maxTicks = 200)
     public void continuePhraseResumesToAnchor(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(70, -3, 3, -3, 3, 3);
@@ -645,7 +645,7 @@ public final class OreDigPoiGameTests {
     /** A POSSIBLE candidate below the fallback's structure-score threshold never pauses a descending
      * {@code DigDownTask}: the design 6.7 fallback matrix resolves to NOTIFY_ONLY, and DigDown keeps descending
      * untouched. */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_dig_down_possible_fallback_never_pauses_below_threshold",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_possible_fallback_never_pauses_below_threshold",
             maxTicks = 200)
     public void digDownPossibleFallbackNeverPausesBelowThreshold(TestContext context) {
         Harness h = new Harness(context);
@@ -706,7 +706,7 @@ public final class OreDigPoiGameTests {
      * (always selecting the standard/mandatory template, never the climb-out one, for every DigDown-descend
      * stop) would have gone undetected without a real paused task to observe.</p>
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_dig_down_stop_uses_descent_climb_notice",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_stop_uses_descent_climb_notice",
             maxTicks = 200)
     public void digDownStopUsesDescentClimbNotice(TestContext context) {
         Harness h = new Harness(context);
@@ -759,7 +759,7 @@ public final class OreDigPoiGameTests {
     /** Same descent-notice-variant proof as {@link #digDownStopUsesDescentClimbNotice} (including the same
      * pre-pause-capture timing point), off a MANDATORY trigger instead of a structure-certain one: every
      * source uses the climb-out template while DigDown is descending. */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_dig_down_mandatory_uses_descent_variant_too",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_mandatory_uses_descent_variant_too",
             maxTicks = 200)
     public void digDownMandatoryUsesDescentVariantToo(TestContext context) {
         Harness h = new Harness(context);
@@ -840,7 +840,7 @@ public final class OreDigPoiGameTests {
      * identically (same {@code poi_stop} log line, same pause) under both {@code noticeRecipients} policies,
      * proving recipient selection is orthogonal to the coordinator's own state changes.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_notice_reaches_only_authorized_players",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_notice_reaches_only_authorized_players",
             maxTicks = 250)
     public void noticeReachesOnlyAuthorizedPlayers(TestContext context) {
         Harness h = new Harness(context);
@@ -925,7 +925,7 @@ public final class OreDigPoiGameTests {
      * cancelIntentTasks, and a despawn during an active pause bumps it by exactly 1 (via
      * {@code onBotDespawn -> cancelIntentTasks(bot, "bot_unload")} as its own first statement), never 2 --
      * the real-server regression guard for the double-bump fix (contract §0 correction #4/§3.1). */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_user_pause_epoch_bumps_on_every_transition",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_user_pause_epoch_bumps_on_every_transition",
             maxTicks = 100)
     public void userPauseEpochBumpsOnEveryTransition(TestContext context) {
         Harness h = new Harness(context);
@@ -985,7 +985,7 @@ public final class OreDigPoiGameTests {
      * then a STOP verdict promotes that hold in place into a real stop -- never a second
      * {@code IntentController.pause} -- with the dedupe registry recording it STOPPED.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_stop", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_stop", maxTicks = 300)
     public void possibleCandidateHoldsThenStop(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(130, -3, 3, -3, 3, 3);
@@ -1054,7 +1054,7 @@ public final class OreDigPoiGameTests {
      * {@code TaskManager.resumeUserIntent(bot, "poi_cleared")} un-pauses the mission and the dedupe registry
      * records the candidate DECLINED, never STOPPED.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_continue", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_continue", maxTicks = 300)
     public void possibleCandidateHoldsThenContinue(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(140, -3, 3, -3, 3, 3);
@@ -1123,7 +1123,7 @@ public final class OreDigPoiGameTests {
      * becomes a notify-only "Late check" line instead (design 6.6: "Late replies never pause"), and the
      * registry still records the outcome for future dedupe even though the bot's pause state is untouched.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_player_pause_during_hold_is_never_overridden",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_player_pause_during_hold_is_never_overridden",
             maxTicks = 300)
     public void playerPauseDuringHoldIsNeverOverridden(TestContext context) {
         Harness h = new Harness(context);
@@ -1203,7 +1203,7 @@ public final class OreDigPoiGameTests {
      * pause is promoted in place, exactly like a real verdict's STOP branch. When the stub eventually does
      * answer, its (now-stale) verdict must be a silent no-op: no second stop, no duplicate log line.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_consult_deadline_applies_fallback_when_advisor_is_slow",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_consult_deadline_applies_fallback_when_advisor_is_slow",
             maxTicks = 700)
     public void consultDeadlineAppliesFallbackWhenAdvisorIsSlow(TestContext context) {
         Harness h = new Harness(context);
@@ -1283,7 +1283,7 @@ public final class OreDigPoiGameTests {
      * transport (present, but must never be invoked) is bypassed entirely and the design 6.7 fallback matrix
      * runs synchronously, exactly like P2 -- no hold, no pause-then-resolve delay.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_degraded_tps_skips_consult_and_uses_fallback",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_degraded_tps_skips_consult_and_uses_fallback",
             maxTicks = 200)
     public void degradedTpsSkipsConsultAndUsesFallback(TestContext context) {
         Harness h = new Harness(context);
@@ -1347,7 +1347,7 @@ public final class OreDigPoiGameTests {
      * resumeUserIntent} would restore it (proven directly, not by waiting for a verdict, exactly like the
      * regression proven by {@code IntentController.pause}/{@code resume} never being called at all here).
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_hold_does_not_clear_planner_wake_state",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_hold_does_not_clear_planner_wake_state",
             maxTicks = 300)
     public void holdDoesNotClearPlannerWakeState(TestContext context) {
         Harness h = new Harness(context);
@@ -1434,7 +1434,7 @@ public final class OreDigPoiGameTests {
      * the fallback left it (paused, one {@code poi_stop} line, never resumed), while the cache still gets the
      * real verdict so a later candidate in the same coarse cell benefits from it.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 3800)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 3800)
     public void lateVerdictIsNotifyOnly(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(190, -3, 3, -3, 3, 3);
@@ -1541,7 +1541,7 @@ public final class OreDigPoiGameTests {
      * since the restart-simulated bot object is the very one the callback closures captured), never reaching
      * the fail-closed rehydration path at all.
      */
-    @GameTest(environment = "aibot-gametest:ore_dig_poi_game_tests_restart_during_consulting_hold_fails_closed",
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_restart_during_consulting_hold_fails_closed",
             maxTicks = 300)
     public void restartDuringConsultingHoldFailsClosed(TestContext context) {
         Harness h = new Harness(context);
@@ -1951,8 +1951,8 @@ public final class OreDigPoiGameTests {
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {
-            require(AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                    "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+            require(MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                    "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
             for (PrivilegedCapability capability : PrivilegedCapability.values()) {
                 require(!CapabilityRuntime.decide(bot, capability, label).allowed(),
                         "strict_survival unexpectedly allowed " + capability);

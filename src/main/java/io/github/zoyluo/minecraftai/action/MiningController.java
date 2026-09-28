@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogFields;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistHooks;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistHooks;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;

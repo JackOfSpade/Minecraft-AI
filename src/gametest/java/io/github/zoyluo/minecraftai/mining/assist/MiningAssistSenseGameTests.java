@@ -1,28 +1,28 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLogWriter;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.observe.BotProfiler;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.AbstractTask;
-import io.github.zoyluo.aibot.task.DescendToYTask;
-import io.github.zoyluo.aibot.task.DigDownTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MineValuablesTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskState;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.AbstractTask;
+import io.github.zoyluo.minecraftai.task.DescendToYTask;
+import io.github.zoyluo.minecraftai.task.DigDownTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MineValuablesTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskState;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -73,7 +73,7 @@ import java.util.regex.Pattern;
  * <p>Numbers observed in the real world are written to the server log with the tag {@code [assist-gametest]}.</p>
  */
 public final class MiningAssistSenseGameTests {
-    private static final Logger LOG = LoggerFactory.getLogger("aibot-assist-gametest");
+    private static final Logger LOG = LoggerFactory.getLogger("minecraftai-assist-gametest");
 
     /** Thickness of the stone shell around every fixture: an ore two layers deep is enclosed on every side. */
     private static final int SHELL = 3;
@@ -86,7 +86,7 @@ public final class MiningAssistSenseGameTests {
     // 1. A visible ore is sighted within two sweeps
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_visible_ore", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_visible_ore", maxTicks = 500)
     public void visibleOreInsideACaveIsSighted(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(20, -4, 4, -3, 3, 4);
@@ -183,7 +183,7 @@ public final class MiningAssistSenseGameTests {
     // 1b. The same, while a real OreDig mission actually mines (break peek included)
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_real_ore_dig", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_real_ore_dig", maxTicks = 700)
     public void realOreDigMissionIsSensedWhileItMines(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -4, 4, -3, 3, 4);
@@ -268,7 +268,7 @@ public final class MiningAssistSenseGameTests {
     // 2. The x-ray canary: an ore behind one stone layer is never sighted
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_enclosed_ore", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_enclosed_ore", maxTicks = 500)
     public void oreBehindOneStoneLayerIsNeverSighted(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(40, -4, 4, -3, 3, 3);
@@ -357,7 +357,7 @@ public final class MiningAssistSenseGameTests {
     // 3. An un-forced bot stays completely off (the harness default)
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_unforced_off", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_unforced_off", maxTicks = 700)
     public void unforcedBotStaysOff(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(50, -4, 4, -3, 3, 4);
@@ -430,7 +430,7 @@ public final class MiningAssistSenseGameTests {
     // 4. Non-real origins never sense (VERIFY, SAFETY, SYSTEM_BACKGROUND), a real one does
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_verify_origin", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_verify_origin", maxTicks = 500)
     public void verifyOriginNeverSenses(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(60, -3, 3, -3, 3, 3);
@@ -495,7 +495,7 @@ public final class MiningAssistSenseGameTests {
     // 4b. An open audit session, and a degraded TPS verdict, close the gate at once
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_audit_gate", maxTicks = 600)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_audit_gate", maxTicks = 600)
     public void auditSessionAndDegradedTpsCloseTheGate(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(55, -3, 3, -3, 3, 3);
@@ -599,7 +599,7 @@ public final class MiningAssistSenseGameTests {
     // 5. POI palette: a mineshaft scores as a structure, the bot's own edits do not
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_mineshaft_poi", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_mineshaft_poi", maxTicks = 700)
     public void minePoiPaletteScoresAsStructureInShadow(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(70, -9, 9, -1, 1, 3);
@@ -689,7 +689,7 @@ public final class MiningAssistSenseGameTests {
         }));
     }
 
-    @GameTest(environment = "aibot-gametest:assist_sense_own_edits_poi", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_own_edits_poi", maxTicks = 800)
     public void botOwnPlacementsNeverScoreAsStructure(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(85, -5, 5, -4, 4, 4);
@@ -816,7 +816,7 @@ public final class MiningAssistSenseGameTests {
     // 6. Four bots, bounded cost
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_four_bot_cost", maxTicks = 800)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_four_bot_cost", maxTicks = 800)
     public void fourBotsSensingCostStaysBounded(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(25, -9, 9, -9, 9, 6);
@@ -968,7 +968,7 @@ public final class MiningAssistSenseGameTests {
     // 7. Design "done when": recall of ores within 8 blocks after two sweeps
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_recall", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_recall", maxTicks = 500)
     public void recallWithinEightBlocksAfterTwoSweeps(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(35, -6, 6, -6, 6, 10);
@@ -1077,7 +1077,7 @@ public final class MiningAssistSenseGameTests {
     // 7b. Pause, abort, re-assign and despawn leave nothing behind
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_lifecycle", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_lifecycle", maxTicks = 500)
     public void pauseAbortAndDespawnMidSenseLeaveNoLeakedState(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(45, -3, 3, -3, 3, 3);
@@ -1204,7 +1204,7 @@ public final class MiningAssistSenseGameTests {
     // 7c. Every mining class senses; other tasks do not
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_task_classes", maxTicks = 600)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_task_classes", maxTicks = 600)
     public void everyMiningClassSensesAndOtherTasksDoNot(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(65, -3, 3, -3, 3, 3);
@@ -1281,7 +1281,7 @@ public final class MiningAssistSenseGameTests {
     // 7c2. A real strip mine: the break peek and the bot's own torches, measured on a bot that really digs
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_strip_mine", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_strip_mine", maxTicks = 900)
     public void realStripMineIsPeekedAndItsOwnTorchesNeverScore(TestContext context) {
         Harness h = new Harness(context);
         // A small pocket inside a solid mass of stone, and a target ore that does not exist: OreDig strip-mines.
@@ -1378,7 +1378,7 @@ public final class MiningAssistSenseGameTests {
     // 7d. The documented clocks: a cost summary per minute of sensing, state released after two idle minutes
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "aibot-gametest:assist_sense_clocks", maxTicks = 4600)
+    @GameTest(environment = "minecraftai-gametest:assist_sense_clocks", maxTicks = 4600)
     public void summaryLineAndIdleReleaseFollowTheDocumentedClocks(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(75, -3, 3, -3, 3, 3);
@@ -1652,7 +1652,7 @@ public final class MiningAssistSenseGameTests {
                 require(p.tick < 200, "the sealed fixture never became underground by the world's sky test");
                 return false;
             }
-            int ring = (int) Math.ceil(SenseBudget.sweepRadius(AIBotConfig.get().perception().radius()) / 16.0D);
+            int ring = (int) Math.ceil(SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius()) / 16.0D);
             boolean loaded = true;
             for (int dx = -ring; dx <= ring && loaded; dx++) {
                 for (int dz = -ring; dz <= ring && loaded; dz++) {
@@ -1673,8 +1673,8 @@ public final class MiningAssistSenseGameTests {
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {
-            require(AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                    "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+            require(MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                    "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
             for (PrivilegedCapability capability : PrivilegedCapability.values()) {
                 require(!CapabilityRuntime.decide(bot, capability, label).allowed(),
                         "strict_survival unexpectedly allowed " + capability);

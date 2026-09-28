@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AmbientConversationCoordinatorTest {
 
-    private static AIBotConfig.Conversation conversation(double readingWpm, double thinkingSecondsPerWord,
+    private static MinecraftAiConfig.Conversation conversation(double readingWpm, double thinkingSecondsPerWord,
                                                           double minDelay, double maxDelay) {
-        return new AIBotConfig.Conversation(true, 12000, 200, 0.03D, 1, 4,
+        return new MinecraftAiConfig.Conversation(true, 12000, 200, 0.03D, 1, 4,
                 readingWpm, thinkingSecondsPerWord, minDelay, maxDelay, 100);
     }
 
@@ -90,7 +90,7 @@ class AmbientConversationCoordinatorTest {
 
     @Test
     void delayGrowsWithMessageLengthWithinTheConfiguredBounds() {
-        AIBotConfig.Conversation cfg = conversation(200, 0.15, 2, 25);
+        MinecraftAiConfig.Conversation cfg = conversation(200, 0.15, 2, 25);
         int shortDelay = AmbientConversationCoordinator.computeDelayTicks("Nice weather today.", cfg);
         int longDelay = AmbientConversationCoordinator.computeDelayTicks(
                 "I was thinking we should head north past the ravine and check out that abandoned "
@@ -103,7 +103,7 @@ class AmbientConversationCoordinatorTest {
 
     @Test
     void delayNeverExceedsTheConfiguredCeilingEvenForAVeryLongMessage() {
-        AIBotConfig.Conversation cfg = conversation(200, 0.15, 2, 10);
+        MinecraftAiConfig.Conversation cfg = conversation(200, 0.15, 2, 10);
         String longMessage = "word ".repeat(200);
         int delay = AmbientConversationCoordinator.computeDelayTicks(longMessage, cfg);
         assertEquals((int) Math.round(cfg.maxReplyDelaySeconds() * 20), delay);

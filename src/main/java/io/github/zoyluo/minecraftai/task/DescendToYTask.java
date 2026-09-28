@@ -1,21 +1,21 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.action.ToolSelector;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.Registries;
@@ -36,29 +36,38 @@ import java.util.OptionalInt;
 import java.util.Set;
 
 /**
- * DESCEND_TO_Y(挖深层矿重构 P1):连续挖竖井**下到指定 Y 层**,然后交还 —— 专为"挖钻石/红石等深层矿前先到矿层"设计。
+ * DESCEND_TO_Y (deep-ore digging rework, P1): continuously digs a vertical shaft **down to a
+ * specified Y level**, then hands back control -- purpose-built for "reach the ore layer before
+ * mining diamond/redstone/other deep ores".
  *
- * 病根(实测):OreDigTask 把"下挖"和"找矿"耦合在一个 scan 限频循环里,从 Y=48 想挖到钻石层(Y<16)时
- * 反复"锁定斜下方够不到的矿→水平掘隧道→dist 卡死→no_progress",卡死 11 分钟。本任务把"下到矿层"独立出来:
- * 用共享 {@link BlockMiner} 连续挖脚下(不受任何限频),bot 无被动重力则主动 descendInto 下沉,
- * 遇岩浆硬停、遇水穿过(与 DigDownTask 一致),一路掘到 targetY。到层后由 GoalExecutor 接 MINE_ORE(此时矿在水平面近处)。
+ * Root cause (observed in testing): OreDigTask coupled "dig down" and "find ore" into one
+ * rate-limited scan loop. When trying to dig from Y=48 down to the diamond layer (Y<16), it
+ * repeatedly cycled "lock onto an out-of-reach diagonally-below ore -> tunnel horizontally ->
+ * dist gets stuck -> no_progress", hanging for 11 minutes. This task pulls "descend to the ore
+ * layer" out as its own responsibility: it uses the shared {@link BlockMiner} to continuously mine
+ * straight down at its feet (not subject to any rate limit); when the bot has no passive gravity it
+ * actively descends via descendInto; it hard-stops on lava and passes through water (same as
+ * DigDownTask), digging all the way down to targetY. Once at the layer, GoalExecutor takes over
+ * with MINE_ORE (ore is now close by on the horizontal plane).
  *
- * 自包含状态机(G1,不自 assign),全程主线程(G2)。
+ * A self-contained state machine (G1, not self-assigning), entirely on the main thread (G2).
  */
 public final class DescendToYTask extends AbstractTask implements CheckpointableTask {
     private static final int CHECKPOINT_SCHEMA = 4;
     private static final int EDGE_CHECKPOINT_SCHEMA = 3;
     private static final int LEGACY_CHECKPOINT_SCHEMA = 2;
     private static final int MAX_CHECKPOINTED_WATER_SEALS = 256;
-    private static final int NO_PROGRESS_LIMIT = 200;  // 10s 没破任何块即失败(挖不动/卡住)
+    private static final int NO_PROGRESS_LIMIT = 200;  // fail if no block is broken for 10s (can't dig / stuck)
     private static final int MIN_Y = -60;
     // One obstructed layer can be the roof of a broad natural cave, not only a lava pool.
     // Keep the graph walk bounded, but leave enough factual movement budget to reach a nearby
     // supported rim after exploring a short dead branch (seed-3000 needs 21 unique edges).
     private static final int MAX_LATERAL = 32;
-    // 落点漂移(击退/推挤把 bot 打到 origin/target 之外的第三格)是常见外力事件,不是安全
-    // 不变量破坏:以当前实际站位为新的台阶起点重规划即可。仅当一次下潜内反复漂移超过此
-    // 上限,才按原 fail-closed 语义终结任务(说明存在持续的外部干扰或物理异常)。
+    // Landing drift (knockback/pushing knocks the bot to a third cell outside origin/target) is a
+    // common external-force event, not a safety-invariant violation: simply replan the stair from
+    // the bot's actual current stance as the new origin. Only when drift repeats beyond this cap
+    // within a single descent does the task terminate under the original fail-closed semantics
+    // (indicating persistent external interference or a physics anomaly).
     private static final int MAX_LANDING_DRIFT_RECOVERIES = 8;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
@@ -78,10 +87,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private int budgetOffset;
     private int budgetLimit;
     private int lastProgressTick;
-    private int lateralDetours; // 当前高度层已横移绕岩浆/卡点的次数
-    private int landingDriftRecoveries; // 本次下潜内已从落点漂移恢复的次数
-    private int stairDirIndex;  // 台阶斜下的当前水平方向(HORIZONTAL 下标)
-    private int detourHeadingIndex = -1; // 绕行保持航向，把立即原路返回放到最后
+    private int lateralDetours; // number of lateral detours already taken around lava/obstructions at the current height level
+    private int landingDriftRecoveries; // number of landing-drift recoveries already performed within this descent
+    private int stairDirIndex;  // the stair's current diagonal-descent horizontal direction (index into HORIZONTAL)
+    private int detourHeadingIndex = -1; // detours keep heading; an immediate reversal is tried last
     // SafetyNet runs after task ticks.  Remember the most recent physical landing so that, when
     // water/unsupported-footing recovery returns the bot to its origin, the next task tick rotates
     // away instead of issuing the identical rejected edge forever.
@@ -102,9 +111,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // touched yet) or is merely an artifact of the bot's own in-progress excavation of this exact
     // stair tread. See the flat-landing shortcut below for why this distinction matters.
     private BlockPos selfCarvedAheadAt;
-    private boolean started;    // 是否已打 descend_started 日志
-    private int lastTorchY = Integer.MAX_VALUE; // P1:上次插火把的 Y(每下 TORCH_EVERY 格插一支)
-    private static final int TORCH_EVERY = 6;   // 火把光照半径足够覆盖 6 格落差,不刷怪
+    private boolean started;    // whether the descend_started log has already been emitted
+    private int lastTorchY = Integer.MAX_VALUE; // P1: the Y of the last placed torch (one torch every TORCH_EVERY blocks descended)
+    private static final int TORCH_EVERY = 6;   // a torch's light radius comfortably covers a 6-block drop, preventing mob spawns
 
     public DescendToYTask(int targetY) {
         this(targetY, Map.of());
@@ -307,7 +316,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     @Override
     public boolean isWaiting() {
-        // 下挖期 bot 站着挖,位置基本不变;视为 waiting 让 StuckWatcher 不误判,由本任务 NO_PROGRESS_LIMIT 看门狗兜底。
+        // While digging down the bot stands and mines in place, so its position barely changes; report waiting so StuckWatcher doesn't misjudge it as stuck -- this task's own NO_PROGRESS_LIMIT watchdog is the real backstop.
         return true;
     }
 
@@ -364,9 +373,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 rejectLandingDirection(feet, interruptedDirection);
             }
         }
-        // 带铁套加成:下潜进危险深层前主动穿上背包里最好的甲(钻石计划已在 preamble 备了头胸甲)。
-        // 深潜死因多是生存(岩浆/怪/低血),铁甲直接减伤;不等战斗触发才穿(被动伤害也护)。
-        io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot);
+        // Armor-up bonus: before descending into a dangerous deep layer, proactively equip the
+        // best armor in the inventory (the diamond plan already stocked a helmet + chestplate in
+        // the preamble). Most deep-descent deaths are survival deaths (lava/mobs/low health), and
+        // iron armor directly reduces damage taken; equip it now rather than waiting for combat to
+        // trigger it, since it also protects against passive damage.
+        io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         initializeSafeLandingHistory(bot);
     }
 
@@ -451,14 +463,18 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (tryFreshEntryRelocation(bot, world, feet)) {
             return;
         }
-        // 含水层的水会在破开相邻石块后侧向/从顶上灌进刚挖出的台阶。只检查下一格是否
-        // 已经是水不够：检查时是石头，破坏完成后才变成流动水。和 DigDownTask 一样，
-        // 每 tick 用背包方块逐格封住脚位/头位周围的水，先恢复干燥工作泡再继续下潜。
+        // An aquifer's water can flow sideways/downward into a freshly dug stair after an adjacent
+        // stone block is broken. Checking only whether the next cell is already water is not
+        // enough: at check time it is still stone, and only becomes flowing water once the break
+        // completes. Same as DigDownTask: every tick, use an inventory block to seal off the water
+        // around the foot/head cells one cell at a time, restoring a dry working bubble before
+        // continuing the descent.
         if (sealLateralWater(bot, world)) {
             return;
         }
-        // 到达目标层也必须交付一个干燥工作面。旧逻辑在水下 Y=16 直接 complete，紧接的
-        // OreDig 看不到可工作格并在 200 tick 后错误 replan 到矿底砍树。
+        // Reaching the target layer must also hand off a dry working face. The old logic completed
+        // immediately even underwater at Y=16, and the subsequent OreDig would see no workable cell
+        // and incorrectly replan to chop trees at the bottom of the mine after 200 ticks.
         if (feet.getY() == targetY) {
             // Entity water flags lag a server tick behind fluid placement/removal. Read the
             // authoritative cells as well and require actual footing before handing the face to
@@ -479,13 +495,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             complete();
             return;
         }
-        maybePlaceTorch(bot, world, feet); // P1:下潜途中定距点火把,深井不再全黑刷怪(实测下潜 Y-58 全程 light=0 被骷髅围杀)
+        maybePlaceTorch(bot, world, feet); // P1: place torches at fixed intervals while descending so a deep shaft is no longer pitch black and mob-spawning (observed: descending to Y-58 stayed light=0 throughout and the bot was swarmed by skeletons)
         BlockPos below = feet.down();
         if (below.getY() <= MIN_Y) {
             fail("descend_reached_min_y");
             return;
         }
-        // 卡住太久(挖不动/被挡)→ 先横移到相邻列绕过,四面不通才失败。
+        // Stuck too long (can't dig / blocked) -> first try a lateral detour around it; only fail if all four sides are impassable.
         if (totalBudget() - lastProgressTick > NO_PROGRESS_LIMIT) {
             if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
                 lastProgressTick = totalBudget();
@@ -496,7 +512,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
 
-        // 推进当前挖掘。
+        // Advance the current mining operation.
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.MINING) {
             return;
@@ -505,8 +521,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             lastProgressTick = totalBudget();
         }
 
-        // 台阶式斜向下挖(拟人 + 安全):挖"下一级台阶"(斜前下方),先暴露前方——下一级或其踏面是水/岩浆
-        // 就换方向绕,绝不直挖脚下(避免一镐捅穿到下方的水/岩浆)。像挖楼梯一样一级一级斜下。
+        // Stair-style diagonal descent (human-like + safe): dig "the next stair step" (diagonally
+        // forward-down), exposing what's ahead first -- if the next step or its tread is water/lava,
+        // switch direction and go around; never mine straight down through the feet (to avoid one
+        // pickaxe swing breaking through into water/lava below). Descend diagonally one step at a
+        // time, like digging a staircase.
         ensureRejectedLandingOrigin(feet);
         if ((rejectedLandingDirections & 1 << stairDirIndex) != 0) {
             if (rotateStair(bot, world, feet)) {
@@ -520,8 +539,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
         Direction dir = HORIZONTAL[stairDirIndex];
-        BlockPos ahead = feet.offset(dir);   // 下一级头位 (x+d, y)
-        BlockPos next = ahead.down();         // 下一级站位 (x+d, y-1)
+        BlockPos ahead = feet.offset(dir);   // next step's head cell (x+d, y)
+        BlockPos next = ahead.down();         // next step's standing cell (x+d, y-1)
         if (containsOwnedWaterSeal(world, ahead, ahead.up(), next)
                 || !isViableDescentDirection(bot, world, feet, stairDirIndex)) {
             // Mining next's tread can reveal that its own support is an already-mined cavity or a
@@ -533,9 +552,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
             rejectLandingDirection(feet, stairDirIndex);
             if (rotateStair(bot, world, feet)) {
-                return; // 换了个不挨水/岩浆的斜下方向
+                return; // switched to a diagonal-descent direction that doesn't touch water/lava
             }
-            // 四个斜下方向都被水/岩浆挡 → 退回横移绕(卡死兜底)。
+            // All four diagonal-descent directions are blocked by water/lava -> fall back to a lateral detour (stuck-condition backstop).
             if (lateralDetours < MAX_LATERAL && tryLateralDetour(bot, world, feet)) {
                 lastProgressTick = totalBudget();
                 return;
@@ -544,10 +563,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             fail("descend_no_safe_landing at_y=" + next.getY());
             return;
         }
-        // 清出下一级身位:ahead(前方头位,可见先挖) + ahead.up()(前上,头顶净空) + next(脚位)。
-        // 关键补挖 ahead.up()——只清 next+ahead 的旧台阶每列仅 2 格(Y-1,Y),玩家从上一级走下来时头会撞到
-        // 前方 Y+1 的实心顶,对角下台阶只剩 1 格可走高、正常玩家(1.8高)钻不进(实测下潜矿道人过不去)。
-        // 补 ahead.up() 后下潜巷道沿对角线真正 2 格净空可通行。firstSolid3 跳流体防溃浆。
+        // Clear the next step's body space: ahead (the forward head cell, visible, mined first) +
+        // ahead.up() (forward-up, headroom clearance) + next (the foot cell). The key extra dig is
+        // ahead.up() -- the old stair that only cleared next+ahead gave each column just 2 cells
+        // (Y-1, Y); when the player walks down from the previous step, their head hits the solid
+        // ceiling at the forward Y+1 cell, leaving only 1 walkable-height cell on the diagonal step
+        // down, which a normal player (1.8 blocks tall) cannot fit through (observed: the bot
+        // physically could not pass through the descent shaft). After adding ahead.up(), the descent
+        // tunnel has a genuine 2-cell-high clearance along the diagonal and is passable. firstSolid3
+        // skips fluids to avoid a lava/water collapse.
         BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
         DetourEdge flatLandingEdge = new DetourEdge(feet, ahead);
         if (solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
@@ -622,8 +646,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
         }
         if (solid != null) {
-            // 工具闸(与 DigDownTask 一致):无合格镐时立即以类型化原因失败,交 GoalExecutor
-            // 倒推补镐;否则空手磨深板岩会把整个下潜窗口烧成无类型的 descend_timeout。
+            // Tool gate (same as DigDownTask): fail immediately with a typed reason when no
+            // qualifying pickaxe is available, letting GoalExecutor work backward to restock a
+            // pickaxe; otherwise grinding away at deepslate bare-handed would burn the entire descent
+            // window into an untyped descend_timeout.
             if (!ToolTier.canHarvestWithInventory(bot, world.getBlockState(solid))) {
                 miner.cancel(bot);
                 bot.getActionPack().stopAll();
@@ -641,7 +667,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             markStarted(bot, feet);
             return;
         }
-        // 身位已通 → 斜下踏到下一级台阶(bot 无被动重力,仍需主动移一格;斜向移近似踏下一级楼梯)。
+        // Body space is now clear -> step diagonally down onto the next stair step (the bot has no passive gravity, so it still needs to actively move one cell; the diagonal move approximates stepping down one stair).
         BlockPos origin = feet.toImmutable();
         boolean descended = bot.getActionPack().descendInto(next);
         if (descended && bot.getBlockPos().equals(next)) {
@@ -803,9 +829,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private static boolean physicallyRetreat(AIPlayerEntity bot, BlockPos from, BlockPos to) {
         int dy = to.getY() - from.getY();
         return dy == 1
-                ? io.github.zoyluo.aibot.mode.FakePlayerMotion.jumpTo(
+                ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
                         bot, to, "descend_blocked_body_retreat")
-                : io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+                : io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                         bot, to, "descend_blocked_body_retreat");
     }
 
@@ -974,10 +1000,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || !Standability.isStandable(world, feet)) {
             return false;
         }
-        // MAX_LATERAL 是单个障碍层的绕行预算，不是整段深潜的全局预算。
-        // 只有落到本轮绕行触及的最低层以下，才算真正绕过障碍。上退一层后重新
-        // 落回同一最低层不构成进展：若在这里清账，A->B->A->upper->A 会每几 tick
-        // 重新获得完整预算并永久循环。湿落点被退回原位时同样不能白得预算。
+        // MAX_LATERAL is the detour budget for a single obstruction layer, not a global budget for
+        // the whole descent. Only landing below the lowest layer touched by this round of detours
+        // counts as genuinely having gotten past the obstruction. Retreating up one level and then
+        // landing back on that same lowest layer is not progress: if the budget were cleared here,
+        // A->B->A->upper->A would regain a full budget every few ticks and loop forever. Likewise, a
+        // wet landing that gets rejected back to the original position must not get a free budget
+        // refund.
         boolean advancedBelowDetourFloor = traversedDetourEdges.isEmpty()
                 || feet.getY() < lowestTraversedDetourY();
         if (advancedBelowDetourFloor) {
@@ -1144,12 +1173,18 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos);
     }
 
-    // 竖井被岩浆(或卡点)挡住时,横移一格到"无岩浆、可下挖"的相邻列,绕过去继续下挖。
-    // 挖开通往侧列的块(挨岩浆的块不挖,防溃浆淹没);通了就通过相邻物理 step/jump 过去。
-    // 四面都不可行 → 返回 false,由调用方判失败(交规避层"困死撤离"兜底)。
+    // When the shaft is blocked by lava (or another obstruction), move laterally one cell to an
+    // adjacent column that is "lava-free and diggable" to go around it and keep descending. Mine
+    // the block leading to that side column (never mine a block touching lava, to prevent a
+    // lava-collapse flood); once it's open, move over via an adjacent physical step/jump. If all
+    // four sides are infeasible -> return false, letting the caller judge failure (the evasion
+    // layer's "trapped -- evacuate" logic is the backstop).
     private boolean tryLateralDetour(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
-        // 先在当前层找无岩浆侧列绕;当前层四面都被岩浆封死(大岩浆湖,实测 at_y=50:脚下及四面 side.down 皆岩浆
-        // → 当前层无解 → 整步失败)时,上退一层在岩浆湖顶上方绕——通常能爬到岩浆湖边缘外继续下挖。
+        // First look for a lava-free side column to detour through on the current level; when the
+        // current level is sealed on all four sides by lava (a large lava lake -- observed at
+        // at_y=50: the feet and all four side.down cells were lava -> no solution on the current
+        // level -> the whole step fails), retreat up one level and detour above the lava lake's
+        // surface -- this usually lets the bot climb out past the lake's rim and keep descending.
         int[] directionOrder = detourDirectionOrder();
         for (int dy = 0; dy <= 1; dy++) {
             BlockPos base = feet.up(dy);
@@ -1176,7 +1211,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     continue;
                 }
                 if (isLava(world, side) || isLava(world, side.up()) || isLava(world, support)) {
-                    continue; // 别往岩浆方向横移
+                    continue; // don't move laterally toward lava
                 }
                 // Verify the factual landing before clearing its body column. A solid side block
                 // can hide an unsupported floor below it; mining that block first both discovers
@@ -1199,7 +1234,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     // Only a genuinely visible neighbouring lava source (through an already open
                     // gap elsewhere) may reject this block; unmined rock beyond it stays UNKNOWN.
                     if (hasObservedAdjacentLava(bot, world, solid)) {
-                        continue; // 要挖的块挨着已可见的岩浆,挖了会溃浆淹没,换方向
+                        continue; // the block to mine is adjacent to already-visible lava; mining it would cause a lava collapse -- switch direction
                     }
                     if (!ToolTier.canHarvestWithInventory(bot, world.getBlockState(solid))) {
                         miner.cancel(bot);
@@ -1213,14 +1248,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     }
                     miner.tick(bot);
                     markStarted(bot, feet);
-                    return true; // 正在挖通往侧列的路(本 tick 算进展)
+                    return true; // currently mining the path to the side column (counts as progress this tick)
                 }
-                // 侧列已通(脚位+头位皆空)→ 相邻物理移动(可能上退一层),下个 tick 在新列继续下挖。
+                // The side column is now clear (foot and head cells both empty) -> move over via adjacent physical movement (possibly retreating up one level), then continue descending in the new column on the next tick.
                 miner.cancel(bot);
                 boolean moved = dy == 0
-                        ? io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+                        ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                                 bot, side, "descend_lava_detour")
-                        : io.github.zoyluo.aibot.mode.FakePlayerMotion.jumpTo(
+                        : io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
                                 bot, side, "descend_lava_detour");
                 if (!moved) {
                     continue;
@@ -1384,9 +1419,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     /**
-     * 沿当前航向探索障碍边缘：直行、右转、左转，最后才原路返回。
-     * 固定按 NORTH/EAST/SOUTH/WEST 枚举会在两格通道中把 south 的回头路
-     * 排在 west 的新出口之前，从而北南往返直到耗尽预算。
+     * Explores the edge of an obstruction along the current heading: straight ahead, turn right,
+     * turn left, and only try reversing course last. A fixed NORTH/EAST/SOUTH/WEST enum order would
+     * place the "south" reversal path ahead of the "west" new exit in a two-cell-wide passage,
+     * causing the bot to shuttle back and forth north-south until the budget is exhausted.
      */
     private int[] detourDirectionOrder() {
         int forward = detourHeadingIndex >= 0 ? detourHeadingIndex : stairDirIndex;
@@ -1507,10 +1543,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
     }
 
-    // 台阶斜下:换到下一个"不挨水/岩浆"的斜下方向;四面都不行返回 false(交横移兜底)。
-    // 顺序与 tryLateralDetour 的 detourDirectionOrder 一致(右转、左转,最后才原路返回):被拒方向
-    // 背后的深层支撑一旦不可见就"未知即放行",反向格因此也可能显得"可行"——但那只是刚离开的
-    // 起点,直着走两侧新方向才是真探索,回头是最后才该试的选项,否则两格间会来回摆动耗尽预算。
+    // Diagonal stair descent: switch to the next diagonal-descent direction that "doesn't touch
+    // water/lava"; if none of the four directions work, return false (a lateral detour is the
+    // backstop). The order matches tryLateralDetour's detourDirectionOrder (turn right, turn left,
+    // and only try reversing course last): once a rejected direction's deeper support becomes
+    // unobservable it is treated as "unknown, so allowed", which can make the reverse cell look
+    // "viable" too -- but that is only the origin just left. Walking straight into the two new side
+    // directions is genuine exploration; reversing course should be the last option tried, otherwise
+    // the bot would oscillate back and forth between two cells until the budget is exhausted.
     private boolean rotateStair(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         int forward = stairDirIndex;
@@ -1657,15 +1697,18 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 && !Standability.isDangerous(support);
     }
 
-    // P1 下潜照明(真实玩家下矿标准操作):每下 TORCH_EVERY 格、光照<8、有火把就在脚位插一支。
-    // 治"下潜深井全程 light=0、骷髅/僵尸成群刷出来围杀"(实测 real_diamond 下潜 Y-58 全程 light=0 被 5 只骷髅围攻)。
-    // 照明是增益不是前置:缺火把不阻塞下潜。
+    // P1 descent lighting (standard real-player mining practice): every TORCH_EVERY blocks
+    // descended, if light level < 8 and a torch is available, place one at the foot cell. This
+    // fixes "the shaft stays light=0 for the whole descent, letting skeletons/zombies spawn in
+    // and swarm the bot" (observed: real_diamond descending to Y-58 stayed light=0 throughout and
+    // was swarmed by 5 skeletons). Lighting is a nice-to-have, not a prerequisite: lacking torches
+    // never blocks the descent.
     private void maybePlaceTorch(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         if (lastTorchY != Integer.MAX_VALUE && lastTorchY - feet.getY() < TORCH_EVERY) {
             return;
         }
         if (world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) >= 8) {
-            lastTorchY = feet.getY(); // 已够亮也推进基准,避免每 tick 重判
+            lastTorchY = feet.getY(); // already bright enough -- advance the baseline too, to avoid re-checking every tick
             return;
         }
         var torchSlot = InventoryAction.findItem(bot, net.minecraft.item.Items.TORCH);
@@ -1691,8 +1734,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
     }
 
-    // 3 参版:依次返回第一个"固体且非流体"的格(流体跳过,绝不挖→防溃浆/溃水)。用于下潜台阶清三格身位
-    // (ahead 头位 + ahead.up 头顶净空 + next 脚位),保证下潜巷道 2 格可走高。
+    // 3-argument version: returns the first cell that is "solid and not a fluid" (fluids are
+    // skipped, never mined -- to avoid a lava/water collapse). Used to clear the three body cells
+    // of a descent stair step (ahead = head cell, ahead.up() = headroom clearance, next = foot
+    // cell), ensuring the descent tunnel has 2-cell walkable height.
     private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b, BlockPos c) {
         for (BlockPos p : new BlockPos[]{a, b, c}) {
             if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {

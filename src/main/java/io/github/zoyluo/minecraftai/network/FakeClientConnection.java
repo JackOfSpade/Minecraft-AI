@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.network;
+package io.github.zoyluo.minecraftai.network;
 
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -18,7 +18,7 @@ public class FakeClientConnection extends ClientConnection {
 
     public FakeClientConnection(NetworkSide side) {
         super(side);
-        ((ClientConnectionAccessor) this).aibot$setChannel(new EmbeddedChannel());
+        ((ClientConnectionAccessor) this).minecraftai$setChannel(new EmbeddedChannel());
     }
 
     @Override

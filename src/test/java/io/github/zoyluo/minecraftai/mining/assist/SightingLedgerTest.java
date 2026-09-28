@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.assist.SightingLedger.Outcome;
-import io.github.zoyluo.aibot.mining.assist.SightingLedger.Sighting;
+import io.github.zoyluo.minecraftai.mining.assist.SightingLedger.Outcome;
+import io.github.zoyluo.minecraftai.mining.assist.SightingLedger.Sighting;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 

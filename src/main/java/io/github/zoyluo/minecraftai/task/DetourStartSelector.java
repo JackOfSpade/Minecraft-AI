@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.mining.assist.DetourPolicy;
-import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
-import io.github.zoyluo.aibot.mining.assist.ObservedReach;
-import io.github.zoyluo.aibot.mining.assist.SafeGate;
-import io.github.zoyluo.aibot.mining.assist.SafeReason;
-import io.github.zoyluo.aibot.mining.assist.SightingLedger;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy;
+import io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.minecraftai.mining.assist.ObservedReach;
+import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
+import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
+import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.List;

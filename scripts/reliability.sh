@@ -1,12 +1,12 @@
 #!/bin/bash
-# 目标可靠性测量:同一 verify 目标跨多 seed 跑 N 次,统计成功率+每次失败阶段画像。
-# 解决"real_* flaky、特定 chunk 才坏":先量化多坏/坏在哪阶段,再用 /aibot snapshot 抓现场冻成确定性场景真修。
-# 设计同 auto30.sh:串行+mkdir锁+可续跑(awk)+caffeinate。
-# 用法: nohup bash scripts/reliability.sh [feature] [runs_per_seed] [timeout_s] </dev/null >/tmp/reliability.out 2>&1 &
+# Target reliability measurement: run the same verify target across multiple seeds, N runs each, and tally the pass rate plus a per-failure stage profile.
+# Addresses "real_* is flaky / only breaks in a specific chunk": first quantify how often it fails and at which stage, then use /minecraftai snapshot to capture the live state, freeze it into a deterministic scenario, and actually fix it.
+# Same design as auto30.sh: serial execution + mkdir lock + resumable (via awk) + caffeinate.
+# Usage: nohup bash scripts/reliability.sh [feature] [runs_per_seed] [timeout_s] </dev/null >/tmp/reliability.out 2>&1 &
 set -u
 cd "$(dirname "$0")/.." || exit 1
 FEATURE="${1:-real_diamond3}"; RUNS="${2:-2}"; TIMEOUT="${3:-2200}"
-# SEEDS_OVERRIDE="s1 s2 ..." 换种子集(默认三种子);STATE_FILE 换状态文件(随机批测用独立文件不混既有数据)。
+# SEEDS_OVERRIDE="s1 s2 ..." swaps the seed set (default is three seeds); STATE_FILE swaps the state file (use a separate file for random batch tests so it doesn't mix with existing data).
 if [ -n "${SEEDS_OVERRIDE:-}" ]; then read -r -a SEEDS <<< "$SEEDS_OVERRIDE"; else SEEDS=(20260610 3000 777); fi
 LOCK=/tmp/reliability.lock; STATE="${STATE_FILE:-reports/reliability_state.tsv}"
 mkdir -p reports
@@ -35,7 +35,7 @@ run_one() {
   echo "[reliability] === $FEATURE#$seed#$run (t=${TIMEOUT}s) ==="
   local out summary reason result stage
   out=$(SEED="$seed" bash scripts/food_test.sh "$FEATURE" "$TIMEOUT" 2>&1)
-  summary=$(echo "$out" | grep -E "\[AIBot Verify\] summary" | tail -1); summary="${summary#*summary }"
+  summary=$(echo "$out" | grep -E "\[MinecraftAi Verify\] summary" | tail -1); summary="${summary#*summary }"
   if [ -z "$summary" ]; then summary="NO_SUMMARY"; result=ERR; reason=NO_SUMMARY
   elif echo "$summary" | grep -q FAIL; then result=FAIL; reason=$(echo "$summary" | sed -n 's/.*FAIL:\([^,}]*\).*/\1/p'); [ -z "$reason" ] && reason=unknown_fail
   else result=PASS; reason=PASS; fi
@@ -44,7 +44,7 @@ run_one() {
   echo "[reliability] $FEATURE#$seed#$run -> $result [$stage]: $reason"
 }
 command -v caffeinate >/dev/null && caffeinate -is -w $$ &
-# 批量同代码多 seed:先 clean 编译一次,之后各局 SKIP_COMPILE 复用(代码冻结,省 N-1 次全量重编)。
+# Batch run of the same code across multiple seeds: do one clean compile first, then each run reuses it via SKIP_COMPILE (code is frozen, saving N-1 full recompiles).
 echo "[reliability] compiling once (clean) before batch ..."
 ./gradlew --stop >/dev/null 2>&1
 if ./gradlew --no-daemon --rerun-tasks --no-build-cache clean classes >/dev/null 2>&1; then

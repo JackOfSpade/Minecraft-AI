@@ -1,39 +1,42 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.DigNav;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.DigNav;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.Heightmap;
 
 public final class MoveTask extends AbstractTask {
-    private static final int DIG_NO_PROGRESS_LIMIT = 200; // 挖掘式直行 10s 没破块/没迈步 → 放弃
+    private static final int DIG_NO_PROGRESS_LIMIT = 200; // Digging straight-line: give up if no block broken / no step taken for 10s
     private static final int DIG_MAX_ELAPSED = 2400;
-    private static final double ARRIVE_SQUARED = 4.0D;     // 挖掘式到 goal 2 格内即视为到达
+    private static final double ARRIVE_SQUARED = 4.0D;     // Digging mode: within 2 blocks of goal counts as arrived
 
-    // —— 分段中继导航(绕大湖/大障碍)——
-    // 失败机理(real_nav_far 实测):目标 120 格外隔着大湖。A* 不走水柱(深水不可站立、挖掘阶段
-    // 也不挖含流体方块),WALK_MAX_NODES=10k 的预算又不够搜出整条绕湖长路 → 寻路"彻底失败" →
-    // 旧逻辑直接降级挖掘式直行 → DigNav 朝目标硬挖、一头挖进湖里 → touchingWater 熔断 fail。
-    // 解法:把"一步直达"拆成"多段经停"——每段 ≤40 格,A* 预算内必然可解;中继点沿 bot→goal
-    // 方位角左右扫偏角,只选"干燥可站"的落脚点,湖是绕出来的,不是挖出来的。
-    private static final int WAYPOINT_MAX_HOPS = 6;             // 中继跳数上限:防湖湾地形里无限折返
-    private static final double WAYPOINT_ARRIVE_SQUARED = 9.0D; // 距中继点 ≤3 格即视为经停到达
-    private static final int WAYPOINT_PATH_ATTEMPTS = 5;        // 单次选点最多对几个候选实跑 A*(同步寻路单次有 50ms 级预算,封顶防单 tick 长卡)
-    private static final int[] WAYPOINT_DEFLECTIONS_DEG = {0, 30, -30, 60, -60, 90, -90}; // 偏角序列:先直奔,再左右扇形扫开
+    // —— Segmented waypoint-relay navigation (routing around large lakes/large obstacles) ——
+    // Failure mechanism (observed in real_nav_far testing): the target is 120 blocks away across a large lake. A* won't
+    // path through water columns (deep water isn't standable, and the digging phase also won't dig fluid-containing
+    // blocks), and the WALK_MAX_NODES=10k budget isn't enough to search out the whole long detour route around the
+    // lake → pathfinding "fails completely" → the old logic immediately fell back to digging straight-line → DigNav
+    // dug hard straight at the target and dug straight into the lake → touchingWater circuit-breaker triggered fail.
+    // Solution: break the "one-hop direct route" into "multi-segment waypoint stops" — each segment ≤40 blocks, which
+    // is always solvable within the A* budget; waypoints are chosen by sweeping deflection angles left/right around
+    // the bot→goal bearing, picking only "dry and standable" footholds — the lake is routed around, not dug through.
+    private static final int WAYPOINT_MAX_HOPS = 6;             // Waypoint hop cap: prevents endless back-and-forth in lake-bay terrain
+    private static final double WAYPOINT_ARRIVE_SQUARED = 9.0D; // Within 3 blocks of a waypoint counts as having arrived at that stop
+    private static final int WAYPOINT_PATH_ATTEMPTS = 5;        // Max candidates actually run through A* per waypoint pick (synchronous pathfinding has a ~50ms-scale budget per call; this cap prevents a single tick from stalling)
+    private static final int[] WAYPOINT_DEFLECTIONS_DEG = {0, 30, -30, 60, -60, 90, -90}; // Deflection angle sequence: head straight first, then fan out left/right
 
     private final BlockPos goal;
     private final double startDistance;
     private BlockPos resolvedGoal;
-    private boolean digging;                               // 纯寻路走不通 → 降级为挖掘式直行
+    private boolean digging;                               // Pure pathfinding can't get through → fall back to digging straight-line
     private final BlockMiner miner = new BlockMiner();
     private int digLastProgressTick;
-    private BlockPos waypoint;                             // 经停模式:当前中继点;null = 直奔最终 goal
-    private int waypointHops;                              // 已采用中继点次数(上限 WAYPOINT_MAX_HOPS)
+    private BlockPos waypoint;                             // Waypoint mode: current relay point; null = heading straight for the final goal
+    private int waypointHops;                              // Number of waypoints already used (capped at WAYPOINT_MAX_HOPS)
 
     public MoveTask(BlockPos start, BlockPos goal) {
         this.goal = goal.toImmutable();
@@ -64,14 +67,17 @@ public final class MoveTask extends AbstractTask {
 
     @Override
     public boolean isWaiting() {
-        // 挖掘式直行时 bot 站着挖、位置基本不变 → 视为 waiting,让 StuckWatcher 不误判(由本任务看门狗兜底)。
+        // While digging straight-line the bot stands and digs in place, barely moving → treat this as waiting so
+        // StuckWatcher doesn't misjudge it as stuck (this task's own watchdog backstops it instead).
         return digging;
     }
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        // 越界目标快速认输:y 超出世界范围(虚空下/建筑上限外)物理不可达,任何走/挖都是空转
-        //(实测朝 y330 目标"挖天"耗满 2400t 不认输——空转是实操里最隐蔽的故障形态)。
+        // Fast-fail for out-of-bounds targets: a y outside the world range (below the void / above the build limit)
+        // is physically unreachable, and any walking/digging just spins its wheels (observed in testing: digging
+        // toward a y330 target "dug at the sky" for the full 2400 ticks without giving up — spinning wheels is one
+        // of the most insidious failure modes in practice).
         ServerWorld world = bot.getEntityWorld();
         int bottom = world.getBottomY();
         int top = bottom + world.getHeight();
@@ -91,16 +97,18 @@ public final class MoveTask extends AbstractTask {
     private void startWalkOrDig(AIPlayerEntity bot) {
         ActionResult result = bot.getActionPack().startPathTo(goal);
         if (result.isFailed()) {
-            // 中继优先于挖掘降级:挖掘式直行是"最后手段"——它无视地形朝坐标硬挖,目标隔水时
-            // 必然一路挖进湖里触发溺水熔断、任务必败。寻路失败先试分段中继(走得通就不动土),
-            // 中继也选不出落脚点才退回挖掘式直行。
+            // Waypoint relay takes priority over falling back to digging: digging straight-line is a "last resort" —
+            // it ignores terrain and digs hard straight toward the coordinate, so when the target is across water
+            // it's bound to dig straight into the lake and trigger the drowning circuit-breaker, failing the task
+            // for sure. On pathfinding failure, try segmented waypoint relay first (don't touch the ground if a
+            // walkable route exists); only fall back to digging straight-line if the relay can't find a foothold either.
             if (tryWaypointRelay(bot, "path_start:" + result.reason())) {
                 return;
             }
-            beginDigging(bot, result.reason()); // 纯寻路一开始就失败(被墙/SEARCH_LIMIT)→ 直接挖掘式直行
+            beginDigging(bot, result.reason()); // Pure pathfinding failed right from the start (blocked by a wall / SEARCH_LIMIT) → go straight to digging straight-line
             return;
         }
-        waypoint = null; // 直达寻路成功 → 不需要经停(也清掉 resume 残留的旧中继)
+        waypoint = null; // Direct pathfinding succeeded → no waypoint stop needed (also clears any stale waypoint left over from a resume)
         resolvedGoal = bot.getActionPack().activePathGoal();
     }
 
@@ -122,12 +130,14 @@ public final class MoveTask extends AbstractTask {
             digTick(bot);
             return;
         }
-        // 经停模式:正赶往中继点。到达中继点 ≠ 任务完成,在 waypointTick 里换乘(重新直奔最终 goal)。
+        // Waypoint mode: currently heading to the relay point. Arriving at the waypoint != task complete —
+        // waypointTick handles the "transfer" (re-heading straight for the final goal).
         if (waypoint != null) {
             waypointTick(bot);
             return;
         }
-        // 纯寻路模式:寻路执行器空闲(到不了)→ 降级挖掘式直行,而不是直接 did_not_reach 卡死。
+        // Pure pathfinding mode: the path executor is idle (can't reach it) → fall back to digging straight-line
+        // instead of just getting stuck on did_not_reach.
         if (bot.getActionPack().isPathExecutorIdle() && elapsed > 5) {
             beginDigging(bot, "path_idle");
             return;
@@ -139,27 +149,39 @@ public final class MoveTask extends AbstractTask {
 
     private void beginDigging(AIPlayerEntity bot, String reason) {
         digging = true;
-        waypoint = null; // 互斥:进挖掘模式即放弃经停
+        waypoint = null; // Mutually exclusive: entering digging mode abandons the waypoint relay
         digLastProgressTick = elapsed;
-        bot.getActionPack().stopAll(); // 清掉寻路状态,改由 DigNav 驱动
+        bot.getActionPack().stopAll(); // Clear the pathfinding state; DigNav takes over driving from here
         BotLog.action(bot, "move_dig_fallback", "goal", compact(goal), "reason", reason);
     }
 
     private void digTick(AIPlayerEntity bot) {
-        // 安全熔断(实测致死根因):挖掘式直行会朝坐标**挖穿一切**,最危险。一旦把 bot 挖进水下(溺水)
-        // 或挖进怪堆(正在挨打),立即放弃,交生存层(NavSafetyNet/DangerWatcher)或大脑处理——
-        // 绝不一路挖到淹死/被围殴致死。
-        // 病根:大脑 move_to 盲目挖向坐标 → digStep 一路挖进水域 → bot 头没入水中;NavSafetyNet 每 tick
-        // 上浮换气,但下一 tick 本任务又 digStep 把 bot 挖回水里 → "上浮↔挖回"活锁几分钟、零进展,
-        // 最终溺水/被怪打死(实测两次死亡)。在这里 submerged/挨打即熔断,从根上打破活锁、保命第一。
-        // 熔断提前:脚一沾水就停(原来等头没入 submerged 才停——那时已半淹,安全网要拖很久才能救上岸;
-        // 实测 real_nav_far 挖到湖边 73t 即灌水)。touchingWater 时水还没过头,立即停手交安全网上岸。
+        // Safety circuit-breaker (observed root cause of death in testing): digging straight-line **digs through
+        // anything** toward the coordinate, which is the most dangerous mode. The instant it digs the bot underwater
+        // (drowning) or into a mob pile (currently being hit), abandon immediately and hand off to the survival
+        // layer (NavSafetyNet/DangerWatcher) or the brain — never keep digging all the way to drowning or being
+        // beaten to death.
+        // Root cause: the brain's move_to blindly digs toward the coordinate → digStep digs straight into a body of
+        // water → the bot's head goes under; NavSafetyNet surfaces for air every tick, but the next tick this task's
+        // digStep digs the bot back into the water → a "surface <-> dig back in" livelock for minutes with zero
+        // progress, eventually drowning / being killed by mobs (observed two deaths in testing). Here,
+        // submersion/being hit triggers the circuit-breaker immediately, breaking the livelock at the root —
+        // survival first.
+        // Circuit-breaker triggers early: stop as soon as the feet touch water (originally it waited until the head
+        // went under / submerged before stopping — by then it's already half-submerged, and the safety net takes a
+        // long time to drag it ashore; observed in real_nav_far testing: digging to the lake edge floods with water
+        // at 73 ticks). When touchingWater fires, the water hasn't reached the head yet — stop digging immediately
+        // and hand off to the safety net to get to shore.
         if (bot.isTouchingWater()) {
             miner.cancel(bot);
-            // 熔断保命 × 中继绕行的分工:熔断只负责"别淹死",不负责"把路走完"——沾水说明挖掘直行
-            // 正把 bot 往水体里送,继续挖必然重演活锁。所以 fail 之前先尝试分段中继:挑一个偏离水体
-            // 的干燥落脚点重新寻路绕行(湖只能绕,不能挖)。中继也找不到(四面环水/跳数耗尽)才维持
-            // 原语义 fail("move_dig_drowning"),交安全网上岸、大脑另谋出路。
+            // Division of labor between the safety circuit-breaker and waypoint relay: the circuit-breaker is only
+            // responsible for "don't drown," not for "finish the route" — touching water means digging straight-line
+            // is currently sending the bot into a body of water, and continuing to dig would certainly replay the
+            // livelock. So before failing, first try segmented waypoint relay: pick a dry foothold away from the
+            // water and re-path around it (a lake can only be routed around, never dug through). Only if the relay
+            // also can't find one (surrounded by water on all sides / hops exhausted) does it keep the original
+            // fail("move_dig_drowning") semantics, handing off to the safety net to reach shore and the brain to
+            // find another way.
             if (tryWaypointRelay(bot, "dig_drowning")) {
                 return;
             }
@@ -178,7 +200,7 @@ public final class MoveTask extends AbstractTask {
         }
         if (elapsed - digLastProgressTick > DIG_NO_PROGRESS_LIMIT) {
             miner.cancel(bot);
-            fail("move_dig_no_progress"); // 挖不动/受阻(如四面岩浆)→ 交还,交生存层/大脑
+            fail("move_dig_no_progress"); // Can't dig / blocked (e.g. surrounded by lava) → hand back control to the survival layer/brain
             return;
         }
         if (DigNav.digStep(bot, miner, goal)) {
@@ -186,22 +208,24 @@ public final class MoveTask extends AbstractTask {
         }
     }
 
-    // ==================== 分段中继导航 ====================
+    // ==================== Segmented waypoint-relay navigation ====================
 
     /**
-     * 经停模式主循环:到达中继点(≤3 格)或这一段路提前走断(执行器空闲)→ 清掉中继点,
-     * 重新对最终 goal 直达寻路;直达仍不通就再选下一个中继点,逐段啃完全程。
+     * Waypoint mode main loop: on reaching the relay point (<=3 blocks) or this segment breaking off early
+     * (executor idle) → clear the waypoint, re-attempt direct pathfinding to the final goal; if direct pathing
+     * still fails, pick the next waypoint and chip away at the route segment by segment.
      */
     private void waypointTick(AIPlayerEntity bot) {
         if (elapsed > 1200) {
-            fail("move_timeout"); // 与纯寻路模式同一条总闸,经停绕路也不许无限耗
+            fail("move_timeout"); // Same master timeout gate as pure pathfinding mode — waypoint detours aren't allowed to run indefinitely either
             return;
         }
         boolean arrived = bot.getBlockPos().getSquaredDistance(waypoint) <= WAYPOINT_ARRIVE_SQUARED;
         if (!arrived && !bot.getActionPack().isPathExecutorIdle()) {
-            return; // 仍在赶往中继点的路上
+            return; // Still en route to the waypoint
         }
-        // 经停到达(或这一段提前断了也就地换乘):重新直奔最终 goal——离湖更近、视角变了,直达可能已经可解。
+        // Arrived at the waypoint (or transfer on the spot even if this segment broke off early): re-head straight
+        // for the final goal — now closer to the lake with a different vantage, direct pathing may be solvable now.
         waypoint = null;
         ActionResult result = bot.getActionPack().startPathTo(goal);
         if (!result.isFailed()) {
@@ -211,13 +235,15 @@ public final class MoveTask extends AbstractTask {
         if (tryWaypointRelay(bot, "relay_next:" + result.reason())) {
             return;
         }
-        // 中继耗尽 → 走原失败路径(降级挖掘式直行,由其熔断/看门狗定生死)
+        // Relay exhausted → fall back to the original failure path (fall back to digging straight-line, its
+        // circuit-breaker/watchdog decides the outcome)
         beginDigging(bot, "waypoint_exhausted");
     }
 
     /**
-     * 尝试进入/延续经停模式:选一个干燥可站的中继点并对它寻路成功 → 记录状态 + 打点。
-     * 返回 false 表示中继救不了(跳数耗尽或扇形里选不出落脚点),调用方走原失败路径。
+     * Try to enter/continue waypoint mode: pick a dry, standable relay point and successfully path to it → record
+     * state + log. Returns false to mean the relay can't help (hops exhausted, or no foothold found within the fan
+     * sweep); the caller falls back to the original failure path.
      */
     private boolean tryWaypointRelay(AIPlayerEntity bot, String reason) {
         if (waypointHops >= WAYPOINT_MAX_HOPS) {
@@ -233,18 +259,21 @@ public final class MoveTask extends AbstractTask {
         }
         waypoint = picked;
         waypointHops++;
-        digging = false; // 可能从挖掘熔断转入:经停段按纯寻路走,不再动土
+        digging = false; // May be transitioning in from a digging circuit-breaker: the waypoint segment proceeds as pure pathfinding, no more digging
         BotLog.action(bot, "move_waypoint",
                 "to", waypoint.toShortString(), "hop", waypointHops, "goal", compact(goal), "reason", reason);
         return true;
     }
 
     /**
-     * 中继点选择:以 bot→goal 方位角 θ 为基准,偏角 {0°,±30°,±60°,±90°}(外层)×
-     * 前出距离 {goal距离一半钳到≤40, 24, 12}(内层)生成候选;每个候选取地表落脚 y,
-     * 必须同时满足:可站立 + 干列(湖面/浅滩水点全排除)+ 不比当前更远离 goal 超 10%(防背向倒退)。
-     * 第一个几何合格且 startPathTo 不失败的候选即采用(寻路成功即顺带启动了去程)。
-     * 距离钳 ≤40:保证每一段都落在 A* 步行预算(10k 节点)稳定可解的范围内——分段正是为此。
+     * Waypoint selection: using the bot→goal bearing θ as the baseline, deflection angles {0°, ±30°, ±60°, ±90°}
+     * (outer loop) x forward distances {half the goal distance clamped to <=40, 24, 12} (inner loop) generate
+     * candidates; each candidate takes the surface foothold y, and must simultaneously satisfy: standable + dry
+     * column (lake-surface/shallow-water points all excluded) + not more than 10% farther from goal than the
+     * current distance (prevents backward regression). The first candidate that's geometrically valid and whose
+     * startPathTo doesn't fail is adopted (a successful path also kicks off the leg). Distance clamp <=40: ensures
+     * every segment falls within the range reliably solvable within the A* walking budget (10k nodes) — that's the
+     * whole point of segmenting.
      */
     private BlockPos pickWaypoint(AIPlayerEntity bot, BlockPos target) {
         ServerWorld world = bot.getEntityWorld();
@@ -254,7 +283,7 @@ public final class MoveTask extends AbstractTask {
         double dzGoal = target.getZ() + 0.5D - bz;
         double goalDist = Math.sqrt(dxGoal * dxGoal + dzGoal * dzGoal);
         if (goalDist < 1.0D) {
-            return null; // 已经贴脸,没有"前出中继"可言
+            return null; // Already right up against it — there's no such thing as a "forward relay" here
         }
         double theta = Math.atan2(dzGoal, dxGoal);
         double maxGoalDist = goalDist * 1.10D;
@@ -274,13 +303,13 @@ public final class MoveTask extends AbstractTask {
                     continue;
                 }
                 if (!isDryColumn(world, candidate)) {
-                    continue; // 湖面取出的悬空格/浅滩水脚全排除——中继点自己先别站进水里
+                    continue; // Excludes airborne cells picked up above a lake surface / water-covered feet on a shallow shore — the waypoint itself must not stand in water
                 }
                 if (candidate.getSquaredDistance(target) > maxGoalDistSq) {
                     continue;
                 }
                 if (pathAttempts >= WAYPOINT_PATH_ATTEMPTS) {
-                    return null; // 同步 A* 单次 ~50ms 级,封顶实跑次数防单 tick 长卡
+                    return null; // Synchronous A* runs at ~50ms-scale per call; cap the number of actual attempts to prevent a single tick from stalling
                 }
                 pathAttempts++;
                 if (!bot.getActionPack().startPathTo(candidate).isFailed()) {
@@ -292,9 +321,10 @@ public final class MoveTask extends AbstractTask {
     }
 
     /**
-     * 干列检查:候选脚格及其向下 4 格全部无流体才算"干"。
-     * MOTION_BLOCKING_NO_LEAVES 在湖面上取到的是水面上方的悬空格、在浅滩取到的脚格本身是水,
-     * 两类都必须排除——否则中继点把 bot 直接引进水里,绕行变送死。
+     * Dry-column check: a candidate counts as "dry" only if its feet cell and the 4 cells below it are all free of
+     * fluid. MOTION_BLOCKING_NO_LEAVES picks up an airborne cell above the water on a lake surface, and on a
+     * shallow shore the feet cell itself is water — both cases must be excluded, otherwise the waypoint would lead
+     * the bot straight into the water, turning the detour into a death trap.
      */
     private static boolean isDryColumn(ServerWorld world, BlockPos feet) {
         for (int i = 0; i <= 4; i++) {

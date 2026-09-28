@@ -1,18 +1,18 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.brain.BrainValidation;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.RuntimeLifecycleCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.brain.BrainValidation;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.command.argument.MessageArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
@@ -25,8 +25,8 @@ import java.util.concurrent.TimeUnit;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotBrainSubcommand {
-    private AIBotBrainSubcommand() {
+public final class MinecraftAiBrainSubcommand {
+    private MinecraftAiBrainSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -96,7 +96,7 @@ public final class AIBotBrainSubcommand {
             return 0;
         }
         BrainCoordinator.BrainStatus status = BrainCoordinator.INSTANCE.status(bot.get());
-        source.sendFeedback(() -> Text.literal("[AIBot] brain status " + name
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] brain status " + name
                 + ": busy=" + status.busy()
                 + ", history=" + status.historySize()
                 + ", prompt_tokens=" + status.promptTokens()
@@ -112,7 +112,7 @@ public final class AIBotBrainSubcommand {
         }
         RuntimeLifecycleCoordinator.INSTANCE.resetBot(
                 bot.get(), IntentController.ControlOrigin.PLAYER_COMMAND, "command_brain_reset");
-        source.sendFeedback(() -> Text.literal("[AIBot] brain reset " + name), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] brain reset " + name), false);
         return 1;
     }
 
@@ -122,7 +122,7 @@ public final class AIBotBrainSubcommand {
             return 0;
         }
         BrainCoordinator.INSTANCE.setManualMode(bot.get(), enabled);
-        source.sendFeedback(() -> Text.literal("[AIBot] manual low-level tools " + (enabled ? "on" : "off") + " for " + name), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] manual low-level tools " + (enabled ? "on" : "off") + " for " + name), false);
         return 1;
     }
 
@@ -137,7 +137,7 @@ public final class AIBotBrainSubcommand {
         }
         boolean queued = BrainCoordinator.INSTANCE.handleMessage(bot.get(), source.getName(), text);
         if (queued) {
-            source.sendFeedback(() -> Text.literal("[AIBot] brain request queued for " + name), false);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] brain request queued for " + name), false);
             return 1;
         }
         return 0;
@@ -178,13 +178,13 @@ public final class AIBotBrainSubcommand {
                             "seconds", seconds,
                             "ticks", elapsedTicks,
                             "tps", String.format(java.util.Locale.ROOT, "%.2f", tps));
-                    source.sendFeedback(() -> Text.literal("[AIBot] TPS validation "
+                    source.sendFeedback(() -> Text.literal("[Minecraft-AI] TPS validation "
                             + (ok ? "ok" : "failed")
                             + ": queued=" + queued
                             + ", ticks=" + elapsedTicks
                             + ", tps=" + String.format(java.util.Locale.ROOT, "%.2f", tps)), false);
                 }));
-        source.sendFeedback(() -> Text.literal("[AIBot] TPS validation started for " + name + " over " + seconds + "s"), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] TPS validation started for " + name + " over " + seconds + "s"), false);
         return queued ? 1 : 0;
     }
 
@@ -196,10 +196,10 @@ public final class AIBotBrainSubcommand {
         }
         BrainValidation.ValidationResult result = validator.apply(bot.get());
         if (result.ok()) {
-            source.sendFeedback(() -> Text.literal("[AIBot] validation ok: " + result.scenario() + " -> " + result.message()), false);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] validation ok: " + result.scenario() + " -> " + result.message()), false);
             return 1;
         }
-        source.sendError(Text.literal("[AIBot] validation failed: " + result.scenario() + " -> " + result.message()));
+        source.sendError(Text.literal("[Minecraft-AI] validation failed: " + result.scenario() + " -> " + result.message()));
         return 0;
     }
 

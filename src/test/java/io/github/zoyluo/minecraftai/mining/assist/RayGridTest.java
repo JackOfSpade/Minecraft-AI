@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,10 +13,10 @@ import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.TreeSet;
 
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.AIR;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.FLUID;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.SOLID;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.UNKNOWN;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.AIR;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.FLUID;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.SOLID;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.UNKNOWN;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;

@@ -1,14 +1,14 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.EquipAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ai.RangedAttackMob;
@@ -40,18 +40,20 @@ public final class DangerWatcher {
     private final Map<UUID, Integer> observedSleepCompletionTicks = new ConcurrentHashMap<>();
     private final Map<UUID, TrapRecord> trapRecords = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextHuntAttemptTick = new ConcurrentHashMap<>();
-    private final Map<UUID, PosRecord> darkStuckRecords = new ConcurrentHashMap<>(); // 规避:困死陷阱检测
-    private final Map<UUID, Integer> nextEscapeHelpTick = new ConcurrentHashMap<>();  // 撤离求助节流
+    private final Map<UUID, PosRecord> darkStuckRecords = new ConcurrentHashMap<>(); // Mitigation: trapped-in-the-dark detection
+    private final Map<UUID, Integer> nextEscapeHelpTick = new ConcurrentHashMap<>();  // Escape help-request throttling
     private final Map<UUID, Integer> nextShelterAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, ShelterEpisode> shelterEpisodes = new ConcurrentHashMap<>();
 
-    // 第1层 困死退避:逃避类任务(evade/shelter)在同一格反复触发却没脱身,即判"被困",
-    // 退避一段时间不再空派、并按间隔节流求助。终结"夜间困坑底每 2 秒 shelter/evade 死循环刷屏"。
-    private static final int TRAP_REPEAT_LIMIT = 4;      // 同格反复避险 4 次 → 判被困
-    private static final int TRAP_BACKOFF_TICKS = 600;   // 被困后退避 30s 不再空派威胁任务
-    private static final int TRAP_HELP_INTERVAL = 1200;  // 求助消息最短间隔 60s(防刷屏)
-    private static final int HUNT_FOOD_TARGET = 3;       // 第2层 饥饿链:没食物时主动猎取的生肉数量
-    private static final int DARK_STUCK_TICKS = 160;     // 规避:地下黑暗处静止 8s 判"困死陷阱",撤回地面
+    // Layer 1 trapped backoff: an evasion-class task (evade/shelter) repeatedly firing on the same
+    // cell without the bot escaping counts as "trapped". Back off for a while and stop dispatching,
+    // throttling help requests by interval. This ends the "shelter/evade infinite-loop chat spam
+    // every 2 seconds while stuck at the bottom of a pit at night" failure mode.
+    private static final int TRAP_REPEAT_LIMIT = 4;      // 4 repeated evasive attempts on the same cell -> judged trapped
+    private static final int TRAP_BACKOFF_TICKS = 600;   // After being trapped, back off for 30s and stop dispatching threat tasks
+    private static final int TRAP_HELP_INTERVAL = 1200;  // Minimum interval between help messages: 60s (prevents chat spam)
+    private static final int HUNT_FOOD_TARGET = 3;       // Layer 2 hunger chain: amount of raw meat to actively hunt for when there is no food
+    private static final int DARK_STUCK_TICKS = 160;     // Mitigation: standing still in a dark underground spot for 8s is judged a "trapped in the dark" hazard; retreat to the surface
     /** Shelter is a final response, not a generic low-health/night-time behaviour. */
     private static final float LAST_RESORT_HEALTH_CAP = 10.0F;
     private static final double DROP_RECOVERY_MAX_DISTANCE = 80.0D;
@@ -136,7 +138,7 @@ public final class DangerWatcher {
     }
 
     public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
-        // SAFE-DEAD:死亡的 bot 不再无限派 evade(僵尸循环)。满血复活到地表,清任务/计划,中文告知。
+        // SAFE-DEAD: a dead bot no longer endlessly dispatches evade (zombie loop). Respawn at full health on the surface, clear tasks/plans, and notify in chat.
         // isAlive() alone is not a death signal: it also goes false when the entity is removed for
         // a non-death reason (e.g. chunk unload), same pitfall documented in HuntTask's
         // resolveUnavailableTarget. Only zero health or Minecraft's explicit KILLED reason count.
@@ -150,11 +152,15 @@ public final class DangerWatcher {
                     .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
                     .toList().size();
             AIPlayerManager.INSTANCE.respawnDeadBot(bot);
-            // 死亡找回反射:装备掉在死亡点(5 分钟 despawn),真实玩家第一反应就是跑尸。
-            // 只有短、浅且死亡现场已清空的路线才自动跑尸。严格生存没有传送；从世界出生点裸体直挖
-            // 回深矿既没有可证明入口，又会在掉落消失前再次送死。深矿恢复必须等未来持久化的
-            // 可逆入口/trail 合同，当前先 fail-closed，立即恢复原 Mission 从地表重建物资。
-            boolean dangerous = io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE
+            // Death-recovery reflex: dropped gear sits at the death point (despawns in 5 minutes); a
+            // real player's first instinct is to run back for it ("corpse run").
+            // Only a short, shallow route with an already-clear death site auto-runs the corpse.
+            // Strict survival has no teleport; digging straight back down to a deep mine naked from
+            // the world spawn point has no provable entry route, and risks dying again before the
+            // drops despawn. Deep-mine recovery must wait for a future persisted, reversible
+            // entry/trail contract; for now, fail closed and immediately restart the original
+            // Mission, rebuilding supplies from the surface.
+            boolean dangerous = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
                     .isDanger(bot.getUuid(), deathPos);
             DropRecoveryDecision recovery = dropRecoveryDecision(
                     bot.getBlockPos(), deathPos, visibleHostilesAtDeath, dangerous);
@@ -178,9 +184,13 @@ public final class DangerWatcher {
         Optional<Threat> threat = collectTopThreat(bot);
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
         refreshShelterEpisode(bot);
-        // 入浆即自救(最高优先,压倒威胁):岩浆每 tick 烧 4,几秒就死。SurvivalGuard 只中断作业、注释说
-        // "让位 DangerWatcher 脱困"但从未实现——bot 泡在岩浆里被烧死(real_diamond 下潜挖穿岩浆袋,14/15 步功亏一篑)。
-        // 这里补上:身陷岩浆且当前不是逃浆任务 → 立即派 LavaEscapeTask,把命先捞回来。
+        // Self-rescue on lava contact (highest priority, overrides threat): lava burns 4 damage per
+        // tick, killing the bot within seconds. SurvivalGuard only interrupts the current job, with a
+        // comment claiming it "defers to DangerWatcher to escape" but that was never implemented --
+        // the bot burned to death while sitting in lava (real_diamond dove and dug through a lava
+        // pocket, failing at 14/15 steps).
+        // Patched here: if the bot is stuck in lava and the current task isn't already the
+        // lava-escape task -> immediately dispatch LavaEscapeTask to save its life first.
         if (bot.isInLava() && !(active.isPresent() && active.get() instanceof LavaEscapeTask)) {
             if (active.isPresent()) {
                 TaskManager.INSTANCE.pauseFor(bot, "lava_escape");
@@ -228,7 +238,7 @@ public final class DangerWatcher {
                 && !TaskManager.INSTANCE.isUserPaused(bot)
                 && !bot.getActionPack().hasActiveActions()
                 && bot.hurtTime == 0
-                && bot.getHealth() > AIBotConfig.get().combat().retreatHp();
+                && bot.getHealth() > MinecraftAiConfig.get().combat().retreatHp();
         if (threat.isPresent()
                 && threat.get().type() == Threat.Type.LAVA
                 && digDownCandidate instanceof DigDownTask digDown
@@ -432,7 +442,7 @@ public final class DangerWatcher {
                 return true;
             }
         }
-        // 规避加固(保命兜底):困死在地下黑暗处 → 撤回地面,优先于补给/进食。
+        // Mitigation hardening (life-saving fallback): trapped in a dark underground spot -> retreat to the surface, taking priority over resupply/eating.
         if (maybeEscapeDarkTrap(server, bot, active)) {
             return true;
         }
@@ -467,7 +477,7 @@ public final class DangerWatcher {
     static boolean canResumePausedWork(AIPlayerEntity bot, Optional<Threat> threat) {
         return threat.isEmpty()
                 && bot.hurtTime == 0
-                && bot.getHealth() > AIBotConfig.get().combat().retreatHp();
+                && bot.getHealth() > MinecraftAiConfig.get().combat().retreatHp();
     }
 
     private boolean maybeRegroup(AIPlayerEntity bot, Optional<Task> active) {
@@ -505,7 +515,7 @@ public final class DangerWatcher {
 
     private boolean maybeResupply(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         boolean criticalStarvation = bot.getHungerManager().getFoodLevel()
-                <= AIBotConfig.get().survival().hungerCriticalThreshold();
+                <= MinecraftAiConfig.get().survival().hungerCriticalThreshold();
         // A just-finished shelter has a deterministic post-combat sequence: consume carried food
         // to 20 first, then permit low-priority artifact cleanup.  A routine tool resupply must
         // not jump that recovery boundary merely because a pick happened to be selected.
@@ -518,7 +528,7 @@ public final class DangerWatcher {
             return false;
         }
         if (bot.getActionPack().hasActiveActions()) {
-            return false; // 普通补给不抢占 action-only replacement；紧急生存分支在本方法之前处理。
+            return false; // Ordinary resupply does not preempt an action-only replacement; emergency-survival branches are handled earlier in this method.
         }
         if (active.isPresent() && active.get() instanceof ResupplyTask) {
             return true;
@@ -571,9 +581,12 @@ public final class DangerWatcher {
             Item item = mainHand.getItem();
             task = ResupplyTask.tool(item);
         } else {
-            AIBotConfig.Survival survival = AIBotConfig.get().survival();
-            // 没食物时:周围有猎物 → 让路给 maybeEat 的猎食(野外猎肉比翻箱找小麦可靠,见第2层饥饿链),
-            // 周围没猎物才走 ResupplyTask.food()(翻储备箱)。修"饿了反复 resupply 找小麦失败而不去猎肉"。
+            MinecraftAiConfig.Survival survival = MinecraftAiConfig.get().survival();
+            // When there is no food: if prey is nearby, yield to maybeEat's hunting (hunting meat in
+            // the wild is more reliable than digging through chests for wheat, see the layer-2 hunger
+            // chain); only fall back to ResupplyTask.food() (searching storage chests) when there is
+            // no prey nearby. Fixes "repeatedly resupplying for wheat and failing instead of hunting
+            // when hungry".
             if (bot.getHungerManager().getFoodLevel() <= survival.hungerEatThreshold()
                     && InventoryAction.findFoodSlot(bot) < 0
                     && !HuntTask.hasPreyNearby(bot)) {
@@ -604,7 +617,7 @@ public final class DangerWatcher {
 
     private boolean maybeEat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         int foodLevel = bot.getHungerManager().getFoodLevel();
-        AIBotConfig.Survival survival = AIBotConfig.get().survival();
+        MinecraftAiConfig.Survival survival = MinecraftAiConfig.get().survival();
         boolean healingEmergency = isHealingEatTransaction(bot);
         // Cleanup is deliberately post-combat housekeeping, but it must begin with a full hunger
         // bar so natural regeneration has already started.  This is deterministic survival work,
@@ -622,7 +635,7 @@ public final class DangerWatcher {
             return false;
         }
         if (bot.getActionPack().hasActiveActions() && !urgent) {
-            return false; // 非紧急进食等动作完成；critical starvation 仍可抢占保命。
+            return false; // Non-urgent eating waits for the current action to finish; critical starvation can still preempt to save the bot's life.
         }
         if (active.isPresent() && active.get() instanceof EatTask) {
             return true;
@@ -645,7 +658,7 @@ public final class DangerWatcher {
             return false;
         }
         if (InventoryAction.findFoodSlot(bot) < 0) {
-            // 第2层 饥饿链:没有任何食物 → 若周围有可猎动物,主动猎杀获取生肉,而非干等饿死。
+            // Layer 2 hunger chain: no food at all -> if huntable animals are nearby, actively hunt them for raw meat instead of just waiting to starve.
             if (huntForFood(server, bot, active)) {
                 return true;
             }
@@ -674,19 +687,20 @@ public final class DangerWatcher {
         return true;
     }
 
-    // 第2层 饥饿链:没食物时主动猎食(获取生肉)。仅在不处于威胁应对(evade/combat)时派;周围无猎物则不空派。
+    // Layer 2 hunger chain: actively hunt for food (raw meat) when there is no food. Only dispatched
+    // when not already responding to a threat (evade/combat); never dispatched when there is no prey nearby.
     private boolean huntForFood(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         boolean critical = bot.getHungerManager().getFoodLevel()
-                <= AIBotConfig.get().survival().hungerCriticalThreshold();
+                <= MinecraftAiConfig.get().survival().hungerCriticalThreshold();
         if (TaskManager.INSTANCE.isUserPaused(bot) && !critical) {
             return false;
         }
         if (active.isPresent()) {
             if (active.get() instanceof HuntTask) {
-                return true; // 已在猎食,保持
+                return true; // Already hunting for food, keep it
             }
             if (active.get() instanceof EvadeTask || active.get() instanceof CombatTask) {
-                return false; // 正在应对威胁,别打断
+                return false; // Currently responding to a threat, don't interrupt
             }
         }
         int now = server.getTicks();
@@ -694,7 +708,7 @@ public final class DangerWatcher {
             return false;
         }
         if (!HuntTask.hasPreyNearby(bot)) {
-            nextHuntAttemptTick.put(bot.getUuid(), now + 200); // 周围没猎物,过会儿再看
+            nextHuntAttemptTick.put(bot.getUuid(), now + 200); // No prey nearby, check again later
             return false;
         }
         if (active.isPresent()) {
@@ -711,7 +725,7 @@ public final class DangerWatcher {
     private Task decideCombatOrEvade(AIPlayerEntity bot,
                                      Threat threat,
                                      boolean shelterAllowed) {
-        AIBotConfig.Combat combat = AIBotConfig.get().combat();
+        MinecraftAiConfig.Combat combat = MinecraftAiConfig.get().combat();
         // These mobs require a dedicated tactic, never the generic defensive melee loop.
         if (isMeleeForbiddenThreat(threat)) {
             return new EvadeTask(threat);
@@ -729,7 +743,7 @@ public final class DangerWatcher {
         if (!shelterAllowed && shouldDefensivelyFightClosePressure(bot, threat)) {
             return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.getBlockPos());
         }
-        // combat 困死:连续多次 combat 被 stuck 中止(目标够不到——如僵尸在下方矿洞/墙后)→ 别再站桩等死,改逃跑。
+        // combat stuck-trap: combat repeatedly aborted as stuck (target unreachable -- e.g. a zombie below in a mineshaft/behind a wall) -> stop standing there waiting to die, switch to fleeing.
         if (canFight(bot, threat, combat) && !combatStuck(bot)) {
             // Safety combat defends the interrupted work site. It binds the observed entity and
             // cannot turn into an open-ended hunt by reacquiring another mob of the same type.
@@ -814,9 +828,13 @@ public final class DangerWatcher {
         }
     }
 
-    // 第1层:困死退避 + 求助。仅针对逃避类(evade/shelter);战斗(canFight→CombatTask)不拦。
-    // bot 反复在同一格触发逃避却没移动(被围/困坑底)→ 累加;达阈值即退避(长 cooldown 静默等救援)
-    // 并节流向玩家求助,而非每 2 秒空派一次 shelter/evade 刷屏。bot 真在逃(位置变)则计数自然重置。
+    // Layer 1: trapped backoff + help request. Applies only to evasion-class tasks (evade/shelter);
+    // combat (canFight -> CombatTask) is not blocked.
+    // If the bot repeatedly triggers evasion on the same cell without moving (surrounded/stuck at
+    // the bottom of a pit) -> accumulate a count; once the threshold is hit, back off (a long
+    // cooldown, silently waiting for rescue) and throttle help requests to the player, instead of
+    // spamming an empty shelter/evade dispatch every 2 seconds. If the bot is genuinely escaping
+    // (position changes), the count resets naturally.
     private boolean trappedBackoff(MinecraftServer server, AIPlayerEntity bot, Task next) {
         if (!(next instanceof EvadeTask) && !(next instanceof EmergencyShelterTask)) {
             trapRecords.remove(bot.getUuid());
@@ -830,9 +848,12 @@ public final class DangerWatcher {
             return false;
         }
         int repeat = rec.repeatCount() + 1;
-        // 绝境反击:困住(逃跑反复原地)且正在挨打——退避=站着等死(real_iron 实测:洞穴 13 蛛贴脸,
-        // evade 目标算出原地 1t 完成,backoff 停发威胁任务后被围殴致死)。canFight 的武器/数量闸
-        // 是"打得划算吗"的算计,绝境没得算:空手也开打,伤害换活命窗口。
+        // Last-stand counterattack: trapped (evasion keeps landing back in the same spot) and
+        // currently taking hits -- backing off = standing still waiting to die (real_iron test case:
+        // 13 spiders cornered the bot in a cave, the evade destination computed to a 1-tick no-op in
+        // place, and once backoff stopped issuing threat tasks the bot was beaten to death).
+        // canFight's weapon/count gate is a "is this fight worth it" calculation; in a last stand
+        // there's no calculating -- fight even bare-handed, trading damage for a window to survive.
         if (repeat >= 2 && bot.hurtTime > 0) {
             trapRecords.remove(bot.getUuid());
             var hostile = bot.getEntityWorld().getEntitiesByClass(
@@ -841,7 +862,7 @@ public final class DangerWatcher {
                     .stream()
                     .filter(e -> isActiveHostileThreat(bot, e))
                     .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
-                    .filter(e -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, e))
+                    .filter(e -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, e))
                     .findFirst().orElse(null);
             if (hostile != null) {
                 BotLog.danger(bot, "trapped_fight_back", "target", hostile.getType().toString());
@@ -875,17 +896,20 @@ public final class DangerWatcher {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return false;
         }
-        AIBotConfig.Night night = AIBotConfig.get().night();
+        MinecraftAiConfig.Night night = MinecraftAiConfig.get().night();
         if (!night.autoSleep()
                 || bot.getEntityWorld().isDay()
                 || active.isPresent()
                 || bot.getActionPack().hasActiveActions()) {
             return false;
         }
-        // 目标计划进行中(步骤间隙 active 短暂为空)不插夜间照明:它是 foreign task,会让 GoalExecutor
-        // 放弃整个目标(与 maybeLightDarkArea 同款守护——实测 real_iron_bulk 夜里挖到 91/100 时,步骤间隙被
-        // 夜间点灯抢走 → goal_abandoned → 卡 light_area churn 永不完成)。深矿照明由 GoalPlanner 火把前置负责。
-        if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+        // While a goal plan is in progress (active is briefly empty between steps), don't insert
+        // night lighting: it's a foreign task and would make GoalExecutor abandon the whole goal
+        // (same guard as maybeLightDarkArea -- real_iron_bulk test case: while mining at night, at
+        // 91/100 progress the step gap got hijacked by night-lighting -> goal_abandoned -> stuck
+        // churning on light_area, never completing). Deep-mine lighting is handled by GoalPlanner's
+        // torch prerequisite step.
+        if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
         int now = server.getTicks();
@@ -901,7 +925,7 @@ public final class DangerWatcher {
         if (now < nextNightAttemptTick.getOrDefault(bot.getUuid(), 0)) {
             return false;
         }
-        // 睡觉功能暂时取消(以后再加):夜间不睡床,只在有火把时补光防刷怪。
+        // Sleeping is temporarily disabled (to be added later): don't sleep in a bed at night, only top up lighting with torches when available to prevent mob spawns.
         Task task;
         if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) > 0) {
             task = new LightAreaTask(8, 8);
@@ -915,8 +939,10 @@ public final class DangerWatcher {
         return true;
     }
 
-    // 规避加固:地下/黑暗处(方块光照<8)只要 idle 且有火把,就先点亮——从源头减少怪物在身边刷新。
-    // 不限夜晚(地下白天 light=0 同样刷怪)。仅 active 为空(idle/目标步骤间隙)时派,避免打断挖矿。
+    // Mitigation hardening: underground/dark spots (block light < 8) get lit as soon as the bot is
+    // idle and has a torch -- cutting mob spawns off at the source. Not limited to nighttime
+    // (underground, daytime with light=0 still spawns mobs). Only dispatched when active is empty
+    // (idle/goal step gap) to avoid interrupting mining.
     private boolean maybeLightDarkArea(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return false;
@@ -924,10 +950,12 @@ public final class DangerWatcher {
         if (active.isPresent() || bot.getActionPack().hasActiveActions()) {
             return false;
         }
-        // 目标计划进行中(步骤间隙 active 会短暂为空)不要插照明:它是 foreign task,会让 GoalExecutor
-        // 放弃整个目标(实测:金锭挖到 raw_gold、熔炼前的空隙被照明抢走 → goal_abandoned、没熔炼 → 无金锭)。
-        // 深矿照明由 GoalPlanner 的挖矿前置(火把步)负责,不靠这个 idle 反射。
-        if (io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+        // While a goal plan is in progress (active is briefly empty between steps), don't insert
+        // lighting: it's a foreign task and would make GoalExecutor abandon the whole goal (test
+        // case: after mining raw_gold, the gap before smelting got hijacked by lighting ->
+        // goal_abandoned, no smelting -> no gold ingot). Deep-mine lighting is handled by
+        // GoalPlanner's mining-prerequisite torch step, not by this idle reflex.
+        if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
         var world = bot.getEntityWorld();
@@ -937,11 +965,11 @@ public final class DangerWatcher {
             return false;
         }
         if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) <= 0) {
-            return false; // 没火把点不了——由 GoalPlanner 挖深矿前置备火把兜底
+            return false; // Can't light anything without a torch -- GoalPlanner's deep-mining prerequisite covers stocking torches
         }
         int now = server.getTicks();
         if (now < nextNightAttemptTick.getOrDefault(bot.getUuid(), 0)) {
-            return false; // 复用夜间节流,避免每次扫描都派
+            return false; // Reuses the night-time throttle to avoid dispatching on every scan
         }
         TaskManager.INSTANCE.assign(bot, new LightAreaTask(8, 8),
                 TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "dark_area_light"));
@@ -951,12 +979,18 @@ public final class DangerWatcher {
         return true;
     }
 
-    // 规避加固(保命兜底):bot 卡在"地下 + 黑暗"处 = 困死陷阱(随时被刷怪秒杀)。只盯移动类(move)卡住
-    // 与 idle 静止——挖矿/熔炼等有各自看门狗或属合理静止,先让它们 fail。检测到困死就 teleport 撤回
-    // 地面 + 清当前目标 + 求助(节流)。牺牲当次目标换保命;回地面后大脑可重试(届时已备火把更安全)。
+    // Mitigation hardening (life-saving fallback): a bot stuck "underground + in the dark" = a
+    // trapped-in-the-dark hazard (can be one-shot by a spawned mob at any time). Only watches for
+    // movement-type (move) getting stuck or idle stillness -- mining/smelting etc. have their own
+    // watchdogs or are legitimately stationary, so let those fail on their own first. Once trapped is
+    // detected, teleport back to the surface + clear the current goal + request help (throttled).
+    // Sacrifice the current goal to save the bot's life; the brain can retry after returning to the
+    // surface (by then torches should be better stocked, making it safer).
     private boolean maybeEscapeDarkTrap(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
-        // isWaiting=任务自报"原地作业是正常态":MoveTask 挖掘式直行破硬石时一站好几秒,
-        // 黑暗+同格被误判困死、被'救'上地面任务报废(nav 套件画布后实测两连 aborted)。
+        // isWaiting = the task self-reports "standing still in place is a normal state": MoveTask can
+        // stand still for several seconds while tunnel-digging straight through hard stone, and
+        // dark + same-cell was misjudged as trapped, getting "rescued" to the surface and aborting
+        // the task (observed two consecutive aborts in testing after the nav-suite canvas change).
         if (active.isPresent() && (!"move".equals(active.get().name()) || active.get().isWaiting())) {
             darkStuckRecords.remove(bot.getUuid());
             return false;
@@ -976,15 +1010,18 @@ public final class DangerWatcher {
             return false;
         }
         if (now - rec.sinceTick() < DARK_STUCK_TICKS) {
-            return false; // 还没卡够久
+            return false; // Not stuck long enough yet
         }
         darkStuckRecords.remove(bot.getUuid());
         if (!escapeToSurface(bot)) {
-            return false; // 上方没有露天可站点(极少),交还其它逻辑
+            return false; // No open-sky standable spot above (rare); hand off to other logic
         }
         TaskManager.INSTANCE.abort(bot);
-        // 问题4:不再 clear 目标——撤回地面后保留挖钻石目标,GoalExecutor 会重规划/重试当前步继续
-        //(abort 当前困住的 task → handleStepFailure 重规划;bot 在地面、环境变了不再困)。实测:旧逻辑撤回后把任务忘了。
+        // Issue 4: no longer clear the goal -- after retreating to the surface, keep the
+        // diamond-mining goal; GoalExecutor will replan/retry the current step and continue
+        // (abort the currently-stuck task -> handleStepFailure replans; the bot is now on the
+        // surface, the environment changed, no longer trapped). Test finding: the old logic forgot
+        // the goal after retreating.
         BotLog.danger(bot, "dark_trap_escape",
                 "from", feet.getX() + "," + feet.getY() + "," + feet.getZ());
         if (now >= nextEscapeHelpTick.getOrDefault(bot.getUuid(), 0)) {
@@ -995,17 +1032,17 @@ public final class DangerWatcher {
         return true;
     }
 
-    // teleport 上浮到正上方最近的露天可站点(保命兜底,清 fallDistance)。
+    // teleport upward to the nearest open-sky standable spot directly above (life-saving fallback, resets fallDistance).
     private boolean escapeToSurface(AIPlayerEntity bot) {
         var world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
         int top = world.getBottomY() + world.getHeight();
         for (int dy = 1; feet.getY() + dy < top - 1 && dy <= 120; dy++) {
             BlockPos cand = feet.up(dy);
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(world, cand)
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, cand)
                     && world.isSkyVisible(cand)) {
-                return io.github.zoyluo.aibot.mode.CapabilityRuntime.run(
-                        bot, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                return io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
+                        bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                         "danger_dark_trap_surface", () -> {
                             bot.getActionPack().stopAll();
                             bot.teleport(world, cand.getX() + 0.5D, cand.getY(), cand.getZ() + 0.5D,
@@ -1016,7 +1053,7 @@ public final class DangerWatcher {
         return false;
     }
 
-    // combat 困死检测:连续 ≥2 次 combat 被 StuckWatcher 中止(stuck:combat),说明目标够不到 → 改逃,别站桩被打死。
+    // combat stuck-trap detection: combat aborted by StuckWatcher as stuck (stuck:combat) 2+ times in a row means the target is unreachable -> switch to fleeing, don't stand there and get killed.
     private boolean combatStuck(AIPlayerEntity bot) {
         Optional<TaskManager.FailureRecord> fail = TaskManager.INSTANCE.peekFailure(bot);
         return fail.isPresent()
@@ -1025,7 +1062,7 @@ public final class DangerWatcher {
                 && fail.get().count() >= 2;
     }
 
-    private boolean canFight(AIPlayerEntity bot, Threat threat, AIBotConfig.Combat combat) {
+    private boolean canFight(AIPlayerEntity bot, Threat threat, MinecraftAiConfig.Combat combat) {
         if (threat.type() != Threat.Type.HOSTILE || threat.entity() == null || !threat.entity().isAlive()) {
             return false;
         }
@@ -1103,13 +1140,16 @@ public final class DangerWatcher {
     }
 
     private static boolean shouldPauseForThreat(Task active, Threat threat, Task nextTask) {
-        // 已在战斗/逃跑 → 不二次暂停(让其自行重定向)。
+        // Already fighting/fleeing -> don't pause a second time (let it redirect itself).
         if (active instanceof CombatTask || active instanceof EvadeTask) {
             return false;
         }
-        // FREEZE fix:其它进行中的任务(挖矿/采集/合成…)遇任何威胁一律**暂停保留**,打完/逃完再 resume,
-        // 而不是被后续 assign 直接 abort 销毁。旧逻辑对"敌对→战斗"和 LOW_HP 都返回 false=不暂停=销毁当前任务,
-        // 导致 GoalExecutor 把它判为 foreign 而整体放弃目标(实测刷怪时挖矿目标被反复放弃、空转发呆)。
+        // FREEZE fix: any other in-progress task (mining/gathering/crafting...) is always **paused
+        // and preserved** when any threat appears, then resumed after the fight/flee is done, instead
+        // of being destroyed outright by a subsequent assign's abort. The old logic returned false
+        // (= don't pause = destroy the current task) for both "hostile -> combat" and LOW_HP, causing
+        // GoalExecutor to classify it as foreign and abandon the whole goal (test finding: while mobs
+        // were spawning, the mining goal was repeatedly abandoned and the bot idled doing nothing).
         return true;
     }
 
@@ -1162,7 +1202,7 @@ public final class DangerWatcher {
     }
 
     private static boolean isHealingEatTransaction(AIPlayerEntity bot) {
-        return bot.getHealth() <= AIBotConfig.get().combat().retreatHp()
+        return bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
                 && bot.getHungerManager().getFoodLevel() < 20
                 && InventoryAction.findFoodSlot(bot) >= 0;
     }
@@ -1261,7 +1301,7 @@ public final class DangerWatcher {
                 .thenComparingDouble(bot::distanceTo));
         for (LivingEntity mob : hostiles) {
             if (!canReachThreat(bot, mob)) {
-                continue; // 被方块阻隔,够不到 bot → 不算威胁
+                continue; // Blocked by a solid block, can't reach the bot -> doesn't count as a threat
             }
             // Low HP is a combat modifier, not a threat by itself. The old unconditional branch
             // emitted an entity-less LOW_HP at the bot's own position even in broad daylight with
@@ -1296,15 +1336,21 @@ public final class DangerWatcher {
         return Optional.empty();
     }
 
-    // 怪物能否真正威胁到 bot:bot 眼睛 → 怪眼睛之间做一次方块 raycast,中间被实心方块挡住(非 MISS)即
-    // 视为够不到(隔墙/隔隧道)。raycast 只检测方块、不含实体,正好判断"有没有墙挡着"。近战怪没视线打不到、
-    // 远程怪没视线射不到、苦力怕没视线也炸不到——一律不算当前威胁(它们绕过来/露头后会被重新检测到)。
+    // Whether a mob can actually threaten the bot: cast a block raycast from the bot's eyes to the
+    // mob's eyes; if a solid block blocks the middle (result is not MISS), treat it as unreachable
+    // (through a wall/tunnel). The raycast only checks blocks, not entities, which is exactly right
+    // for judging "is there a wall in the way". A melee mob without line of sight can't hit it, a
+    // ranged mob without line of sight can't shoot it, and a Creeper without line of sight can't blow
+    // it up either -- none of these count as a current threat (they'll be re-detected once they come
+    // around or into view).
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
         return CombatCore.hasLineOfSight(bot, mob);
     }
 
-    // 近处(8 格)是否有可达(有视线)的敌对怪。作为濒死封墙闸的防御性兜底；正常 LOW_HP
-    // Threat 已携带 hostile entity。复用同款视线判定，避免把隔墙怪物算作当前压力。
+    // Whether there is a reachable (line-of-sight) hostile mob nearby (8 blocks). Serves as a
+    // defensive fallback for the near-death walling-in gate; a normal LOW_HP Threat already carries
+    // the hostile entity. Reuses the same line-of-sight check to avoid counting a mob behind a wall
+    // as current pressure.
     private static boolean hasReachableHostile(AIPlayerEntity bot) {
         List<LivingEntity> hostiles = bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(8.0D),

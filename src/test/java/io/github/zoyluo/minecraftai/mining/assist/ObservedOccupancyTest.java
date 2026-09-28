@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
@@ -8,11 +8,11 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.SplittableRandom;
 
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.AIR;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.FLUID;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.SIZE;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.SOLID;
-import static io.github.zoyluo.aibot.mining.assist.ObservedOccupancy.UNKNOWN;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.AIR;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.FLUID;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.SIZE;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.SOLID;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.UNKNOWN;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;

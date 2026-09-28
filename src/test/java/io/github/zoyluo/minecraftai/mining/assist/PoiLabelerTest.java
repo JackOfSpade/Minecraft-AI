@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.assist.PoiScorer.Band;
-import io.github.zoyluo.aibot.mining.assist.PoiScorer.PoiScore;
+import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.Band;
+import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.PoiScore;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;

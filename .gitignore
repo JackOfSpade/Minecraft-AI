@@ -55,11 +55,11 @@ bin/
 # Local reference source used during implementation.
 references/
 
-# headless production test server (installer-generated, 含 56MB server.jar)
+# headless production test server (installer-generated, includes a 56MB server.jar)
 run-prod/
 
 # Local promotional workspaces and generated dependency trees.
-/aibot-tiktok-promo/
+/minecraftai-tiktok-promo/
 /promo/tiktok/
 node_modules/
 

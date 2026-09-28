@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BoatAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BoatAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.item.Item;
 import net.minecraft.util.math.BlockPos;
@@ -164,9 +164,11 @@ public final class BoatLaunchTask extends AbstractTask {
             ActionResult walk = bot.getActionPack().startWalkTo(launchSite.shore().toCenterPos(), 1.0D);
             if (walk.isFailed()) {
                 lastProblem = "shore_unreachable:" + path.reason();
-                // 放弃这个 shore、回 FIND_WATER 换一个:如果最终超时在 APPROACH_SHORE,单看
-                // "boat_launch_timeout:approach_shore" 分不清是卡在同一个 shore 反复重试,还是
-                // 换了好几个都够不到 -- 这条记录每次放弃时都留痕。
+                // Give up on this shore and go back to FIND_WATER to try another one: if it
+                // eventually times out in APPROACH_SHORE, "boat_launch_timeout:approach_shore"
+                // alone can't tell whether it's stuck retrying the same shore repeatedly or
+                // tried several shores and none were reachable -- this log leaves a trace
+                // every time it gives up.
                 BotLog.action(bot, "boat_shore_abandoned", "shore", launchSite.shore().toShortString(),
                         "reason", path.reason());
                 launchSite = null;

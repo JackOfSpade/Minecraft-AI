@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.assist.FrontierPlanner.Candidate;
+import io.github.zoyluo.minecraftai.mining.assist.FrontierPlanner.Candidate;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonParser;
 import net.minecraft.util.math.BlockPos;
@@ -67,7 +67,7 @@ class BotEditsTest {
 
     @Test
     void snapshotThenLoadRoundTripsThePlacedLedger(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("aibot").resolve(BotEditsLedger.SIDECAR_FILE_NAME);
+        Path file = dir.resolve("minecraftai").resolve(BotEditsLedger.SIDECAR_FILE_NAME);
         BotEdits.ledger().notePlaced(OVERWORLD, TORCH);
         BotEdits.ledger().notePlaced("minecraft:the_nether", TORCH.up());
         assertTrue(BotEdits.ledger().isDirty());

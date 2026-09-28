@@ -1,16 +1,16 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalPlanner;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
-import io.github.zoyluo.aibot.pathfinding.FailureReason;
-import io.github.zoyluo.aibot.pathfinding.PathExecutor;
-import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalPlanner;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
+import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
+import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
@@ -35,13 +35,19 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * HUNT(第2层 食物自给):主动猎杀附近可食用动物并捡起生肉,直到凑够目标数量的肉。
+ * HUNT (tier-2 food self-sufficiency): actively hunts nearby edible animals and picks up raw
+ * meat until the target amount of meat is reached.
  *
- * 背景:CombatCore/CombatTask 原本只打**敌对怪**(HostileEntity);bot 饿了却没有"主动去搞肉"的能力
- *(EatTask 只吃现有食物,没肉就放弃)。本任务补上这一环:找最近的牛/猪/羊/鸡/兔 → 接近 → 击杀 → 捡肉 → 凑够数。
+ * Background: CombatCore/CombatTask originally only fought **hostile mobs** (HostileEntity); a
+ * hungry bot had no ability to "actively go get meat" (EatTask only eats existing food and gives
+ * up if there's no meat). This task fills that gap: find the nearest cow/pig/sheep/chicken/rabbit
+ * -> approach -> kill -> pick up meat -> repeat until the quota is met.
  *
- * 复用共享原语:接近/攻击走 {@link CombatCore},掉落用 {@link HarvestCore} 强拾取(与挖矿采集一致)。
- * 自包含状态机(G1,不自 assign),全程主线程(G2)。数量达成或周围无猎物即结束,交编排层处理(如继续去烤)。
+ * Reuses shared primitives: approach/attack goes through {@link CombatCore}, drops use
+ * {@link HarvestCore} force-pickup (consistent with mining collection).
+ * Self-contained state machine (G1, does not self-assign), runs entirely on the main thread (G2).
+ * Ends once the quota is reached or no prey remains nearby, handing control back to the
+ * orchestration layer (e.g. to continue on to cooking).
  */
 public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private enum Phase { RETURN_SURFACE, ACQUIRE, APPROACH, STRIKE, PICKUP, ROAM }
@@ -62,25 +68,27 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
     }
 
-    private static final int SEARCH_RANGE = 64;        // 找猎物的扫描范围(动物分散→扩到 64 格,再走过去)
-    // 猎物视线与扫描范围对齐:真实玩家在渲染距离内、有视线就能看到动物,远超方块读取的
-    // 交互半径。canObserveEntityWithin 保留射线判定(地形仍会遮蔽畜群),只放宽距离上限。
+    private static final int SEARCH_RANGE = 64;        // Scan range for finding prey (animals are spread out -> expanded to 64 blocks, then walk over)
+    // Prey sight range is aligned with the scan range: a real player within render distance
+    // with line of sight can see an animal, far beyond the block-read interaction radius.
+    // canObserveEntityWithin still keeps the raycast check (terrain can still occlude a herd);
+    // only the distance cap is relaxed.
     private static final int PREY_SIGHT_RANGE = SEARCH_RANGE;
-    private static final int MAX_ELAPSED = 3600;       // 3 分钟硬超时
-    private static final int NO_PROGRESS_LIMIT = 400;  // 20s 无进展(没靠近/没掉肉)即失败
-    private static final int PICKUP_RECOVERY_LIMIT = 240; // 可见掉落/在途拾取的物理恢复硬上限
+    private static final int MAX_ELAPSED = 3600;       // 3-minute hard timeout
+    private static final int NO_PROGRESS_LIMIT = 400;  // Fails after 20s with no progress (no closer approach / no meat dropped)
+    private static final int PICKUP_RECOVERY_LIMIT = 240; // Hard cap for physical recovery of a visible drop / in-progress pickup
     private static final int APPROACH_STUCK_TICKS = 30;
-    private static final int MAX_PREY_ROAMS = 10;      // 找不到猎物时漫游换片的最多次数(目标量大时多找几片)
-    private static final int ROAM_DISTANCE = 32;       // 每次漫游的水平距离
+    private static final int MAX_PREY_ROAMS = 10;      // Max number of roam-to-a-new-tile attempts when no prey is found (search more tiles when the target amount is large)
+    private static final int ROAM_DISTANCE = 32;       // Horizontal distance covered by each roam
     private static final int ROAM_RETRY_ROTATION_DEGREES = 11;
     private static final int MAX_SURFACE_DESCENT = 16;
     /** Match ActionPack's surface-path budget so its outbound execution reuses A*'s success cache. */
     private static final int SURFACE_ROUTE_MAX_NODES = 10_000;
     private static final long SURFACE_ROUTE_MAX_MILLIS = 50L;
     private static final int SURFACE_RETURN_LIMIT = 400;
-    private static final double MIN_ROAM_ADVANCE_SQUARED = 64.0D; // 至少实际走 8 格才算探索过一片
-    private static final int WET_PREY_REJECTION_TICKS = 300; // 上岸后 15s 内不重追刚把 bot 带进水里的同一只动物
-    private static final int BLIND_PICKUP_SWEEP_DELAY = 20; // 没捡到任何副产物也要有界搜索,覆盖猪等单掉落猎物
+    private static final double MIN_ROAM_ADVANCE_SQUARED = 64.0D; // Must actually travel at least 8 blocks for a tile to count as explored
+    private static final int WET_PREY_REJECTION_TICKS = 300; // After getting back on dry land, don't re-chase for 15s the same animal that just led the bot into water
+    private static final int BLIND_PICKUP_SWEEP_DELAY = 20; // Even if no by-product was picked up, still run a bounded search, to cover single-drop prey like pigs
     private static final int PICKUP_DROP_BIND_WINDOW = 40;
     private static final double PICKUP_DROP_ORIGIN_RADIUS_SQUARED = 16.0D;
     private static final int PICKUP_CHECKPOINT_SCHEMA = 1;
@@ -94,7 +102,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             "aux_pickup_stat_baseline", "pickup_started_world_time",
             "bound_drop_units");
 
-    // 可食用猎物及其生肉掉落(烤熟前先拿到生肉)。
+    // Edible prey and their raw meat drops (get the raw meat first, before cooking).
     private static final Set<EntityType<?>> PREY = Set.of(
             EntityType.COW, EntityType.PIG, EntityType.SHEEP, EntityType.CHICKEN, EntityType.RABBIT);
     private static final Set<Item> RAW_MEATS = Set.of(
@@ -125,7 +133,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private final int targetMeat;
     private final boolean requireFullQuota;
     private final HuntSearchCursor searchCursor;
-    private final int maxElapsed; // 硬超时按目标量放大(每块肉约多给 24s),打大量肉不被固定 3 分钟掐断
+    private final int maxElapsed; // Hard timeout scales with the target amount (about 24s extra per piece of meat), so hunting a large amount of meat isn't cut off by a fixed 3-minute limit
     private final RestoreMetadata restoredPickup;
     private final boolean invalidCheckpoint;
     private final boolean settlementOnly;
@@ -157,15 +165,15 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private LivingEntity target;
     private BlockPos attackPose;
     private BlockPos attackPreyCell;
-    private BlockPos approachStuckPos; // 接近卡路障检测:上次记录的站位
-    private int approachStuckTick;     // 记录该站位的 tick
-    private int roamCount;             // 找猎物漫游换片次数
-    private BlockPos roamTarget;       // 漫游落脚点
-    private BlockPos roamOrigin;       // 本次漫游实际起点；预算只按真实位移结算
-    private int roamOrdinal;           // 本次漫游成功后应结算的序号
+    private BlockPos approachStuckPos; // Approach-stuck detection: the last recorded stand position
+    private int approachStuckTick;     // The tick at which that stand position was recorded
+    private int roamCount;             // Number of roam-to-new-tile attempts while searching for prey
+    private BlockPos roamTarget;       // Roam landing point
+    private BlockPos roamOrigin;       // The actual starting point of this roam; the budget is only settled against real displacement
+    private int roamOrdinal;           // The ordinal that should be credited once this roam succeeds
     private boolean roamCredited;
-    private int roamStartTick;         // 本次漫游起步 tick(给寻路起步宽限,防"未出发即判到达"瞬退)
-    private int nextRoamRetryTick;     // 候选路径暂时全拒时退避；不把 NO_START 误报成动物耗尽
+    private int roamStartTick;         // The tick this roam started (gives pathfinding a startup grace period, to avoid an instant "arrived before it even left" false positive)
+    private int nextRoamRetryTick;     // Backs off when every candidate path is temporarily rejected; avoids misreporting NO_START as prey exhaustion
     private int surfaceReturnStartTick;
     private final Map<UUID, Integer> wetPreyRejectedUntil = new HashMap<>();
     private final Map<UUID, Integer> unsafePreyRejectedUntil = new HashMap<>();
@@ -217,8 +225,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     @Override
     public boolean isWaiting() {
-        // 追击/捡肉期 bot 可能短暂站立或被地形挡,本任务自带 NO_PROGRESS / 漫游 / 超时三重兜底,
-        // 不交给 StuckWatcher 那个"200t 位置没变就 abort"的粗监控误杀(实测追羊卡墙被它 200t abort)。
+        // During the chase/pickup phase the bot may briefly stand still or get blocked by terrain;
+        // this task has its own triple safety net (NO_PROGRESS / roam / timeout), so it should not be
+        // handed to StuckWatcher's crude "abort if position hasn't changed in 200t" monitor, which
+        // would kill it by mistake (observed: chasing a sheep against a wall got a false 200t abort).
         return true;
     }
 
@@ -276,13 +286,14 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        // 收肉计数:强拾取脚边掉落 + 固定基线绝对增量(刚击杀的肉随后落袋也会算进来)。
+        // Meat-collected count: force-pickup drops at the bot's feet + absolute delta against a
+        // fixed baseline (meat from a kill that lands in the inventory shortly after is also counted).
         HarvestCore.forcePickupNearbyAnyOf(bot, RAW_MEATS, 2.5D, 2.5D);
         int total = Math.max(0, HarvestCore.countInventoryItems(bot, RAW_MEATS) - meatBaseline);
         if (total > collected) {
             collected = total;
             lastProgressTick = elapsed;
-            roamCount = 0; // 打到肉=这一带有货,重置漫游预算(否则打大量肉时 MAX_PREY_ROAMS 累计早早耗尽、没凑够就收工)
+            roamCount = 0; // Hit meat = there's game in this area, reset the roam budget (otherwise, when hunting a large amount of meat, MAX_PREY_ROAMS would accumulate and run out early, finishing before the quota is met)
             BotLog.action(bot, "hunt_collected", "total", collected + "/" + targetMeat);
         }
         // An acknowledged kill owns a physical transaction. Goal quota, ordinary hunt timeout and
@@ -324,10 +335,13 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
 
-        // 接近进展:到当前猎物的距离相对历史最优单调改善 ≥4 格也算进展。远距目标从获取到
-        // 击杀的走位可能远超 NO_PROGRESS_LIMIT;只认掉肉/漫游会把进行中的长接近整个窗口
-        // 误杀(实测 44 格接近 ~390t 后刚开始攻击就被判无进展)。用历史最优而非相邻 tick
-        // 差值,追逐横跳无法刷表。
+        // Approach progress: a monotonic improvement of >=4 blocks in distance to the current prey,
+        // relative to the best distance seen so far, also counts as progress. For a far-away target,
+        // the movement from acquisition to kill can easily exceed NO_PROGRESS_LIMIT; crediting only
+        // meat drops/roams would wrongly kill off an entire long approach still in progress (observed:
+        // a 44-block approach at ~390t was judged "no progress" right as the attack started). Using the
+        // best distance so far, rather than a tick-to-tick delta, means darting back and forth in
+        // pursuit can't game the counter.
         if (phase == Phase.APPROACH && target != null && target.isAlive()) {
             double distance = bot.distanceTo(target);
             if (bestApproachDistance - distance >= 4.0D) {
@@ -336,7 +350,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             }
         }
 
-        // 无进展看门狗:长时间没靠近猎物/没掉肉 → 干净失败,交编排层(可能周围没动物了)。
+        // No-progress watchdog: no approach to prey / no meat dropped for a long time -> clean
+        // failure, handed back to the orchestration layer (there may be no animals left nearby).
         if (phase != Phase.PICKUP
                 && phase != Phase.RETURN_SURFACE
                 && elapsed - lastProgressTick > NO_PROGRESS_LIMIT) {
@@ -525,7 +540,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         return anchor.y() - MAX_SURFACE_DESCENT;
     }
 
-    // 进入接近阶段:重置卡住基线/清障状态(否则沿用上一个目标的基线,新目标第一 tick 就被误判卡住),再起步寻路。
+    // Entering the approach phase: reset the stuck baseline/clear-intent state (otherwise the
+    // previous target's baseline carries over and the new target gets falsely flagged as stuck
+    // on its very first tick), then start pathfinding.
     private void beginApproach(AIPlayerEntity bot) {
         clearRoamIntent();
         phase = Phase.APPROACH;
@@ -577,8 +594,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         BlockPos feet = prey.getBlockPos();
         ServerWorld world = bot.getEntityWorld();
-        // 猎物落点验证与猎物视线同距:看得见动物却看不到它踩的格子,远距目标会在第一步
-        // 就被 no_round_trip 拒掉,视觉与安全链自相矛盾。
+        // Prey-cell validation uses the same range as prey sight: if you can see the animal but not
+        // the cell it's standing on, a far-away target would be rejected as no_round_trip on the very
+        // first step, contradicting the sight/safety chain.
         if (feet.getY() < surfaceFloorY(bot)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, feet, PREY_SIGHT_RANGE)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, feet.up(), PREY_SIGHT_RANGE)
@@ -757,13 +775,16 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             beginApproach(bot);
             return;
         }
-        // 周围(64 格)没猎物 → 先漫游换片找更多,努力凑够目标(动物分散/在远处),
-        // 而非"猎到一点就收工"(实测:打 10 块肉,猎到几块后附近打光就 complete,没凑够数)。
+        // No prey nearby (64 blocks) -> roam to a new tile first to find more, trying to reach the
+        // full target (animals are spread out / far away), rather than "stop as soon as we get some"
+        // (observed: hunting 10 pieces of meat, once nearby prey ran out after a few kills it would
+        // complete without reaching the quota).
         RoamResult roam = roamForPrey(bot);
         if (roam != RoamResult.EXHAUSTED) {
             return;
         }
-        // 漫游也用尽仍找不到:普通觅食可尽力收；长期挖矿 readiness 必须达到完整配额。
+        // Still nothing found after exhausting roams: an ordinary foraging pass can settle for
+        // whatever was collected; long-term mining readiness must reach the full quota.
         if (collected > 0 && !requireFullQuota) {
             complete();
             return;
@@ -802,7 +823,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         return true;
     }
 
-    // 找不到猎物 → 走到 ROAM_DISTANCE 外的露天地表换片再找;最多 MAX_PREY_ROAMS 次。
+    // No prey found -> walk to open surface ground ROAM_DISTANCE away to search a new tile; at most
+    // MAX_PREY_ROAMS times.
     private RoamResult roamForPrey(AIPlayerEntity bot) {
         if (elapsed < nextRoamRetryTick) {
             return RoamResult.RETRY;
@@ -828,8 +850,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         int attemptSerial = (int) Math.floorMod(claimedOrdinal, Integer.MAX_VALUE);
         int[][] dirs = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
         int start = Math.floorMod(attemptSerial + nextRoam, dirs.length);
-        // 距离自适应:满距 8 方向全寻路被拒(山顶/悬崖/水域环绕)就减半再试——近处总有能走的点,
-        // 先挪过去下轮再扩(与 GatherQuotaTask.roamToNewArea 同款,治"8 连拒直接放弃"速死)。
+        // Distance is adaptive: if pathfinding is rejected in all 8 directions at full distance
+        // (mountaintop / cliff / surrounded by water), halve it and retry -- there's usually somewhere
+        // walkable nearby, so move there first and expand again next round (same approach as
+        // GatherQuotaTask.roamToNewArea; fixes the "reject all 8 and give up immediately" quick death).
         for (int dist = ROAM_DISTANCE; dist >= ROAM_DISTANCE / 4; dist /= 2) {
             for (int i = 0; i < dirs.length; i++) {
                 int[] d = dirs[(start + i) % dirs.length];
@@ -858,9 +882,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     continue;
                 }
                 bot.getActionPack().stopAll();
-                // 寻路被拒(目标不可达/未加载)→ 试下一个方向。原来不看结果就进 ROAM,
-                // 下一 tick isPathExecutorIdle 即真 → 瞬退回 ACQUIRE → 再 roam……
-                // 同一秒连发 3 次 roam、瞬间烧光漫游预算,bot 原地没动(实测 hunt 在贫瘠地形 642t 空转失败)。
+                // Pathfinding rejected (target unreachable / not loaded) -> try the next direction.
+                // Previously ROAM was entered without checking the result, so the very next tick
+                // isPathExecutorIdle would be true -> instantly fall back to ACQUIRE -> roam again...
+                // firing 3 roams in the same second and instantly burning the whole roam budget while
+                // the bot never moved (observed: hunt spun idle for 642t on barren terrain and failed).
                 SurfacePathStart pathStart = startExactSurfacePath(
                         bot, ground, surfaceFloorY(bot), feet);
                 if (pathStart == SurfacePathStart.RETRY) {
@@ -1077,7 +1103,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         return SurfacePathStart.STARTED;
     }
 
-    // 漫游途中持续扫猎物:发现就转入捕猎;到落脚点/走不动则回 ACQUIRE 重扫。
+    // Keep scanning for prey while roaming: switch to hunting as soon as one is found; on reaching
+    // the landing point / getting stuck, return to ACQUIRE and rescan.
     private void roamMove(AIPlayerEntity bot) {
         LivingEntity prey = nearestPrey(bot);
         if (prey != null) {
@@ -1099,8 +1126,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         boolean arrived = roamTarget == null
                 || bot.getBlockPos().getSquaredDistance(roamTarget) <= 9.0D;
-        // 起步宽限 20t:startPathTo 后 A* 异步计算需几个 tick,期间 executor 仍 idle,
-        // 立即判"走不动"会瞬退(roam 形同虚设)。宽限后 idle 才是真到不了;200t 上限防走太久。
+        // 20t startup grace period: after startPathTo, the asynchronous A* computation needs a few
+        // ticks, during which the executor is still idle; judging "can't move" immediately would
+        // cause an instant fallback (making roam pointless). Idle after the grace period means it
+        // genuinely can't get there; the 200t cap prevents walking for too long.
         boolean gaveUp = (elapsed - roamStartTick > 20 && bot.getActionPack().isPathExecutorIdle())
                 || elapsed - roamStartTick > 200;
         if (arrived || gaveUp) {
@@ -1129,13 +1158,18 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         roamCredited = false;
     }
 
-    // 在 (x,z) 列从高往低找第一个露天可站点(地表落脚点)。
+    // In the (x,z) column, scan top-down for the first open-air standable spot (a surface landing point).
     private static BlockPos findGround(ServerWorld world, int x, int z) {
-        // 用高度图直接拿该列地表,跨任意海拔都成立。原来硬上限 y=110:bot 站在 y>110 的高地/丘陵时
-        // 永远找不到落脚点 → 漫游全废 → 明明附近有猎物也 hunt_stuck_no_escape(实测 y=111、有鸡 dist 13 仍失败)。
-        // 树冠穿透:原 MOTION_BLOCKING 顶面在森林落在树冠上(高大云杉 20+ 格,固定下穿格数赌不赢),
-        // 林下地面又不见天 → 采样点全 null → 漫游全拒速死(实测云杉林出生)。
-        // 正解:MOTION_BLOCKING_NO_LEAVES 高度图原生跳过树叶,顶面=地形/树干;再下穿几格落到地面。
+        // Use the heightmap to read that column's surface directly, so this holds at any altitude.
+        // The old hard cap of y=110 meant a bot standing on terrain/hills above y=110 could never
+        // find a landing point -> roaming was completely broken -> hunt_stuck_no_escape even with
+        // prey nearby (observed: at y=111 with a chicken 13 blocks away, it still failed).
+        // Canopy penetration: the old MOTION_BLOCKING top surface lands on the tree canopy in
+        // forests (tall spruce can be 20+ blocks, so a fixed descent count is a losing bet), and the
+        // ground under the canopy never sees sky -> every sampled point comes back null -> every
+        // roam gets rejected, a quick death (observed: spawning in a spruce forest).
+        // The fix: the MOTION_BLOCKING_NO_LEAVES heightmap natively skips leaves, so its top surface
+        // is terrain/trunk; then descend a few more blocks to reach the ground.
         int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
         for (int y = surfaceY; y >= surfaceY - 24 && y > world.getBottomY() + 1; y--) {
             BlockPos p = new BlockPos(x, y, z);
@@ -1253,7 +1287,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             beginApproach(bot);
             return;
         }
-        CombatCore.equipMelee(bot); // 砍之前确保手持最佳武器(实测打猎 held=dirt,拿土砍肉伤害仅 1、极慢);equipFromSlot 幂等不抖
+        CombatCore.equipMelee(bot); // Make sure the best weapon is equipped before striking (observed: hunting with held=dirt, hitting meat with dirt only deals 1 damage and is extremely slow); equipFromSlot is idempotent and won't flicker
         // Refresh at the exact attack boundary. A long approach may cross unrelated meat or kill
         // statistics; only evidence produced after the swing that can own this target may settle
         // the transaction.
@@ -1269,9 +1303,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 == net.minecraft.entity.Entity.RemovalReason.KILLED)) {
             captureFreshTargetRawDropIds(bot);
         }
-        // 只在挥砍实际掉血时刷 lastProgressTick。真实伤害意味着目标血量单调下降、连击终会击杀;
-        // 空挥循环(实测 126 刀不致死)与够不到都不刷新,由 NO_PROGRESS_LIMIT 干净收口而不是拖到
-        // maxElapsed;健康连击接在长接近之后也不再被 400t 窗口误杀(collected=0 肉还在地上)。
+        // Only refresh lastProgressTick when a swing actually deals damage. Real damage means the
+        // target's health monotonically decreases and a sustained combo will eventually kill it;
+        // whiffing in a loop (observed: 126 hits without a kill) and being out of range both leave it
+        // unrefreshed, so NO_PROGRESS_LIMIT cleanly closes it out instead of dragging on to maxElapsed;
+        // a healthy combo right after a long approach also no longer gets falsely killed by the 400t
+        // window (collected=0 with meat still on the ground).
         if (struck && target != null && target.getHealth() < healthBeforeSwing) {
             lastProgressTick = elapsed;
         }
@@ -1486,7 +1523,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             complete();
             return;
         }
-        phase = Phase.ACQUIRE; // 捡完去找下一只(数量够了会在 onTick 顶部 complete)
+        phase = Phase.ACQUIRE; // Once pickup is done, go find the next one (if the quota is met, onTick's top-of-tick check will complete)
     }
 
     private Optional<ItemEntity> nearestTransactionRawDrop(AIPlayerEntity bot) {
@@ -1661,7 +1698,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if (observedDropPosition == null) {
                 bot.getActionPack().stopMovement();
             } else {
-                io.github.zoyluo.aibot.mode.FakePlayerMotion.nudgeWithinBlockToward(
+                io.github.zoyluo.minecraftai.mode.FakePlayerMotion.nudgeWithinBlockToward(
                         bot, stand, observedDropPosition, "physical_drop_pickup");
             }
             return true;
@@ -1671,8 +1708,10 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 == SurfacePathStart.STARTED;
     }
 
-    // 只猎确定掉生肉的成年 vanilla 动物。旧的“任意 AnimalEntity”兼容会把蜜蜂、青蛙等
-    // 非食物生物当猎物，既浪费 200t 拾取预算又可能主动制造战斗；模组肉源应通过显式配置扩展。
+    // Only hunts adult vanilla animals known to drop raw meat. The old "any AnimalEntity"
+    // compatibility would treat bees, frogs, and other non-food creatures as prey, wasting the 200t
+    // pickup budget and possibly starting unwanted fights; modded meat sources should be added via
+    // explicit config.
     private static boolean isHuntable(LivingEntity entity) {
         return PREY.contains(entity.getType())
                 && entity instanceof net.minecraft.entity.passive.AnimalEntity animal
@@ -2045,7 +2084,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         return HarvestCore.countInventoryItems(bot, RAW_MEATS);
     }
 
-    /** 周围是否有可猎动物——供饥饿链判断"值不值得派猎食任务",避免没动物时空派必失败。 */
+    /** Whether huntable animals are nearby -- used by the hunger chain to decide whether it's worth
+     * dispatching a hunt task, avoiding a guaranteed failure when dispatched with no animals around. */
     public static boolean hasPreyNearby(AIPlayerEntity bot) {
         return !bot.getEntityWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(SEARCH_RANGE),

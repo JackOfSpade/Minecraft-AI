@@ -1,15 +1,15 @@
-package io.github.zoyluo.aibot.perception;
+package io.github.zoyluo.minecraftai.perception;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogFields;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
@@ -36,7 +36,7 @@ public final class PerceptionCollector {
 
     public static PerceptionSnapshot collect(AIPlayerEntity bot) {
         long started = System.currentTimeMillis();
-        AIBotConfig.Perception config = AIBotConfig.get().perception();
+        MinecraftAiConfig.Perception config = MinecraftAiConfig.get().perception();
         ServerWorld world = bot.getEntityWorld();
         BlockPos center = bot.getBlockPos();
         PerceptionSnapshot.SelfState self = collectSelfState(bot);
@@ -61,7 +61,7 @@ public final class PerceptionCollector {
                 "items_n", items.size(),
                 "light", world.getLightLevel(center));
         if (elapsed > 10L) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.PERCEPTION, bot, "snapshot_slow", "elapsed_ms", elapsed);
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.PERCEPTION, bot, "snapshot_slow", "elapsed_ms", elapsed);
         }
         return new PerceptionSnapshot(
                 self,

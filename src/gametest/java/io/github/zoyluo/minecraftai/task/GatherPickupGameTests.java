@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
@@ -23,7 +23,7 @@ import net.minecraft.text.Text;
 
 /** Strict-survival regressions for Gather's physical drop transaction. */
 public final class GatherPickupGameTests {
-    @GameTest(environment = "aibot-gametest:gather_pickup_game_tests_vanilla_pickup_stat_survives_concurrent_log_consumption", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_vanilla_pickup_stat_survives_concurrent_log_consumption", maxTicks = 500)
     public void vanillaPickupStatSurvivesConcurrentLogConsumption(TestContext context) {
         Fixture fixture = fixture(context, "GatherPickupStatGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -58,7 +58,7 @@ public final class GatherPickupGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:gather_pickup_game_tests_real_miss_retries_nearby_resource_before_regional_roam", maxTicks = 700)
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_real_miss_retries_nearby_resource_before_regional_roam", maxTicks = 700)
     public void realMissRetriesNearbyResourceBeforeRegionalRoam(TestContext context) {
         Fixture fixture = fixture(context, "GatherMissRetryGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -111,7 +111,7 @@ public final class GatherPickupGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:gather_pickup_game_tests_reachable_harvest_restarts_immediately_after_safety_pause", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_reachable_harvest_restarts_immediately_after_safety_pause", maxTicks = 300)
     public void reachableHarvestRestartsImmediatelyAfterSafetyPause(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeHarvestGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -154,7 +154,7 @@ public final class GatherPickupGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:gather_pickup_game_tests_safety_displacement_reselects_instead_of_mining_remote_target", maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_safety_displacement_reselects_instead_of_mining_remote_target", maxTicks = 300)
     public void safetyDisplacementReselectsInsteadOfMiningRemoteTarget(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeReselectGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -189,7 +189,7 @@ public final class GatherPickupGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:gather_pickup_game_tests_out_of_reach_retry_cannot_renew_harvest_deadline", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_out_of_reach_retry_cannot_renew_harvest_deadline", maxTicks = 400)
     public void outOfReachRetryCannotRenewHarvestDeadline(TestContext context) {
         Fixture fixture = fixture(context, "GatherHarvestLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
@@ -231,7 +231,7 @@ public final class GatherPickupGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:gather_pickup_game_tests_repeated_safety_resume_cannot_renew_harvest_deadline", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_repeated_safety_resume_cannot_renew_harvest_deadline", maxTicks = 400)
     public void repeatedSafetyResumeCannotRenewHarvestDeadline(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();

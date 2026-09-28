@@ -1,60 +1,60 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.EatAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.brain.ActionDispatcher;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.brain.ChatToolCall;
-import io.github.zoyluo.aibot.brain.ToolRegistry;
-import io.github.zoyluo.aibot.coordination.TaskBoard;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.goal.GoalEvaluation;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.goal.GoalPlanner;
-import io.github.zoyluo.aibot.goal.GoalPredicate;
-import io.github.zoyluo.aibot.goal.GoalPredicates;
-import io.github.zoyluo.aibot.goal.GoalSnapshot;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningFoodReserve;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mode.CapabilityPolicy;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.persist.BotPersistence;
-import io.github.zoyluo.aibot.persist.MissionSpec;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.task.AbstractTask;
-import io.github.zoyluo.aibot.task.BuildTask;
-import io.github.zoyluo.aibot.task.CombatTask;
-import io.github.zoyluo.aibot.task.DescendToYTask;
-import io.github.zoyluo.aibot.task.DigDownTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.ContainerTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.FarmTask;
-import io.github.zoyluo.aibot.task.HoldTask;
-import io.github.zoyluo.aibot.task.IrrigateTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.RaidCropsTask;
-import io.github.zoyluo.aibot.task.SleepTask;
-import io.github.zoyluo.aibot.task.StripMineTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskState;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.EatAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.brain.ActionDispatcher;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.brain.ChatToolCall;
+import io.github.zoyluo.minecraftai.brain.ToolRegistry;
+import io.github.zoyluo.minecraftai.coordination.TaskBoard;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalEvaluation;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalPlanner;
+import io.github.zoyluo.minecraftai.goal.GoalPredicate;
+import io.github.zoyluo.minecraftai.goal.GoalPredicates;
+import io.github.zoyluo.minecraftai.goal.GoalSnapshot;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningFoodReserve;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mode.CapabilityPolicy;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.persist.BotPersistence;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.task.BlueprintLoader;
+import io.github.zoyluo.minecraftai.task.AbstractTask;
+import io.github.zoyluo.minecraftai.task.BuildTask;
+import io.github.zoyluo.minecraftai.task.CombatTask;
+import io.github.zoyluo.minecraftai.task.DescendToYTask;
+import io.github.zoyluo.minecraftai.task.DigDownTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.ContainerTask;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.FarmTask;
+import io.github.zoyluo.minecraftai.task.HoldTask;
+import io.github.zoyluo.minecraftai.task.IrrigateTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.RaidCropsTask;
+import io.github.zoyluo.minecraftai.task.SleepTask;
+import io.github.zoyluo.minecraftai.task.StripMineTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskState;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -89,16 +89,16 @@ import java.util.function.Predicate;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotVerifySubcommand {
+public final class MinecraftAiVerifySubcommand {
     private static final int DIAMOND_STACK_TARGET = 64;
     private static final int OBSIDIAN_HALF_STACK_TARGET = 32;
-    // 用户承诺口径:整组 64 黑曜石。32 契约保持原样(已封存),64 是其超集场景。
+    // User-facing commitment baseline: a full stack of 64 obsidian. The 32 contract stays as-is (frozen); 64 is its superset scenario.
     private static final int OBSIDIAN_STACK_TARGET =
             MiningEvidenceAudit.OBSIDIAN_STACK_TARGET;
-    // from-zero 64 = 32 版固定超时 + 增量 32 块 × CreateObsidian 单块摊销预算(2,400 tick)。
+    // from-zero 64 = the 32 version's fixed timeout + an incremental 32 blocks × CreateObsidian's per-block amortized budget (2,400 ticks).
     private static final int OBSIDIAN_STACK_64_FROM_ZERO_TIMEOUT =
             240_000 + 32 * 2_400;
-    // prepared 隔离流水线:32 版 24,000 tick 合约按相同单块速率翻倍。
+    // prepared isolated pipeline: the 32 version's 24,000-tick contract, doubled at the same per-block rate.
     private static final int OBSIDIAN_STACK_64_PREPARED_TIMEOUT = 48_000;
     static final String STRICT_STRIP_MINE_REJECTION_FEATURE = "strip_mine_strict_rejection";
 
@@ -190,14 +190,14 @@ public final class AIBotVerifySubcommand {
             "geo_rich", "geo_water", "geo_recover", "geo_bonus", "geo_stockpile", "geo_resume", "geo_shaft", "geo_cave", "geo_diamond_lava", "geo_obsidian_make", "geo_cliff_tree", "geo_night_swarm", "geo_replay_ore",
             "geo_flow", "geo_lake", "geo_guard", "explore_wood");
 
-    // Mining First 的快速能力契约：只验证 63/64、31/32 后置条件边界和 MissionSpec 往返，
-    // 不预置矿石、不执行长跑，也绝不把 PASS 表述成真实采矿能力。PR CI 可稳定在秒级完成。
+    // Mining First's fast capability contract: only verifies the 63/64 and 31/32 postcondition boundaries and the MissionSpec round trip;
+    // it does not pre-place ore, does not run a long expedition, and never presents a PASS as real mining capability. PR CI can finish reliably in seconds.
     private static final List<String> MINING_CONTRACT_SUITE = List.of(
             "diamond_stack_64_controlled",
             "obsidian_half_stack_32_controlled");
 
-    // 以下两层均为显式 opt-in，不进入 verify all / mining / PR CI。prepared 隔离工具链和自然资源方差，
-    // from_zero 才是 capability manifest 绑定的最终用户承诺口径。两层都可能在能力未完成时诚实 FAIL。
+    // The two tiers below are both explicit opt-in and never enter verify all / mining / PR CI. "prepared" isolates the tool chain from natural resource variance,
+    // while "from_zero" is the final user-commitment baseline bound to the capability manifest. Either tier may honestly FAIL while the capability is still incomplete.
     private static final List<String> MINING_ACCEPTANCE_PREPARED_SUITE = List.of(
             "diamond_stack_64_prepared",
             "obsidian_half_stack_32_prepared",
@@ -214,7 +214,7 @@ public final class AIBotVerifySubcommand {
             "obsidian_half_stack_32_from_zero",
             "obsidian_stack_64_from_zero");
 
-    // 挖矿回归套件:一条命令 /aibot verify mining 跑完所有挖矿相关场景。
+    // Mining regression suite: one command, /minecraftai verify mining, runs every mining-related scenario.
     private static final List<String> MINING_SUITE = List.of(
             "diamond_stack_64_controlled",
             "obsidian_half_stack_32_controlled",
@@ -236,9 +236,9 @@ public final class AIBotVerifySubcommand {
             "geo_resume",
             "geo_guard");
 
-    // 食物回归套件:一条命令 /aibot verify food_suite 跑完所有食物/种田相关场景。
-    // 覆盖五条食物途径:打猎+烤(food/food_full)、种田做面包(food_farm)、觅食(forage)、
-    // 无限水源灌溉(farm_irrigate)、合成蛋糕(cake)、村庄收菜(village_harvest),外加种田基元(farm/farm_wheat)。
+    // Food regression suite: one command, /minecraftai verify food_suite, runs every food/farming-related scenario.
+    // Covers five food-acquisition paths: hunting + cooking (food/food_full), farming for bread (food_farm), foraging (forage),
+    // infinite-water-source irrigation (farm_irrigate), crafting cake (cake), and village crop raiding (village_harvest), plus the farming primitive (farm/farm_wheat).
     private static final List<String> FOOD_SUITE = List.of(
             "food",
             "food_full",
@@ -250,27 +250,27 @@ public final class AIBotVerifySubcommand {
             "cake",
             "village_harvest");
 
-    // 矿物材料回归套件:一条命令 /aibot verify material_suite 跑完四种目标矿:铁锭/金锭/钻石/黑曜石。
+    // Mineral material regression suite: one command, /minecraftai verify material_suite, runs all four target minerals: iron ingot/gold ingot/diamond/obsidian.
     private static final List<String> MATERIAL_SUITE = List.of(
             "achieve_iron_ingot",
             "achieve_gold_ingot",
             "achieve_diamond",
             "achieve_obsidian");
 
-    // 极端环境回归套件:矿物/食物在"怪物围攻 + 深暗"下仍要完成。/aibot verify extreme_suite
+    // Extreme-environment regression suite: mineral/food goals must still be completed under "mob siege + deep darkness". /minecraftai verify extreme_suite
     private static final List<String> EXTREME_SUITE = List.of(
             "iron_extreme",
             "diamond_extreme",
             "food_extreme");
 
-    // 地形矩阵套件(②):同一挖矿任务 × 六种几何,统一接近原语的考场。/aibot verify geo_suite
+    // Terrain matrix suite (②): the same mining task × six geometries, a unified proving ground for the approach primitive. /minecraftai verify geo_suite
     private static final List<String> GEO_SUITE = List.of(
             "geo_vertical", "geo_slope", "geo_overhang", "geo_wall", "geo_pocket", "geo_deep",
             "geo_lava", "geo_gravel", "geo_fullinv", "geo_rich", "geo_water", "geo_bonus",
             "geo_flow", "geo_lake");
 
-    // 贴近实操套件:自然世界、空背包、零给予,从零完成目标。/aibot verify real_suite
-    // 失败 = 自动化与实操的真实差距,逐个修复;real_obsidian 预期 FAIL(浇水造黑曜石能力未实现)。
+    // Close-to-real-play suite: natural world, empty inventory, nothing granted — complete the goal entirely from scratch. /minecraftai verify real_suite
+    // A failure here = a real gap between automation and actual play, to be fixed one by one; real_obsidian is expected to FAIL (the pour-water-to-make-obsidian capability isn't implemented yet).
     private static final List<String> REAL_SUITE = List.of(
             "real_wood",
             "real_food",
@@ -283,38 +283,38 @@ public final class AIBotVerifySubcommand {
             "real_armor",
             "real_obsidian");
 
-    // 寻路容错专项套件:/aibot verify nav_suite。四条各钉一种实操高频故障形态:
-    // 自然地形长距离绕行(real_nav_far)、被困搭柱翻墙(nav_pillar_out)、活埋窒息脱困(nav_buried_escape)、
-    // 不可达目标快速认输(nav_unreachable)。前三条测"会自救",最后一条测"会认输"——
-    // 空转不报错比干净失败更伤:实操里 bot 看着在干活,实际原地打转浪费整局。
+    // Pathfinding fault-tolerance suite: /minecraftai verify nav_suite. Its four cases each pin down a high-frequency real-play failure mode:
+    // long-distance detouring over natural terrain (real_nav_far), pillaring up and over a wall when trapped (nav_pillar_out), escaping suffocation when buried alive (nav_buried_escape),
+    // and quickly giving up on an unreachable target (nav_unreachable). The first three test "can it save itself"; the last tests "can it admit defeat" —
+    // spinning without ever erroring is worse than a clean failure: in real play the bot looks like it's working while actually just spinning in place, wasting the whole run.
     private static final List<String> NAV_SUITE = List.of(
             "real_nav_far",
             "nav_pillar_out",
             "nav_buried_escape",
             "nav_unreachable");
 
-    // R2 LLM 全链层套件:中文口语指令走真实 LLM 大脑(意图解析→选工具→参数化→执行),
-    // 与玩家聊天 @bot 完全同一代码路径(BrainCoordinator.handleMessage)。烧真 API 钱:
-    // 故意不进 ALL_FEATURES(verify all 不应偷偷计费),必须显式 /aibot verify llm_suite(或单点名),
-    // 且 WITH_LLM=1 跑(test 脚本默认 unset AIBOT_LLM_API_KEY 隔离大脑)。
+    // R2 LLM full-chain-layer suite: colloquial-language instructions go through the real LLM brain (intent parsing → tool selection → parameterization → execution),
+    // the exact same code path as a player chatting @bot (BrainCoordinator.handleMessage). It burns real API money:
+    // deliberately excluded from ALL_FEATURES (verify all should never bill silently), so it must be named explicitly, /minecraftai verify llm_suite (or a single case),
+    // and run with WITH_LLM=1 (the test script unsets MINECRAFTAI_LLM_API_KEY by default to isolate the brain).
     private static final List<String> LLM_SUITE = List.of(
             "llm_move",
             "llm_food",
             "llm_iron",
             "llm_diamond");
 
-    // 对话式助手层套件:/aibot verify assistant_suite。验证助手层四块新地基(此前只编译过、零运行验证):
-    // P0 目标队列(连续吩咐自动排队接续)、P1 Goal.Build 自动备料(只给原木自己算料合成)、
-    // P3 参数化蓝图(custom:WxDxH:material)、P2 玩家消息不清进行中目标(打断保留语义)。
-    // 全部确定性实验室场景,不走 LLM、不烧 API(大脑驱动的全链由 llm_suite 单独覆盖)。
+    // Conversational assistant-layer suite: /minecraftai verify assistant_suite. Verifies four new foundations of the assistant layer (previously only compiled, never run-verified):
+    // P0 goal queue (consecutive instructions auto-queue and chain), P1 Goal.Build auto-provisioning (given only raw logs, it computes materials and crafts on its own),
+    // P3 parameterized blueprints (custom:WxDxH:material), and P2 player messages that don't clear the in-progress goal (interrupt-preserving semantics).
+    // All deterministic lab scenarios; none go through the LLM or burn API calls (the brain-driven full chain is covered separately by llm_suite).
     private static final List<String> ASSISTANT_SUITE = List.of(
             "goal_queue",
             "goal_build_auto",
             "goal_build_custom",
             "msg_keep_goal");
 
-    // Runtime 控制专项：取消必须清掉所有复活源；cancel-current 保留并晋升队列；
-    // LLM 同批 stop + replacement 必须只启动一次 replacement。
+    // Runtime control suite: cancellation must clear every resurrection source; cancel-current preserves and promotes the queue;
+    // an LLM batch of stop + replacement must start the replacement exactly once.
     private static final List<String> RUNTIME_CONTROL_SUITE = List.of(
             "cancel_no_resurrection",
             "cancel_current_queue",
@@ -323,10 +323,10 @@ public final class AIBotVerifySubcommand {
             "replace_start_failure",
             "pause_resume_safety_stack");
     private static final Map<UUID, VerifyRun> RUNS = new ConcurrentHashMap<>();
-    // 场景空间隔离计数:每场景在 x 方向轮转到新地块,防套件内场景互染(prepareArea 注释详述)。
+    // Scenario spatial-isolation counter: each scenario rotates to a new plot along the x axis, preventing cross-contamination between scenarios in a suite (see the prepareArea comment for details).
     private static int scenarioSlot = 0;
 
-    private AIBotVerifySubcommand() {
+    private MinecraftAiVerifySubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -354,7 +354,7 @@ public final class AIBotVerifySubcommand {
                         })
                         .executes(context -> {
                             String feature = StringArgumentType.getString(context, "feature");
-                            // "all"/"mining" 组别名在 start→expandFeatures 里展开;单用例直接传名。
+                            // "all"/"mining" group aliases are expanded in start→expandFeatures; a single case just passes its name through.
                             return start(context.getSource(), List.of(feature));
                         }));
     }
@@ -373,22 +373,22 @@ public final class AIBotVerifySubcommand {
         }
         Optional<AIPlayerEntity> bot = selectBot(source);
         if (bot.isEmpty()) {
-            source.sendError(Text.literal("[AIBot Verify] FAIL no_bot: spawn a bot first with /aibot spawn <name>"));
+            source.sendError(Text.literal("[MinecraftAi Verify] FAIL no_bot: spawn a bot first with /minecraftai spawn <name>"));
             return 0;
         }
         List<String> features = expandFeatures(requested);
         if (features.isEmpty()) {
-            source.sendError(Text.literal("[AIBot Verify] unknown feature. Available: " + String.join(", ", ALL_FEATURES)));
+            source.sendError(Text.literal("[MinecraftAi Verify] unknown feature. Available: " + String.join(", ", ALL_FEATURES)));
             return 0;
         }
         UUID botId = bot.get().getUuid();
         if (RUNS.containsKey(botId)) {
-            source.sendError(Text.literal("[AIBot Verify] already running for " + bot.get().getGameProfile().name()));
+            source.sendError(Text.literal("[MinecraftAi Verify] already running for " + bot.get().getGameProfile().name()));
             return 0;
         }
         VerifyRun run = new VerifyRun(source, botId, features);
         RUNS.put(botId, run);
-        source.sendFeedback(() -> Text.literal("[AIBot Verify] started for "
+        source.sendFeedback(() -> Text.literal("[MinecraftAi Verify] started for "
                 + bot.get().getGameProfile().name()
                 + ": "
                 + String.join(", ", features)), false);
@@ -435,7 +435,7 @@ public final class AIBotVerifySubcommand {
     }
 
     private static List<String> expandFeatures(List<String> requested) {
-        return expandFeatures(requested, AIBotConfig.get().profile());
+        return expandFeatures(requested, MinecraftAiConfig.get().profile());
     }
 
     static List<String> expandFeaturesForGameTest(List<String> requested, OperatingProfile profile) {
@@ -450,38 +450,38 @@ public final class AIBotVerifySubcommand {
         for (String raw : requested) {
             String feature = raw.toLowerCase(java.util.Locale.ROOT);
             if (feature.contains("+")) {
-                // 加号组合:任意场景/套件串成一跑(诊断'单跑 PASS 套跑 FAIL'的顺序污染对最常用;
-                // Brigadier word() 字符集不含逗号,故用 +)。
+                // Plus-sign combos: chain any scenarios/suites into one run (most often used to diagnose the order-pollution pattern of 'passes alone, fails in a suite';
+                // Brigadier's word() character set excludes commas, hence the + separator).
                 features.addAll(expandFeatures(
                         java.util.Arrays.asList(feature.split("\\+")), effectiveProfile));
             } else if ("all".equals(feature)) {
                 addFeaturesForProfile(features, ALL_FEATURES, effectiveProfile);
             } else if ("mining".equals(feature)) {
-                features.addAll(MINING_SUITE); // 挖矿回归套件别名
+                features.addAll(MINING_SUITE); // mining regression suite alias
             } else if ("food_suite".equals(feature)) {
-                features.addAll(FOOD_SUITE); // 食物回归套件别名
+                features.addAll(FOOD_SUITE); // food regression suite alias
             } else if ("material_suite".equals(feature)) {
-                features.addAll(MATERIAL_SUITE); // 矿物材料回归套件别名
+                features.addAll(MATERIAL_SUITE); // mineral material regression suite alias
             } else if ("extreme_suite".equals(feature)) {
-                features.addAll(EXTREME_SUITE); // 极端环境回归套件别名
+                features.addAll(EXTREME_SUITE); // extreme-environment regression suite alias
             } else if ("real_suite".equals(feature)) {
-                features.addAll(REAL_SUITE); // 贴近实操套件别名
+                features.addAll(REAL_SUITE); // close-to-real-play suite alias
             } else if ("geo_suite".equals(feature)) {
-                features.addAll(GEO_SUITE); // 地形矩阵套件别名
+                features.addAll(GEO_SUITE); // terrain matrix suite alias
             } else if ("nav_suite".equals(feature)) {
-                features.addAll(NAV_SUITE); // 寻路容错专项套件别名
+                features.addAll(NAV_SUITE); // pathfinding fault-tolerance suite alias
             } else if ("llm_suite".equals(feature)) {
-                features.addAll(LLM_SUITE); // R2 LLM 全链层套件别名(真实 LLM,计费,需 WITH_LLM=1)
+                features.addAll(LLM_SUITE); // R2 LLM full-chain-layer suite alias (real LLM, billed, requires WITH_LLM=1)
             } else if ("assistant_suite".equals(feature)) {
-                features.addAll(ASSISTANT_SUITE); // 对话式助手层套件别名(P0 队列/P1 自动备料/P3 参数化/P2 打断保留)
+                features.addAll(ASSISTANT_SUITE); // conversational assistant-layer suite alias (P0 queue / P1 auto-provisioning / P3 parameterization / P2 interrupt-preserving)
             } else if ("runtime_control_suite".equals(feature)) {
-                features.addAll(RUNTIME_CONTROL_SUITE); // P0 原子取消/替换；确定性且不调用 LLM
+                features.addAll(RUNTIME_CONTROL_SUITE); // P0 atomic cancel/replace; deterministic and never calls the LLM
             } else if ("mining_contract_suite".equals(feature)) {
-                features.addAll(MINING_CONTRACT_SUITE); // 秒级数量/持久化/后置条件契约，不代表真实采矿
+                features.addAll(MINING_CONTRACT_SUITE); // second-scale quantity/persistence/postcondition contract; does not represent real mining
             } else if ("mining_acceptance_prepared_suite".equals(feature)) {
-                features.addAll(MINING_ACCEPTANCE_PREPARED_SUITE); // 显式 opt-in 长跑：预置非目标装备
+                features.addAll(MINING_ACCEPTANCE_PREPARED_SUITE); // explicit opt-in long run: pre-equips non-target gear
             } else if ("mining_acceptance_from_zero_suite".equals(feature)) {
-                features.addAll(MINING_ACCEPTANCE_FROM_ZERO_SUITE); // 显式 opt-in 最终能力口径
+                features.addAll(MINING_ACCEPTANCE_FROM_ZERO_SUITE); // explicit opt-in final capability baseline
             } else if ("mining_acceptance_suite".equals(feature)) {
                 features.addAll(MINING_CONTRACT_SUITE);
                 features.addAll(MINING_ACCEPTANCE_PREPARED_SUITE);
@@ -489,7 +489,7 @@ public final class AIBotVerifySubcommand {
             } else if (ALL_FEATURES.contains(feature) || LLM_SUITE.contains(feature)
                        || OPT_IN_LONG_MINING_FEATURES.contains(feature)
                        || "real_diamond3".equals(feature)) {
-                // llm_* 与长跑挖矿故意不进 ALL_FEATURES，必须显式点名，避免普通 verify all 偷偷计费或跑数小时。
+                // llm_* and long-running mining are deliberately excluded from ALL_FEATURES; they must be named explicitly, so a plain verify all never bills silently or runs for hours.
                 addFeatureForProfile(features, feature, effectiveProfile);
             }
         }
@@ -513,9 +513,9 @@ public final class AIBotVerifySubcommand {
     }
 
     private static Result startScenario(ServerCommandSource source, AIPlayerEntity bot, String feature) throws IOException {
-        // 场景开始前统一清执行状态:上一场景断言满足判 PASS 时 goal 可能仍有剩余步骤在跑
-        //(runningGoal 的 assertion≠goal 完成),活跃 plan 会拒掉本场景的 submit(实测 forage
-        // goal_submit_failed)或把残余任务泄进来。每场景从干净执行状态开跑,一处治所有场景间泄漏。
+        // Uniformly clear execution state before each scenario starts: when the previous scenario's assertion is satisfied and it's judged PASS, the goal may still have steps left running
+        // (runningGoal's assertion ≠ goal completion); an active plan would reject this scenario's submit (observed as forage's
+        // goal_submit_failed) or leak a leftover task into it. Every scenario starts from a clean execution state — fixing this in one place stops leakage between all scenarios.
         IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_scenario_reset");
         return switch (feature) {
             case "capability_profile" -> verifyCapabilityProfile(bot);
@@ -640,7 +640,7 @@ public final class AIBotVerifySubcommand {
     }
 
     private static Result verifyCapabilityProfile(AIPlayerEntity bot) {
-        AIBotConfig config = AIBotConfig.get();
+        MinecraftAiConfig config = MinecraftAiConfig.get();
         AtomicInteger sideEffects = new AtomicInteger();
         int expectedExecutions = 0;
         boolean matched = true;
@@ -747,7 +747,7 @@ public final class AIBotVerifySubcommand {
         }
         zombie.refreshPositionAndAngles(bot.getX() + 2.0D, bot.getY(), bot.getZ(), 0.0F, 0.0F);
         world.spawnEntity(zombie);
-        return assignTask(bot, "combat", new CombatTask(EntityType.ZOMBIE, 1, AIBotConfig.get().combat().retreatHp()),
+        return assignTask(bot, "combat", new CombatTask(EntityType.ZOMBIE, 1, MinecraftAiConfig.get().combat().retreatHp()),
                 600,
                 ignored -> !zombie.isAlive());
     }
@@ -793,7 +793,7 @@ public final class AIBotVerifySubcommand {
      * operator profile never expands to this scenario and continues to run {@link #assignStripMine}.
      */
     private static Result assignStripMineStrictRejection(AIPlayerEntity bot) {
-        OperatingProfile profile = AIBotConfig.get().profile();
+        OperatingProfile profile = MinecraftAiConfig.get().profile();
         Optional<String> declaredRejection = StripMineTask.profileRejectionReason(profile);
         if (!declaredRejection.filter(StripMineTask.STRICT_SURVIVAL_REJECTION::equals).isPresent()) {
             return Result.fail(STRICT_STRIP_MINE_REJECTION_FEATURE,
@@ -803,8 +803,8 @@ public final class AIBotVerifySubcommand {
         }
         TaskManager.INSTANCE.assign(bot,
                 new StripMineTask(Direction.NORTH, 2, 0, null, java.util.Set.of()),
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(
-                        io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY,
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(
+                        io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY,
                         "strict_strip_mine_rejection"));
         return Result.runningExpectTypedFail(
                 STRICT_STRIP_MINE_REJECTION_FEATURE,
@@ -815,8 +815,8 @@ public final class AIBotVerifySubcommand {
     private static Result assignBuild(AIPlayerEntity bot) throws IOException {
         prepareArea(bot);
         clearInventory(bot);
-        // small_hut 实测需 114 板(地板25+墙66-门2+顶25),原 64 板建到一半料尽 missing_material
-        //(BuildTask 只拿成品不合成;自动备料是 Goal.Build 链的事,本场景测纯建造)。
+        // small_hut measured needs 114 planks (floor 25 + walls 66 - door 2 + roof 25); the original 64 planks ran out of material halfway through, missing_material
+        // (BuildTask only consumes finished materials, it doesn't craft them; auto-provisioning is the Goal.Build chain's job — this scenario tests pure building).
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_PLANKS, 128));
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 64));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 64));
@@ -838,9 +838,9 @@ public final class AIBotVerifySubcommand {
     }
 
     private static Result verifyDrowning(AIPlayerEntity bot) {
-        Task task = new io.github.zoyluo.aibot.task.EvadeTask(new io.github.zoyluo.aibot.task.Threat(
-                io.github.zoyluo.aibot.task.Threat.Type.DROWNING,
-                io.github.zoyluo.aibot.task.Threat.Severity.MEDIUM,
+        Task task = new io.github.zoyluo.minecraftai.task.EvadeTask(new io.github.zoyluo.minecraftai.task.Threat(
+                io.github.zoyluo.minecraftai.task.Threat.Type.DROWNING,
+                io.github.zoyluo.minecraftai.task.Threat.Severity.MEDIUM,
                 null,
                 bot.getBlockPos()));
         return assignTask(bot, "drowning", task, 300, status -> status.state() == TaskState.COMPLETED);
@@ -867,8 +867,8 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(P1-a):MineTask 走 BlockMiner 挖一个**裸露**的指定方块。
-     * 给石镐、正前方放一块裸露铁矿,断言挖到 raw_iron——验证 MineTask 的"找最近裸露块→挖"在新原语下正常。
+     * REGRESSION(P1-a): MineTask goes through BlockMiner to mine a designated **exposed** block.
+     * Give a stone pickaxe, place one exposed iron ore directly in front, and assert raw_iron is obtained — verifies MineTask's "find nearest exposed block → mine" still works correctly under the new primitive.
      */
     private static Result assignMineExposed(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -910,8 +910,8 @@ public final class AIBotVerifySubcommand {
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        clearNearbyMobs(world, origin); // 从零链 bot 无装备,y6 怪海会围杀(实测 aborted=被僵尸打死)
-        // GOALFIX-GF3:从零到铁链路(木镐→挖石→石镐→挖铁)约需 3 原木 + 3 圆石,给足余量(6/6)避免边界失败。
+        clearNearbyMobs(world, origin); // in the from-scratch chain the bot has no gear, and the y6 mob sea would swarm it (observed aborted = killed by a zombie)
+        // GOALFIX-GF3: the from-scratch-to-iron chain (wood pickaxe → mine stone → stone pickaxe → mine iron) needs roughly 3 raw logs + 3 cobblestone; give a comfortable margin (6/6) to avoid boundary failures.
         for (int dy = 0; dy < 6; dy++) {
             world.setBlockState(origin.offset(Direction.WEST, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
         }
@@ -923,15 +923,15 @@ public final class AIBotVerifySubcommand {
         if (!started) {
             return Result.fail("mine_iron_from_scratch", "goal_submit_failed");
         }
-        // GOALFIX-GF3:完整从零链路真实 tick 下耗时长,timeout 3600→12000(10 分钟)。
+        // GOALFIX-GF3: the full from-scratch chain takes a long time in real ticks; timeout raised from 3600 to 12000 (10 minutes).
         return Result.runningGoal("mine_iron_from_scratch", 12000,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
     }
 
     /**
-     * REGRESSION:隔离"接近被埋矿"的定向通道逻辑(bbf8364 阶梯下降/防坠落)。给钻石镐排除工具/合成变量,
-     * 把铁矿用 3 格石头墙封死(走路够不到,必须挖通道),断言能挖到 raw_iron 且不死。
-     * 这条专测 OreSeek 的 APPROACH→digCorridorStep→MINE_ORE,不走 LLM,确定性可复现。
+     * REGRESSION: isolates the directional-corridor logic for "approaching buried ore" (bbf8364 stepped descent / fall protection). Give a diamond pickaxe to rule out the tool/crafting variable,
+     * seal the iron ore behind a 3-block stone wall (unreachable on foot — a corridor must be dug), and assert raw_iron is obtained without dying.
+     * This case specifically tests OreSeek's APPROACH→digCorridorStep→MINE_ORE; it doesn't go through the LLM and is deterministically reproducible.
      */
     private static Result assignMineBuriedIron(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -939,7 +939,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 北向 +3..+6 砌实心石墙(2 高)+ 铺底,bot 走到 +2 后必须挖通 3 格石头才够到 +6 的铁矿。
+        // Build a solid stone wall (2 high) + floor spanning north +3..+6; once the bot reaches +2 it must dig through 3 blocks of stone to reach the iron ore at +6.
         for (int d = 3; d <= 6; d++) {
             BlockPos col = origin.offset(Direction.NORTH, d);
             world.setBlockState(col, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -957,9 +957,9 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(实测#9):DigDownTask 站着挖竖井取圆石。复现"地表 bot,脚下是表层土、相邻无裸露石头"
-     * 的场景——旧实现会秒报 no_reachable / 反复重发 startMining 清零进度卡死。
-     * 给木镐,脚下铺 2 层泥土再下是石头,bot 必须挖穿泥土到石层、采够 3 个圆石且不卡。
+     * REGRESSION(observed #9): DigDownTask digs a vertical shaft in place to get cobblestone. Reproduces the scenario of "a surface bot with topsoil underfoot and no exposed stone adjacent" —
+     * the old implementation instantly reported no_reachable, or repeatedly re-issued startMining and stalled with progress reset to zero.
+     * Give a wooden pickaxe; lay 2 layers of dirt underfoot with stone below that, and the bot must dig through the dirt into the stone layer and gather 3 cobblestone without getting stuck.
      */
     private static Result assignDigDown(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -967,7 +967,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE, 1));
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 脚下:y-1、y-2 铺泥土(表层土),y-3 起向下铺石头柱;模拟"草地下挖到石层"。
+        // Underfoot: y-1, y-2 laid with dirt (topsoil), stone pillar starting at y-3 going down; simulates "digging from grass down into a stone layer".
         world.setBlockState(origin.down(), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(origin.down(2), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
         for (int dy = 3; dy <= 10; dy++) {
@@ -979,8 +979,8 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(实测#10):MINE_ORE 走 OreDigTask。给石镐、把铁矿用石头包埋(走路够不到,必须挖隧道接近),
-     * 断言能挖到 raw_iron 不卡。专测 OreDigTask 的扫描→直挖隧道→挖脉,绕开 OreSeek 的 A* 接近 stall。
+     * REGRESSION(observed #10): MINE_ORE goes through OreDigTask. Give a stone pickaxe and bury the iron ore in stone (unreachable on foot — a tunnel must be dug to approach it),
+     * assert raw_iron is obtained without stalling. Specifically tests OreDigTask's scan → straight tunnel dig → vein mining, bypassing OreSeek's A* approach stall.
      */
     private static Result assignOreDigBuried(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -988,7 +988,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 脚下 y-1..-4 实心石头,铁矿埋在 y-3 正下方稍偏:bot 必须竖直挖穿石头才够到。
+        // Underfoot y-1..-4 is solid stone; the iron ore is buried slightly offset directly below at y-3: the bot must dig straight down through stone to reach it.
         for (int dy = 1; dy <= 5; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
@@ -997,23 +997,23 @@ public final class AIBotVerifySubcommand {
             }
         }
         world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.down(4), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL); // 一条小脉,测泛洪
+        world.setBlockState(origin.down(4), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL); // a small vein, tests flood-fill
         Task task = new OreDigTask(java.util.Set.of(Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE), 2);
         return assignTask(bot, "ore_dig_buried", task, 2400,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 2);
     }
 
     /**
-     * REGRESSION(实测#8/#10):狭窄出生坑里空手"挖铁矿"全链。把 bot 围在 5x5 石墙小坑(模拟真实困境地形),
-     * 坑里给一棵小树(原木)、脚下石层、深处铁矿;走 GoalExecutor 完整倒推,断言最终拿到 raw_iron 不卡不死。
-     * 这是端到端冒烟:砍树→木镐→挖石→石镐→挖铁,全程 BlockMiner 原语。
+     * REGRESSION(observed #8/#10): the full "mine iron ore" chain starting with an empty inventory in a narrow spawn pit. Enclose the bot in a small 5x5 stone-walled pit (simulating a real cramped-terrain predicament);
+     * put one small tree (logs) in the pit, a stone layer underfoot, and iron ore deeper down; run the full backward chain through GoalExecutor and assert raw_iron is obtained in the end, without stalling or dying.
+     * This is an end-to-end smoke test: chop tree → wood pickaxe → mine stone → stone pickaxe → mine iron, all through the BlockMiner primitive.
      */
     private static Result assignMineIronPocket(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 5x5 石墙(4 高)围出狭窄坑,逼出"地形受限"变量。
+        // A 5x5 stone wall (4 high) encloses a narrow pit, forcing out the "terrain-constrained" variable.
         for (int dy = 0; dy <= 3; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
                 for (int dz = -2; dz <= 2; dz++) {
@@ -1023,12 +1023,12 @@ public final class AIBotVerifySubcommand {
                 }
             }
         }
-        clearNearbyMobs(world, origin); // y6 怪海会把无装备的 bot 打死(重生背包清空→任务必败)
-        // 坑里一棵小树(4 段原木——从零链需 工作台4+木镐3+棍2=9 板,2 段原木只出 8 板差 1,实测 need:oak_planks x1)。
+        clearNearbyMobs(world, origin); // the y6 mob sea would kill an unequipped bot (respawn clears the inventory → the task is doomed to fail)
+        // One small tree in the pit (4 log segments — the from-scratch chain needs crafting-table 4 + wood pickaxe 3 + stick 2 = 9 planks; 2 log segments yield only 8 planks, 1 short — observed need:oak_planks x1).
         for (int dy = 0; dy < 4; dy++) {
             world.setBlockState(origin.offset(Direction.EAST).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
         }
-        // 脚下石层 + 深处铁矿。
+        // Stone layer underfoot + iron ore deeper down.
         for (int dy = 1; dy <= 8; dy++) {
             world.setBlockState(origin.down(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         }
@@ -1042,8 +1042,8 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(实测#7):挖矿中刷怪。给石镐、脚下石层埋铁矿,提交挖铁目标后立刻刷一只僵尸。
-     * 断言目标**存活到完成**(挖到 raw_iron)——验证 DangerWatcher 暂停而非放弃目标、打完 resume 继续挖。
+     * REGRESSION(observed #7): a mob spawns mid-mining. Give a stone pickaxe, bury iron ore in the stone layer underfoot, and spawn one zombie right after submitting the mine-iron goal.
+     * Assert the goal **survives to completion** (raw_iron is obtained) — verifies that DangerWatcher pauses rather than abandons the goal, and resumes mining after the fight.
      */
     private static Result assignMineWithMob(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -1052,11 +1052,11 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD, 1));
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 清掉 y6 环境怪海(会把 bot 围杀,重生背包清空→工具闸报缺镐),只留下面受控 spawn 的 1 只——
-        // 本场景测的是"带 1 怪挖矿"的战斗抢占/恢复,不是怪海生存。穿甲提高确定性。
+        // Clear the y6 ambient mob sea (it would swarm-kill the bot; respawn clears the inventory → the tool gate reports a missing pickaxe), leaving only the 1 controlled spawn below —
+        // this scenario tests combat preemption/recovery while "mining with 1 mob around", not surviving the mob sea. Wearing armor improves determinism.
         clearNearbyMobs(world, origin);
         giveDeepMineKit(bot);
-        io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot);
+        io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         fillStoneCube(world, origin, 4, 8);
         world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         ZombieEntity zombie = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
@@ -1074,10 +1074,10 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(P2):achieve_goal 铁锭——空手→倒推→砍树→木镐→挖石→石镐→挖铁→熔炼→铁锭。
-     * 全料齐备(树/石/铁矿)+ 一座熔炉 + 充足燃料就在身边,断言最终背包出现 iron_ingot。测熔炼链。
+     * REGRESSION(P2): achieve_goal iron ingot — empty-handed → backward planning → chop tree → wood pickaxe → mine stone → stone pickaxe → mine iron → smelt → iron ingot.
+     * All materials ready to hand (tree/stone/iron ore) + a furnace + ample fuel are nearby; assert iron_ingot eventually appears in the inventory. Tests the smelting chain.
      */
-    // 铁锭:实心石区里埋铁矿,给石镐+熔炉+煤 → 挖铁矿→熔炼→铁锭(聚焦矿+熔,工具/炉链由其它场景测)。
+    // Iron ingot: iron ore buried in a solid-stone area, given a stone pickaxe + furnace + coal → mine iron ore → smelt → iron ingot (focuses on ore+smelting; the tool/furnace chain is tested by other scenarios).
     private static Result assignAchieveIronIngot(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -1097,7 +1097,7 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.IRON_INGOT) >= 1);
     }
 
-    // 金锭(深层矿,需铁镐):传送到金矿层(-16)、脚下埋金矿,给铁镐+熔炉+深矿安全装+供给 → 挖金矿→熔炼→金锭。
+    // Gold ingot (deep ore, needs an iron pickaxe): teleport to the gold-ore layer (-16), bury gold ore underfoot, given an iron pickaxe + furnace + deep-mining safety gear + supplies → mine gold ore → smelt → gold ingot.
     private static Result assignAchieveGoldIngot(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -16);
@@ -1119,7 +1119,7 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.GOLD_INGOT) >= 1);
     }
 
-    // 黑曜石:实心石区里埋一层黑曜石,给钻石镐 → DigDownTask 下挖撞到黑曜石层、挖 1 块(黑曜石挖得慢)。
+    // Obsidian: a layer of obsidian buried in a solid-stone area, given a diamond pickaxe → DigDownTask digs downward, hits the obsidian layer, and mines 1 block (obsidian is slow to mine).
     private static Result assignAchieveObsidian(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -1128,7 +1128,7 @@ public final class AIBotVerifySubcommand {
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
-        // 在 down(2..3) 铺一层 5×5 黑曜石,保证下挖阶梯无论朝哪都会撞到(只需挖到 1 块即达标)。
+        // Lay a 5×5 layer of obsidian at down(2..3), guaranteeing the downward stepped dig hits it regardless of direction (only 1 block needs to be mined to pass).
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 world.setBlockState(origin.add(dx, -2, dz), Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
@@ -1143,7 +1143,7 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.OBSIDIAN) >= 1);
     }
 
-    // 极端环境①:铁锭 + 怪物围攻。穿甲 + 2 僵尸,bot 要边打边挖铁→熔炼。验证战斗 pauseFor/resume 不丢任务。
+    // Extreme environment ①: iron ingot + mob siege. Armored, with 2 zombies; the bot must fight while mining iron → smelting. Verifies combat pauseFor/resume never drops the task.
     private static Result assignIronExtreme(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -1155,7 +1155,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 4));
         giveDeepMineKit(bot);
-        io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot);
+        io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         spawnHostiles(world, origin, 2);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.IRON_INGOT, 1));
@@ -1166,7 +1166,7 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.IRON_INGOT) >= 1);
     }
 
-    // 极端环境②:钻石(深层 -59,黑暗)+ 怪物围攻。深 + 暗 + 2 僵尸三重极端,bot 要边打边挖钻石。
+    // Extreme environment ②: diamond (deep at -59, dark) + mob siege. Depth + darkness + 2 zombies, a triple extreme; the bot must fight while mining diamond.
     private static Result assignDiamondExtreme(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
@@ -1174,7 +1174,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
-        io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot);
+        io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 world.setBlockState(origin.add(dx, -2, dz), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
@@ -1189,7 +1189,7 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.DIAMOND) >= 1);
     }
 
-    // 极端环境③:收集食物(打猎+烤)+ 怪物围攻。穿甲 + 2 僵尸,bot 要边打边猎边烤够 4 熟食。
+    // Extreme environment ③: gathering food (hunting + cooking) + mob siege. Armored, with 2 zombies; the bot must fight while hunting and cooking to reach 4 cooked food.
     private static Result assignFoodExtreme(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -1198,8 +1198,8 @@ public final class AIBotVerifySubcommand {
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 8));
-        giveDeepMineKit(bot); // 含铁剑(打猎+打怪两用)+ 甲
-        io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot);
+        giveDeepMineKit(bot); // includes an iron sword (dual-use for hunting and fighting mobs) + armor
+        io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         for (int i = 0; i < 6; i++) {
             var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
             if (cow != null) {
@@ -1217,23 +1217,23 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(P2):achieve_goal 铁镐——空手→整条倒推含熔炼 3 铁锭→合成铁镐。最深的工具链。
+     * REGRESSION(P2): achieve_goal iron pickaxe — empty-handed → the full backward chain including smelting 3 iron ingots → crafting an iron pickaxe. The deepest tool chain.
      */
     private static Result assignAchieveIronPickaxe(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        clearNearbyMobs(world, origin); // 全链早期无装备,清 y6 怪海
-        // 两列 24 木:from_scratch 链含熔炼,燃料烧原木+craft 整木换板的执行漂移可能吃掉补采余量,
-        // 单列 12 木被第一轮砍光后 replan 补采就 no_resource(套跑实测)。树管够,漂移全兜住。
+        clearNearbyMobs(world, origin); // early in the full chain the bot has no gear; clear the y6 mob sea
+        // Two columns of 24 logs: the from_scratch chain includes smelting, and execution drift from burning raw logs as fuel + crafting whole logs into planks can eat into the resupply margin;
+        // with a single column of 12 logs, once the first pass chops it bare the replan resupply hits no_resource (observed in suite runs). Give enough trees to absorb all the drift.
         for (int dy = 0; dy < 12; dy++) {
             world.setBlockState(origin.offset(Direction.WEST, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(origin.offset(Direction.WEST, 2).offset(Direction.NORTH, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
         }
-        // 实心石区替代 1 列石柱:挖石/挖铁任务是斜挖阶梯,1 列柱第一步就走出柱外掉进残留坑(no_resource 元凶)。
+        // A solid-stone area replaces a single stone pillar: the mine-stone/mine-iron task digs a diagonal stepped shaft, and with a single pillar the first step already walks off it into a leftover pit (the culprit behind no_resource).
         fillStoneCube(world, origin, 4, 10);
-        // 3 个铁矿(铁镐需 3 铁锭)。
+        // 3 iron ore blocks (an iron pickaxe needs 3 iron ingots).
         world.setBlockState(origin.down(4), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(origin.down(5), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(origin.down(6), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
@@ -1246,20 +1246,20 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(食物链):空手 → Goal.Food 端到端。布置树(工具+燃料)+ 脚下石(熔炉)+ 5 头牛(猎物),
-     * 感知择源应选打猎 → 砍树做工具 → 挖石做炉 → 打猎 → 烤肉,凑够 4 份熟食。验证感知择源/打猎/烤肉全链。
+     * REGRESSION(food chain): empty-handed → Goal.Food end to end. Place a tree (tools + fuel) + stone underfoot (furnace) + 5 cows (prey);
+     * source-perception should choose hunting → chop tree for tools → mine stone for a furnace → hunt → cook meat, reaching 4 portions of cooked food. Verifies the full source-perception/hunting/cooking chain.
      */
     private static Result assignAchieveFood(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 聚焦"感知择源 → 打猎 → 烤肉"食物核心:给现成前置(熔炉+燃料+剑),不让 Goal.Food 倒推去挖石做炉
-        //(dig_down 挖深井会把 bot 困在井底、追不到地表的牛——那是挖矿场景的 bug,单独修)。
+        // Focuses on the "source-perception → hunting → cooking" food core: give the prerequisites ready-made (furnace + fuel + sword) so Goal.Food never has to backward-plan mining stone for a furnace
+        // (dig_down digging a deep shaft would trap the bot at the bottom, unable to chase surface cows — that's a mining-scenario bug, fixed separately).
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD, 1));
-        // 5 头牛紧邻 bot(平整区内),免得追远卡路障
+        // 5 cows placed right next to the bot (within the flattened area), to avoid a long chase getting stuck on obstacles
         for (int i = 0; i < 5; i++) {
             var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
             if (cow != null) {
@@ -1275,9 +1275,9 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && safeFoodUnits(bot) >= 4);
     }
 
-    // 完整食物链(给现成石料/燃料/剑):做炉(craft furnace) → 打猎 → 烤。比 food(给现成炉)多覆盖一层"craft 熔炉"。
-    // 不含挖石:dev 测试世界 bot 出生在 y6 黑暗地下(spawn snap 0,6,0),挖石阶梯会卡基岩 + 被蜘蛛围杀,
-    // 那是地下挖矿的几何/导航问题、不是食物链逻辑,单独立项修(见 progress 笔记)。给 8 cobblestone → 直接 craft furnace。
+    // Full food chain (given ready-made stone/fuel/sword): craft a furnace (craft furnace) → hunt → cook. Compared to food (which gives a ready-made furnace), this covers one more layer: "craft furnace".
+    // Does not include mining stone: in the dev test world the bot spawns underground in darkness at y6 (spawn snap 0,6,0), where a stepped stone dig would get stuck on bedrock and be swarmed by spiders —
+    // that's an underground-mining geometry/navigation problem, not food-chain logic, and is tracked separately (see the progress notes). Give 8 cobblestone → craft furnace directly.
     private static Result assignAchieveFoodFull(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -1306,28 +1306,28 @@ public final class AIBotVerifySubcommand {
         return MiningFoodReserve.units(bot.getInventory());
     }
 
-    // 食物链"种田做面包"分支端到端测试:无动物 + 有草 → Goal.Food 应走 ensureFoodTo 的种植链
-    // (倒推锄头 → 割草/给种 → 开垦 → 播种 → 等熟 → 收割 → 合成面包),最终凑够 2 个面包。
-    // 与 food/food_full(打猎→烤)互补,覆盖"没动物的地形靠种地自给"这条之前从未被测过的路径。
-    // 故意不给锄头(给木板+工作台让其自己 craft),验证 GoalPlanner 在 Food→面包→小麦分支会倒推锄头(Fix B)。
+    // End-to-end test of the food chain's "farm for bread" branch: no animals + grass present → Goal.Food should take ensureFoodTo's planting chain
+    // (backward-plan a hoe → cut grass/get seeds → till → plant → wait to ripen → harvest → craft bread), reaching 2 loaves of bread in the end.
+    // Complements food/food_full (hunt → cook), covering the previously-untested path of "self-sufficient farming on animal-less terrain".
+    // Deliberately withholds a hoe (gives planks + a crafting table so the bot crafts one itself), verifying GoalPlanner backward-plans a hoe on the Food→bread→wheat branch (Fix B).
     private static Result assignAchieveFoodFarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        // 1) 清掉附近动物+敌对生物:种植择源要"无动物"(否则误判有猎物→打猎),且避免骷髅抢占中止种田。
+        // 1) Clear nearby animals + hostile mobs: planting source-selection needs "no animals" (otherwise it misjudges prey present → hunts instead), and this avoids a skeleton preempting and aborting the farming.
         clearNearbyMobs(world, origin);
-        // 2) bot 周围半径 4 的地板(y-1)铺可开垦泥土(FARM 步 FarmTask 以 bot 为中心、半径 4 在此 till/plant)。
+        // 2) Lay tillable dirt on the floor (y-1) within radius 4 of the bot (the FARM step's FarmTask is centered on the bot, till/plant happens within radius 4 here).
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
                 world.setBlockState(origin.add(dx, -1, dz), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
             }
         }
-        // 3) 放几丛短草作"有草"信号(FOOD_GRASS_SCAN=32 内有短草即触发种植择源);放边缘泥土上,不占满农田。
+        // 3) Place a few tufts of short grass as the "grass present" signal (short grass within FOOD_GRASS_SCAN=32 triggers planting source-selection); placed on the edge dirt, not filling the whole farmland.
         for (int dz = -1; dz <= 1; dz++) {
             world.setBlockState(origin.add(4, 0, dz), Blocks.SHORT_GRASS.getDefaultState(), Block.NOTIFY_ALL);
         }
-        // 4) 给种子+木板+工作台,但不给锄头(锄头=tool 需工作台;面包/木棍不需)。验证倒推锄头(Fix B)。
+        // 4) Give seeds + planks + a crafting table, but withhold a hoe (a hoe = a tool that needs a crafting table; bread/sticks don't). Verifies the backward-planned hoe (Fix B).
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 16));
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_PLANKS, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
@@ -1335,15 +1335,15 @@ public final class AIBotVerifySubcommand {
         if (!started) {
             return Result.fail("food_farm", "goal_submit_failed");
         }
-        // perTick 每个服务端 tick 强制催熟 bot 周围小麦——无头测不能等自然随机刻生长(要数分钟、必超时),
-        // bot 种下即熟,从而测"开垦→播种→收割→拾取(Fix A)→合成面包"整条逻辑链能否凑够 2 个面包。
-        // (催熟必须放 perTick:assertion 仅在 task 完成时才调,FarmTask 等熟时无 task 完成→放 assertion 会死锁。)
+        // perTick forcibly ripens the wheat around the bot on every server tick — a headless test can't wait on natural random-tick growth (would take minutes and always time out);
+        // the bot's wheat ripens as soon as it's planted, so this tests whether the full "till → plant → harvest → pick up (Fix A) → craft bread" logic chain can reach 2 loaves of bread.
+        // (The ripening must live in perTick: the assertion is only invoked once a task completes, and while FarmTask is waiting for it to ripen no task ever completes → putting it in the assertion would deadlock.)
         return Result.runningGoal("food_farm", 12000,
                 tickBot -> forceGrowCrops(world, origin, 6, Blocks.WHEAT),
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.BREAD) >= 1);
     }
 
-    // 把 center±radius 范围内未成熟的指定作物强制催熟到 maxAge(供无头测绕开自然生长等待)。
+    // Forcibly ripens unripe instances of the given crop within center±radius to maxAge (lets headless tests skip waiting on natural growth).
     private static void forceGrowCrops(ServerWorld world, BlockPos center, int radius, Block crop) {
         for (BlockPos pos : BlockPos.iterate(center.add(-radius, -1, -radius), center.add(radius, 2, radius))) {
             net.minecraft.block.BlockState st = world.getBlockState(pos);
@@ -1353,15 +1353,15 @@ public final class AIBotVerifySubcommand {
         }
     }
 
-    // 觅食(野果)端到端测试:周围铺成熟甜浆果丛 → Goal.HaveItem(SWEET_BERRIES) 应走 gather 采到野果。
-    // 覆盖"靠野果补充食物"这条途径(forage 工具实际就映射到 Goal.HaveItem(SWEET_BERRIES))。
+    // End-to-end foraging (wild berries) test: ripe sweet-berry bushes laid out nearby → Goal.HaveItem(SWEET_BERRIES) should take the gather path to pick the berries.
+    // Covers the "supplement food with wild berries" path (the forage tool actually maps to Goal.HaveItem(SWEET_BERRIES)).
     private static Result assignForage(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // 北侧铺一片成熟(age3)甜浆果丛,下垫泥土防"无支撑"被方块更新打掉。浆果概率掉落,铺 15 丛远多于 target 4。
+        // Lay a patch of ripe (age3) sweet-berry bushes to the north, with dirt underneath to prevent a "no support" block update from knocking them out. Berries drop probabilistically, so 15 bushes are laid — far more than the target of 4.
         net.minecraft.block.BlockState ripeBush = Blocks.SWEET_BERRY_BUSH.getDefaultState()
                 .with(net.minecraft.state.property.Properties.AGE_3, 3);
         for (int dx = -2; dx <= 2; dx++) {
@@ -1379,38 +1379,38 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.SWEET_BERRIES) >= 4);
     }
 
-    // 无限水源/灌溉端到端测试:给 2 桶水 + 实心泥土地面 → IrrigateTask 挖 2×2 坑、对角放 2 桶水。
-    // 断言:2×2 四格在 SETTLE 后全部变成水源(只放了 2 桶,另 2 格靠水流自动成源)——证明形成了
-    // 可无限舀取/可灌溉的 2×2 无限水源。同时背包应变出 2 个空桶。
+    // End-to-end infinite-water-source/irrigation test: give 2 water buckets + a solid dirt floor → IrrigateTask digs a 2×2 pit and places 2 buckets of water diagonally.
+    // Assertion: all four cells of the 2×2 pit become water source blocks after SETTLE (only 2 buckets were poured; the other 2 cells become sources automatically from the flow) — proving that
+    // an infinite, scoopable/irrigable 2×2 water source was formed. At the same time the inventory should end up with 2 empty buckets.
     private static Result assignFarmIrrigate(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // floor 层(y-1)铺一片实心泥土,作挖坑的地面 + 2×2 坑四周的挡水墙。
+        // A patch of solid dirt is laid on the floor layer (y-1), serving as the ground to dig the pit into plus the retaining walls around the 2×2 pit.
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 world.setBlockState(origin.add(dx, -1, dz), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET, 2));
-        BlockPos waterCenter = origin.add(2, -1, 0); // 在 floor 层挖 2×2 水池(bot 旁边)
+        BlockPos waterCenter = origin.add(2, -1, 0); // dig a 2×2 pool in the floor layer (next to the bot)
         return assignTask(bot, "farm_irrigate", new IrrigateTask(waterCenter), 2400,
                 ignored -> bot.isAlive()
                         && countWaterSources(world, waterCenter) >= 4
                         && InventoryAction.countItem(bot, Items.BUCKET) >= 2);
     }
 
-    // 蛋糕合成链端到端测试:给 3 空桶 + 1 蛋 + 4 甘蔗 + 3 麦 + 工作台,旁边 spawn 3 头牛。
-    // Goal.HaveItem(CAKE) 应:挤奶(MilkCowTask:空桶→牛奶桶×3) + 甘蔗→糖×2 + 蛋/麦现成 → 合成蛋糕。
-    // 蛋为被动产物(鸡慢慢下),不自动生产、直接给(真实玩法需 bot 养鸡攒蛋,见 commit 说明)。
+    // End-to-end cake-crafting-chain test: give 3 empty buckets + 1 egg + 4 sugar cane + 3 wheat + a crafting table, and spawn 3 cows nearby.
+    // Goal.HaveItem(CAKE) should: milk the cows (MilkCowTask: empty bucket → milk bucket ×3) + sugar cane → sugar ×2 + eggs/wheat already on hand → craft the cake.
+    // Eggs are a passive byproduct (chickens lay them slowly); they aren't auto-produced here and are simply given directly (real play would need the bot to raise chickens and collect eggs, see the commit notes).
     private static Result assignCake(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        clearNearbyMobs(world, origin); // 先清(含历史污染的牛),再 spawn 干净的 3 头
+        clearNearbyMobs(world, origin); // clear first (including cows left over from earlier contamination), then spawn 3 clean ones
         InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.EGG, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.SUGAR_CANE, 4));
@@ -1431,16 +1431,16 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.CAKE) >= 1);
     }
 
-    // 村庄收菜端到端测试:开一条可行走走廊,尽头摆一片成熟作物田(模拟村庄农田,距 bot ~12 格)。
-    // RaidCropsTask 应:大范围扫到作物田 → 走过去 → 收割 → 捡起,凑够 4 个产出。覆盖"找现成作物田收菜"
-    //(与 FarmTask 自种自收互补)。走廊是必须的:dev 世界 y6 地下全是石头,不开路 bot 无法走到远处的田。
+    // End-to-end village-crop-raiding test: carve a walkable corridor, with a patch of ripe crop field at the end (simulating a village farm, ~12 blocks from the bot).
+    // RaidCropsTask should: wide-scan to find the crop field → walk over → harvest → pick up, reaching 4 units of produce. Covers "find an existing crop field and raid it"
+    // (complementing FarmTask's plant-and-harvest-your-own). The corridor is required: the dev world is all stone underground at y6, and without a path cleared the bot can't reach the distant field.
     private static Result assignVillageHarvest(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // 走廊:floor 铺土、上方清 3 高,从 bot 一直通到田。
+        // Corridor: dirt laid on the floor, 3 blocks of headroom cleared above, running from the bot all the way to the field.
         for (int x = 0; x <= 16; x++) {
             for (int z = -3; z <= 3; z++) {
                 world.setBlockState(origin.add(x, -1, z), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
@@ -1449,7 +1449,7 @@ public final class AIBotVerifySubcommand {
                 }
             }
         }
-        // 成熟作物田(小麦/胡萝卜/马铃薯混种,都是 CropBlock):x 10..14 × z -1..1 = 15 株,远多于 target 4。
+        // Ripe crop field (wheat/carrot/potato mixed, all CropBlock): x 10..14 × z -1..1 = 15 plants, far more than the target of 4.
         net.minecraft.block.BlockState[] crops = {
                 Blocks.WHEAT.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7),
                 Blocks.CARROTS.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7),
@@ -1468,24 +1468,24 @@ public final class AIBotVerifySubcommand {
                         + InventoryAction.countItem(bot, Items.POTATO) >= 4);
     }
 
-    // ==================== 贴近实操层(realistic) ====================
-    // 与人造理想场景相反:自然生成世界(固定 seed)、空背包、不清怪、不给装备、不铺方块、不传送——
-    // 测"真实条件下从零完成目标"。这层的失败清单 = 自动化与实操的差距清单,逐个修。
-    // 注意:断言只代表"拿到结果",不代表过程不蠢(绕路/卡顿观感仍需实操确认)。
+    // ==================== Close-to-real-play layer (realistic) ====================
+    // The opposite of artificial idealized scenarios: a naturally generated world (fixed seed), empty inventory, no mob clearing, no gear given, no blocks placed, no teleporting —
+    // tests "completing the goal from scratch under real conditions". The failure list at this layer = the gap list between automation and real play, fixed one item at a time.
+    // Note: an assertion only means "the result was obtained", not that the process wasn't dumb (detours/stutter still need manual confirmation).
 
     private static BlockPos prepareRealistic(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
-        world.setTimeOfDay(1000L); // 同 prepareArea:白天开局,隔离夜间反射 flaky
+        world.setTimeOfDay(1000L); // same as prepareArea: start in daytime, isolating flakiness from nighttime reflexes
         bot.getActionPack().stopAll();
-        clearInventory(bot); // 实操开局=空背包;其余一概不动(不清怪/不铺/不给)
-        // real_wheat 会调 randomTickSpeed,这里统一复位,避免场景间泄漏
+        clearInventory(bot); // real-play start = empty inventory; leave everything else untouched (no mob clearing/no laying blocks/no giving items)
+        // real_wheat adjusts randomTickSpeed; reset it uniformly here to avoid leaking between scenarios
         world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
         surfaceTeleport(bot);
         return bot.getBlockPos();
     }
 
-    // Mining First 最终口径比 legacy real_* 更严格：保留 seed 的真实出生位置，不做 surfaceTeleport。
-    // 独立 evidence server 每次只跑一个 from_zero 场景，因此无需用传送来清理前一场景的位置污染。
+    // Mining First's final baseline is stricter than the legacy real_* one: it keeps the seed's genuine spawn position and does no surfaceTeleport.
+    // The dedicated evidence server only ever runs one from_zero scenario at a time, so there's no need to teleport away to clean up positional contamination from a previous scenario.
     private static BlockPos prepareMiningFromZero(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
         world.setTimeOfDay(1000L);
@@ -1495,8 +1495,8 @@ public final class AIBotVerifySubcommand {
         return bot.getBlockPos();
     }
 
-    // 场景锚点列下方 12 格内无水(挖石阶梯斜下挖,湖上/含水层地块会把 bot 挖进水里泡死——
-    // 实测 dig_down stall dump 四面全 water)。
+    // No water within 12 blocks below the scenario's anchor column (the diagonal stepped stone dig would put the bot digging into water and drowning it if it's over a lake/aquifer —
+    // observed in a dig_down stall dump where all four sides were water).
     private static boolean dryColumn(ServerWorld world, BlockPos top) {
         for (int dy = 0; dy <= 12; dy++) {
             if (!world.getFluidState(top.down(dy)).isEmpty()) {
@@ -1506,9 +1506,9 @@ public final class AIBotVerifySubcommand {
         return true;
     }
 
-    // 出生点在洞/地下时提到自然地表(实操玩家在地表活动);已在地表则原地不动。
-    // 围墙/活埋类场景必须先地表化:在 y6 黑暗地下摆围墙会触发 DangerWatcher"困死陷阱"保命传送
-    // (dark_trap_escape),把被测的真实逃生(搭柱/挖墙)直接顶掉(实测 nav_pillar_out aborted)。
+    // If the spawn point is in a cave/underground, lift it to the natural surface (real players operate on the surface); if already on the surface, leave it in place.
+    // Wall-enclosure/buried-alive scenarios must be surfaced first: building a wall in the y6 underground darkness would trigger DangerWatcher's "trapped in a death pit" life-saving teleport
+    // (dark_trap_escape), which would directly override the real escape being tested (pillaring/digging through walls) (observed as nav_pillar_out aborted).
     private static void surfaceTeleport(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
         BlockPos at = bot.getBlockPos();
@@ -1521,9 +1521,9 @@ public final class AIBotVerifySubcommand {
         bot.getActionPack().stopAll();
     }
 
-    // 读 bot 的累计死亡统计(ServerStatHandler 跨重生持续累加,不随重生清零)。real_* 零死亡断言的基线用:
-    // 实操里死亡重生 = 掉装备/丢位置/进度报废的重大事故,哪怕重生后把目标补齐也不能算过——
-    // 只看 isAlive() 抓不到"死过又活了"的情况,必须对比死亡计数。
+    // Reads the bot's cumulative death statistic (ServerStatHandler accumulates across respawns and is never reset by one). Used as the baseline for real_*'s zero-death assertions:
+    // in real play, dying and respawning is a major incident — dropped gear/lost position/wasted progress — that can't be waved off even if the goal is completed after respawn.
+    // Checking isAlive() alone can't catch "died and came back"; the death count must be compared instead.
     private static int deathCount(AIPlayerEntity bot) {
         return bot.getStatHandler().getStat(net.minecraft.stat.Stats.CUSTOM.getOrCreateStat(net.minecraft.stat.Stats.DEATHS));
     }
@@ -1539,8 +1539,8 @@ public final class AIBotVerifySubcommand {
                 .or(() -> zeroDeathFailFast(deathBase).apply(candidate));
     }
 
-    // 拥有某装备:背包里有 或 已穿在任意装备槽。用于 armor 断言——避免"合好甲→自动穿甲"的 1-tick 竞态
-    // (runningGoal 在目标完成那刻检断言,穿甲在同 burst 下一拍生效,否则误判'胸甲没穿' FAIL)。
+    // Owns a given piece of gear: either in the inventory or already worn in any armor slot. Used for the armor assertion — avoids a 1-tick race in "craft armor → auto-equip it"
+    // (runningGoal checks the assertion the instant the goal completes, and equipping happens one tick later in the same burst; otherwise it would misjudge 'chestplate not worn' and FAIL).
     private static boolean hasGear(AIPlayerEntity bot, Item item) {
         if (InventoryAction.countItem(bot, item) >= 1) {
             return true;
@@ -1553,25 +1553,25 @@ public final class AIBotVerifySubcommand {
         return false;
     }
 
-    // 实操:砍 8 根原木(自然找树;接受任意树种)。
+    // Real play: chop 8 logs (find a tree naturally; any wood type accepted).
     private static Result assignRealWood(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        final int deathBase = deathCount(bot); // 零死亡红线:场景内死过一次即 FAIL(见 deathCount 注释)
+        final int deathBase = deathCount(bot); // zero-death red line: dying even once during the scenario is an instant FAIL (see the deathCount comment)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.OAK_LOG, 8));
         if (!started) {
             return Result.fail("real_wood", "goal_submit_failed");
         }
-        java.util.Set<Item> logs = java.util.Set.copyOf(io.github.zoyluo.aibot.craft.RecipeRegistry.LOGS);
+        java.util.Set<Item> logs = java.util.Set.copyOf(io.github.zoyluo.minecraftai.craft.RecipeRegistry.LOGS);
         return Result.runningGoal("real_wood", 8000,
                 ignored -> bot.isAlive()
-                        && io.github.zoyluo.aibot.action.HarvestCore.countInventoryItems(bot, logs) >= 8
+                        && io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot, logs) >= 8
                         && deathCount(bot) == deathBase);
     }
 
-    // 实操:从零搞 4 个熟食(自己感知周围择源:打猎/种植;自己做炉凑燃料)。
+    // Real play: get 4 cooked food from scratch (perceive and choose a source on its own — hunting/planting; craft its own furnace and gather fuel).
     private static Result assignRealFood(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(实操死一次=大事故)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (in real play, dying once is a major incident)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Food(4));
         if (!started) {
             return Result.fail("real_food", "goal_submit_failed");
@@ -1581,14 +1581,14 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 实操:从零种麦做 2 个面包(割草取种→锄→开垦→种→等熟→收→合成)。
-    // 唯一的让步:randomTickSpeed 3→40(加速生长 ~13x)。生长路径真实走过,只是时间加速——
-    // 不加速的话自然熟要 20+ 分钟,套件没法跑;这与 perTick 魔法催熟(food_farm)不同档。
+    // Real play: farm wheat from scratch to make 2 loaves of bread (cut grass for seeds → craft a hoe → till → plant → wait to ripen → harvest → craft).
+    // The one concession: randomTickSpeed raised from 3 to 40 (~13x faster growth). The growth path is genuinely walked through, only sped up in time —
+    // without the speedup, natural ripening takes 20+ minutes and the suite couldn't run; this is a different tier from perTick's magic ripening (food_farm).
     private static Result assignRealWheat(AIPlayerEntity bot) {
         prepareRealistic(bot);
         ServerWorld world = bot.getEntityWorld();
         world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 40, world.getServer());
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(实操死一次=大事故)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (in real play, dying once is a major incident)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.BREAD, 2));
         if (!started) {
             return Result.fail("real_wheat", "goal_submit_failed");
@@ -1598,10 +1598,10 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 实操:从零一块铁锭(砍树→木镐→挖石→石镐→找铁矿→挖→做炉→熔炼)。自然地形大考。
+    // Real play: one iron ingot from scratch (chop tree → wood pickaxe → mine stone → stone pickaxe → find iron ore → mine → craft a furnace → smelt). A major test on natural terrain.
     private static Result assignRealIron(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(实操死一次=大事故)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (in real play, dying once is a major incident)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.IRON_INGOT, 1));
         if (!started) {
             return Result.fail("real_iron", "goal_submit_failed");
@@ -1611,16 +1611,16 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 持续挖矿测量:给镐+甲+火把跳过 bootstrap/生存/照明,真实地形挖 100 块铁矿(raw_iron)。
-    // 隔离"OreDigTask 长跑持续可靠性"——找矿/接近抖死/strip 扩面/耐久/归仓,看天花板卡在哪。
+    // Sustained-mining measurement: given a pickaxe + armor + torches to skip bootstrap/survival/lighting, mine 100 blocks of iron ore (raw_iron) on real terrain.
+    // Isolates "OreDigTask's sustained long-run reliability" — ore-finding/approach stalling/strip-mine expansion/durability/return-to-base — to see where the ceiling is.
     private static Result assignRealIronBulk(AIPlayerEntity bot) {
         prepareRealistic(bot);
         clearInventory(bot);
         for (int i = 0; i < 5; i++) {
-            InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1)); // 5 把铁镐:耐久不当首瓶颈
+            InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1)); // 5 iron pickaxes: durability shouldn't be the first bottleneck
         }
-        giveDeepMineKit(bot);                                          // 护甲+剑+盾:生存不当首瓶颈
-        InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 64)); // 火把:照明不当首瓶颈
+        giveDeepMineKit(bot);                                          // armor + sword + shield: survival shouldn't be the first bottleneck
+        InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 64)); // torches: lighting shouldn't be the first bottleneck
         final int deathBase = deathCount(bot);
         java.util.Set<Block> ironOres = java.util.Set.of(Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(ironOres, 100));
@@ -1632,7 +1632,7 @@ public final class AIBotVerifySubcommand {
                         && InventoryAction.countItem(bot, Items.RAW_IRON) >= 100);
     }
 
-    // 实操:从零一块金锭(工具链 → 铁镐 → 下挖到 Y-16 找金矿 → 挖 → 熔炼)。金比钻浅,但仍需铁镐+深潜。
+    // Real play: one gold ingot from scratch (tool chain → iron pickaxe → dig down to Y-16 to find gold ore → mine → smelt). Gold is shallower than diamond, but still needs an iron pickaxe + a deep dive.
     private static Result assignRealGold(AIPlayerEntity bot) {
         prepareRealistic(bot);
         final int deathBase = deathCount(bot);
@@ -1645,8 +1645,8 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 实操:从零拿到红石(工具链 → 铁镐 → 下挖到 Y-59 找红石矿 → 挖)。Y-59=钻石同深度,与钻石共享深层硬边。
-    // 红石矿一块掉 4-5 红石、不需熔炼;断言 ≥4(约一块矿)。
+    // Real play: get redstone from scratch (tool chain → iron pickaxe → dig down to Y-59 to find redstone ore → mine). Y-59 is the same depth as diamond, sharing diamond's tough deep-layer edge.
+    // One block of redstone ore drops 4-5 redstone and needs no smelting; assert ≥4 (about one ore block's worth).
     private static Result assignRealRedstone(AIPlayerEntity bot) {
         prepareRealistic(bot);
         final int deathBase = deathCount(bot);
@@ -1659,10 +1659,10 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 实操:从零一颗钻石(完整工具链 + 真实下挖到 -59 找矿,会遇洞穴/岩浆/黑暗)。
+    // Real play: one diamond from scratch (the full tool chain + a genuine dig down to -59 to find ore, encountering caves/lava/darkness along the way).
     private static Result assignRealDiamond(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(实操死一次=大事故)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (in real play, dying once is a major incident)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.DIAMOND, 1));
         if (!started) {
             return Result.fail("real_diamond", "goal_submit_failed");
@@ -1672,9 +1672,9 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 真实应用终极(钻石≥3):从零真实地形挖到 3 颗钻石——用户目标的回归化身。3 颗逼出"连续多矿脉
-    // 定位+重复下潜",timeout 36000t 给足全链,零死亡红线。reliability.sh 跑它做修复前后成功率对照。
-    // 只许单点名/脚本跑(不进 ALL_FEATURES:36000t 会拖垮 verify all)。
+    // The ultimate real-play application (diamond ≥3): mine 3 diamonds from scratch on real terrain — the regression embodiment of the user's actual goal. Requiring 3 forces "locating multiple ore veins in a row
+    // and diving repeatedly"; timeout is 36000t to give the full chain room, with the zero-death red line. reliability.sh runs it to compare success rates before/after a fix.
+    // Only runnable by explicit name or script (excluded from ALL_FEATURES: 36000t would sink verify all).
     private static Result assignRealDiamond3(AIPlayerEntity bot) {
         prepareRealistic(bot);
         final int deathBase = deathCount(bot);
@@ -1687,16 +1687,16 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // Mining First M1-prepared:在深层确定性巷道两侧铺 32×2=64 块眼高暴露钻石矿，只预给非目标深矿装备。
-    // 该层用于隔离连续找矿/破块/拾取/工具更换，不是从零能力；显式 opt-in，不进入 verify all。
+    // Mining First M1-prepared: lays 32×2=64 blocks of eye-level exposed diamond ore along both sides of a deterministic deep corridor, pre-granting only non-target deep-mining gear.
+    // This layer isolates continuous ore-finding/block-breaking/pickup/tool-swapping — it is not a from-scratch capability; explicit opt-in, excluded from verify all.
     private static Result assignDiamondStack64Prepared(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
         ServerWorld world = bot.getEntityWorld();
         MiningBudget budget = MiningBudget.forQuota(
                 DIAMOND_STACK_TARGET, true, ToolTier.IRON);
-        // Prepared 隔离层与 from-zero 使用同一个远征预算源，避免 fixture 手写值落后于
-        // boundary-zero service 的工具、火把、石材和 future-stick 合约。
+        // The prepared isolation layer shares the same expedition-budget source as from-zero, so hand-written fixture values never drift out of sync with
+        // the boundary-zero service's tool, torch, stone, and future-stick contract.
         giveItemToAtLeast(bot, Items.IRON_PICKAXE, budget.initialPickaxes());
         giveItemToAtLeast(bot, Items.STONE_PICKAXE, budget.tunnelingPickaxes());
         giveItemToAtLeast(bot, Items.IRON_INGOT, budget.spareToolIngots());
@@ -1707,9 +1707,9 @@ public final class AIBotVerifySubcommand {
         giveItemToAtLeast(bot, Items.COOKED_BEEF, budget.cookedFoodTarget());
         giveItemToAtLeast(bot, Items.CRAFTING_TABLE, 1);
         giveDeepMineKit(bot);
-        // 巷道沿 OreDig 默认的首段 NORTH 方向延伸；中间 3 格宽可行走，矿墙与外侧也留空，
-        // 使 strict 模式能真正走到掉落旁碰撞拾取。旧脚下矿层会挖掉自身支撑；封闭环/棋盘
-        // 会在批次恢复后把余矿遮在身后，测到几何死角而不是 8 批远征。
+        // The corridor extends in OreDig's default first-leg NORTH direction; the middle 3 blocks are walkable, and space is left both at the ore wall and outside it,
+        // so strict mode can actually walk over and pick up drops by collision. The old under-foot ore layer would mine away its own support; a closed loop or checkerboard
+        // layout would hide remaining ore behind the bot after batch recovery, testing a geometric dead angle instead of an 8-batch expedition.
         for (int dz = -34; dz <= 0; dz++) {
             for (int dx = -3; dx <= 3; dx++) {
                 world.setBlockState(origin.add(dx, -1, dz),
@@ -1733,9 +1733,9 @@ public final class AIBotVerifySubcommand {
         }
         for (int dz = -1; dz >= -32; dz--) {
             for (int dx : new int[]{-2, 2}) {
-                // 只用眼高单层矿墙：每块均能由中心走廊真实看见、从侧面开采，且掉落落在
-                // 石地板上。prepared 的职责是隔离连续批次/工具/物理拾取，不额外混入
-                // “脚边下层矿被地板遮挡”这一独立感知变量。
+                // Uses only a single eye-level ore wall: every block is genuinely visible from the central corridor, mined from the side, with drops landing on
+                // the stone floor. prepared's job is to isolate continuous batches/tools/physical pickup, without mixing in
+                // the separate perception variable of "an underfoot ore layer being occluded by the floor".
                 world.setBlockState(origin.add(dx, 1, dz),
                         Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
             }
@@ -1752,8 +1752,8 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // Mining First M1-final:自然地形、空背包、零目标给予，从零获得完整一组钻石。
-    // 这是 capability manifest 的唯一可 pin 场景；当前未达标时必须诚实 FAIL/MISSING。
+    // Mining First M1-final: natural terrain, empty inventory, nothing granted toward the goal — obtain a full stack of diamonds entirely from scratch.
+    // This is the only scenario the capability manifest may pin; while it isn't met it must honestly FAIL/MISSING.
     private static Result assignDiamondStack64FromZero(AIPlayerEntity bot) {
         prepareMiningFromZero(bot);
         MiningEvidenceAudit.begin(bot, MiningEvidenceAudit.Target.DIAMOND);
@@ -1776,9 +1776,9 @@ public final class AIBotVerifySubcommand {
                         .filter(MiningEvidenceAudit.Snapshot::passes).isPresent());
     }
 
-    // 从零做整套铁甲(真实地形,不预置任何材料——区别于 achieve_armor 的预置 30 铁只测合甲)。
-    // 链路:木→工具→挖铁×24+→熔炼→合 4 甲+剑→穿。比钻石浅(铁在 Y16-48,石镐够,无 Y-59 岩浆),但量大。
-    // 断言:整套四件铁甲全部穿上 + 存活 + 零死亡(死一次=大事故,与 real_diamond 同红线)。
+    // Craft a full suit of iron armor entirely from scratch (real terrain, no materials pre-placed — unlike achieve_armor, which pre-gives 30 iron and only tests assembling the armor).
+    // Chain: wood → tools → mine iron ×24+ → smelt → craft 4 armor pieces + a sword → equip. Shallower than diamond (iron is at Y16-48, a stone pickaxe suffices, no Y-59 lava), but a large quantity.
+    // Assertion: the full four-piece iron armor set is worn + the bot survives + zero deaths (dying once = a major incident, same red line as real_diamond).
     private static Result assignRealArmor(AIPlayerEntity bot) {
         prepareRealistic(bot);
         final int deathBase = deathCount(bot);
@@ -1792,27 +1792,27 @@ public final class AIBotVerifySubcommand {
                         && hasGear(bot, Items.IRON_CHESTPLATE)
                         && hasGear(bot, Items.IRON_LEGGINGS)
                         && hasGear(bot, Items.IRON_BOOTS)
-                        && hasGear(bot, Items.IRON_SWORD)); // 铁套+铁剑:整套四件甲 + 铁剑都到手(Goal.Armor full 本就含剑)
+                        && hasGear(bot, Items.IRON_SWORD)); // iron set + iron sword: the full four-piece armor set plus the sword are both obtained (Goal.Armor full already includes a sword)
     }
 
-    // 建筑深化·真实地形建房:备足木板(隔离"建造"本体——选址 autoSite + 整地 + 逐格落成),不测备料。
-    // 真实地形(斜坡/起伏/水边)是 lab 平整画布测不到的:autoSite 选址 + flatten 整地能否干净落成一栋房。
-    // 断言:origin±24、木板族方块 ≥80(small_hut 全房 112,留余量)+ 存活 + 零死亡。先暴露真实地形建造短板。
+    // Building, deepened · building on real terrain: given ample planks (isolating the "building" step itself — site selection autoSite + ground leveling + block-by-block placement), does not test provisioning.
+    // Real terrain (slopes/rolling ground/water's edge) is something the flat lab canvas can never test: whether autoSite's site selection + flatten's ground leveling can cleanly finish a house.
+    // Assertion: within origin±24, plank-family blocks ≥80 (small_hut is 112 blocks total, leaving margin) + survives + zero deaths. First surfaces the shortcomings of building on real terrain.
     private static Result assignRealBuild(AIPlayerEntity bot) {
         prepareRealistic(bot);
         clearInventory(bot);
-        // 备足多树种木板(蓝图按当地树种自适应,只给 oak 会 need birch/spruce_log)+ 整地填料(dirt/cobble),
-        // 真正隔离"建造"本体(选址+整地+落成),不测备料/采木。
-        for (Item p : io.github.zoyluo.aibot.craft.RecipeRegistry.PLANKS) {
+        // Give ample planks of multiple wood types (the blueprint adapts to the local wood type; giving only oak would trigger need birch/spruce_log) + ground-leveling fill (dirt/cobble),
+        // to genuinely isolate the "building" step itself (site selection + leveling + placement), without testing provisioning/logging.
+        for (Item p : io.github.zoyluo.minecraftai.craft.RecipeRegistry.PLANKS) {
             InventoryAction.giveItem(bot, new ItemStack(p, 128));
         }
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 256));        // FLATTEN 挖高填低的填料
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 256));        // fill material for FLATTEN's dig-high-fill-low leveling
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 128));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
         ServerWorld world = bot.getEntityWorld();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> plankBlocks = new java.util.HashSet<>();
-        for (Item planks : io.github.zoyluo.aibot.craft.RecipeRegistry.PLANKS) {
+        for (Item planks : io.github.zoyluo.minecraftai.craft.RecipeRegistry.PLANKS) {
             Block block = Block.getBlockFromItem(planks);
             if (block != Blocks.AIR) {
                 plankBlocks.add(block);
@@ -1821,30 +1821,30 @@ public final class AIBotVerifySubcommand {
         if (!GoalExecutor.INSTANCE.submit(bot, new Goal.Build("small_hut"))) {
             return Result.fail("real_build", "goal_submit_failed");
         }
-        // 计数锚点对准真实建房点:断言在 BuildTask 完成时评估(见 pollActive),此刻 bot 就在建好的 hut 处;
-        // SiteFinder 自动选址可能远离/低于出生点(origin),故绕 bot 当前位对称扫描(±10 水平、上下 -6..8),
-        // 而非以出生点为锚的 "only above"——治"建满 116/116 零死亡却被原点计数漏掉"的断言锚点局限。
+        // The count anchor targets the actual house-building spot: the assertion is evaluated when BuildTask completes (see pollActive), at which point the bot is right at the finished hut;
+        // SiteFinder's automatic site selection may end up far from or below the spawn point (origin), so the scan is symmetric around the bot's current position instead (±10 horizontal, -6..8 vertical),
+        // rather than an origin-anchored "only above" — this fixes the assertion-anchor limitation where a house finished 116/116 with zero deaths was still missed by an origin-centered count.
         return Result.runningGoal("real_build", 20000,
                 ignored -> bot.isAlive() && deathCount(bot) == deathBase
                         && countNearbyBlocks(world, bot.getBlockPos(), 10, -6, 8, plankBlocks) >= 80);
     }
 
-    // snapshot 落地辅助:按相对坐标放一块默认态方块(配 /aibot snapshot 导出的 setRel 行)。
+    // snapshot placement helper: places one block in its default state at a relative coordinate (pairs with the setRel lines exported by /minecraftai snapshot).
     static void setRel(ServerWorld world, BlockPos origin, int dx, int dy, int dz, String id) {
         net.minecraft.block.Block block = net.minecraft.registry.Registries.BLOCK
                 .getOptionalValue(net.minecraft.util.Identifier.of(id)).orElse(null);
         if (block == null) {
-            io.github.zoyluo.aibot.log.BotLog.config("snapshot_unknown_block", "id", id);
+            io.github.zoyluo.minecraftai.log.BotLog.config("snapshot_unknown_block", "id", id);
             return;
         }
         world.setBlockState(origin.add(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_LISTENERS);
     }
 
-    // 实操:从零一块黑曜石。自然世界黑曜石须"找岩浆湖+浇水"——bot 目前没有这个能力,
-    // 本场景预期 FAIL,留作能力缺失的存证与修复目标(修好后转绿)。
+    // Real play: one block of obsidian from scratch. In the natural world, obsidian requires "find a lava lake + pour water" — the bot currently lacks this capability,
+    // so this scenario is expected to FAIL, kept as evidence of the missing capability and a fix target (turns green once it's fixed).
     private static Result assignRealObsidian(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(实操死一次=大事故)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (in real play, dying once is a major incident)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.OBSIDIAN, 1));
         if (!started) {
             return Result.fail("real_obsidian", "goal_submit_failed");
@@ -1854,16 +1854,16 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // Mining First M1-prepared:确定性画布提供 35 格下沉岩浆池、钻石镐和唯一水桶，但不预放/给予黑曜石。
-    // 它只验证长配额 planner/task 接线；只有使用真实放水与原版流体反应的实现才可晋级最终验收。
+    // Mining First M1-prepared: the deterministic canvas provides a 35-cell sunken lava pool, a diamond pickaxe, and a single water bucket, but does not pre-place or grant obsidian.
+    // It only verifies the long-quota planner/task wiring; only an implementation that actually pours water and relies on vanilla fluid reactions can graduate to final acceptance.
     private static Result assignObsidianHalfStack32Prepared(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // 7×5 下沉源池（35 块）+ 石质池沿：真实水流横跨池面批量转化，收水后逐块开采。
-        // 这也是玩家常用的安全采集法，避免同平面孤立源向整张画布无限蔓延。
+        // A 7×5 sunken source pool (35 blocks) + a stone rim: real water flow sweeps across the pool surface converting it in bulk, then it's mined block by block after the water is recovered.
+        // This is also the safe collection method players commonly use, avoiding an isolated same-plane source spreading endlessly across the whole canvas.
         for (int dx = 4; dx <= 10; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 world.setBlockState(origin.add(dx, -1, dz), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
@@ -1872,14 +1872,14 @@ public final class AIBotVerifySubcommand {
         world.setBlockState(origin.add(3, 0, 0), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
         bot.teleport(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
                 java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
-        // 可补水的 2x2 水源；目标实现应真实放水/回收，而非直接写黑曜石方块。
+        // A refillable 2x2 water source; the target implementation should genuinely pour/recover water rather than writing obsidian blocks directly.
         for (int dx = -3; dx <= -2; dx++) {
             for (int dz = 0; dz <= 1; dz++) {
                 world.setBlockState(origin.add(dx, 0, dz), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
-        // 与 from-zero 合约一致：全程只有一个桶，任何一次未回收都会立即暴露为任务失败。
+        // Consistent with the from-zero contract: only one bucket exists for the whole run, so any single failure to recover it immediately shows up as a task failure.
         InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 64));
         InventoryAction.giveItem(bot, new ItemStack(Items.COOKED_BEEF, 8));
@@ -1903,8 +1903,8 @@ public final class AIBotVerifySubcommand {
                 });
     }
 
-    // 用户承诺口径的 prepared 层:与 32 版同构,池扩到 10×7(70 源 ≥ 64),物资按 64 目标
-    // 合约缩放(食物走 MiningBudget.obsidianExpeditionFoodTarget),超时按同一单块速率翻倍。
+    // The user-commitment-baseline prepared layer: structurally identical to the 32 version, with the pool expanded to 10×7 (70 sources ≥ 64); supplies scaled
+    // to the 64-target contract (food follows MiningBudget.obsidianExpeditionFoodTarget), and the timeout doubled at the same per-block rate.
     private static Result assignObsidianStack64Prepared(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -1953,8 +1953,8 @@ public final class AIBotVerifySubcommand {
                 });
     }
 
-    // 用户承诺口径的 from-zero 层:与 32 版同构,配额与审计阈值均为 64,超时按增量派生。
-    // 与 32 契约一样,未达标时必须诚实 FAIL/MISSING;认证长跑门禁另行标定。
+    // The user-commitment-baseline from-zero layer: structurally identical to the 32 version, with both the quota and the audit threshold at 64, and the timeout derived incrementally.
+    // Just like the 32 contract, while unmet it must honestly FAIL/MISSING; the certification long-run gate is calibrated separately.
     private static Result assignObsidianStack64FromZero(AIPlayerEntity bot) {
         prepareMiningFromZero(bot);
         MiningEvidenceAudit.begin(bot, MiningEvidenceAudit.Target.OBSIDIAN,
@@ -1976,8 +1976,8 @@ public final class AIBotVerifySubcommand {
                         .filter(MiningEvidenceAudit.Snapshot::passes).isPresent());
     }
 
-    // Mining First M1-final:自然地形、空背包，自主取得钻石镐/桶、寻找岩浆并获得半组黑曜石。
-    // 这是 capability manifest 的唯一可 pin 场景；当前未达标时必须诚实 FAIL/MISSING。
+    // Mining First M1-final: natural terrain, empty inventory — obtain a diamond pickaxe/bucket on its own, find lava, and obtain half a stack of obsidian.
+    // This is the only scenario the capability manifest may pin; while it isn't met it must honestly FAIL/MISSING.
     private static Result assignObsidianHalfStack32FromZero(AIPlayerEntity bot) {
         prepareMiningFromZero(bot);
         MiningEvidenceAudit.begin(bot, MiningEvidenceAudit.Target.OBSIDIAN);
@@ -1996,59 +1996,59 @@ public final class AIBotVerifySubcommand {
                         .filter(MiningEvidenceAudit.Snapshot::passes).isPresent());
     }
 
-    // 实操:自然地形长距离导航——目标=东边 120 格的自然地表点(中途可能有湖/崖/密林,考验绕行与容错)。
-    // 不验证路径漂不漂亮,只验证"能到":距目标 ≤3 格即过。这是所有 real_*"走过去干活"的共同前置能力,
-    // 单拎出来测,导航挂了能直接定位是"走路"问题而不是采集/合成问题。
+    // Real play: long-distance navigation on natural terrain — target = a natural surface point 120 blocks east (there may be lakes/cliffs/dense forest along the way, testing detouring and fault tolerance).
+    // Doesn't verify whether the path is pretty, only that it can "get there": within ≤3 blocks of the target passes. This is the shared prerequisite capability behind every real_* "walk over and do it",
+    // pulled out and tested on its own so that if navigation breaks, it's immediately clear it's a "walking" problem, not a gathering/crafting one.
     private static Result assignRealNavFar(AIPlayerEntity bot) {
         BlockPos start = prepareRealistic(bot);
         ServerWorld world = bot.getEntityWorld();
         int gx = start.getX() + 120;
         int gz = start.getZ();
-        // 用 MOTION_BLOCKING 堆叠图取自然地表落脚 y(含树叶/水面),与"玩家肉眼选个地表点"一致
+        // Uses the MOTION_BLOCKING heightmap to get a natural surface footing y (including leaves/water surfaces), consistent with "a player eyeballing a surface spot"
         int gy = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, gx, gz);
         BlockPos goal = new BlockPos(gx, gy, gz);
         return assignTask(bot, "real_nav_far", new MoveTask(bot, goal), 6000,
                 ignored -> bot.isAlive() && bot.getBlockPos().getSquaredDistance(goal) <= 9.0D);
     }
 
-    // ==================== R2 LLM 全链层(llm_*) ====================
-    // 这层测"中文口语指令 → LLM 意图解析 → 工具选择 → 参数化 → 执行"的完整实操链路:
-    // 入口与玩家在聊天里 @bot 说话完全相同(BrainCoordinator.handleMessage,server 线程进、
-    // 异步调 LLM、响应回 server 线程执行工具)。必须 WITH_LLM=1 跑——test 脚本默认
-    // unset AIBOT_LLM_API_KEY 隔离大脑,防确定性套件偷偷计费;这也是 llm_* 不进 ALL_FEATURES 的原因。
-    // 判定一律用 patient 模式(见 pollActive):大脑是会话式驱动,会连续派发多个任务、失败换法重试、
-    // 任务间空闲思考——单任务 COMPLETED/FAILED 都不是场景终局,只认"世界状态断言达成"或超时。
-    // 开局与 real_* 同一标准:prepareRealistic 自然世界零给予 + deathBase 零死亡红线。
+    // ==================== R2 LLM full-chain layer (llm_*) ====================
+    // This layer tests the full real-play chain of "colloquial-language instruction → LLM intent parsing → tool selection → parameterization → execution":
+    // the entry point is exactly the same as a player chatting @bot (BrainCoordinator.handleMessage, entering on the server thread,
+    // calling the LLM asynchronously, then the response returns to the server thread to execute the tool). Must be run with WITH_LLM=1 — the test script
+    // unsets MINECRAFTAI_LLM_API_KEY by default to isolate the brain, preventing the deterministic suites from billing silently; this is also why llm_* is excluded from ALL_FEATURES.
+    // Judging always uses patient mode (see pollActive): the brain is conversation-driven and will dispatch multiple tasks in a row, retry with a different approach on failure,
+    // and idle-think between tasks — a single task's COMPLETED/FAILED is never the scenario's final word; only "the world-state assertion is satisfied" or a timeout counts.
+    // The starting standard matches real_*: prepareRealistic's natural world with nothing granted + deathBase's zero-death red line.
 
     /**
-     * llm_* 公共开局:复位大脑会话/目标计划/遗留任务 → prepareRealistic(自然世界零给予)→
-     * 中文指令经 handleMessage 递给大脑(与玩家聊天 @bot 同一入口)。
-     * 复位原因:上一个 llm 场景断言达成时大脑往往仍在续航思考(busy),busy 下 handleMessage
-     * 拒收新消息返回 false,不复位会套件串台误判;resetToIdle 顺带清掉遗留失败记录,
-     * 防新会话开局就被注入上一场景的"上一个任务失败"。
-     * 前置查 key:key 缺失时 handleMessage 照样返回 true(异步请求才报 llm_api_key_missing),
-     * 不查就得干等满 timeout 才 FAIL。返回 null=指令已提交;非 null=应立即记录的 FAIL。
+     * llm_* common startup: reset the brain session/goal plan/leftover tasks → prepareRealistic (natural world, nothing granted) →
+     * the instruction is handed to the brain via handleMessage (the same entry point as a player chatting @bot).
+     * Reason for the reset: when the previous llm scenario's assertion is satisfied, the brain is often still busy thinking ahead (busy); while busy, handleMessage
+     * rejects new messages and returns false, so skipping the reset would cause cross-talk misjudgments between scenarios in a suite; resetToIdle also clears any leftover failure record,
+     * preventing a new session from starting out already contaminated with the previous scenario's "last task failed".
+     * Checks the key up front: when the key is missing, handleMessage still returns true (only the async request later reports llm_api_key_missing),
+     * so without this check the test would just have to wait out the full timeout before FAILing. A null return means the instruction was submitted; a non-null return is a FAIL to record immediately.
      */
     private static Result startLlmScenario(AIPlayerEntity bot, String feature, String instruction) {
         BrainCoordinator.INSTANCE.reset(bot);
         GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.resetToIdle(bot);
         prepareRealistic(bot);
-        if (AIBotConfig.get().llm().apiKey().isBlank()
+        if (MinecraftAiConfig.get().llm().apiKey().isBlank()
                 || !BrainCoordinator.INSTANCE.handleMessage(bot, "Tester", instruction)) {
             return Result.fail(feature, "brain_rejected_or_not_configured (run WITH_LLM=1)");
         }
         return null;
     }
 
-    // 实操(LLM):口语化移动指令 → 大脑应解析出"去 (120, z=0) 附近"的意图并选移动类工具(move_to 等)。
-    // 断言只看世界结果:bot 与 (120, 0) 的水平距离 ≤ 8 格(忽略 y,落脚高度由自然地形决定)且零死亡。
+    // Real play (LLM): a colloquial movement instruction → the brain should parse out the intent of "go near (120, z=0)" and pick a movement tool (move_to, etc.).
+    // The assertion looks only at the world result: the bot's horizontal distance to (120, 0) is ≤ 8 blocks (ignoring y, whose footing height is decided by natural terrain), plus zero deaths.
     private static Result assignLlmMove(AIPlayerEntity bot) {
-        Result rejected = startLlmScenario(bot, "llm_move", "走到坐标 x=120 z=0 附近去");
+        Result rejected = startLlmScenario(bot, "llm_move", "Go over near coordinates x=120 z=0");
         if (rejected != null) {
             return rejected;
         }
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(照抄 real_* 标准)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (copied from the real_* standard)
         return Result.runningPatient("llm_move", 6000,
                 ignored -> {
                     double dx = bot.getX() - 120.0D;
@@ -2057,37 +2057,37 @@ public final class AIBotVerifySubcommand {
                 });
     }
 
-    // 实操(LLM):口语化食物指令 → 大脑应解析"至少 4 个熟食"的意图与数量参数,自主择源
-    // (打猎+烤/种田做面包/觅食),与 real_food 同一世界标准但驱动方是真实大脑而非直接 submit Goal。
+    // Real play (LLM): a colloquial food instruction → the brain should parse the intent and quantity parameter of "at least 4 cooked food", choosing a source on its own
+    // (hunt + cook / farm for bread / forage), the same world standard as real_food but driven by the real brain instead of directly submitting a Goal.
     private static Result assignLlmFood(AIPlayerEntity bot) {
-        Result rejected = startLlmScenario(bot, "llm_food", "去搞点吃的回来,至少弄到 4 个熟食");
+        Result rejected = startLlmScenario(bot, "llm_food", "Go get something to eat, get at least 4 cooked food");
         if (rejected != null) {
             return rejected;
         }
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(照抄 real_* 标准)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (copied from the real_* standard)
         return Result.runningPatient("llm_food", 16000,
                 ignored -> bot.isAlive() && safeFoodUnits(bot) >= 4 && deathCount(bot) == deathBase);
     }
 
-    // 实操(LLM):口语化矿物指令 → 大脑应把"挖一块铁锭"映射到 achieve_goal/mine_ore 全链
-    // (砍树→木镐→挖石→石镐→找铁→挖→做炉→熔炼),与 real_iron 同一世界标准。
+    // Real play (LLM): a colloquial mineral instruction → the brain should map "mine an iron ingot" onto the full achieve_goal/mine_ore chain
+    // (chop tree → wood pickaxe → mine stone → stone pickaxe → find iron → mine → craft a furnace → smelt), the same world standard as real_iron.
     private static Result assignLlmIron(AIPlayerEntity bot) {
-        Result rejected = startLlmScenario(bot, "llm_iron", "帮我挖一块铁锭回来");
+        Result rejected = startLlmScenario(bot, "llm_iron", "Help me mine an iron ingot");
         if (rejected != null) {
             return rejected;
         }
-        final int deathBase = deathCount(bot); // 零死亡红线:死亡重生也判 FAIL(照抄 real_* 标准)
+        final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (copied from the real_* standard)
         return Result.runningPatient("llm_iron", 24000,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.IRON_INGOT) >= 1
                         && deathCount(bot) == deathBase);
     }
 
-    // 实操(LLM)·旗舰:口语化钻石指令 → 大脑应跑通整条深链(铁镐前置→下潜深层→地下探矿→挖钻石)。
-    // 这是真实地形最深的缺口(campaign 实测 real_diamond 两 seed no_resource):地表觅食已被 EXPLORE
-    // 解决,地下定向探矿尚缺。用真实对话层验收,卡点即下一个该修的能力(数据驱动,不靠猜)。
-    // 超时给足(地下找钻石本就慢);零死亡红线照旧——深层岩浆/坠落/怪一次失误都判 FAIL,逼出真实鲁棒性。
+    // Real play (LLM) · flagship: a colloquial diamond instruction → the brain should run the entire deep chain end to end (iron-pickaxe prerequisite → dive deep → underground ore prospecting → mine diamond).
+    // This is the deepest gap on real terrain (observed in campaigns: real_diamond hit no_resource on two seeds): surface foraging has already been
+    // solved by EXPLORE, but directed underground prospecting is still missing. Verified through the real conversational layer, so whatever it snags on is the next capability to fix (data-driven, not guesswork).
+    // Timeout given generously (finding diamond underground is inherently slow); the zero-death red line still applies — a single slip into deep lava/a fall/a mob is judged FAIL, forcing genuine robustness.
     private static Result assignLlmDiamond(AIPlayerEntity bot) {
-        Result rejected = startLlmScenario(bot, "llm_diamond", "帮我挖一颗钻石回来");
+        Result rejected = startLlmScenario(bot, "llm_diamond", "Help me mine a diamond");
         if (rejected != null) {
             return rejected;
         }
@@ -2097,28 +2097,28 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // ==================== 对话式助手层(assistant_suite) ====================
-    // 验证助手层四块新地基(此前只编译过、零运行验证):P0 目标队列 / P1 Goal.Build 自动备料 /
-    // P3 参数化蓝图 / P2 玩家消息保留进行中目标。全部确定性实验室场景(prepareArea 人造平台),
-    // 不走 LLM、不烧 API——测的是助手层的执行根基,大脑驱动的全链由 llm_suite 单独覆盖。
+    // ==================== Conversational assistant layer (assistant_suite) ====================
+    // Verifies four new foundations of the assistant layer (previously only compiled, never run-verified): P0 goal queue / P1 Goal.Build auto-provisioning /
+    // P3 parameterized blueprints / P2 player messages preserving the in-progress goal. All deterministic lab scenarios (prepareArea's artificial platform);
+    // none go through the LLM or burn API calls — this tests the assistant layer's execution foundation, while the brain-driven full chain is covered separately by llm_suite.
 
     /**
-     * P0 目标队列端到端:连续 submit 两个目标——第一个(木棍×4)立即开工;第二个(工作台×1)在
-     * 活跃目标存在时应走 GoalExecutor.goalQueue **入队**且返回 true(返回 false=队列回归,立即 FAIL);
-     * 第一个完成后 advanceQueue 自动出队衔接执行第二个。4 原木够两条链:棍链耗 1 木(→4 板,2 板成 4 棍),
-     * 台链再耗 1 木(剩 2 板补 4 板→工作台)。断言两个目标的产物**同时到手**(木棍≥4 且工作台≥1)
-     * 且零死亡——只有第二个目标真被接续执行了,断言才可能成立。
+     * P0 goal queue end to end: submit two goals back to back — the first (sticks×4) starts immediately; the second (crafting table×1), while
+     * an active goal exists, should go through GoalExecutor.goalQueue and **enqueue**, returning true (returning false = a queue regression, instant FAIL);
+     * once the first completes, advanceQueue automatically dequeues and starts executing the second. 4 raw logs are enough for both chains: the stick chain consumes 1 log (→4 planks, 2 planks make 4 sticks),
+     * the table chain consumes another log (the remaining 2 planks plus 4 more → a crafting table). Assert both goals' products **arrive together** (sticks≥4 and crafting table≥1)
+     * and zero deaths — the assertion can only hold if the second goal was genuinely picked up and executed.
      */
     private static Result assignGoalQueue(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 4));
-        final int deathBase = deathCount(bot); // 零死亡红线(照抄 real_* 标准)
+        final int deathBase = deathCount(bot); // zero-death red line (copied from the real_* standard)
         if (!GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.STICK, 4))) {
             return Result.fail("goal_queue", "goal_submit_failed");
         }
         if (!GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.CRAFTING_TABLE, 1))) {
-            return Result.fail("goal_queue", "second_submit_rejected"); // P0 回归:第二目标应入队返回 true
+            return Result.fail("goal_queue", "second_submit_rejected"); // P0 regression: the second goal should enqueue and return true
         }
         return Result.runningGoal("goal_queue", 4800,
                 ignored -> bot.isAlive()
@@ -2128,9 +2128,9 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * P0-02a 取消后不可复活：同时建立 Goal、active Task 和 BotMemory long-term goal，随后走生产
-     * IntentController.cancelAll。等待 200 tick，确认旧 Goal、队列、Task、paused Task、记忆目标和
-     * Brain decision 都保持静默。这个等待窗口专门防止“Task 被停了，但 Goal/记忆下一 tick 又派回来”。
+     * P0-02a no resurrection after cancellation: simultaneously establish a Goal, an active Task, and a BotMemory long-term goal, then go through production
+     * IntentController.cancelAll. Wait 200 ticks and confirm the old Goal, queue, Task, paused Task, memory goal, and
+     * Brain decision all stay silent. This waiting window specifically guards against "the Task was stopped, but the Goal/memory dispatches it right back on the next tick".
      */
     private static Result assignCancelNoResurrection(AIPlayerEntity bot) {
         prepareRuntimeControlArea(bot);
@@ -2147,7 +2147,7 @@ public final class AIBotVerifySubcommand {
         TaskManager.INSTANCE.pauseFor(bot, "verify_cancel_paused");
         HoldTask activeTask = new HoldTask();
         TaskManager.INSTANCE.assign(bot, activeTask,
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "cancel_setup"));
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "cancel_setup"));
         if (!TaskManager.INSTANCE.hasPaused(bot)
                 || pausedTask.state() != TaskState.PAUSED
                 || TaskManager.INSTANCE.getActive(bot).orElse(null) != activeTask) {
@@ -2162,8 +2162,8 @@ public final class AIBotVerifySubcommand {
             IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_setup_cleanup");
             return Result.fail("cancel_no_resurrection", "using_item_setup_failed");
         }
-        // 已建立 isUsingItem 动作后立即恢复饥饿，避免取消后 DangerWatcher 合法派发新的 EatTask；
-        // 本场景只检测旧 Mission/Task/记忆是否复活，不把安全层的新工作误判成旧意图。
+        // Immediately restore hunger right after establishing the isUsingItem action, to prevent DangerWatcher from legitimately dispatching a new EatTask after cancellation;
+        // this scenario only checks whether the old Mission/Task/memory resurrects, and must not mistake new work from the safety layer for the old intent.
         bot.getHungerManager().setFoodLevel(20);
         bot.getHungerManager().setSaturationLevel(5.0F);
         var outcome = IntentController.INSTANCE.cancelAll(
@@ -2200,7 +2200,7 @@ public final class AIBotVerifySubcommand {
                 });
     }
 
-    /** cancel-current 同 tick 重试必须幂等；队首只在下一 tick 晋升，且随后能真正完成。 */
+    /** cancel-current retried within the same tick must be idempotent; the head of the queue is only promoted on the next tick, and afterward must actually complete. */
     private static Result verifyCancelCurrentQueue(AIPlayerEntity bot) {
         prepareRuntimeControlArea(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 4));
@@ -2236,12 +2236,12 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * 模拟 LLM 一次 response 中的 stop + achieve_goal(B)：stop 保留当前 APPLYING lease，不提前晋升 B；
-     * 第二个 Tool 立即安装 B，并从旧队列移除同一 Goal，避免 B 完成后再执行一次。
+     * Simulates a stop + achieve_goal(B) within a single LLM response: stop preserves the current APPLYING lease without prematurely promoting B;
+     * the second Tool call installs B immediately and removes the same Goal from the old queue, preventing it from running a second time after B completes.
      */
     private static Result verifyReplaceQueuedGoal(AIPlayerEntity bot) {
         prepareRuntimeControlArea(bot);
-        if (AIBotConfig.get().brain().maxToolCallsPerTurn() < 2) {
+        if (MinecraftAiConfig.get().brain().maxToolCallsPerTurn() < 2) {
             return Result.fail("replace_queued_goal", "bad_config_max_tool_calls");
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 4));
@@ -2279,12 +2279,12 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * stop + move_to 没有 Task/Goal，必须靠 ActionPack 维持 continuation。显式 queue 要等动作结束后
-     * 才能启动，不能由 GoalExecutor 下一 tick 抢占 move；旧 Goal 也不得复活。
+     * stop + move_to has no Task/Goal, so continuation must be maintained by ActionPack alone. The explicit queue must wait for the action to finish
+     * before it can start — GoalExecutor must not preempt the move on the next tick — and the old Goal must not resurrect either.
      */
     private static Result verifyReplaceActionOnly(AIPlayerEntity bot) {
         prepareRuntimeControlArea(bot);
-        if (AIBotConfig.get().brain().maxToolCallsPerTurn() < 2) {
+        if (MinecraftAiConfig.get().brain().maxToolCallsPerTurn() < 2) {
             return Result.fail("replace_action_only", "bad_config_max_tool_calls");
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 4));
@@ -2319,7 +2319,7 @@ public final class AIBotVerifySubcommand {
             IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_cleanup");
             return Result.fail("replace_action_only", detail);
         }
-        bot.getHungerManager().setFoodLevel(10); // 非 critical、但达到自动进食阈值：不得抢掉 move action
+        bot.getHungerManager().setFoodLevel(10); // not critical, but reaches the auto-eat threshold: must not preempt the move action
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 1));
         String[] violation = {null};
         boolean[] violationLogged = {false};
@@ -2365,8 +2365,8 @@ public final class AIBotVerifySubcommand {
                     }
                     if (violation[0] != null && !violationLogged[0]) {
                         violationLogged[0] = true;
-                        io.github.zoyluo.aibot.log.BotLog.warn(
-                                io.github.zoyluo.aibot.log.LogCategory.TASK,
+                        io.github.zoyluo.minecraftai.log.BotLog.warn(
+                                io.github.zoyluo.minecraftai.log.LogCategory.TASK,
                                 bot,
                                 "verify_action_replacement_violation",
                                 "reason", violation[0]);
@@ -2380,7 +2380,7 @@ public final class AIBotVerifySubcommand {
                 });
     }
 
-    /** replacement 的 Task.onStart 抛异常时必须回滚 partial active，并在下一 tick 恢复 preserved queue。 */
+    /** when replacement's Task.onStart throws, partial active state must be rolled back, and the preserved queue restored on the next tick. */
     private static Result verifyReplaceStartFailure(AIPlayerEntity bot) {
         prepareRuntimeControlArea(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 4));
@@ -2423,7 +2423,7 @@ public final class AIBotVerifySubcommand {
                     "verify_replace_start_failure",
                     () -> {
                         TaskManager.INSTANCE.assign(bot, broken,
-                                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "replace_failure"));
+                                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "replace_failure"));
                         return true;
                     });
         } catch (IllegalStateException exception) {
@@ -2455,12 +2455,12 @@ public final class AIBotVerifySubcommand {
 
     private static Result verifyPauseResumeSafetyStack(AIPlayerEntity bot) {
         IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_pause_setup");
-        Task mission = new io.github.zoyluo.aibot.task.HoldTask();
-        Task safetyOne = new io.github.zoyluo.aibot.task.HoldTask();
-        Task safetyTwo = new io.github.zoyluo.aibot.task.HoldTask();
+        Task mission = new io.github.zoyluo.minecraftai.task.HoldTask();
+        Task safetyOne = new io.github.zoyluo.minecraftai.task.HoldTask();
+        Task safetyTwo = new io.github.zoyluo.minecraftai.task.HoldTask();
         try {
             TaskManager.INSTANCE.assign(bot, mission,
-                    io.github.zoyluo.aibot.runtime.TaskOrigin.mission(java.util.UUID.randomUUID(), "verify_mission"));
+                    io.github.zoyluo.minecraftai.runtime.TaskOrigin.mission(java.util.UUID.randomUUID(), "verify_mission"));
             TaskManager.INSTANCE.pauseUserIntent(bot, "verify_user_pause");
             if (!TaskManager.INSTANCE.isUserPaused(bot) || TaskManager.INSTANCE.pausedDepth(bot) != 1
                     || mission.state() != TaskState.PAUSED) {
@@ -2468,10 +2468,10 @@ public final class AIBotVerifySubcommand {
             }
 
             TaskManager.INSTANCE.assign(bot, safetyOne,
-                    io.github.zoyluo.aibot.runtime.TaskOrigin.safety("verify_combat"));
+                    io.github.zoyluo.minecraftai.runtime.TaskOrigin.safety("verify_combat"));
             TaskManager.INSTANCE.pauseFor(bot, "verify_nested_safety");
             TaskManager.INSTANCE.assign(bot, safetyTwo,
-                    io.github.zoyluo.aibot.runtime.TaskOrigin.safety("verify_lava"));
+                    io.github.zoyluo.minecraftai.runtime.TaskOrigin.safety("verify_lava"));
             if (TaskManager.INSTANCE.pausedDepth(bot) != 2) {
                 return Result.fail("pause_resume_safety_stack", "nested_stack_depth=" + TaskManager.INSTANCE.pausedDepth(bot));
             }
@@ -2513,21 +2513,21 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * P1 Goal.Build 自动备料端到端:只给 32 原木、零木板——ensureBuild 必须自己按蓝图逐格统计出
-     * 需 114 块木板(small_hut 实测口径,见 assignBuild 注释),倒推出"原木→木板"CRAFT 步并全部合成,
-     * 再由 BUILD 步把房盖起来(纯建造已由 build 场景覆盖,本场景钉的是备料链)。
-     * 断言:origin ±14、y∈[origin.y, origin.y+8] 的木板家族方块 ≥80(全房 112 块,留余量)且零死亡。
-     * above 口径理由见 countNearbyBlocksAbove(木板虽不与石地板同族,两个建房场景统一口径更稳)。
+     * P1 Goal.Build auto-provisioning end to end: give only 32 raw logs, zero planks — ensureBuild must tally, block by block from the blueprint, that
+     * 114 planks are needed (small_hut's measured baseline, see the assignBuild comment), backward-plan a "logs→planks" CRAFT step and craft all of it,
+     * then let the BUILD step finish the house (pure building is already covered by the build scenario; this scenario pins down the provisioning chain).
+     * Assertion: within origin ±14, y∈[origin.y, origin.y+8], plank-family blocks ≥80 (the full house is 112 blocks, leaving margin) and zero deaths.
+     * See the countNearbyBlocksAbove comment for the "above" baseline rationale (planks aren't in the same family as the stone floor, but a unified baseline between the two house-building scenarios is more robust).
      */
     private static Result assignGoalBuildAuto(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 32)); // 只给原木:114 板必须自己算出来并合成
+        InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 32)); // raw logs only: the 114 planks must be figured out and crafted on its own
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> plankBlocks = new java.util.HashSet<>();
-        for (Item planks : io.github.zoyluo.aibot.craft.RecipeRegistry.PLANKS) {
+        for (Item planks : io.github.zoyluo.minecraftai.craft.RecipeRegistry.PLANKS) {
             Block block = Block.getBlockFromItem(planks);
             if (block != Blocks.AIR) {
                 plankBlocks.add(block);
@@ -2543,12 +2543,12 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * P3 参数化蓝图端到端:Goal.Build("custom:5x4x3:stone_like") 不读蓝图文件,由
-     * BlueprintSchema.parametricHouse 按规格生成(外径 5×4、墙净高 3:地板20+墙42-门2+顶20=80 格,
-     * palette=stone_like)。给足 128 圆石(备料链判"已满足"零采集,聚焦参数化几何+palette 建造)。
-     * 断言:±14、y∈[origin.y, origin.y+8] 的 stone_like 建材(圆石/石头/石砖)≥40(半房即过,容忍
-     * 个别格缺失)且零死亡。必须 above 口径:实验室平台地板(y-1 圆石、其下 16 层实心石)与建材同族,
-     * 数进去会把"没盖房"误判成 PASS——房子地板层恰落在 origin.y(SiteFinder 锚在可站立脚位),零损失。
+     * P3 parameterized blueprint end to end: Goal.Build("custom:5x4x3:stone_like") reads no blueprint file — it's generated on the fly by
+     * BlueprintSchema.parametricHouse from the spec (outer footprint 5×4, net wall height 3: floor 20 + walls 42 - door 2 + roof 20 = 80 cells,
+     * palette=stone_like). Given ample cobblestone, 128 (the provisioning chain judges materials "already satisfied" with zero collection, focusing on parametric geometry + palette building).
+     * Assertion: within ±14, y∈[origin.y, origin.y+8], stone_like building material (cobblestone/stone/stone bricks) ≥40 (half the house passes, tolerating
+     * a few missing cells) and zero deaths. Must use the "above" baseline: the lab platform's floor (y-1 cobblestone, 16 solid-stone layers below) shares the same family as the building material,
+     * and counting it would misjudge "no house built" as a PASS — the house's floor layer lands exactly on origin.y (SiteFinder anchors to a standable foothold), so there's zero loss.
      */
     private static Result assignGoalBuildCustom(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -2568,16 +2568,16 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * P2 打断保留目标(机制层,不走 LLM 决策):提交挖圆石目标(平台下全是人造石,DigDownTask 要挖
-     * 几百 tick),趁执行中用 BrainCoordinator.handleMessage 模拟玩家闲聊——与玩家聊天 @bot 完全同一入口。
-     * P2 语义:有活跃 plan 时新消息**不清目标**只解 busy(旧行为"新消息=重定向,清目标"会把正在挖的
-     * 目标直接杀掉)。消息后立即断言 hasActivePlan 仍为 true(false=P2 回归);再以"目标照常完成"
-     * (圆石≥6 且零死亡)收尾——保留语义不只是没清,还得真的继续干完。无 LLM key 时 handleMessage
-     * 异步才报 key 缺失,同步路径照走,不影响本验证。
+     * P2 interrupt-preserving goal (mechanism layer, no LLM decision involved): submit a mine-cobblestone goal (the platform below is all artificial stone, so DigDownTask needs
+     * several hundred ticks to dig), and while it's executing, use BrainCoordinator.handleMessage to simulate a player's idle chat — the exact same entry point as a player chatting @bot.
+     * P2 semantics: while an active plan exists, a new message must **not clear the goal**, only resolve the busy state (the old behavior of "new message = redirect, clear the goal" would
+     * outright kill the goal that's currently mining). Right after the message, assert hasActivePlan is still true (false = a P2 regression); then finish by asserting "the goal completes as normal"
+     * (cobblestone≥6 and zero deaths) — preserving semantics isn't just about not clearing it, the goal must actually finish. With no LLM key, handleMessage only
+     * reports the missing key on the async path; the synchronous path proceeds as normal and this verification is unaffected.
      */
-    // ==================== 地形矩阵(②):同一挖矿任务 × 多种几何 ====================
-    // 让"地形组合爆炸"发生在无头测试里而不是玩家存档里——实操撞到的"山体侧面矿挖洞不进洞"
-    // 本该是矩阵第二行(slope)。全部断言:统一接近原语(挖掘感知寻路)能走/挖到矿并采到 1 个 raw_iron。
+    // ==================== Terrain matrix (②): the same mining task × multiple geometries ====================
+    // Let the "combinatorial explosion of terrain" happen in headless tests rather than a player's save file — the real-play case of "digging into a mountainside for ore but missing the hole"
+    // should be covered by the matrix's second row (slope). Every case asserts the same thing: the unified approach primitive (mining-aware pathfinding) can walk/dig to the ore and mine 1 raw_iron.
     private static Result assignMineGeo(AIPlayerEntity bot, String geo) {
         prepareArea(bot);
         clearInventory(bot);
@@ -2586,9 +2586,9 @@ public final class AIBotVerifySubcommand {
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         switch (geo) {
-            // 垂直埋矿:脚下 3 格(旧实验室基线)
+            // Vertically buried ore: 3 blocks underfoot (the old lab baseline)
             case "vertical" -> world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-            // 山体侧面:8 格外堆一座 6 高石坡,矿嵌在坡面里(实操三连败的复刻)
+            // Mountainside: a 6-high stone slope is piled up 8 blocks away, with ore embedded in the slope face (a recreation of three real-play failures in a row)
             case "slope" -> {
                 for (int dx = 0; dx <= 6; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
@@ -2599,7 +2599,7 @@ public final class AIBotVerifySubcommand {
                 }
                 world.setBlockState(origin.add(11, 3, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
             }
-            // 悬空头顶:矿在头顶 5 格的石板底面(要搭柱/挖不到就垫脚——考验垂直接近)
+            // Suspended overhead: ore in the underside of a stone slab 5 blocks overhead (requires pillaring up / stepping up if it can't be reached — tests vertical approach)
             case "overhang" -> {
                 for (int dx = -2; dx <= 2; dx++) {
                     for (int dz = -2; dz <= 2; dz++) {
@@ -2607,9 +2607,9 @@ public final class AIBotVerifySubcommand {
                     }
                 }
                 world.setBlockState(origin.add(0, 5, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 16)); // 垫脚材料
+                InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 16)); // footing material
             }
-            // 隔墙:bot 与矿之间 3 厚石墙(必须穿墙)
+            // Wall between: a 3-thick stone wall between the bot and the ore (must dig through the wall)
             case "wall" -> {
                 for (int dx = 3; dx <= 5; dx++) {
                     for (int dz = -2; dz <= 2; dz++) {
@@ -2620,7 +2620,7 @@ public final class AIBotVerifySubcommand {
                 }
                 world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
             }
-            // 全包裹口袋:矿在 6 格外完全嵌进实心石立方中心(终点豁免的直接考题)
+            // Fully enclosed pocket: ore fully embedded at the center of a solid stone cube 6 blocks away (a direct test of the endpoint exemption)
             case "pocket" -> {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
@@ -2631,14 +2631,14 @@ public final class AIBotVerifySubcommand {
                 }
                 world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
             }
-            // 深层斜下:矿在斜下方 6 格(深板岩铁矿,考验斜向下挖)。火把给足:strip 巷道定距照明
-            // (ore_dig_torch)在这行顺带验证——黑暗巷道里每 10 格该见一支。
+            // Deep and diagonally below: ore diagonally 6 blocks down (deep deepslate iron ore, testing diagonal downward digging). Torches given generously: fixed-interval strip-corridor lighting
+            // (ore_dig_torch) is incidentally verified in this row — a torch should appear every 10 blocks in the dark corridor.
             case "deep" -> {
                 world.setBlockState(origin.add(4, -6, 4), Blocks.DEEPSLATE_IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 16));
             }
-            // P0 验证·岩浆邻接:全包裹矿的东面贴一格岩浆源——预检该让 A* 从北/南/上等安全面进,
-            // 挖错面=岩浆涌入烧死(零死亡断言抓)。
+            // P0 verification · lava adjacency: one lava-source block adjoins the east face of the fully enclosed ore — the precheck should route A* in from a safe face (north/south/top, etc.);
+            // digging the wrong face = lava floods in and burns the bot to death (caught by the zero-death assertion).
             case "lava" -> {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
@@ -2648,11 +2648,11 @@ public final class AIBotVerifySubcommand {
                     }
                 }
                 world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 1, 0), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL); // 矿东面贴岩浆
-                InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8)); // 封堵材料(真实玩家身上总有圆石)
+                world.setBlockState(origin.add(8, 1, 0), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL); // lava adjoining the ore's east face
+                InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8)); // sealing material (a real player always has cobblestone on hand)
             }
-            // R9 流动水贴矿(瀑布脚):水源悬在矿邻位上方 2 格,自然流下漫过矿东邻——流动水(非源)
-            // 的 fluidState 同样 isIn(WATER),封堵/侧位链路应当一致生效;封掉流经格即可安全开挖。
+            // R9 flowing water adjoining ore (waterfall base): a water source hangs 2 blocks above the cell adjacent to the ore and naturally flows down over the ore's east neighbor — flowing water (not a source)
+            // also has fluidState.isIn(WATER), so the sealing/side-approach path should behave the same way; sealing off the flowed-through cell is enough to dig safely.
             case "flow" -> {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
@@ -2664,13 +2664,13 @@ public final class AIBotVerifySubcommand {
                 world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 world.setBlockState(origin.add(8, 1, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
                 world.setBlockState(origin.add(8, 2, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 3, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL); // 高处源,流抵矿邻
+                world.setBlockState(origin.add(8, 3, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL); // a high source, flowing down to the ore's neighbor
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
             }
-            // R9 暗湖破壁:通往矿的 z=0/1 直线壁后藏水箱(挖穿即涌),z 负侧留干路——
-            // 预检(digEnterable 流体邻位拒)应让 A* 自动绕干路,湖是绕出来的不是堵出来的。
+            // R9 hidden-lake wall breach: a water tank hides behind the straight z=0/1 wall leading to the ore (digging through floods it), with a dry path left on the negative-z side —
+            // the precheck (digEnterable rejecting a fluid-adjacent cell) should make A* automatically detour along the dry path; the lake is meant to be routed around, not sealed off.
             case "lake" -> {
-                // (统一画布天然零矿零湖,人造水箱的破壁涌水考题不再被天然湖截胡。)
+                // (the unified canvas naturally has zero ore and zero lakes, so the artificial-tank wall-breach flood test is no longer hijacked by a natural lake.)
                 for (int dx = 3; dx <= 9; dx++) {
                     for (int dz = -4; dz <= 3; dz++) {
                         for (int dy = -1; dy <= 4; dy++) {
@@ -2678,10 +2678,10 @@ public final class AIBotVerifySubcommand {
                         }
                     }
                 }
-                // 水箱:x=5..6, z=2..3 贴墙侧位(四周石壁已就位)。考题=主路侧旁有暗湖,
-                // 掘进路过不被勾引/封堵不乱触发——z=0 直线仍可达矿。原 z=0..1 正压主路:
-                // 预检"邻位无流体"会把 z=-1 贴箱列也全拒,A* 需绕 z=-2,80t 接近闸内
-                // 常走不完(轮3b 实测 silent skip),考题失真为"绕行竞速"。
+                // Water tank: x=5..6, z=2..3 against the wall to the side (the surrounding stone walls are already in place). The test = a hidden lake sits beside the main path;
+                // digging past it must not be lured in, and sealing must not trigger spuriously — the z=0 straight line can still reach the ore. The original z=0..1 pressed right against the main path:
+                // the "no fluid adjacent" precheck would reject the whole z=-1 column next to the tank too, forcing A* to detour via z=-2, and the 80t approach budget
+                // often couldn't finish (observed as a silent skip in round 3b), distorting the test into a "detour race".
                 for (int dx = 5; dx <= 6; dx++) {
                     for (int dz = 2; dz <= 3; dz++) {
                         for (int dy = 1; dy <= 2; dy++) {
@@ -2692,8 +2692,8 @@ public final class AIBotVerifySubcommand {
                 world.setBlockState(origin.add(9, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
             }
-            // 含水矿:与 lava 行同构,流体换水源——挖开瞬间水涌入会推走 bot/掉落物淹巷道,
-            // 统一危险流体封堵(ore_dig_fluid_seal)该先封水再挖。
+            // Water-adjacent ore: structurally identical to the lava row, with the fluid swapped for a water source — the instant it's dug open, the inrushing water could push the bot away or flood the corridor and drown the drops;
+            // the unified hazardous-fluid sealing logic (ore_dig_fluid_seal) should seal the water first and only then dig.
             case "water" -> {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
@@ -2703,11 +2703,11 @@ public final class AIBotVerifySubcommand {
                     }
                 }
                 world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 1, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL); // 矿东面贴水源
+                world.setBlockState(origin.add(8, 1, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL); // water source adjoining the ore's east face
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
             }
-            // P0 验证·沙砾顶:穿墙必经段头顶悬 3 格沙砾柱(z=0 直线),预检该绕 z±1 安全列穿——
-            // 直线穿=塌方砸头窒息(零死亡断言抓)。
+            // P0 verification · gravel overhead: a 3-block gravel column hangs overhead on the mandatory wall-crossing segment (the z=0 straight line); the precheck should route through a safe z±1 column instead —
+            // going straight through = a cave-in crushes and suffocates the bot (caught by the zero-death assertion).
             case "gravel" -> {
                 for (int dx = 3; dx <= 5; dx++) {
                     for (int dz = -2; dz <= 2; dz++) {
@@ -2723,8 +2723,8 @@ public final class AIBotVerifySubcommand {
                 }
                 world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
             }
-            // P0 验证·背包满:工作面不得直接 dropJunk；OreDig 应暂停并等待 sealed
-            // ORE_BATCH capacity service 腾出四格，再从同一 cursor 重试并捡起目标矿。
+            // P0 verification · full inventory: the work face must not just dropJunk directly; OreDig should pause and wait for the sealed
+            // ORE_BATCH capacity service to free up four slots, then retry from the same cursor and pick up the target ore.
             case "fullinv" -> {
                 InventoryAction.giveItem(bot, new ItemStack(Items.COOKED_BEEF, 8));
                 for (int i = 0; i < 36; i++) {
@@ -2732,19 +2732,19 @@ public final class AIBotVerifySubcommand {
                 }
                 world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
             }
-            // 竖井旁下沉矿(real_iron seed777 确定性复现):矿在下方5/横向10 的实心石里,
-            // 身旁 2 格留一条到底开放竖井(模拟 bot 刚挖完 dig_down 的遗留井)。real 实测:
-            // bot 破14块全在出发 Y 层横向掘进、不下沉到矿的 Y → no_progress。geo_deep(纯实心斜下)
-            // 却 PASS,差异就在这条混合地形的开放井。修好接近器下沉,此场景与 real_iron 同时转绿。
+            // Sunken ore next to a shaft (deterministic reproduction of real_iron seed777): the ore sits in solid stone 5 down/10 across,
+            // with an open shaft left 2 blocks away going all the way down (simulating a leftover shaft from the bot having just dug dig_down). Observed in real play:
+            // the bot breaks 14 blocks entirely at the starting Y level, tunneling horizontally without ever sinking to the ore's Y → no_progress. geo_deep (pure solid diagonal-down)
+            // still PASSes, and the difference is exactly this open shaft mixed into the terrain. Once the approacher's descent is fixed, this scenario and real_iron should turn green together.
             case "shaft" -> {
                 world.setBlockState(origin.add(10, -5, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 for (int dy = 0; dy >= -8; dy--) {
                     world.setBlockState(origin.add(2, dy, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
                 }
             }
-            // 空腔下沉矿(real_iron seed777 二号假设):bot 与下沉矿之间横亘一个 5x4x5 洞穴。
-            // 假设:接近器 A* 见空腔走 WALK 进洞,落在洞底后从错误角度面对矿,横向掘进卡死。
-            // geo_shaft(纯实心)PASS 而本场景若红 → 空气缺口即真因。
+            // Sunken ore across a cavity (real_iron seed777, hypothesis #2): a 5x4x5 cave lies between the bot and the sunken ore.
+            // Hypothesis: the approacher's A* sees the cavity and WALKs into the cave, lands at the bottom facing the ore from the wrong angle, and stalls tunneling horizontally.
+            // If geo_shaft (pure solid) PASSes while this scenario fails → the air gap is the real cause.
             case "cave" -> {
                 world.setBlockState(origin.add(10, -5, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
                 for (int dx = 3; dx <= 7; dx++) {
@@ -2770,8 +2770,8 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // P1 富矿区导向:近处(64 格)无矿,但知识库记得 80 格外的富矿簇(预热 3 个资源点)——
-    // prospect 兜底应直奔富区而非盲目掘进。断言:拿到 80 格外埋的真矿。
+    // P1 rich-ore-area guidance: no ore nearby (within 64 blocks), but the knowledge base remembers a rich-ore cluster 80 blocks away (3 resource points pre-warmed) —
+    // prospect's fallback should head straight for the rich area instead of digging blindly. Assertion: obtain the real ore buried 80 blocks away.
     private static Result assignGeoRich(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -2779,8 +2779,8 @@ public final class AIBotVerifySubcommand {
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        // (高空前提已由统一画布满足:prospect 64 球内天然零矿,富区导向考题不再被截胡。)
-        // 富区:80 格外,3 个资源点记忆(20 格内成簇)+真矿一块;沿途铺石走廊保通(贫瘠带,64 格内无矿)
+        // (the high-altitude premise is already satisfied by the unified canvas: prospect's 64-block sphere naturally has zero ore, so the rich-area-guidance test is no longer hijacked.)
+        // Rich area: 80 blocks away, 3 remembered resource points (clustered within 20 blocks) + one real ore block; a stone corridor is laid along the way to guarantee passage (the barren band, no ore within 64 blocks)
         BlockPos rich = origin.add(80, 0, 0);
         for (int dx = 0; dx <= 82; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
@@ -2791,14 +2791,14 @@ public final class AIBotVerifySubcommand {
             }
         }
         world.setBlockState(rich, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        // 平台铺完才上人(先铺后传,防坠落窗口)
+        // The platform is fully laid before the bot is placed (lay first, teleport after, to prevent a falling window)
         bot.teleport(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
                 java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
         bot.fallDistance = 0.0F;
-        io.github.zoyluo.aibot.memory.EpisodeLog log = io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE;
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(0, 0, 10), "minecraft:iron_ore");
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(10, 0, 0), "minecraft:iron_ore");
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(0, 0, -10), "minecraft:iron_ore");
+        io.github.zoyluo.minecraftai.memory.EpisodeLog log = io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE;
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(0, 0, 10), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(10, 0, 0), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(0, 0, -10), "minecraft:iron_ore");
         final int deathBase = deathCount(bot);
         boolean started = GoalExecutor.INSTANCE.submit(bot,
                 new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
@@ -2810,8 +2810,8 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 顺路矿(R3):目标铁矿 6 格外,通往它的隧道壁上嵌 2 块煤矿(±1 伸手位)——断言铁照采、
-    // 煤顺手白捡(ore_dig_bonus),改行追脉/绕路都算输(预算与 reach 约束兜着)。
+    // Ore along the way (R3): the target iron ore is 6 blocks away, and 2 blocks of coal ore are embedded in the tunnel wall on the way there (within ±1 reach) — assert the iron is still mined,
+    // and the coal is picked up for free along the way (ore_dig_bonus); changing course to chase the vein or detour counts as a loss (guarded by the budget and reach constraints).
     private static Result assignGeoBonus(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -2820,9 +2820,9 @@ public final class AIBotVerifySubcommand {
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 6, 8);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        // 目标铁矿:东 6 格同层
+        // Target iron ore: 6 blocks east, same level
         world.setBlockState(origin.add(6, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        // 顺路煤:通道两壁(挖隧道经过时进入 ±2 扫描窗)
+        // Coal along the way: on both tunnel walls (enters the ±2 scan window as the tunnel is dug through)
         world.setBlockState(origin.add(2, 1, 1), Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(origin.add(4, 0, -1), Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
         final int deathBase = deathCount(bot);
@@ -2837,8 +2837,8 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 挖矿归仓(R4):base 旁放箱,目标=挖 1 铁并入库。两连 goal(MineOre→queue Stockpile),
-    // 断言箱内 RAW_IRON≥1(不是背包——拿在手里不算归仓)。
+    // Mine-then-stock (R4): a chest is placed next to the base, goal = mine 1 iron and put it in storage. Two chained goals (MineOre→queue Stockpile),
+    // assert the chest holds RAW_IRON≥1 (not the inventory — holding it in hand doesn't count as stocked).
     private static Result assignGeoStockpile(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -2848,8 +2848,8 @@ public final class AIBotVerifySubcommand {
         fillStoneCube(world, origin, 4, 8);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         world.setBlockState(origin.add(5, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        // 基地:脚边 mark + 箱子
-        io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        // Base: a marker at the bot's feet + a chest
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .markPlace("base", world, origin);
         BlockPos chest = origin.add(-2, 0, 0);
         world.setBlockState(chest, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
@@ -2863,7 +2863,7 @@ public final class AIBotVerifySubcommand {
             if (!bot.isAlive()) {
                 return false;
             }
-            var inv = io.github.zoyluo.aibot.action.ContainerAction.resolve(bot, chest).orElse(null);
+            var inv = io.github.zoyluo.minecraftai.action.ContainerAction.resolve(bot, chest).orElse(null);
             if (inv == null) {
                 return false;
             }
@@ -2876,8 +2876,8 @@ public final class AIBotVerifySubcommand {
         });
     }
 
-    // 续挖(R6/R7):预置 mine_face 地标+矿种记忆于 35 格外(矿就埋在作业面旁),复刻 resume_mining
-    // 工具体(MoveTask 回面+MineOre 排队),断言走回去挖到矿——验证地标记忆与任务/目标衔接语义。
+    // Resume mining (R6/R7): a mine_face landmark + ore-type memory pre-placed 35 blocks away (the ore is buried right beside the work face), recreating resume_mining
+    // in body (MoveTask back to the face + MineOre queued), assert the bot walks back and mines the ore — verifies landmark memory and task/goal hand-off semantics.
     private static Result assignGeoResume(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -2885,7 +2885,7 @@ public final class AIBotVerifySubcommand {
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        // 作业面:东 35 格,走廊保通,面旁嵌 2 铁矿
+        // Work face: 35 blocks east, corridor kept clear, 2 iron ore embedded beside the face
         BlockPos face = origin.add(35, 0, 0);
         for (int dx = 0; dx <= 37; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
@@ -2895,18 +2895,18 @@ public final class AIBotVerifySubcommand {
                 }
             }
         }
-        // 画布规则:矿至少 y+1——放地面层(y+0)时 approach goal=矿.down 落到唯一石板层之下的
-        // 虚空,支撑检查全拒 → TIMEOUT 连环 skip(轮4b 实测)。垫一格石头当矿座。
+        // Canvas rule: ore must be at least y+1 — placing it at ground level (y+0) makes the approach goal (ore.down) land in the void below the single stone-slab layer,
+        // so the support check rejects it every time → a cascade of TIMEOUT skips (observed in round 4b). A single stone block is placed as the ore's base.
         world.setBlockState(face.add(1, 0, 1), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(face.add(1, 0, -1), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(face.add(1, 1, 1), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(face.add(1, 1, -1), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        var mem = io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
+        var mem = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
         mem.markPlace("mine_face", world, face);
         mem.remember("mine_face_ores", "minecraft:iron_ore");
-        // 复刻 resume_mining 工具体
-        TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.aibot.task.MoveTask(bot, face),
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "geo_resume"));
+        // Recreates resume_mining in body
+        TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.minecraftai.task.MoveTask(bot, face),
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "geo_resume"));
         GoalExecutor.INSTANCE.submit(bot,
                 new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 2));
         final int deathBase = deathCount(bot);
@@ -2915,15 +2915,15 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 统一生存层(二期 V1):水底站桩(HoldTask 无任何私有熔断——兜底语义的最严考题),
-    // air 耗向阈值时 SurvivalGuard 该斩任务,NavSafetyNet 上浮,bot 活命。断言:任务以
-    // guard_drowning 终止+bot 存活——"任何任务都不能比统一层做得更差"。
+    // Unified survival layer (phase 2, V1): standing planted underwater (HoldTask has no private circuit breaker of its own — the strictest test of the fallback safety semantics),
+    // as air runs down toward the threshold SurvivalGuard should cut the task, NavSafetyNet surfaces the bot, and the bot survives. Assertion: the task
+    // terminates with guard_drowning + the bot survives — "no task may ever do worse than the unified layer".
     private static Result assignGeoGuard(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos(); // 统一画布已是高空,天然水体零干扰
-        // 石壁水井:内腔 1x1、深 4,bot 沉底,头顶 3 格水(上不来才算真淹)
+        BlockPos origin = bot.getBlockPos(); // the unified canvas is already high in the air, with zero interference from natural water bodies
+        // Stone-walled water well: 1x1 interior, 4 deep, the bot sinks to the bottom with 3 blocks of water overhead (only truly drowning if it can't surface)
         for (int dy = -1; dy <= 4; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
@@ -2938,24 +2938,24 @@ public final class AIBotVerifySubcommand {
         bot.teleport(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
                 java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
         bot.fallDistance = 0.0F;
-        bot.setAir(120); // 压缩等待:从 120 起跌,~1 秒到阈值(全程 300 要白等 10 秒)
-        TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.aibot.task.HoldTask(),
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "hold"));
-        // 反向场景:guard 斩任务=干净 FAILED 即 PASS(detail 自带失败原因可核对是 guard_drowning);
-        // 任务傻跑到超时(=统一层没兜住)才是 FAIL。
+        bot.setAir(120); // compresses the wait: dropping from 120, ~1 second to the threshold (a full 300 would mean wasting 10 seconds waiting)
+        TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.minecraftai.task.HoldTask(),
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "hold"));
+        // Inverted scenario: the guard cutting the task = a clean FAILED counts as a PASS (the detail carries the failure reason so it can be checked as guard_drowning);
+        // the task blindly running to a timeout (= the unified layer failed to catch it) is the actual FAIL.
         return Result.runningExpectCleanFail("geo_guard", 1200);
     }
 
-    // 资源探索(EXPLORE):近处(48 格 survey + 96 格 prospect)零树,唯一的树簇在 120 格外走廊
-    // 尽头——roam 的 28 格乒乓够不着,必须靠 EXPLORE 定向大步走出去才找得到。画布天然零树
-    //(prepareArea 统一画布),无需清场。断言:存活且原木族(白桦/橡木)计数 ≥4。
+    // Resource exploration (EXPLORE): zero trees nearby (within survey's 48 blocks + prospect's 96 blocks); the only tree cluster is at the end of a corridor 120 blocks away —
+    // roam's 28-block back-and-forth range can't reach it, so it must be found by EXPLORE striding out in a directed way. The canvas is naturally tree-free
+    // (prepareArea's unified canvas), so no clearing is needed. Assertion: the bot survives and the log-family count (birch/oak) is ≥4.
     private static Result assignExploreWood(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // 石板走廊通到 120 格外(dy-1 铺石、dy0..2 清空,与 geo_rich 走廊同构):保证树簇物理可达。
+        // A stone-slab corridor runs 120 blocks out (dy-1 laid with stone, dy0..2 cleared, structurally identical to geo_rich's corridor): guarantees the tree cluster is physically reachable.
         for (int dx = 0; dx <= 124; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 world.setBlockState(origin.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -2964,13 +2964,13 @@ public final class AIBotVerifySubcommand {
                 }
             }
         }
-        // 树簇:3 根 2 格高白桦柱(合计 6 logs,凑 4 根目标有余量;走廊已清空,后立柱不被覆盖)。
+        // Tree cluster: 3 birch pillars 2 blocks tall (6 logs total, leaving margin over the 4-log target; the corridor is already cleared so the pillars behind it aren't buried).
         for (BlockPos base : new BlockPos[]{origin.add(120, 0, 0), origin.add(121, 0, 1), origin.add(121, 0, -1)}) {
             world.setBlockState(base, Blocks.BIRCH_LOG.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(base.up(), Blocks.BIRCH_LOG.getDefaultState(), Block.NOTIFY_ALL);
         }
-        // HaveItem(OAK_LOG) 对原木族宽容:GatherQuotaTask.acceptItemsFor 对 LOGS 族返回整族
-        //(任意树种计数),白桦照样推进进度——所以采的是 BIRCH、目标写 OAK 也能完成。
+        // HaveItem(OAK_LOG) is lenient about the log family: GatherQuotaTask.acceptItemsFor returns the whole family for the LOGS tag
+        // (any wood type counts), so birch logs still advance progress — meaning the goal can complete even though BIRCH is gathered while the target says OAK.
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.OAK_LOG, 4));
         if (!started) {
             return Result.fail("explore_wood", "goal_submit_failed");
@@ -2980,8 +2980,8 @@ public final class AIBotVerifySubcommand {
                         && InventoryAction.countItem(bot, Items.BIRCH_LOG) + InventoryAction.countItem(bot, Items.OAK_LOG) >= 4);
     }
 
-    // 死亡找回(R1):带高辨识物资被一击致死,断言重生反射自动跑尸、despawn 前把铁锭捡回背包。
-    // 灯下黑校验项:掉落确实生成(本 mod respawn 不恢复背包,原版 dropInventory 掉在死亡点)。
+    // Death recovery (R1): the bot is killed in one hit while carrying easily-identifiable supplies; assert the respawn reflex auto-runs to the corpse and retrieves the iron ingot back into the inventory before it despawns.
+    // A blind-spot sanity check: the drop is genuinely spawned (this mod's respawn does not restore the inventory; vanilla dropInventory drops it at the death point).
     private static Result assignGeoRecover(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -2990,14 +2990,14 @@ public final class AIBotVerifySubcommand {
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_INGOT, 5));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        // 一击致死:走原版死亡流程(掉落生成);setHealth(0) 不触发 onDeath 掉落,必须走 damage。
+        // One-hit kill: goes through the vanilla death flow (drops are spawned); setHealth(0) doesn't trigger onDeath drops, damage must be applied instead.
         bot.damage(world, world.getDamageSources().generic(), 1000.0F);
         return Result.running("geo_recover", 2400,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.IRON_INGOT) >= 5);
     }
 
-    // 运行时配方索引端到端:OAK_TRAPDOOR 不在手写表(grep 确认),只能靠 RuntimeRecipeIndex 从
-    // RecipeManager 学来的配方(6 板)倒推合成——模组物品走同一路径,这里用 vanilla 表外物品代证。
+    // Runtime recipe index end to end: OAK_TRAPDOOR is not in the hand-written table (confirmed by grep), so it can only be crafted by backward-planning
+    // through a recipe (6 planks) learned by RuntimeRecipeIndex from RecipeManager — mod items go through the same path, and a vanilla item outside the table is used here as a stand-in proof.
     private static Result assignCraftRuntime(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -3006,33 +3006,33 @@ public final class AIBotVerifySubcommand {
         final int deathBase = deathCount(bot);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.OAK_TRAPDOOR, 1));
         if (!started) {
-            return Result.fail("craft_runtime", "goal_submit_failed(运行时索引未让规划器认识活板门)");
+            return Result.fail("craft_runtime", "goal_submit_failed(the runtime index never taught the planner about the trapdoor)");
         }
         return Result.runningGoal("craft_runtime", 2400,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.OAK_TRAPDOOR) >= 1
                         && deathCount(bot) == deathBase);
     }
 
-    // 记忆/知识子系统 API 冒烟(同步,一次判定):情景流入死亡×2 同点 → 蒸馏出危险区(单次不立牌);
-    // 资源发现×2 同点 → 去重只记一条;落盘文件存在。纯 API 行为,不跑任务。
+    // Memory/knowledge subsystem API smoke test (synchronous, judged once): feeding in 2 deaths at the same spot → distills out a danger zone (a single one doesn't flag it);
+    // 2 resource discoveries at the same spot → deduplicates to just one record; the on-disk file exists. Pure API behavior, no task is run.
     private static Result assignKnowledgeSmoke(AIPlayerEntity bot) {
-        io.github.zoyluo.aibot.memory.KnowledgeBase kb = io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE;
-        io.github.zoyluo.aibot.memory.EpisodeLog log = io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE;
-        BlockPos spot = bot.getBlockPos().add(1000, 0, 1000); // 远离实际活动区,不污染后续场景
+        io.github.zoyluo.minecraftai.memory.KnowledgeBase kb = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE;
+        io.github.zoyluo.minecraftai.memory.EpisodeLog log = io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE;
+        BlockPos spot = bot.getBlockPos().add(1000, 0, 1000); // far from the actual activity area, so it doesn't contaminate later scenarios
         int dangersBefore = kb.dangerCount(bot.getUuid());
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, spot, "smoke_test");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, spot, "smoke_test");
         if (kb.dangerCount(bot.getUuid()) != dangersBefore) {
-            return Result.fail("knowledge_smoke", "single_death_created_zone(应两次才立牌)");
+            return Result.fail("knowledge_smoke", "single_death_created_zone(should require two before flagging)");
         }
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, spot.add(3, 0, 3), "smoke_test");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, spot.add(3, 0, 3), "smoke_test");
         if (!kb.isDanger(bot.getUuid(), spot)) {
-            return Result.fail("knowledge_smoke", "two_deaths_no_zone(聚类蒸馏未生效)");
+            return Result.fail("knowledge_smoke", "two_deaths_no_zone(cluster distillation did not take effect)");
         }
         int resBefore = kb.resourceCount(bot.getUuid());
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.add(50, 0, 0), "minecraft:iron_ore");
-        log.record(bot, io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.add(52, 0, 2), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.add(50, 0, 0), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.add(52, 0, 2), "minecraft:iron_ore");
         if (kb.resourceCount(bot.getUuid()) != resBefore + 1) {
-            return Result.fail("knowledge_smoke", "resource_dedup_failed(8 格内同矿应去重)");
+            return Result.fail("knowledge_smoke", "resource_dedup_failed(the same ore within 8 blocks should dedupe)");
         }
         if (kb.nearestResource(bot.getUuid(), "minecraft:iron_ore", spot.add(40, 0, 0), 96).isEmpty()) {
             return Result.fail("knowledge_smoke", "nearest_resource_miss");
@@ -3041,15 +3041,15 @@ public final class AIBotVerifySubcommand {
                 + " resources=" + kb.resourceCount(bot.getUuid()));
     }
 
-    // L1 接线回归(不烧 key):直接喂工具调用给各高层工具 handler,断言"选对工具+传对参 → 映射到对的 Goal 且提交成功
-    // (goal_assigned)"。只测接线/参数/映射,不实际执行(每个提交完即 clear)。把这条链锁成确定性回归,防以后改坏。
-    // 不替代 llm_*(那验真 LLM 选不选得对、烧 key);本测验的是【选对之后接线对不对】。
+    // L1 wiring regression (no key burned): feeds tool calls directly to each high-level tool handler, asserting "the right tool + the right parameters → maps to the right Goal and submits successfully
+    // (goal_assigned)". Only tests wiring/parameters/mapping, not actual execution (each submission is cleared right after). Locks this chain down as a deterministic regression to prevent future breakage.
+    // Does not replace llm_* (that verifies whether the real LLM picks correctly, burning a key); this test verifies [once the right choice is made, is the wiring correct].
     private static Result assignToolDispatch(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.abort(bot);
-        io.github.zoyluo.aibot.brain.ToolRegistry reg = new io.github.zoyluo.aibot.brain.ToolRegistry();
+        io.github.zoyluo.minecraftai.brain.ToolRegistry reg = new io.github.zoyluo.minecraftai.brain.ToolRegistry();
         record Case(String tool, String args) {
         }
         java.util.List<Case> cases = java.util.List.of(
@@ -3066,12 +3066,12 @@ public final class AIBotVerifySubcommand {
         StringBuilder fails = new StringBuilder();
         int ok = 0;
         for (Case c : cases) {
-            io.github.zoyluo.aibot.brain.ToolDefinition def = reg.get(c.tool()).orElse(null);
+            io.github.zoyluo.minecraftai.brain.ToolDefinition def = reg.get(c.tool()).orElse(null);
             if (def == null) {
                 fails.append(c.tool()).append(":unregistered; ");
                 continue;
             }
-            io.github.zoyluo.aibot.brain.ToolDefinition.ToolResult r;
+            io.github.zoyluo.minecraftai.brain.ToolDefinition.ToolResult r;
             try {
                 com.google.gson.JsonObject args = com.google.gson.JsonParser.parseString(c.args()).getAsJsonObject();
                 r = def.handler().invoke(bot, args);
@@ -3086,11 +3086,11 @@ public final class AIBotVerifySubcommand {
             } else {
                 fails.append(c.tool()).append("=").append(r == null ? "null" : r.message()).append("; ");
             }
-            GoalExecutor.INSTANCE.clear(bot); // 只测接线:清掉刚提交的目标,不实际执行
+            GoalExecutor.INSTANCE.clear(bot); // wiring test only: clear the just-submitted goal without actually executing it
             TaskManager.INSTANCE.abort(bot);
         }
         return fails.length() == 0
-                ? Result.pass("tool_dispatch", ok + "/" + cases.size() + " 高层工具→Goal 接线/参数映射全通")
+                ? Result.pass("tool_dispatch", ok + "/" + cases.size() + " high-level tool→Goal wiring/parameter mapping all passed")
                 : Result.fail("tool_dispatch", ok + "/" + cases.size() + " ok; FAIL: " + fails.toString().trim());
     }
 
@@ -3102,9 +3102,9 @@ public final class AIBotVerifySubcommand {
         if (!GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.COBBLESTONE, 6))) {
             return Result.fail("msg_keep_goal", "goal_submit_failed");
         }
-        BrainCoordinator.INSTANCE.handleMessage(bot, "Tester", "你在干嘛呢");
+        BrainCoordinator.INSTANCE.handleMessage(bot, "Tester", "What are you up to?");
         if (!GoalExecutor.INSTANCE.hasActivePlan(bot)) {
-            return Result.fail("msg_keep_goal", "goal_cleared_by_message"); // P2 回归:玩家消息把进行中目标清了
+            return Result.fail("msg_keep_goal", "goal_cleared_by_message"); // P2 regression: a player message cleared the in-progress goal
         }
         return Result.runningGoal("msg_keep_goal", 2400,
                 ignored -> bot.isAlive()
@@ -3112,10 +3112,10 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 数 center 水平 ±r、竖直 [center.y, center.y+8] 范围内属于 targets 任一方块的格数(建房断言用)。
-    // 故意只数 center.y 及以上(above 口径):prepareArea 实验室平台的地板/地基(y-1 圆石、其下 16 层
-    // 实心石)与 stone_like 建材同族,数进去会把"没盖房"误判成达标;房子地板层恰好落在锚点脚位 y
-    // (=origin.y,SiteFinder 选址取可站立格),above 口径对建筑本体零损失。
+    // Counts the number of cells within center's horizontal ±r, vertical [center.y, center.y+8] range that belong to any block in targets (used for the building assertion).
+    // Deliberately counts only center.y and above (the "above" baseline): prepareArea's lab-platform floor/foundation (y-1 cobblestone, 16 layers of solid
+    // stone below) shares the same family as stone_like building material, and counting it would misjudge "no house built" as meeting the bar; the house's floor layer lands exactly at the anchor foothold y
+    // (=origin.y, since SiteFinder's site selection picks a standable cell), so the "above" baseline costs the building itself nothing.
     private static int countNearbyBlocksAbove(ServerWorld world, BlockPos center, int r, java.util.Set<Block> targets) {
         int count = 0;
         for (int dx = -r; dx <= r; dx++) {
@@ -3130,11 +3130,11 @@ public final class AIBotVerifySubcommand {
         return count;
     }
 
-    // 对称垂直扫描(center 上下 yLo..yHi):real_build 专用——蓝图 SiteFinder 自动选址,房子可能落在出生点
-    // 远处/下方(实测建在 265,63,587 而出生点在别处),以出生点为锚的 "only above" 数不到建好的房 → 建满
-    // 116/116 零死亡却误判 assertion_failed。real 地形下方是土/石不与 plank 同族,绕"真实建房点"(完工时 bot
-    // 就在房里)对称扫描只数真木板、无假平台问题(不能用于 lab 建房场景:那里平台地板与建材同族,见
-    // countNearbyBlocksAbove 注释)。仍要求 ≥80 块真木板+零死亡+存活,只是把计数锚点对准真实建房点。
+    // Symmetric vertical scan (center's yLo..yHi above and below): dedicated to real_build — the blueprint's SiteFinder auto-selects a site, and the house may land
+    // far from / below the spawn point (observed built at 265,63,587 while spawn was elsewhere); an origin-anchored "only above" scan can't find the finished house → a house finished
+    // 116/116 with zero deaths gets misjudged as assertion_failed. Under real terrain, the ground below is dirt/stone, not in the same family as planks, so scanning symmetrically around the "actual build spot"
+    // (where the bot ends up once the build is done) counts only genuine planks with no fake-platform problem (cannot be used for the lab build scenario: there, the platform floor shares a family with the building material, see
+    // the countNearbyBlocksAbove comment). Still requires ≥80 genuine planks + zero deaths + survival, just with the count anchor aimed at the actual build spot.
     private static int countNearbyBlocks(ServerWorld world, BlockPos center, int r, int yLo, int yHi,
                                          java.util.Set<Block> targets) {
         int count = 0;
@@ -3150,19 +3150,19 @@ public final class AIBotVerifySubcommand {
         return count;
     }
 
-    // 数 center 处 2×2 四格里的水源数量。
+    // Counts the number of water-source blocks among the four cells of the 2×2 area at center.
     private static int countWaterSources(ServerWorld world, BlockPos center) {
         BlockPos[] cells = {center, center.east(), center.south(), center.east().south()};
         int n = 0;
         for (BlockPos p : cells) {
-            if (io.github.zoyluo.aibot.action.FarmAction.isWaterSource(world, p)) {
+            if (io.github.zoyluo.minecraftai.action.FarmAction.isWaterSource(world, p)) {
                 n++;
             }
         }
         return n;
     }
 
-    // Phase1:装备目标。给足铁锭+木头(聚焦"做甲穿甲",省去挖 24 铁的耗时),achieve Goal.Armor 应做出 4 甲+剑并自动穿上。
+    // Phase1: gear goal. Given ample iron ingots + wood (focusing on "craft armor and equip it", skipping the time cost of mining 24 iron), achieve Goal.Armor should craft 4 armor pieces + a sword and equip them automatically.
     private static Result assignAchieveArmor(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -3176,7 +3176,7 @@ public final class AIBotVerifySubcommand {
         if (!started) {
             return Result.fail("achieve_armor", "goal_submit_failed");
         }
-        // 断言与 typed Armor predicate 同口径：头/胸/腿/脚/剑五项缺一不可。
+        // The assertion matches the typed Armor predicate's baseline: none of the five — head/chest/legs/feet/sword — may be missing.
         return Result.runningGoal("achieve_armor", 16000,
                 ignored -> bot.isAlive()
                         && hasGear(bot, Items.IRON_HELMET)
@@ -3186,7 +3186,7 @@ public final class AIBotVerifySubcommand {
                         && hasGear(bot, Items.IRON_SWORD));
     }
 
-    // Phase2:基建目标。给足木板+圆石(聚焦"做三件套+摆放"),achieve Goal.Workstation 应在周围摆出工作台/熔炉/箱子。
+    // Phase2: infrastructure goal. Given ample planks + cobblestone (focusing on "craft the three-piece set + place them"), achieve Goal.Workstation should place a crafting table/furnace/chest nearby.
     private static Result assignAchieveWorkstation(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -3214,7 +3214,7 @@ public final class AIBotVerifySubcommand {
         return false;
     }
 
-    // Phase3:囤货目标。给石镐+石头柱+目标箱，只有箱内实际收到 6 圆石才通过。
+    // Phase3: stockpiling goal. Given a stone pickaxe + a stone pillar + a target chest, passes only once the chest actually receives 6 cobblestone.
     private static Result assignStockpile(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -3223,7 +3223,7 @@ public final class AIBotVerifySubcommand {
         BlockPos origin = bot.getBlockPos();
         BlockPos chestPos = origin.offset(Direction.EAST, 2);
         world.setBlockState(chestPos, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
-        io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .markPlace("base", world, origin);
         for (int dy = 1; dy <= 12; dy++) {
             world.setBlockState(origin.down(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -3233,7 +3233,7 @@ public final class AIBotVerifySubcommand {
             return Result.fail("stockpile", "goal_submit_failed");
         }
         return Result.runningGoal("stockpile", 12000,
-                ignored -> bot.isAlive() && io.github.zoyluo.aibot.action.ContainerAction.resolve(bot, chestPos)
+                ignored -> bot.isAlive() && io.github.zoyluo.minecraftai.action.ContainerAction.resolve(bot, chestPos)
                         .map(inventory -> {
                             int count = 0;
                             for (int slot = 0; slot < inventory.size(); slot++) {
@@ -3246,7 +3246,7 @@ public final class AIBotVerifySubcommand {
                         .orElse(false));
     }
 
-    // 挖深层矿重构 P1:DescendToYTask 应连续挖竖井下到目标 Y(这是 Y=48 卡死的直接对策——先到矿层)。
+    // Deep-mining refactor P1: DescendToYTask should dig a continuous vertical shaft down to the target Y (this is the direct countermeasure for the Y=48 stall — reach the ore layer first).
     private static Result assignDescendToOre(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -3263,7 +3263,7 @@ public final class AIBotVerifySubcommand {
                 ignored -> bot.isAlive() && bot.getBlockPos().getY() <= targetY);
     }
 
-    // 挖掘式移动:bot 被水平石墙围住(头顶留空不窒息),目标在墙外。纯寻路走不通 → MoveTask 应降级挖开墙到达。
+    // Digging-based movement: the bot is enclosed by a horizontal stone wall (headroom left open so it doesn't suffocate), with the target outside the wall. Pure pathfinding can't get through → MoveTask should fall back to digging through the wall to reach it.
     private static Result assignMoveDigThrough(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
@@ -3282,21 +3282,21 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(P2):achieve_goal 钻石——给铁镐(隔离工具链),脚下石层埋钻石矿,断言挖到 diamond。
-     * 测"金/红石/钻石/绿宝石需铁镐"这条新映射 + OreDig 挖高级矿。
+     * REGRESSION(P2): achieve_goal diamond — given an iron pickaxe (isolating the tool chain), diamond ore buried in the stone layer underfoot, assert diamond is mined.
+     * Tests the new mapping "gold/redstone/diamond/emerald need an iron pickaxe" + OreDig mining higher-tier ore.
      */
-    // 夜间怪海保命(A 前沿,确定性复现 real_diamond 死亡螺旋):夜晚+低血(8)+3 僵尸围攻+给圆石无武器
-    // (逼 shelter 非 combat)。断言:bot 把自己封进墙里(头部四面非空)且存活——保命筑墙成功才达成;
-    // 中途被打死则 deathCount 变,断言永不成立→超时 FAIL。验"濒死无视冷却立即筑墙"是否真救命。
+    // Nighttime mob-sea survival (front A, a deterministic reproduction of real_diamond's death spiral): night + low health (8) + 3-zombie siege + given cobblestone with no weapon
+    // (forcing shelter, not combat). Assertion: the bot seals itself inside a wall (all four sides of its head are non-empty) and survives — only met once the life-saving wall-off succeeds;
+    // if it's killed partway through, deathCount changes and the assertion can never be satisfied → timeout FAIL. Verifies whether "ignore the cooldown and wall off immediately when near death" genuinely saves the bot's life.
     private static Result assignGeoNightSwarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        world.setTimeOfDay(13000L); // 夜:刷的僵尸不被晒死,持续围攻
-        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 32)); // 筑墙料(无武器逼 shelter)
-        bot.setHealth(8.0F); // ≤ EMERGENCY_SHELTER_HP,触发保命筑墙
+        world.setTimeOfDay(13000L); // night: spawned zombies won't burn in sunlight, so the siege is sustained
+        InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 32)); // wall-building material (no weapon forces shelter)
+        bot.setHealth(8.0F); // ≤ EMERGENCY_SHELTER_HP, triggers the life-saving wall-off
         for (int i = 0; i < 3; i++) {
             net.minecraft.entity.mob.ZombieEntity z = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
             if (z != null) {
@@ -3307,12 +3307,12 @@ public final class AIBotVerifySubcommand {
                 world.spawnEntity(z);
             }
         }
-        TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.aibot.task.HoldTask(),
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "hold"));
+        TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.minecraftai.task.HoldTask(),
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "hold"));
         final int deathBase = deathCount(bot);
         return Result.running("geo_night_swarm", 600, ignored -> {
             if (!bot.isAlive() || deathCount(bot) != deathBase) {
-                return false; // 被打死=没救成
+                return false; // killed = failed to save itself
             }
             BlockPos h = bot.getBlockPos().up();
             int walls = 0;
@@ -3321,20 +3321,20 @@ public final class AIBotVerifySubcommand {
                     walls++;
                 }
             }
-            return walls >= 4; // 头部四面封住=保命筑墙成功
+            return walls >= 4; // all four sides around the head sealed = the life-saving wall-off succeeded
         });
     }
 
-    // 崖壁采木(钻石 67% 失败的头号坎,确定性复现):    // 崖壁采木(钻石 67% 失败的头号坎,确定性复现):bot 在画布平台,树长在东侧一道**陡坑**底部
-    // (与平台间隔一道 6 格垂直落差,纯步行 GOAL_UNREACHABLE)。断言 bot 升级挖掘接近、下沉够到、
-    // 采足 3 木、零死亡。这是"任何地形都能采到木"→"任何地形都能挖钻石"的第一关。
+    // Cliffside wood-gathering (the #1 obstacle behind diamond's 67% failure rate, deterministic reproduction):    // Cliffside wood-gathering (the #1 obstacle behind diamond's 67% failure rate, deterministic reproduction): the bot is on the canvas platform, with a tree growing at the bottom of a **steep pit** to the east
+    // (separated from the platform by a 6-block vertical drop, so pure walking hits GOAL_UNREACHABLE). Assert the bot upgrades to digging-based approach, descends far enough,
+    // gathers a full 3 logs, with zero deaths. This is the first gate of "wood can be gathered on any terrain" → "diamond can be mined on any terrain".
     private static Result assignGeoCliffTree(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // 东侧 dx 4..10 挖一道陡坑:坑口 y0 起向下清 6 格成竖壁,坑底 y-7 铺石地。
+        // Dig a steep pit to the east at dx 4..10: from the rim at y0, clear 6 blocks straight down into a vertical wall, with a stone floor at the bottom, y-7.
         for (int dx = 4; dx <= 10; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = 0; dy >= -6; dy--) {
@@ -3343,12 +3343,12 @@ public final class AIBotVerifySubcommand {
                 world.setBlockState(origin.add(dx, -7, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
             }
         }
-        // 坑底种 2 棵 4 高橡木(共 8 段),bot 必须下到坑底才够得到。
+        // Plant 2 oak trees 4 blocks tall (8 log segments total) at the pit bottom; the bot must descend to the bottom to reach them.
         for (int dy = -6; dy <= -3; dy++) {
             world.setBlockState(origin.add(7, dy, -1), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
             world.setBlockState(origin.add(8, dy, 1), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
         }
-        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1)); // 给镐(挖掘接近要破石)
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1)); // give a pickaxe (digging-based approach needs to break stone)
         final int target = 3;
         final int deathBase = deathCount(bot);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.OAK_LOG, target));
@@ -3360,22 +3360,22 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 造黑曜石(新能力 L1):画布东侧下沉岩浆源池 + 钻石镐 + 4 水桶,**不预放黑曜石**(区别于
-    // achieve_obsidian 作弊预放)。断言 bot 自主"水浇岩浆现造"+挖到 ≥4 块、零死亡。通了再调 15 压测。
+    // Make obsidian (new capability L1): a sunken lava source pool to the east of the canvas + a diamond pickaxe + 4 water buckets, **with no obsidian pre-placed** (unlike
+    // achieve_obsidian's cheat of pre-placing it). Assert the bot autonomously "pours water on lava to make it on the spot" + mines ≥4 blocks, zero deaths. Once this passes, dial it up to 15 for a stress test.
     private static Result assignGeoObsidianMake(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         clearNearbyMobs(world, origin);
-        // 岩浆位于地面下一格、四周保留石质池沿，贴近自然洞底/地表熔岩池。旧画布把源放在
-        // 平地脚位，原版岩浆会无限摊开吞掉安全站位，测到的是人造灾害而非浇水开采能力。
+        // The lava sits one block below ground level with a stone rim kept around it, close to a natural cave floor/surface lava pool. The old canvas placed the source
+        // at ground-level footing, where vanilla lava would spread endlessly and swallow the safe standing spot, testing an artificial hazard rather than the pour-water-and-mine capability.
         for (int dx = 4; dx <= 5; dx++) {
             for (int dz = -1; dz <= 0; dz++) {
                 world.setBlockState(origin.add(dx, -1, dz), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
             }
         }
-        // 从高一格的石质池沿开工：strict survival 只能使用视线内信息，不允许隔着地板扫描地下流体。
+        // Starts working from the stone rim one block up: strict survival can only use information within line of sight, and isn't allowed to scan underground fluids through the floor.
         world.setBlockState(origin.add(3, 0, 0), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
         bot.teleport(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
                 java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
@@ -3384,19 +3384,19 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 16));
         final int target = 3;
         final int deathBase = deathCount(bot);
-        // 隔离验证新能力本体:直接派 CreateObsidianTask(绕开 planner 的备桶链——那条会在画布上触发
-        // wood→iron 采集、把 bot 引到岩浆池边踩进去;planner 接线另由 Goal 级场景验)。
+        // Isolates and verifies the new capability itself: dispatches CreateObsidianTask directly (bypassing the planner's bucket-provisioning chain — which would trigger
+        // wood→iron collection on the canvas and lead the bot to step right into the lava pool; the planner's wiring is verified separately by a Goal-level scenario).
         return assignTask(bot, "geo_obsidian_make",
-                new io.github.zoyluo.aibot.task.CreateObsidianTask(target), 9600,
+                new io.github.zoyluo.minecraftai.task.CreateObsidianTask(target), 9600,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.OBSIDIAN) >= target
                         && deathCount(bot) == deathBase);
     }
 
-    // 深层接近抖动·确定性复现(回放 seed777 捕获的确切失败几何,ore_dig_region 快照还原):
-    // bot 在自挖空气隧道里(B 周围有空腔),钻石脉嵌 +X/+Z 实心石 5-6 格、目标 T 在最远端——
-    // "开放隧道在侧+矿在前方实心"诱发 A* 在隧道/挖掘面间抖动(破块却不缩 dist→no_progress)。
-    // 7 层 ASCII 按 X 段(|)、Z 字符排布;#实心 .空气 O矿 T目标。bot 站 B,给铁镐+深挖套件。
-    private static final String[] REPLAY_ROWS_Y = { // index 0 = y+4 .. 6 = y-2 (相对 bot)
+    // Deep-approach jittering · deterministic reproduction (replays the exact failure geometry captured from seed777, restored from an ore_dig_region snapshot):
+    // the bot is in a self-dug air tunnel (with a cavity around B), the diamond vein is embedded 5-6 blocks into solid stone along +X/+Z, with the target T at the far end —
+    // "an open tunnel to the side + solid ore ahead" induces A* to jitter between the tunnel and the dig face (breaking blocks without ever closing the distance → no_progress).
+    // 7 layers of ASCII laid out by X segment (|) and Z character; # solid, . air, O ore, T target. The bot stands at B, given an iron pickaxe + deep-mining kit.
+    private static final String[] REPLAY_ROWS_Y = { // index 0 = y+4 .. 6 = y-2 (relative to the bot)
         "#############|#############|#############|#############|#############|#############|#############|#############|#############|#############|#############|#############", // +4
         "#############|#############|#############|#############|#############|#############|#############|#############|#############|#############|#############|#############", // +3
         "#############|#############|#############|#############|####.########|###...#######|###OO########|#############|#############|#############|#############|#############", // +2
@@ -3408,20 +3408,20 @@ public final class AIBotVerifySubcommand {
 
     private static Result assignGeoReplayOre(AIPlayerEntity bot) {
         clearInventory(bot);
-        BlockPos origin = prepareDeepArea(bot, -59); // 深层环境(Y-59 带),bot 落在 origin
+        BlockPos origin = prepareDeepArea(bot, -59); // deep environment (the Y-59 band), the bot lands at origin
         ServerWorld world = bot.getEntityWorld();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
-        // 还原网格:相对 bot(B)。dxMin=-3(seg0 是 X-3),dz 从 -3(char0)起;dy: 行0=+4 .. 行6=-2。
+        // Restores the grid relative to the bot (B). dxMin=-3 (seg0 is X-3), dz starting at -3 (char0); dy: row 0 = +4 .. row 6 = -2.
         for (int yi = 0; yi < REPLAY_ROWS_Y.length; yi++) {
             int dy = 4 - yi;
             String[] segs = REPLAY_ROWS_Y[yi].split("\\|");
             for (int xi = 0; xi < segs.length; xi++) {
-                int dx = xi - 3; // seg3 = bot 的 X
+                int dx = xi - 3; // seg3 = the bot's X
                 String seg = segs[xi];
                 for (int zi = 0; zi < seg.length(); zi++) {
-                    int dz = zi - 3; // char3 = bot 的 Z
+                    int dz = zi - 3; // char3 = the bot's Z
                     char c = seg.charAt(zi);
                     BlockPos pos = origin.add(dx, dy, dz);
                     if (c == '#') {
@@ -3445,9 +3445,9 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 钻石≥3·深层岩浆(真实应用 L1):钻石带(Y-59)本就岩浆密布。    // 钻石≥3·深层岩浆(真实应用 L1):钻石带(Y-59)本就岩浆密布。3 块钻矿各贴一格岩浆源,
-    // 逼出"深层岩浆 survival + 多目标连采"——钻石真实失败的头号嫌疑。给铁镐+深挖套件+补给(同
-    // achieve_diamond 标准:不给钻石,镐是铁的,真去挖)。断言 ≥3 钻且零死亡(深层死一次=真事故)。
+    // Diamond ≥3 · deep lava (real-play application L1): the diamond band (Y-59) is already dense with lava.    // Diamond ≥3 · deep lava (real-play application L1): the diamond band (Y-59) is already dense with lava. 3 diamond ore blocks each adjoin a lava source,
+    // forcing out "deep-lava survival + chaining multiple targets" — the prime suspect behind diamond's real-world failures. Given an iron pickaxe + deep-mining kit + supplies (the same
+    // standard as achieve_diamond: no diamond given, the pickaxe is iron, and it genuinely has to mine). Assert ≥3 diamonds and zero deaths (dying once at depth = a real incident).
     private static Result assignGeoDiamondLava(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
@@ -3455,7 +3455,7 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
-        // 3 块钻矿散布(隔开,逼真正的"采完一块奔下一块"),每块东侧贴岩浆源
+        // 3 diamond ore blocks scattered (spaced apart, forcing a genuine "finish one, move to the next"), each with a lava source on its east side
         int[][] spots = {{3, -1, 0}, {-3, -1, 2}, {0, -2, -3}};
         for (int[] s : spots) {
             BlockPos ore = origin.add(s[0], s[1], s[2]);
@@ -3472,7 +3472,7 @@ public final class AIBotVerifySubcommand {
                         && deathCount(bot) == deathBase);
     }
 
-    // 钻石(深层矿,需铁镐):传送到钻石矿层(-59)、脚下埋钻石矿,给铁镐+深矿安全装+供给 → 挖钻石矿得钻石。
+    // Diamond (deep ore, needs an iron pickaxe): teleport to the diamond-ore layer (-59), bury diamond ore underfoot, given an iron pickaxe + deep-mining safety gear + supplies → mine diamond ore to get diamond.
     private static Result assignAchieveDiamond(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
@@ -3494,8 +3494,8 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * REGRESSION(P3):harvest_crop 小麦。给木锄,周围铺一排**成熟**小麦(age=7,免去等成长的不确定),
-     * 走 GoalExecutor HarvestCrop 目标,断言收到 ≥3 个 wheat。测农业链:有锄→FARM 步→收割计数完成。
+     * REGRESSION(P3): harvest_crop wheat. Give a wooden hoe, lay out a patch of **ripe** wheat nearby (age=7, avoiding the uncertainty of waiting for it to grow),
+     * take the GoalExecutor HarvestCrop goal, and assert ≥3 wheat is received. Tests the farming chain: has a hoe → FARM step → harvest count completes.
      */
     private static Result assignFarmWheatFromScratch(AIPlayerEntity bot) {
         prepareArea(bot);
@@ -3504,13 +3504,13 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 8));
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        clearNearbyMobs(world, origin); // 清骷髅/牛:隔离收割逻辑,避免 y6 黑暗骷髅抢占中止目标(实测 aborted)
+        clearNearbyMobs(world, origin); // clear skeletons/cows: isolates the harvest logic, avoiding a y6 darkness skeleton preempting and aborting the goal (observed aborted)
         net.minecraft.block.BlockState matureWheat =
                 Blocks.WHEAT.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7);
-        // 在 bot 北侧 floor 层(y-1)铺一片 3×3 成熟小麦(farmland + 成熟作物)。
-        // 必须铺在 floor 层:原代码铺在 origin.y(bot 身体层)→ farmland 块挡在身体高度、小麦在头顶 y+1,
-        // bot 走不过去也够不到、只收到 1~2 个 → 超时(实测 done=14 deposit_skipped)。3×3 全在 radius 4 内,
-        // 远多于 target 3,容错。
+        // Lay a 3×3 patch of ripe wheat (farmland + ripe crop) on the floor layer (y-1) to the bot's north.
+        // It must be laid on the floor layer: the original code laid it at origin.y (the bot's body level) → the farmland block blocked body height with wheat overhead at y+1,
+        // so the bot couldn't walk over or reach it and only collected 1~2 → timeout (observed done=14 deposit_skipped). The 3×3 patch is entirely within radius 4,
+        // far more than the target of 3, for tolerance.
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = 1; dz <= 3; dz++) {
                 BlockPos farmland = origin.add(dx, -1, -dz);
@@ -3543,26 +3543,26 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * 寻路容错①:被困逃生。4 高环形石墙把 bot 围死(水平绕路不存在),手里只有 32 泥土——
-     * MoveTask 要么搭柱翻墙、要么徒手挖穿墙,哪条活路都行,断言最终站到墙外目标点。
-     * 这是实操"掉坑/被地形圈死"的最小复现:寻路必须把"垫方块/拆方块"当合法走法,纯平面 A* 会判死路空转。
+     * Pathfinding fault tolerance ①: trapped escape. A 4-high ring of stone walls seals the bot in completely (no horizontal detour exists), with only 32 dirt in hand —
+     * MoveTask should either pillar up and over the wall, or dig through it by hand; either escape route is fine, and the assertion checks the bot ends up standing at the target point outside the wall.
+     * This is the minimal reproduction of real play's "fell into a pit / boxed in by terrain": pathfinding must treat "placing blocks/breaking blocks" as valid movement, or a pure-plane A* will judge it a dead end and spin.
      */
     private static Result assignNavPillarOut(AIPlayerEntity bot) {
-        surfaceTeleport(bot); // 必须地表化:y6 黑暗地下摆围墙会触发 dark_trap_escape 保命传送顶掉被测逃生(实测 aborted)
+        surfaceTeleport(bot); // must be surfaced first: building a wall in the y6 underground darkness would trigger dark_trap_escape's life-saving teleport and override the escape being tested (observed aborted)
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        clearNearbyMobs(world, origin); // 无装备 bot 被圈在墙内,y6 怪海进来就是死局;清掉隔离被测的逃生逻辑
-        // 先把活动空间清大:墙顶(y+3)之上还要 2 格头部空间才翻得过去,墙外到目标也要有落脚地——
-        // dev 世界 y6 四周是原生石头,不清的话测的就不是"会不会自救"而是"被地形捉弄"。
+        clearNearbyMobs(world, origin); // an unequipped bot enclosed by the wall is a death sentence if the y6 mob sea gets in; clear it to isolate the escape logic being tested
+        // First clear the activity space wide: 2 more blocks of headroom are needed above the wall top (y+3) to climb over, and there must also be footing from the wall to the target —
+        // the dev world's y6 surroundings are native stone, and without clearing this would test "getting toyed with by terrain" rather than "can it save itself".
         for (BlockPos pos : BlockPos.iterate(origin.add(-6, 0, -6), origin.add(10, 6, 6))) {
             world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
         for (BlockPos pos : BlockPos.iterate(origin.add(-6, -1, -6), origin.add(10, -1, 6))) {
             world.setBlockState(pos, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
         }
-        // 5×5 环形石墙(高 4)围死 bot:内圈 3×3 留空气,|dx|==2 或 |dz|==2 的一圈砌 STONE。
+        // A 5×5 ring of stone (4 high) seals the bot in: the inner 3×3 is left as air, and STONE is built along the ring where |dx|==2 or |dz|==2.
         for (int dy = 0; dy <= 3; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
                 for (int dz = -2; dz <= 2; dz++) {
@@ -3572,32 +3572,32 @@ public final class AIBotVerifySubcommand {
                 }
             }
         }
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 32)); // 搭柱材料管够;不给镐——徒手挖墙也算一条活路
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 32)); // ample pillaring material; no pickaxe given — digging through the wall by hand is also a valid escape
         BlockPos goal = origin.offset(Direction.EAST, 8);
         return assignTask(bot, "nav_pillar_out", new MoveTask(bot, goal), 2400,
                 ignored -> bot.isAlive() && bot.getBlockPos().getSquaredDistance(goal) <= 9.0D);
     }
 
     /**
-     * 寻路容错②:活埋脱困。把 bot 脚位+头位直接灌成 STONE(模拟塌方/被挤进墙体),bot 正在窒息掉血。
-     * 提交一个普通 MoveTask,NavSafetyNet 的窒息脱困应抢先把身位方块拆掉、人挖出来再走。
-     * 断言完成时 bot 活着且脚位+头位都无碰撞体——必须真挖出来,不能只看任务状态糊弄
-     * (任务可能在身体仍卡在方块里磨血时就被判完成)。
+     * Pathfinding fault tolerance ②: buried-alive escape. The bot's feet and head positions are directly filled with STONE (simulating a cave-in / being forced into a wall), and the bot is suffocating and losing health.
+     * Submit an ordinary MoveTask; NavSafetyNet's suffocation-escape should preempt it, break the body-position blocks first, dig the bot out, and only then walk.
+     * The assertion on completion requires the bot to be alive with no collision shape at either the feet or head position — it must genuinely be dug out, not just have its task status glossed over
+     * (the task could otherwise be judged complete while the body is still stuck in a block grinding down health).
      */
     private static Result assignNavBuriedEscape(AIPlayerEntity bot) {
-        surfaceTeleport(bot); // 地表化,防 y6 黑暗触发 dark_trap_escape 保命传送干扰被测脱困
+        surfaceTeleport(bot); // surface first, to prevent y6 darkness from triggering dark_trap_escape's life-saving teleport and interfering with the escape being tested
         prepareArea(bot);
         clearInventory(bot);
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        clearNearbyMobs(world, origin); // 脱困后 bot 残血,y6 怪海一箭就翻车;清掉保证测的是脱困本身
+        clearNearbyMobs(world, origin); // after escaping the bot is at low health, and a single arrow from the y6 mob sea would derail it; clearing them ensures the escape itself is what's tested
         world.setBlockState(origin, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(origin.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
         return assignTask(bot, "nav_buried_escape", new MoveTask(bot, origin.north(5)), 1200,
                 ignored -> bot.isAlive() && bodyFree(bot));
     }
 
-    // bot 脚位+头位是否都无碰撞体(=没卡在方块里)。活埋脱困的核检条件:挖出来才算真脱困。
+    // Whether the bot's feet and head positions both have no collision shape (= not stuck in a block). The core check condition for buried-alive escape: only being dug out counts as a genuine escape.
     private static boolean bodyFree(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
@@ -3607,57 +3607,57 @@ public final class AIBotVerifySubcommand {
     }
 
     /**
-     * 寻路容错③(反向场景):不可达目标要"快速认输"。目标在头顶 80 格高空、背包全空(连搭柱的方块都没有),
-     * 物理上不可能到达——期望 MoveTask 在 2400t 内**干净 FAILED**(算 PASS);COMPLETED 或超时仍 RUNNING 都判 FAIL。
-     * 空转是实操里最隐蔽的故障形态:bot 看着在干活,实际原地打转浪费整局,比干脆报错难发现得多。
+     * Pathfinding fault tolerance ③ (inverted scenario): an unreachable target must trigger a "quick admission of defeat". The target is 80 blocks straight up, and the inventory is completely empty (not even a block to pillar with) —
+     * physically impossible to reach — MoveTask is expected to **cleanly FAIL** within 2400t (that counts as a PASS); COMPLETED, or still RUNNING at timeout, are both judged FAIL.
+     * Spinning without progress is the most insidious failure mode in real play: the bot looks like it's working while actually just spinning in place, wasting the whole run — much harder to spot than an outright error.
      */
     private static Result assignNavUnreachable(AIPlayerEntity bot) {
-        surfaceTeleport(bot); // 地表化,防黑暗反射干扰"干净认输"判定
+        surfaceTeleport(bot); // surface first, to prevent the darkness reflex from interfering with the "clean admission of defeat" judgment
         prepareArea(bot);
         clearInventory(bot);
-        clearNearbyMobs(bot.getEntityWorld(), bot.getBlockPos()); // 防怪把 bot 打死造成"假干净失败"(死亡中止≠主动认输)
-        // 目标放到世界高度上限之外:resolveEndpoint 会把"够不到的目标"降级到附近可站点(这是导航的
-        // 容错 feature)——up(80) 在开阔地表会被降级成脚下、1t 假完成(实测 should_have_failed)。
-        // 超出 build limit 的点周围不存在任何可站点,降级也无解,才能逼出"干净认输"路径。
+        clearNearbyMobs(bot.getEntityWorld(), bot.getBlockPos()); // prevent a mob from killing the bot and producing a "false clean failure" (death-abort ≠ voluntarily admitting defeat)
+        // Places the target beyond the world's height limit: resolveEndpoint would otherwise downgrade an "unreachable target" to a nearby standable spot (this is a navigation
+        // fault-tolerance feature) — up(80) on open surface terrain would get downgraded to right underfoot, a fake 1-tick completion (observed as should_have_failed).
+        // A point beyond the build limit has no standable spot anywhere around it, so the downgrade has no fallback either, which is what forces out the "clean admission of defeat" path.
         ServerWorld unreachableWorld = bot.getEntityWorld();
         int topLimit = unreachableWorld.getBottomY() + unreachableWorld.getHeight();
         BlockPos goal = new BlockPos(bot.getBlockPos().getX(), topLimit + 10, bot.getBlockPos().getZ());
-        // 不走 assignTask(它只会包出常规 running 语义):直接 assign + 反向 Result,语义是"应当失败"。
+        // Doesn't go through assignTask (it only ever produces ordinary running semantics): assign directly + an inverted Result, whose meaning is "should fail".
         TaskManager.INSTANCE.assign(bot, new MoveTask(bot, goal),
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "move"));
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "move"));
         return Result.runningExpectCleanFail("nav_unreachable", 2400);
     }
 
     private static Result assignTask(AIPlayerEntity bot, String feature, Task task, int timeoutTicks, Predicate<TaskStatus> assertion) {
         TaskManager.INSTANCE.assign(bot, task,
-                io.github.zoyluo.aibot.runtime.TaskOrigin.of(io.github.zoyluo.aibot.runtime.TaskOrigin.Kind.VERIFY, "scenario_task"));
+                io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "scenario_task"));
         return Result.running(feature, timeoutTicks, assertion);
     }
 
     private static void prepareArea(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
-        world.setTimeOfDay(1000L); // 设白天:套件后段入夜,夜间睡觉反射抢占场景任务(实测 farm_irrigate 偶发 aborted)
-        // 套件里多场景顺序跑,bot 位置会从上个场景带过来(打猎走远等)→ 假设"干净出生点"的场景会错位
-        //(food_suite 实测:farm_wheat 时 bot 漂到 9,-2,预置成熟麦没 survey 到、被当空地种 → FAIL)。
-        // 开头复位到固定原点保证确定性;y 取世界原点的自然地表——原来硬编码 y=6(旧测试世界出生点),
-        // 换自然世界后 y6 是黑暗地下,把所有场景传进地下:黑暗触发 DangerWatcher 困死保命传送
-        // (dark_trap_escape)中止被测任务(实测 nav_pillar_out 连续两轮 aborted 的真根因)。
+        world.setTimeOfDay(1000L); // set to daytime: later in a suite it turns to night, and the nighttime sleep reflex would preempt the scenario task (observed farm_irrigate sporadically aborted)
+        // When multiple scenarios run in sequence within a suite, the bot's position carries over from the previous scenario (wandered off hunting, etc.) → a scenario that assumes a "clean spawn point" would be thrown off
+        // (observed in food_suite: during farm_wheat the bot had drifted to 9,-2, the pre-placed ripe wheat wasn't surveyed, and was treated as empty ground to plant on → FAIL).
+        // Resetting to a fixed origin at the start guarantees determinism; y is taken from the world origin's natural surface — it used to be hardcoded to y=6 (the old test world's spawn point),
+        // but after switching to a natural world, y6 is underground in darkness, teleporting every scenario underground: the darkness triggers DangerWatcher's trapped-in-a-death-pit life-saving teleport
+        // (dark_trap_escape), aborting the task being tested (observed as the true root cause of nav_pillar_out aborting two rounds in a row).
         bot.getActionPack().stopAll();
-        // 场景空间隔离:每场景换一片新地(x 方向 64 格步进轮转)。同一锚点连跑 13 场景,前面挖矿/爆破
-        // 把地基啃成烂地,后场景的挖矿阶梯走出 fillStoneCube 范围就掉进残局 → ore_dig_no_progress
-        // 集中爆发(实测 mining 套件 6 场景 FAIL,同场景在 material_suite 单跑却全绿——互染实锤)。
+        // Scenario spatial isolation: each scenario moves to a fresh plot (stepping 64 blocks along the x axis each rotation). Running 13 scenarios back to back at the same anchor, earlier mining/blasting
+        // chews the foundation into a ruined mess, and a later scenario's mining shaft walking out of fillStoneCube's range falls into the wreckage → an ore_dig_no_progress
+        // cluster erupts (observed as 6 scenarios FAILing in the mining suite, while the same scenario run alone in material_suite is all green — proof of cross-contamination).
         scenarioSlot++;
         int baseX = (scenarioSlot % 32) * 64;
-        // V3 统一高空画布:场景一律建在 y=232 虚空层固定列——anchor 搜索/heightmap/拒残骸锚
-        // 全部退役。一期实测:天然矿截胡(geo_rich 三轮)、天然湖勾引淹死(geo_lake)、残骸列坠落
-        // (geo_resume)、虚空列(obsidian 案),这一整类"地形抽卡"假阳性吃掉 ~60% 调试时间——
-        // 画布脚下 16 格人造石、四周虚空,天然干扰物理归零。真实地形考验仍由 real_suite 专职。
-        // y=232:顶上余 88 格(232+清空 8+场景结构),不碰 320 世界上限。
+        // V3 unified high-altitude canvas: scenarios are always built in a fixed column in the void layer at y=232 — anchor search / heightmap / reject-on-wreckage-anchor
+        // are all retired. Phase-1 observations: natural ore hijacking the test (geo_rich, three rounds), a natural lake luring the bot to drown (geo_lake), falling through wreckage columns
+        // (geo_resume), void columns (the obsidian case) — this whole class of "terrain lottery" false positives was eating ~60% of debugging time —
+        // with 16 blocks of artificial stone under the canvas and void all around, natural interference drops to physically zero. Genuine terrain challenges remain the dedicated job of real_suite.
+        // y=232: 88 blocks of headroom remain above (232 + 8 cleared + scenario structure), never touching the 320 world height limit.
         BlockPos origin = new BlockPos(baseX, 232, 0);
-        // 实验室化:轮转地块的天然地形(湖/坡/洞/沙)让确定性回归变抽卡——同一场景红绿每轮洗牌
-        //(实测挖石族在湖边泡死、矿场景 need_planks/no_progress 轮换)。场景区整体替换为人造平台:
-        // floor 之下 16 格实心石(挖矿/下挖全程吃人造石,不穿进天然含水层),上方 8 格清空。
-        // 理想化场景跑"实验室",真实地形考验由 real_suite(SEED 多地形)负责——分层职责明确。
+        // Turned into a lab: a rotating plot's natural terrain (lake/slope/cave/sand) turns a deterministic regression into a lottery — the same scenario passing or failing shuffles every round
+        // (observed: the stone-mining family drowning by a lake, a mining scenario alternating between need_planks/no_progress). The scenario area is wholesale replaced with an artificial platform:
+        // 16 blocks of solid stone below the floor (mining/digging-down always eats artificial stone, never breaking into a natural aquifer), with 8 blocks cleared above.
+        // Idealized scenarios run in "the lab"; genuine terrain challenges are the responsibility of real_suite (SEED, multiple terrains) — the layering of responsibilities is explicit.
         for (BlockPos pos : BlockPos.iterate(origin.add(-16, -16, -16), origin.add(16, -1, 16))) {
             world.setBlockState(pos, Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
         }
@@ -3667,22 +3667,22 @@ public final class AIBotVerifySubcommand {
         for (BlockPos pos : BlockPos.iterate(origin.add(-4, -1, -4), origin.add(4, -1, 4))) {
             world.setBlockState(pos, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
         }
-        // 护栏:画布四周是虚空,走动型场景(打猎/觅食/探索)会把 bot 带出边沿摔落天然层
-        // (food_full 实测 y211→65,坠落中放熔炉连环 no_place)。2 格石墙圈住;走廊型场景
-        // 自己的清空 setBlockState 会在墙上拆出门洞,互不妨碍。
+        // Guard rail: the canvas is surrounded by void, and a movement-heavy scenario (hunting/foraging/exploring) could carry the bot off the edge and drop it into the natural layer
+        // (observed in food_full: y211→65, with a cascade of no_place while trying to place a furnace mid-fall). A 2-block stone wall rings it in; corridor-type scenarios'
+        // own clearing setBlockState calls carve doorways in the wall without interfering with each other.
         for (BlockPos pos : BlockPos.iterate(origin.add(-16, 0, -16), origin.add(16, 1, 16))) {
             if (Math.abs(pos.getX() - origin.getX()) == 16 || Math.abs(pos.getZ() - origin.getZ()) == 16) {
                 world.setBlockState(pos, Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
             }
         }
-        // 先铺平台后传送:反过来 bot 会在未铺区里有 1+ tick 坠落窗口(虚空列直接自由落体)。
+        // Lay the platform before teleporting: doing it the other way around would give the bot a 1+ tick falling window in the unlaid area (a straight free-fall down the void column).
         bot.teleport(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
                 java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
         bot.fallDistance = 0.0F;
-        // 记忆层隔离:情景流+语义知识跨场景互染(前面挖矿场景的资源点把 geo_rich 富区导向拐去废区,
-        // 残留情景让蒸馏去重拦截预热点)。确定性测试逐场景清;真实使用不走这里,知识照常持久。
-        io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.clearFor(bot.getUuid());
-        io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE.resetFor(bot.getUuid());
+        // Memory-layer isolation: episodic stream + semantic knowledge cross-contaminating between scenarios (an earlier mining scenario's resource point could steer geo_rich's rich-area guidance off into a dead zone,
+        // or a leftover episode could let the distillation/dedup logic intercept a pre-warmed point). Deterministic tests clear this per scenario; real usage never goes through this path, and knowledge persists as normal.
+        io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.clearFor(bot.getUuid());
+        io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.resetFor(bot.getUuid());
         bot.getActionPack().stopAll();
     }
 
@@ -3691,11 +3691,11 @@ public final class AIBotVerifySubcommand {
         bot.getInventory().markDirty();
     }
 
-    // 清掉 origin 周围 70 格的动物与敌对生物。两用:
-    // (1) 动物——食物择源测试要"无动物"环境(否则 Goal.Food 误判有猎物→去打猎、测不到种植链;
-    //     且 dev 世界被历史 food 场景 spawn 的牛污染、越积越多);
-    // (2) 敌对——dev 测试世界 y6 黑暗有骷髅,长时间种田/挖矿途中被攻击会触发生存反射抢占、中止目标,
-    //     使确定性回归测试 flaky(farm_wheat 实测因此 aborted)。清掉以隔离被测逻辑本身。
+    // Clears animals and hostile mobs within 70 blocks of origin. Dual purpose:
+    // (1) animals — the food source-selection test needs a "no animals" environment (otherwise Goal.Food misjudges prey as present → goes hunting instead, and the planting chain never gets tested;
+    //     also the dev world is contaminated by cows spawned by earlier food scenarios, accumulating more over time);
+    // (2) hostiles — the dev test world has skeletons in the y6 darkness, and being attacked during a long farming/mining run would trigger the survival reflex to preempt and abort the goal,
+    //     making the deterministic regression test flaky (observed farm_wheat aborted for this reason). Clearing them isolates the logic being tested.
     private static void clearNearbyMobs(ServerWorld world, BlockPos origin) {
         net.minecraft.util.math.Box box = new net.minecraft.util.math.Box(origin).expand(70.0D);
         world.getEntitiesByClass(net.minecraft.entity.passive.AnimalEntity.class, box, e -> true)
@@ -3704,8 +3704,8 @@ public final class AIBotVerifySubcommand {
                 .forEach(net.minecraft.entity.Entity::discard);
     }
 
-    // 在 origin 下方填一个实心石头立方(横向 ±hr,竖向 down 1..depth)。给挖矿任务确定性的实心环境:
-    // 覆盖套件里上个场景挖出的坑/残留方块,也避免"挖矿任务斜挖出 1 列石柱掉进未铺地形"。矿石随后嵌进来。
+    // Fills a solid stone cube below origin (horizontally ±hr, vertically down 1..depth). Gives mining tasks a deterministic solid environment:
+    // covers over pits/leftover blocks dug out by the previous scenario in a suite, and also avoids "the mining task's diagonal shaft walking off a single stone pillar into unlaid terrain". Ore is embedded afterward.
     private static void fillStoneCube(ServerWorld world, BlockPos origin, int hr, int depth) {
         for (int dx = -hr; dx <= hr; dx++) {
             for (int dz = -hr; dz <= hr; dz++) {
@@ -3716,8 +3716,8 @@ public final class AIBotVerifySubcommand {
         }
     }
 
-    // 给 bot 一套深矿安全装(头胸甲+铁剑+盾),满足 ensureMineOre 对 tier≥IRON 矿(金/钻石)的护甲前置,
-    // 让材料测试聚焦"挖矿→熔炼→锭"本身,不被"先凑甲"链拖入(凑甲由 achieve_armor 单独测)。
+    // Gives the bot a set of deep-mining safety gear (helmet+chestplate+iron sword+shield), satisfying ensureMineOre's armor prerequisite for tier≥IRON ore (gold/diamond),
+    // so the material tests focus on "mine → smelt → ingot" itself, without getting dragged into the "assemble armor first" chain (assembling armor is tested separately by achieve_armor).
     private static void giveDeepMineKit(AIPlayerEntity bot) {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HELMET, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE, 1));
@@ -3725,9 +3725,9 @@ public final class AIBotVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.SHIELD, 1));
     }
 
-    // 深矿测试前置:金/钻石规划器必下发"下挖到 Y=深层矿层"步(金 -16/钻 -59)。与其让 bot 从 y6 真挖 60+ 格
-    // (慢+地形/岩浆不可控),不如直接把 bot 传送到矿层、在那儿清出+围好实心石立方:descend 步因 bot 已达深度而空过,
-    // 测试聚焦"在矿层找矿→挖→(熔炼)"。再给齐口粮/火把/护甲跳过深矿的食物/照明前置。返回深层原点。
+    // Deep-mine test prerequisite: the gold/diamond planner must issue a "dig down to Y=the deep ore layer" step (gold -16 / diamond -59). Rather than have the bot genuinely dig 60+ blocks down from y6
+    // (slow, and the terrain/lava are uncontrollable), it's simpler to teleport the bot straight to the ore layer and clear + wall off a solid stone cube there: the descend step is skipped since the bot has already reached depth,
+    // and the test focuses on "find ore at the ore layer → mine → (smelt)". Also fully provisions rations/torches/armor to skip the deep-mining food/lighting prerequisites. Returns the deep-layer origin.
     private static BlockPos prepareDeepArea(AIPlayerEntity bot, int depthY) {
         ServerWorld world = bot.getEntityWorld();
         bot.getActionPack().stopAll();
@@ -3737,8 +3737,8 @@ public final class AIBotVerifySubcommand {
         for (BlockPos pos : BlockPos.iterate(origin.add(-4, 0, -4), origin.add(4, 3, 4))) {
             world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         }
-        fillStoneCube(world, origin, 6, 8); // 下方(含 floor y-1)实心石
-        for (int dy = 0; dy <= 4; dy++) {   // 四周竖墙挡深层岩浆/虚空/未知地形
+        fillStoneCube(world, origin, 6, 8); // solid stone below (including the floor at y-1)
+        for (int dy = 0; dy <= 4; dy++) {   // surrounding vertical walls block deep lava/void/unknown terrain
             for (int d = -6; d <= 6; d++) {
                 world.setBlockState(origin.add(d, dy, -6), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
                 world.setBlockState(origin.add(d, dy, 6), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -3749,7 +3749,7 @@ public final class AIBotVerifySubcommand {
         return origin;
     }
 
-    // 深矿测试的口粮/照明/工作台前置(跳过深矿规划里的打猎/烤/火把/挖煤链,聚焦挖矿本身)。
+    // Deep-mine test's rations/lighting/crafting-table prerequisites (skips the hunting/cooking/torch-making/coal-mining chain in deep-mine planning, focusing on mining itself).
     private static void giveDeepMineSupplies(AIPlayerEntity bot) {
         InventoryAction.giveItem(bot, new ItemStack(Items.COOKED_BEEF, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 16));
@@ -3770,13 +3770,13 @@ public final class AIBotVerifySubcommand {
         }
     }
 
-    // 极端环境:在 bot 周围 spawn count 只僵尸(战斗阈值 maxEnemiesToFight=2,故默认 2 只——bot 会迎战而非逃)。
-    // 测"边打边干":生存反射 pauseFor 战斗、打完 resume 原任务,任务仍要完成。
+    // Extreme environment: spawns `count` zombies around the bot (the combat threshold maxEnemiesToFight=2, hence the default of 2 — the bot will fight rather than flee).
+    // Tests "fighting while working": the survival reflex pauseFor's the combat, resumes the original task after the fight, and the task must still complete.
     private static void spawnHostiles(ServerWorld world, BlockPos origin, int count) {
         for (int i = 0; i < count; i++) {
             ZombieEntity zombie = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
             if (zombie != null) {
-                zombie.setPersistent(); // 防自然消失
+                zombie.setPersistent(); // prevent natural despawning
                 double side = (i % 2 == 0) ? 2.5D : -2.5D;
                 zombie.refreshPositionAndAngles(origin.getX() + side, origin.getY(), origin.getZ() + (i - count / 2), 0.0F, 0.0F);
                 world.spawnEntity(zombie);
@@ -3785,7 +3785,7 @@ public final class AIBotVerifySubcommand {
     }
 
     private static int countContainer(AIPlayerEntity bot, BlockPos pos, Item item) {
-        Optional<Inventory> inventory = io.github.zoyluo.aibot.action.ContainerAction.resolve(bot, pos);
+        Optional<Inventory> inventory = io.github.zoyluo.minecraftai.action.ContainerAction.resolve(bot, pos);
         if (inventory.isEmpty()) {
             return 0;
         }
@@ -3836,7 +3836,7 @@ public final class AIBotVerifySubcommand {
             String feature = queue.removeFirst();
             Result result;
             long goalResultSequenceBefore = GoalExecutor.INSTANCE.lastResult(bot.get())
-                    .map(io.github.zoyluo.aibot.goal.GoalResult::sequence)
+                    .map(io.github.zoyluo.minecraftai.goal.GoalResult::sequence)
                     .orElse(0L);
             try {
                 result = startScenario(source, bot.get(), feature);
@@ -3845,7 +3845,7 @@ public final class AIBotVerifySubcommand {
             }
             if (result.running()) {
                 active = new ActiveScenario(result, server.getTicks(), goalResultSequenceBefore);
-                String message = "[AIBot Verify] " + result.feature() + " RUNNING timeout=" + result.timeoutTicks();
+                String message = "[MinecraftAi Verify] " + result.feature() + " RUNNING timeout=" + result.timeoutTicks();
                 source.sendFeedback(() -> Text.literal(message), false);
                 return false;
             }
@@ -3864,13 +3864,13 @@ public final class AIBotVerifySubcommand {
                 active = null;
                 return;
             }
-            running.perTick().accept(bot); // 每 tick 执行场景的世界副作用(如催熟作物),先于下面的状态判定
+            running.perTick().accept(bot); // runs the scenario's per-tick world side effect (e.g. forcibly ripening crops), ahead of the state judgment below
             int elapsedTicks = server.getTicks() - active.startedTick();
             TaskStatus status = TaskManager.INSTANCE.status(bot);
-            // patient(LLM 会话式)判定:大脑驱动下 bot 会连续派发多个任务、失败换法重试、任务间空闲思考,
-            // 单任务 COMPLETED(断言尚未满足)/FAILED(大脑还会救)都不是场景终局——下面的常规终局判定
-            // 对 LLM 流程全是误判,必须在它们之前整段接管。只做两件事:每 tick 测世界状态断言
-            // (不管任务状态,含 idle/RUNNING),达成即 PASS;超时则 abort 任务并 FAIL(detail 带最后任务状态)。
+            // patient (LLM conversation-style) judging: under brain-driven control the bot dispatches multiple tasks in a row, retries with a different approach on failure, and idle-thinks between tasks,
+            // so a single task's COMPLETED (the assertion isn't satisfied yet) / FAILED (the brain will still try to recover) is never the scenario's final word — the ordinary final-judgment logic below
+            // would misjudge every LLM flow, so this must take over the whole block ahead of it. It does exactly two things: test the world-state assertion every tick
+            // (regardless of task status, including idle/RUNNING), PASS as soon as it's satisfied; abort the task and FAIL on timeout (detail carries the last task status).
             if (running.patient()) {
                 if (running.assertion().test(status)) {
                     record(Result.pass(running.feature(), "completed in " + elapsedTicks + " ticks"));
@@ -3892,7 +3892,7 @@ public final class AIBotVerifySubcommand {
                             || GoalExecutor.INSTANCE.queuedGoalCount(bot) > 0;
                     if (!moreGoalWork) {
                         var goalResult = terminal.get();
-                        if (goalResult.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        if (goalResult.status() == io.github.zoyluo.minecraftai.goal.GoalResult.Status.COMPLETED
                                 && running.assertion().test(status)) {
                             record(Result.pass(running.feature(), "goal accepted in " + elapsedTicks + " ticks evidence="
                                     + goalResult.evaluation().matched() + "/" + goalResult.evaluation().required()));
@@ -3916,7 +3916,7 @@ public final class AIBotVerifySubcommand {
             }
             if (status.state() == TaskState.COMPLETED) {
                 if (running.expectFail()) {
-                    // 反向场景:任务"完成"了反而是错——说明场景前提没立住(目标其实可达),记 FAIL 提示人工复查布景。
+                    // Inverted scenario: the task "completing" is actually wrong — it means the scenario's premise never held up (the target was in fact reachable); record a FAIL prompting manual review of the setup.
                     record(Result.fail(running.feature(), "should_have_failed: completed in " + elapsedTicks + " ticks"));
                     active = null;
                     return;
@@ -3937,7 +3937,7 @@ public final class AIBotVerifySubcommand {
                             ? "task_failed"
                             : status.failureReason();
                     if (running.assertion().test(status)) {
-                        // 反向场景的 PASS:超时前干净报了预期失败(而非空转到永远)。
+                        // An inverted scenario's PASS: it cleanly reported the expected failure before the timeout (rather than spinning forever).
                         record(Result.pass(running.feature(), "clean fail in " + elapsedTicks
                                 + " ticks: " + failureReason));
                     } else {
@@ -3957,7 +3957,7 @@ public final class AIBotVerifySubcommand {
             if (elapsedTicks >= running.timeoutTicks()) {
                 IntentController.INSTANCE.cancelAll(
                         bot, IntentController.ControlOrigin.SYSTEM, "verify_timeout");
-                // expectFail 场景超时 = 任务既没完成也没认输、一直空转——这正是反向场景要钉死的故障形态,换专属前缀好认。
+                // An expectFail scenario timing out = the task neither completed nor admitted defeat, and just kept spinning — exactly the failure mode an inverted scenario is meant to pin down; a dedicated prefix makes it easy to recognize.
                 record(Result.fail(running.feature(), (running.expectFail() ? "no_clean_fail_before_timeout" : "verify_timeout")
                         + " status=" + status.name() + " " + status.description()));
                 active = null;
@@ -3967,7 +3967,7 @@ public final class AIBotVerifySubcommand {
         private void record(Result result) {
             Result effective = finalizeMiningProvenance(result);
             results.add(effective);
-            String message = "[AIBot Verify] "
+            String message = "[MinecraftAi Verify] "
                     + effective.feature()
                     + " "
                     + (effective.pass() ? "PASS" : "FAIL")
@@ -3993,7 +3993,7 @@ public final class AIBotVerifySubcommand {
                 if (result.pass()) {
                     effective = Result.fail(result.feature(), "mining_provenance_session_missing");
                 }
-                io.github.zoyluo.aibot.log.BotLog.task(liveBot.orElse(null),
+                io.github.zoyluo.minecraftai.log.BotLog.task(liveBot.orElse(null),
                         "mining_provenance_result",
                         "schema", MiningEvidenceAudit.SCHEMA_VERSION,
                         "scenario", result.feature(),
@@ -4026,7 +4026,7 @@ public final class AIBotVerifySubcommand {
             if (result.pass() && !provenancePass) {
                 effective = Result.fail(result.feature(), "mining_provenance_postcondition_failed");
             }
-            io.github.zoyluo.aibot.log.BotLog.task(liveBot.orElse(null),
+            io.github.zoyluo.minecraftai.log.BotLog.task(liveBot.orElse(null),
                     "mining_provenance_result",
                     "schema", MiningEvidenceAudit.SCHEMA_VERSION,
                     "scenario", result.feature(),
@@ -4051,7 +4051,7 @@ public final class AIBotVerifySubcommand {
 
         private void finish() {
             long passed = results.stream().filter(Result::pass).count();
-            String summary = "[AIBot Verify] summary " + passed + "/" + results.size() + " PASS: " + summarize(results);
+            String summary = "[MinecraftAi Verify] summary " + passed + "/" + results.size() + " PASS: " + summarize(results);
             if (passed == results.size()) {
                 source.sendFeedback(() -> Text.literal(summary), false);
             } else {
@@ -4113,18 +4113,18 @@ public final class AIBotVerifySubcommand {
                     assertion, failFast, NO_TICK);
         }
 
-        // 带每-tick 副作用钩子的 runningGoal:perTick 在 pollActive 每个服务端 tick 都被调用(无论有无 task 完成),
-        // 用于测试期持续操纵世界(如强制催熟作物,绕开自然随机刻生长的漫长等待)。assertion 仍是成功判定。
+        // A runningGoal with a per-tick side-effect hook: perTick is invoked on every server tick inside pollActive (regardless of whether a task has completed),
+        // used to continuously manipulate the world during the test (e.g. forcibly ripening crops, skipping the long wait for natural random-tick growth). The assertion is still what determines success.
         private static Result runningGoal(String feature, int timeoutTicks,
                                           Consumer<AIPlayerEntity> perTick, Predicate<TaskStatus> assertion) {
             return new Result(feature, false, "running", true, timeoutTicks, true, false, false,
                     assertion, NO_FAIL_FAST, perTick);
         }
 
-        // 反向场景工厂:期望任务在 timeoutTicks 内**干净 FAILED**——这才算 PASS(detail 带失败原因+耗时);
-        // COMPLETED 或超时仍 RUNNING 都记 FAIL。用来钉死"不可达目标必须快速认输"的容错契约,
-        // 防止寻路退化成无限重试空转(实操里空转比报错伤得多:看着在干活,实际整局假死)。
-        // 通用 clean-fail 只要求任意非空转失败；需要精确原因时用 runningExpectTypedFail。
+        // Inverted-scenario factory: expects the task to **cleanly FAIL** within timeoutTicks — that's what counts as a PASS (detail carries the failure reason + elapsed time);
+        // COMPLETED, or still RUNNING at timeout, are both recorded as FAIL. Used to pin down the fault-tolerance contract that "an unreachable target must be admitted quickly",
+        // preventing pathfinding from degenerating into endless retries and spinning (in real play, spinning is far more costly than an outright error: it looks like it's working while the whole run quietly dies).
+        // The generic clean-fail only requires any non-spinning failure; use runningExpectTypedFail when the exact reason needs to be checked.
         private static Result runningExpectCleanFail(String feature, int timeoutTicks) {
             return new Result(feature, false, "running", true, timeoutTicks, false, true, false,
                     ignored -> true, NO_FAIL_FAST, NO_TICK);
@@ -4139,9 +4139,9 @@ public final class AIBotVerifySubcommand {
                     NO_TICK);
         }
 
-        // patient(耐心)工厂:R2 LLM 全链层专用。大脑会话式驱动下单任务 COMPLETED/FAILED 都不是终局
-        // (会连续派发任务/失败重试/空闲思考),pollActive 对 patient 跳过全部终局判定,
-        // 只认"世界状态断言达成"(PASS,completed in X ticks)或超时(abort+FAIL,detail 带最后任务状态)。
+        // patient factory: dedicated to the R2 LLM full-chain layer. Under brain-driven conversational control, a single task's COMPLETED/FAILED is never the final word
+        // (it will dispatch tasks in a row / retry on failure / idle-think), so pollActive skips every final-judgment check for patient,
+        // recognizing only "the world-state assertion is satisfied" (PASS, completed in X ticks) or a timeout (abort+FAIL, detail carries the last task status).
         private static Result runningPatient(String feature, int timeoutTicks, Predicate<TaskStatus> assertion) {
             return new Result(feature, false, "running", true, timeoutTicks, false, false, true,
                     assertion, NO_FAIL_FAST, NO_TICK);

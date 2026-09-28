@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerInventory;
@@ -225,25 +225,25 @@ public final class ToolSelector {
         }
         float speed = stack.getMiningSpeedMultiplier(state);
         if (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1) {
-            return 0.001F; // 即将断 → 别用,免得断在手里
+            return 0.001F; // About to break -> don't use it, to avoid it breaking mid-swing
         }
-        // 不要求工具的块(土/砂/砾/原木等):保持原行为,按最快工具选(铲/斧最快),不影响。
+        // Blocks that don't require a tool (dirt/sand/gravel/logs, etc.): keep the original behavior, pick the fastest tool (shovel/axe are fastest); unaffected.
         if (!state.isToolRequired()) {
             return speed;
         }
-        // 要求工具但本工具档不够(挖不出掉落,如石镐挖钻石矿):兜底极低分,只在没别的选时勉强用。
+        // Requires a tool but this tool's tier is insufficient (won't drop loot, e.g. a stone pickaxe on a diamond ore block): fall back to a very low score, only used reluctantly when there's no other choice.
         if (!stack.isSuitableFor(state)) {
             return Math.max(0.001F, speed * 0.01F);
         }
-        // 要求工具且能挖:耐久保全策略——同样能挖的工具里,优先用【易补充】的石器(无限鹅卵石+耐久足),
-        // 把稀缺的铁/钻镐耐久留给真正要求高档的矿(钻石/金/红石矿,石镐挖不动会落到上面的 !suitable 分支自然选铁)。
-        // 治本:旧逻辑纯按速度选→有铁就拿铁挖石头/下潜上百格→铁镐磨穿→到钻石矿 need_better_tool(real_diamond 主回归)。
-        // 分层:suitable 基础分(100)压倒一切;其上叠加 preservationRank(石>木/金>铁>钻)*10;speed 仅做同档微小 tiebreak。
+        // Requires a tool and can mine it: durability-preservation policy -- among tools that can equally mine it, prefer the readily-replenished stone tools (unlimited cobblestone + ample durability),
+        // saving the scarce iron/diamond pickaxe durability for ore that genuinely requires a high tier (diamond/gold/redstone ore; when a stone pickaxe can't mine it, it naturally falls into the !suitable branch above and picks iron).
+        // Root cause fix: the old logic picked purely by speed -> if iron is available it grabs iron to mine stone/descend hundreds of blocks -> the iron pickaxe wears through -> reaching diamond ore triggers need_better_tool (a regression for real_diamond).
+        // Layering: the suitable base score (100) dominates everything; preservationRank (stone > wood/gold > iron > diamond) * 10 is added on top; speed only serves as a small tiebreak within the same tier.
         return 100.0F + preservationRank(stack) * 10.0F + Math.min(speed, 9.9F) * 0.1F;
     }
 
-    // 耐久保全偏好:数值越大越优先使用。石器最优先(鹅卵石无限、断了 replan 秒补、耐久 131 够用);
-    // 木/金次之(易补但耐久低);铁/钻最该保留(稀缺、做一把要挖矿+熔炼),留给石镐挖不动的高档矿。
+    // Durability-preservation preference: higher value = higher priority to use. Stone tools are top priority (unlimited cobblestone, an instant replan-and-replace if broken, 131 durability is plenty);
+    // wood/gold are next (easy to replenish but low durability); iron/diamond should be preserved the most (scarce, crafting one requires mining + smelting), reserved for high-tier ore that a stone pickaxe can't mine.
     private static int preservationRank(ItemStack stack) {
         String path = Registries.ITEM.getId(stack.getItem()).getPath();
         if (path.startsWith("stone_")) {
@@ -261,6 +261,6 @@ public final class ToolSelector {
         if (path.startsWith("netherite_")) {
             return 0;
         }
-        return 3; // 非分层材质工具:居中,不特别保留也不特别消耗
+        return 3; // Non-tiered material tools: neutral middle ground, neither specially preserved nor specially consumed
     }
 }

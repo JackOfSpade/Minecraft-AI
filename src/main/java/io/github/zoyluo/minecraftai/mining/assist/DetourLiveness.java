@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Pure decisions of the coordinator's detour maintenance (mining-assist design 2.3 step 3b and 3c). The

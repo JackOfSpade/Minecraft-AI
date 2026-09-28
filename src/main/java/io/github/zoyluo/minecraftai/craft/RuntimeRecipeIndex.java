@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.recipe.CraftingRecipe;
@@ -16,11 +16,14 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 运行时配方索引(知识层数据驱动):服务端启动后从 RecipeManager 扫全部 crafting 配方建索引,
- * 让规划器能倒推**手写表没收录的物品**——包括任何模组物品(暮色森林等的配方自动可用)。
+ * Runtime recipe index (knowledge-layer, data-driven): after the server starts, scans all crafting
+ * recipes from RecipeManager to build an index, letting the planner reverse-derive **items not
+ * covered by the hand-written table** — including any mod items (e.g. Twilight Forest recipes work automatically).
  *
- * 两级策略(见 RecipeRegistry.find):手写表优先(vanilla 关键链路钉死、行为零回归),
- * 未命中才查本索引(长尾/模组兜底)。同物多配方时选"材料种类最少"的一条(确定性,利于倒推收敛)。
+ * Two-tier strategy (see RecipeRegistry.find): the hand-written table takes priority (pins down
+ * vanilla's critical path, zero behavior regression); only on a miss does it check this index
+ * (long-tail/mod fallback). When multiple recipes produce the same item, pick the one with the
+ * fewest distinct ingredient types (deterministic, helps reverse-derivation converge).
  */
 public final class RuntimeRecipeIndex {
     private static final Map<Item, RecipeRegistry.Recipe> INDEX = new HashMap<>();
@@ -39,9 +42,10 @@ public final class RuntimeRecipeIndex {
                 if (!(entry.value() instanceof CraftingRecipe crafting)) {
                     continue;
                 }
-                // 1.21.3 配方重构后 result 无公开 getter:shaped/shapeless 的 craft() 实现都是
-                // 直接 result.copy()(不看输入),用空输入调它即取得产物;特殊配方(染色等)会抛/返回空,
-                // 由外层 catch 与 isEmpty 跳过。
+                // After the 1.21.3 recipe refactor, result has no public getter: shaped/shapeless
+                // craft() implementations just do result.copy() (ignoring the input), so calling it
+                // with an empty input still yields the product; special recipes (dyeing, etc.) may
+                // throw/return empty, which is skipped by the outer catch and the isEmpty check.
                 ItemStack result = crafting.craft(
                         net.minecraft.recipe.input.CraftingRecipeInput.EMPTY, server.getRegistryManager());
                 if (result == null || result.isEmpty()) {
@@ -55,13 +59,14 @@ public final class RuntimeRecipeIndex {
                 RecipeRegistry.Recipe candidate = new RecipeRegistry.Recipe(
                         result.getItem(), result.getCount(), ingredients, needsTable);
                 RecipeRegistry.Recipe existing = fresh.get(result.getItem());
-                // 同物多配方:选材料种类最少的(倒推收敛快且确定);并列保留先到的。
+                // Same item, multiple recipes: pick the one with the fewest distinct ingredient
+                // types (faster, deterministic reverse-derivation convergence); ties keep whichever came first.
                 if (existing == null || candidate.ingredients().size() < existing.ingredients().size()) {
                     fresh.put(result.getItem(), candidate);
                 }
                 indexed++;
             } catch (RuntimeException ignored) {
-                // 单条坏配方(模组自定义序列化等)不毁整个索引
+                // A single bad recipe (mod-custom serialization, etc.) does not ruin the whole index
             }
         }
         pruneReciprocalPairs(fresh);
@@ -73,9 +78,12 @@ public final class RuntimeRecipeIndex {
         BotLog.comm(null, "runtime_recipe_index_built", "scanned", scanned, "indexed", INDEX.size());
     }
 
-    // 剔除互逆配方对(块↔物存储转换:铁块↔9铁锭/粗铁块↔9粗铁/煤块↔9煤…):它们是仓储压缩,
-    // 不是获取途径——进了索引会被"材料种类最少"选中压过正道,倒推成 A→B→A 死循环
-    //(实测 cycle:iron_block 后修了锭,又在 raw_iron_block 复发——系统性问题系统性除)。
+    // Prune reciprocal recipe pairs (block<->item storage-compaction conversions:
+    // iron_block<->9 iron_ingot / raw_iron_block<->9 raw_iron / coal_block<->9 coal...): these are
+    // storage compaction, not an acquisition path — if left in the index they would be picked over
+    // the real path by the "fewest ingredient types" rule, turning reverse-derivation into an
+    // A->B->A infinite loop (observed in practice: fixed the cycle for iron_block/ingot, then it
+    // recurred for raw_iron_block — a systemic problem needs a systemic fix).
     private static void pruneReciprocalPairs(Map<Item, RecipeRegistry.Recipe> index) {
         List<Item> toRemove = new ArrayList<>();
         for (Map.Entry<Item, RecipeRegistry.Recipe> e : index.entrySet()) {
@@ -95,7 +103,7 @@ public final class RuntimeRecipeIndex {
         toRemove.forEach(index::remove);
     }
 
-    /** 手写表未命中时的兜底查找(见 RecipeRegistry.find 两级策略)。索引未建(单测/早期)返回 empty。 */
+    /** Fallback lookup for when the hand-written table misses (see RecipeRegistry.find's two-tier strategy). Returns empty if the index hasn't been built yet (unit tests / early startup). */
     public static Optional<RecipeRegistry.Recipe> find(Item item) {
         if (!ready) {
             return Optional.empty();
@@ -112,9 +120,11 @@ public final class RuntimeRecipeIndex {
         ready = false;
     }
 
-    // Ingredient(同槽多候选) → 我们的 anyOf 结构;同种材料多槽合并 count。
-    // 1.21.3:原料统一从 getIngredientPlacement().getIngredients() 取(shaped/shapeless 同口),
-    // 取物用 getMatchingItems()(RegistryEntry 列表);hasNoPlacement=动态特殊配方,调用方跳过。
+    // Ingredient (multiple candidates per slot) -> our anyOf structure; multiple slots of the same
+    // material merge their count.
+    // 1.21.3: ingredients are uniformly read from getIngredientPlacement().getIngredients() (same
+    // API for shaped/shapeless); items are read via getMatchingItems() (a list of RegistryEntry);
+    // hasNoPlacement = a dynamic special recipe, skipped by the caller.
     private static List<RecipeRegistry.Ingredient> convertIngredients(CraftingRecipe crafting) {
         if (crafting.getIngredientPlacement().hasNoPlacement()) {
             return List.of();
@@ -140,7 +150,8 @@ public final class RuntimeRecipeIndex {
         return out;
     }
 
-    // 3x3 才需要工作台:shaped 看宽高,shapeless 看总材料格数(>4 需要)。
+    // Only a 3x3 grid needs a crafting table: for shaped recipes check width/height, for shapeless
+    // check total ingredient slot count (>4 needs one).
     private static boolean needsCraftingTable(CraftingRecipe crafting, List<RecipeRegistry.Ingredient> ingredients) {
         if (crafting instanceof ShapedRecipe shaped) {
             return shaped.getWidth() > 2 || shaped.getHeight() > 2;

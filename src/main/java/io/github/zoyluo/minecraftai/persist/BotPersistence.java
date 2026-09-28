@@ -1,15 +1,15 @@
-package io.github.zoyluo.aibot.persist;
+package io.github.zoyluo.minecraftai.persist;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import io.github.zoyluo.aibot.coordination.Job;
-import io.github.zoyluo.aibot.coordination.TaskBoard;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.coordination.Job;
+import io.github.zoyluo.minecraftai.coordination.TaskBoard;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.StackWithSlot;
@@ -54,7 +54,7 @@ public final class BotPersistence {
     private static final String LEGACY_JOBS_FILE = "jobs.json";
 
     private final ScheduledExecutorService writer = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "AIBotPersistenceWriter");
+        Thread thread = new Thread(runnable, "MinecraftAiPersistenceWriter");
         thread.setDaemon(true);
         return thread;
     });
@@ -71,7 +71,7 @@ public final class BotPersistence {
     public int saveAll(MinecraftServer server) {
         if (readOnlyDueToLoadFailure) {
             lastSaveSucceeded = false;
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null,
                     "runtime_persist_skipped_read_only", "path", runtimeFile(server));
             return 0;
         }
@@ -153,7 +153,7 @@ public final class BotPersistence {
         if (!AIPlayerManager.INSTANCE.all().isEmpty()
                 || TaskManager.INSTANCE.activeCount() > 0
                 || !TaskBoard.INSTANCE.snapshot().isEmpty()) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null,
                     "runtime_live_reload_rejected", "reason", "runtime_not_empty");
             return -1;
         }
@@ -274,7 +274,7 @@ public final class BotPersistence {
     }
 
     private LoadOutcome loadLegacy(MinecraftServer server) {
-        Path dir = aibotDir(server);
+        Path dir = minecraftaiDir(server);
         List<PersistedBot> bots = new ArrayList<>();
         List<Job> jobs = List.of();
         boolean found = false;
@@ -360,7 +360,7 @@ public final class BotPersistence {
                     "jobs", snapshot.jobs().size(), "path", file, "schema", snapshot.schemaVersion(),
                     "atomic_move", atomic);
             if (!atomic) {
-                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null,
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null,
                         "atomic_move_not_supported", "path", file);
             }
             return true;
@@ -373,7 +373,7 @@ public final class BotPersistence {
 
     private void backupLegacyFiles(MinecraftServer server) {
         for (String name : List.of(LEGACY_BOTS_FILE, LEGACY_JOBS_FILE)) {
-            Path source = aibotDir(server).resolve(name);
+            Path source = minecraftaiDir(server).resolve(name);
             Path backup = source.resolveSibling(name + ".migrated.bak");
             try {
                 if (Files.exists(source) && !Files.exists(backup)) {
@@ -391,15 +391,15 @@ public final class BotPersistence {
     }
 
     private Path runtimeFile(MinecraftServer server) {
-        return aibotDir(server).resolve(RUNTIME_FILE);
+        return minecraftaiDir(server).resolve(RUNTIME_FILE);
     }
 
-    private Path aibotDir(MinecraftServer server) {
-        return server.getSavePath(WorldSavePath.ROOT).resolve("aibot");
+    private Path minecraftaiDir(MinecraftServer server) {
+        return server.getSavePath(WorldSavePath.ROOT).resolve("minecraftai");
     }
 
     private static String buildVersion() {
-        return FabricLoader.getInstance().getModContainer("aibot")
+        return FabricLoader.getInstance().getModContainer("minecraftai")
                 .map(container -> container.getMetadata().getVersion().getFriendlyString())
                 .orElse("unknown");
     }

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Bounded FIFO of block cells the bot has just broken (mining-assist design 3.3 and 2.4, capacity

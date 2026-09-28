@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 
 public record ToolDefinition(
         String name,

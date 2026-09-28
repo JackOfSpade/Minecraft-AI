@@ -1,17 +1,17 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.action.MiningAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.StructureVerifier;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.MiningAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.StructureVerifier;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.BlockItem;
@@ -45,9 +45,9 @@ public final class BuildTask extends AbstractTask {
     private final Deque<FlattenTarget> flattenTargets = new ArrayDeque<>();
     private Phase phase = Phase.SITE;
     private FlattenTarget currentFlattenTarget;
-    private int flattenTargetTick;   // 当前整地格起算 tick:够不到的格超预算即跳过,防 nearbyStand 退化"走向自己"死循环
+    private int flattenTargetTick;   // Tick when the current flatten cell started: a cell that stays out of reach past budget is skipped, to prevent nearbyStand from degenerating into "path to self" and looping forever
     private int nextIndex;
-    private int buildTargetTick;      // 当前落块格起算 tick:放不到的块超预算即跳过(best-effort),防 moveWithinReach 永续寻路空转
+    private int buildTargetTick;      // Tick when the current build cell started: a block that can't be placed past budget is skipped (best-effort), to prevent moveWithinReach from spinning in endless pathfinding
     private int buildTargetIndex = -1;
     private int retryTicks;
     private int placeDelayTicks;
@@ -95,10 +95,10 @@ public final class BuildTask extends AbstractTask {
 
     @Override
     public boolean isWaiting() {
-        // 建造=原地立着逐格挖/放(整地+砌房),位置长时间不变是正常作业,不是卡死。
-        // 不豁免则 StuckWatcher 200t 位置不变即误杀(real_build 实测 task_stuck_aborted reason=stuck:build,
-        // 真实地形整地阶段静立施工被斩,phase=FLATTEN progress=0.1)。卡死保护交本任务 build_timeout(7200t)+
-        // moveWithinReach 自身 retryTicks(寻路真失败才计)兜底,比 StuckWatcher 更懂建造语义。
+        // Building = standing in place mining/placing block by block (flattening + laying the structure); staying in the same spot for a long time is normal work here, not being stuck.
+        // Without this exemption, StuckWatcher's 200t no-movement check would kill it by mistake (observed in real_build as task_stuck_aborted reason=stuck:build,
+        // where the bot was cut down mid-construction while standing still during the flatten phase on real terrain, phase=FLATTEN progress=0.1). Stuck protection is instead handled by this task's own build_timeout (7200t) +
+        // moveWithinReach's own retryTicks (counted only on genuine pathfinding failure), which understands build semantics better than StuckWatcher.
         return true;
     }
 
@@ -121,8 +121,8 @@ public final class BuildTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 16000) {
-            // 真实地形建房=整地(挖高填低)+逐格砌 100+ 块,且重活拖低 tps;7200t 不够(实测只到 81/116)。
-            // 放宽到 16000t 让真实地形也能整地+落成;lab 平整建房 346t 远不触此上限,零影响。
+            // Building on real terrain = flattening (digging down high spots, filling low spots) + laying 100+ blocks one by one, and this heavy work drags tps down; 7200t isn't enough (observed reaching only 81/116).
+            // Relaxed to 16000t so real terrain can also finish flattening + construction; on a flat lab site, building takes only 346t and stays far below this new cap, so there's no regression.
             fail("build_timeout");
             return;
         }
@@ -143,8 +143,8 @@ public final class BuildTask extends AbstractTask {
                 fail("missing_anchor");
                 return;
             }
-            // flatten 开启时用 lenient 选址:真实起伏地形罕有现成平地,选最平可用点交 FLATTEN 整平
-            //(治 real_build no_flat_site 5/10);flatten 关闭时严格(平整画布零回归)。
+            // When flatten is enabled, use lenient site selection: real, uneven terrain rarely has ready-made flat ground, so pick the flattest usable spot and let FLATTEN level it
+            // (fixes real_build no_flat_site 5/10); when flatten is disabled, stay strict (zero regression on a flat build canvas).
             anchor = SiteFinder.findSite(bot, blueprint.width(), blueprint.depth(), 16, flatten).orElse(null);
             if (anchor == null) {
                 fail("no_flat_site");
@@ -195,10 +195,10 @@ public final class BuildTask extends AbstractTask {
                 return;
             }
         }
-        // 整地格预算:够不到的格(nearbyStand 无落脚点会退化成 startPathTo 自己→原地死循环,real_build 实测
-        // path_idle 0 进度 build_timeout)→ 50t 内没搞定就跳过,best-effort 继续整地/盖房,站不到的格不强求。
+        // Flatten-cell budget: a cell that stays out of reach (when nearbyStand finds no stand position it degenerates into startPathTo(self), an in-place infinite loop, observed in real_build as
+        // path_idle with 0 progress leading to build_timeout) is skipped if not resolved within 50t; flattening/building then continues best-effort, without insisting on cells the bot can't stand near.
         if (elapsed - flattenTargetTick > 50) {
-            note = "flatten_skip=" + compact(currentFlattenTarget.pos()); // 够不到的整地格跳过(防原地死循环)
+            note = "flatten_skip=" + compact(currentFlattenTarget.pos()); // Skipping a flatten cell that's out of reach (prevents an in-place infinite loop)
             // Unlike a skipped build block (build_block_skipped below), a skipped flatten cell
             // leaves no BotLog trace at all otherwise: the site may still finish the structure and
             // "complete" while a hole/bump was silently left under it, and only StructureVerifier's
@@ -298,9 +298,9 @@ public final class BuildTask extends AbstractTask {
         if (block == null) {
             return;
         }
-        // 落块格预算(镜像 flatten 50t skip):同一块连续放不到时先记录并继续其余结构，避免单格把
-        // 整个执行器卡到 build_timeout。末尾按完整 blueprint（包括 AIR）核验世界状态；只有 exact
-        // match 才完成，否则以 structure_incomplete 失败，不能把 best-effort 误报为完工。
+        // Build-cell budget (mirrors flatten's 50t skip): when the same block repeatedly fails to place, record it and keep going with the rest of the structure first, so a single cell
+        // can't stall the whole executor into build_timeout. At the end, verify world state against the full blueprint (including AIR); only an exact
+        // match counts as complete, otherwise it fails with structure_incomplete -- best-effort progress must never be misreported as finished.
         if (nextIndex != buildTargetIndex) {
             buildTargetIndex = nextIndex;
             buildTargetTick = elapsed;
@@ -343,8 +343,8 @@ public final class BuildTask extends AbstractTask {
         }
         placeDelayTicks = 5;
         if (retryTicks > 12) {
-            // best-effort execution:单块反复失败时先继续其余结构；终态仍会因 skippedBlocks>0
-            // 明确失败。与上面的 80t 预算双保险，谁先到谁记录该缺口。
+            // best-effort execution: when a single block repeatedly fails, keep going with the rest of the structure first; the final state will still
+            // fail explicitly because skippedBlocks>0. This is a double safeguard alongside the 80t budget above -- whichever triggers first records the gap.
             skipBuildTarget(bot, pos, "place_failed:" + result.reason());
         }
     }
@@ -483,12 +483,12 @@ public final class BuildTask extends AbstractTask {
             ActionResult path = bot.getActionPack().startPathTo(stand);
             if (path.isFailed()) {
                 if ("pathfinding_throttled".equals(path.reason())) {
-                    // 节流退避:寻路是全局速率限。整地逐块大量请求时每 tick 重请会【永远撞限流】→
-                    // bot 到不了第一个整地目标、0 place/0 mine → build_timeout(real_build 实测 flatten 0 进度)。
-                    // 退避 4 tick 让速率窗口清掉再重试(不计失败预算);onTick 顶部 placeDelayTicks>0 正好跳过。
+                    // Throttle backoff: pathfinding is rate-limited globally. When flattening requests a new path every tick for each cell, retrying every single tick would [always hit the rate limit] ->
+                    // the bot never reaches even its first flatten target, 0 place/0 mine -> build_timeout (observed in real_build as flatten stuck at 0 progress).
+                    // Back off 4 ticks to let the rate-limit window clear before retrying (not counted against the failure budget); the placeDelayTicks>0 check at the top of onTick skips it correctly.
                     placeDelayTicks = 4;
                 } else {
-                    // 真实无路(无 stand/障碍)才累计,>12 判死。
+                    // Only count against the retry budget when there's genuinely no path (no stand position / real obstruction); declare it dead past 12.
                     retryTicks++;
                     if (retryTicks > 12) {
                         fail("path_to_" + reason + "_failed: " + path.reason());

@@ -1,18 +1,18 @@
 #!/bin/bash
-# 真实故事 harness:把"产品本身"当测试——真实种子世界 + 真实对话层(中文指令→LLM→工具→执行),
-# 只看一个指标:说一句话 → 活着办成 → 耗时合理。这是离用户愿景("对话让他帮我采矿/觅食/挖钻")
-# 最近的度量,补上实验室套件测不到的"真实地形 × 真实大脑"那一层。
+# Real-story harness: treats "the product itself" as the test -- real seeded world + real conversation layer (natural-language (Chinese) instruction -> LLM -> tools -> execution),
+# watching exactly one metric: say one sentence -> it gets done alive -> time taken is reasonable. This is the metric closest to the user's vision ("chat and have it mine/forage/dig for me"),
+# filling in the "real terrain x real brain" layer that the lab test suite can't measure.
 #
-#   ⚠ 计费:走真实 LLM API,本脚本强制 WITH_LLM=1。**会产生 API 费用**,故不默认、不进 gate。
-#   用法: AIBOT_LLM_API_KEY=xxx bash scripts/story.sh            (跑全部故事 × 多 seed)
-#          AIBOT_LLM_API_KEY=xxx bash scripts/story.sh llm_diamond  (单故事最省钱)
-#   产出: reports/story_state.tsv(每行: 故事 seed 结果 summary);可续跑(被杀重启跳过已完成)。
-#   分离跑: nohup bash scripts/story.sh >/tmp/story.out 2>&1 &     (聊天侧只读 state)
+#   WARNING billing: this hits the real LLM API; this script forces WITH_LLM=1. **This incurs API costs**, so it is not run by default and is not part of the gate.
+#   Usage: MINECRAFTAI_LLM_API_KEY=xxx bash scripts/story.sh            (runs all stories x multiple seeds)
+#          MINECRAFTAI_LLM_API_KEY=xxx bash scripts/story.sh llm_diamond  (single story, cheapest)
+#   Output: reports/story_state.tsv (each line: story seed result summary); resumable (if killed and restarted, already-completed runs are skipped).
+#   Detached run: nohup bash scripts/story.sh >/tmp/story.out 2>&1 &     (chat side only reads state)
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-if [ -z "${AIBOT_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
-  echo "[story] 需要 AIBOT_LLM_API_KEY(或旧名 DEEPSEEK_API_KEY;真实对话层走 API,会计费)。用法见脚本头。"
+if [ -z "${MINECRAFTAI_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
+  echo "[story] requires MINECRAFTAI_LLM_API_KEY (or the old name DEEPSEEK_API_KEY; the real conversation layer goes through the API and incurs cost). See the script header for usage."
   exit 2
 fi
 export WITH_LLM=1
@@ -24,9 +24,9 @@ mkdir "$LOCK" 2>/dev/null || { echo "[story] another instance running, exit."; e
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 [ -f "$STATE" ] || printf "story\tseed\tresult\tsummary\n" > "$STATE"
 
-# 故事集:覆盖愿景四面(移动/觅食/采矿/深层矿)。可传参只跑指定故事。
+# Story set: covers the four facets of the vision (movement/foraging/mining/deep-ore mining). Pass an argument to run only specific stories.
 STORIES=("${@:-llm_move llm_food llm_iron llm_diamond}")
-# 真实地形多 seed(地狱关/平原)——同一故事跨地形都得活着办成才算真鲁棒。
+# Multiple seeds on real terrain (nether-like terrain / plains) -- the same story must complete alive across terrains to count as truly robust.
 SEEDS=(20260610 3000)
 
 run_story() {
@@ -37,9 +37,9 @@ run_story() {
   echo "[story] === $story @ seed=$seed ==="
   local out summary
   out=$(SEED="$seed" bash scripts/food_test.sh "$story" 6000 2>&1)
-  summary=$(echo "$out" | grep -E "\[AIBot Verify\] summary" | tail -1)
+  summary=$(echo "$out" | grep -E "\[MinecraftAi Verify\] summary" | tail -1)
   summary="${summary#*summary }"
-  [ -z "$summary" ] && summary="NO_SUMMARY(server异常/未配key,见 /tmp/mc_test_${story}_*.log)"
+  [ -z "$summary" ] && summary="NO_SUMMARY(server error/missing key, see /tmp/mc_test_${story}_*.log)"
   local result="FAIL"; echo "$summary" | grep -q "${story}=PASS" && result="PASS"
   printf "%s\t%s\t%s\t%s\n" "$story" "$seed" "$result" "$summary" >> "$STATE"
   echo "[story] $story@$seed -> $result"

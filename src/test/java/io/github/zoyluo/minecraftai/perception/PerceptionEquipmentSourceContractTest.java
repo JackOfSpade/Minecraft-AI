@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.perception;
+package io.github.zoyluo.minecraftai.perception;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class PerceptionEquipmentSourceContractTest {
     @Test
     void selfStateCapturesBothHandsAndAllArmorSlots() throws IOException {
-        String source = Files.readString(Path.of("src/main/java/io/github/zoyluo/aibot/perception/PerceptionCollector.java"));
+        String source = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/perception/PerceptionCollector.java"));
 
         assertTrue(source.contains("equipment(bot)"));
         assertTrue(source.contains("bot.getMainHandStack()"));

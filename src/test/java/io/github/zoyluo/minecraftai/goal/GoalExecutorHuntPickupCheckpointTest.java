@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.task.HuntPickupCheckpointTest;
+import io.github.zoyluo.minecraftai.task.HuntPickupCheckpointTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -73,18 +73,18 @@ class GoalExecutorHuntPickupCheckpointTest {
 
         assertTrue(!GoalExecutor.trustedClosedHuntPickupReceipt(
                 closed, "minecraft:overworld", 3, 7,
-                1200 + io.github.zoyluo.aibot.task.HuntPickupCheckpoint
+                1200 + io.github.zoyluo.minecraftai.task.HuntPickupCheckpoint
                         .RECOVERY_LIMIT_TICKS - 1));
         assertTrue(GoalExecutor.trustedClosedHuntPickupReceipt(
                 closed, "minecraft:overworld", 3, 7,
-                1200 + io.github.zoyluo.aibot.task.HuntPickupCheckpoint
+                1200 + io.github.zoyluo.minecraftai.task.HuntPickupCheckpoint
                         .RECOVERY_LIMIT_TICKS));
     }
 
     @Test
     void openHuntDebtPrecedesCompoundObsidianTailFailure() throws Exception {
         String source = java.nio.file.Files.readString(java.nio.file.Path.of(
-                "src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
         int branch = source.indexOf(
                 "boolean compoundObsidianTailUnavailable");
         int end = source.indexOf(
@@ -94,12 +94,12 @@ class GoalExecutorHuntPickupCheckpointTest {
                 .contains("&& !unsettledHuntPickup"));
     }
 
-    private static io.github.zoyluo.aibot.task.HuntPickupCheckpoint.Metadata metadata(
+    private static io.github.zoyluo.minecraftai.task.HuntPickupCheckpoint.Metadata metadata(
             String state, String units) {
         Map<String, String> checkpoint = new LinkedHashMap<>(
                 HuntPickupCheckpointTest.openCheckpoint(units));
         checkpoint.put("transaction_state", state);
-        return io.github.zoyluo.aibot.task.HuntPickupCheckpoint
+        return io.github.zoyluo.minecraftai.task.HuntPickupCheckpoint
                 .inspect(checkpoint).orElseThrow();
     }
 

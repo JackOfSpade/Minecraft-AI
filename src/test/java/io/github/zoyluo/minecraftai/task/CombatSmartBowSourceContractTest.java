@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks the deterministic bow/melee boundary and the physical-ammunition selection invariant. */
 final class CombatSmartBowSourceContractTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
     void combatUsesBowOnlyBeyondOneAndAHalfMeleeRangesAndReturnsToBestMelee() throws IOException {

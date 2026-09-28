@@ -1,24 +1,24 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InteractAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.action.MiningAction;
-import io.github.zoyluo.aibot.action.MovementAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
-import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InteractAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.MiningAction;
+import io.github.zoyluo.minecraftai.action.MovementAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
+import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.command.argument.ItemStackArgumentType;
@@ -38,8 +38,8 @@ import java.util.stream.Collectors;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotTestSubcommand {
-    private AIBotTestSubcommand() {
+public final class MinecraftAiTestSubcommand {
+    private MinecraftAiTestSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build(CommandRegistryAccess registryAccess) {
@@ -49,46 +49,46 @@ public final class AIBotTestSubcommand {
                                 .then(argument("x", DoubleArgumentType.doubleArg())
                                         .then(argument("y", DoubleArgumentType.doubleArg())
                                                 .then(argument("z", DoubleArgumentType.doubleArg())
-                                                        .executes(AIBotTestSubcommand::look))))))
+                                                        .executes(MinecraftAiTestSubcommand::look))))))
                 .then(literal("moveto")
                         .then(botName()
                                 .then(argument("x", DoubleArgumentType.doubleArg())
                                         .then(argument("y", DoubleArgumentType.doubleArg())
                                                 .then(argument("z", DoubleArgumentType.doubleArg())
-                                                        .executes(AIBotTestSubcommand::moveTo))))))
+                                                        .executes(MinecraftAiTestSubcommand::moveTo))))))
                 .then(literal("pathfind")
                         .then(botName()
                                 .then(argument("x", IntegerArgumentType.integer())
                                         .then(argument("y", IntegerArgumentType.integer())
                                                 .then(argument("z", IntegerArgumentType.integer())
-                                                        .executes(AIBotTestSubcommand::pathFind))))))
+                                                        .executes(MinecraftAiTestSubcommand::pathFind))))))
                 .then(literal("pathto")
                         .then(botName()
                                 .then(argument("x", IntegerArgumentType.integer())
                                         .then(argument("y", IntegerArgumentType.integer())
                                                 .then(argument("z", IntegerArgumentType.integer())
-                                                        .executes(AIBotTestSubcommand::pathTo))))))
+                                                        .executes(MinecraftAiTestSubcommand::pathTo))))))
                 .then(literal("cancelpath")
                         .then(botName()
-                                .executes(AIBotTestSubcommand::stop)))
+                                .executes(MinecraftAiTestSubcommand::stop)))
                 .then(literal("stop")
                         .then(botName()
-                                .executes(AIBotTestSubcommand::stop)))
+                                .executes(MinecraftAiTestSubcommand::stop)))
                 .then(literal("jump")
                         .then(botName()
-                                .executes(AIBotTestSubcommand::jump)))
+                                .executes(MinecraftAiTestSubcommand::jump)))
                 .then(literal("mine")
                         .then(botName()
                                 .then(argument("x", IntegerArgumentType.integer())
                                         .then(argument("y", IntegerArgumentType.integer())
                                                 .then(argument("z", IntegerArgumentType.integer())
-                                                        .executes(AIBotTestSubcommand::mine))))))
+                                                        .executes(MinecraftAiTestSubcommand::mine))))))
                 .then(literal("place")
                         .then(botName()
                                 .then(argument("x", IntegerArgumentType.integer())
                                         .then(argument("y", IntegerArgumentType.integer())
                                                 .then(argument("z", IntegerArgumentType.integer())
-                                                        .executes(AIBotTestSubcommand::place))))))
+                                                        .executes(MinecraftAiTestSubcommand::place))))))
                 .then(literal("give")
                         .then(botName()
                                 .then(argument("item", ItemStackArgumentType.itemStack(registryAccess))
@@ -98,14 +98,14 @@ public final class AIBotTestSubcommand {
                 .then(literal("select")
                         .then(botName()
                                 .then(argument("slot", IntegerArgumentType.integer(0, 8))
-                                        .executes(AIBotTestSubcommand::select))))
+                                        .executes(MinecraftAiTestSubcommand::select))))
                 .then(literal("inventory")
                         .then(botName()
-                                .executes(AIBotTestSubcommand::inventory)))
+                                .executes(MinecraftAiTestSubcommand::inventory)))
                 .then(literal("attack")
                         .then(botName()
                                 .then(argument("target", EntityArgumentType.entity())
-                                        .executes(AIBotTestSubcommand::attack))));
+                                        .executes(MinecraftAiTestSubcommand::attack))));
     }
 
     private static com.mojang.brigadier.builder.RequiredArgumentBuilder<ServerCommandSource, String> botName() {
@@ -119,7 +119,7 @@ public final class AIBotTestSubcommand {
         }
         Vec3d target = getVec3d(context);
         LookAction.lookAt(bot.get(), target);
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] look started"), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] look started"), false);
         return 1;
     }
 
@@ -130,7 +130,7 @@ public final class AIBotTestSubcommand {
         }
         Vec3d target = getVec3d(context);
         MovementAction.startWalkTo(bot.get(), target);
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] moveto started"), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] moveto started"), false);
         return 1;
     }
 
@@ -141,7 +141,7 @@ public final class AIBotTestSubcommand {
         }
         AIPlayerEntity player = bot.get();
         PathfindingResult result = new AStarPathfinder(player, player.getEntityWorld(), player.getBlockPos(), getBlockPos(context)).findPath();
-        String message = "[AIBot] pathfind success=" + result.success()
+        String message = "[Minecraft-AI] pathfind success=" + result.success()
                 + ", reason=" + result.reason()
                 + ", nodes=" + result.nodesExplored()
                 + ", ms=" + result.elapsedMs()
@@ -168,7 +168,7 @@ public final class AIBotTestSubcommand {
             return 0;
         }
         MovementAction.stopAll(bot.get());
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] stopped"), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] stopped"), false);
         return 1;
     }
 
@@ -178,7 +178,7 @@ public final class AIBotTestSubcommand {
             return 0;
         }
         MovementAction.jumpOnce(bot.get());
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] jump queued"), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] jump queued"), false);
         return 1;
     }
 
@@ -190,7 +190,7 @@ public final class AIBotTestSubcommand {
         AIPlayerEntity player = bot.get();
         BlockPos pos = getBlockPos(context);
         MiningAction.startMining(player, pos, faceFromPlayer(player, pos));
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] mine started"), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] mine started"), false);
         return 1;
     }
 
@@ -233,7 +233,7 @@ public final class AIBotTestSubcommand {
                 : summary.entrySet().stream()
                 .map(entry -> entry.getKey() + " x " + entry.getValue())
                 .collect(Collectors.joining(", "));
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] inventory: " + text), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] inventory: " + text), false);
         return summary.size();
     }
 
@@ -257,10 +257,10 @@ public final class AIBotTestSubcommand {
 
     private static int sendResult(ServerCommandSource source, String action, ActionResult result) {
         if (result.isSuccess() || result.isInProgress()) {
-            source.sendFeedback(() -> Text.literal("[AIBot] " + action + " " + result.status().name().toLowerCase()), false);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + action + " " + result.status().name().toLowerCase()), false);
             return 1;
         }
-        source.sendError(Text.literal("[AIBot] " + action + " failed: " + result.reason()));
+        source.sendError(Text.literal("[Minecraft-AI] " + action + " failed: " + result.reason()));
         return 0;
     }
 

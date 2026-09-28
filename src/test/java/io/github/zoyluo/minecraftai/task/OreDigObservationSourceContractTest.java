@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Strict-survival contracts for OreDig's observe-before-read state transitions. */
 class OreDigObservationSourceContractTest {
     private static final Path ORE_DIG = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/OreDigTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/OreDigTask.java");
     private static final Path ORE_SCAN = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/mining/OreScan.java");
+            "src/main/java/io/github/zoyluo/minecraftai/mining/OreScan.java");
 
     @Test
     void oreScanTriStateNeverReadsAnUnknownFluidCandidate() throws IOException {

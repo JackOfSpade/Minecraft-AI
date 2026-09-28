@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.assist.InventoryHeadroom.Estimate;
+import io.github.zoyluo.minecraftai.mining.assist.InventoryHeadroom.Estimate;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

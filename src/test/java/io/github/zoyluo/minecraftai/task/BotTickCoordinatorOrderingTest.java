@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * never consume the tick or skip the bot's remaining checks.
  */
 class BotTickCoordinatorOrderingTest {
-    private static final Path SOURCE = Path.of("src/main/java/io/github/zoyluo/aibot/task/BotTickCoordinator.java");
+    private static final Path SOURCE = Path.of("src/main/java/io/github/zoyluo/minecraftai/task/BotTickCoordinator.java");
     private static final String CALL = "MiningAssistCoordinator.INSTANCE.tickBot(server, bot, handled);";
 
     private static String source() throws IOException {
@@ -69,7 +69,7 @@ class BotTickCoordinatorOrderingTest {
                         + "            }\n"));
         assertTrue(source.contains(
                 "            if (!handled && runBackground) {\n"
-                        + "                io.github.zoyluo.aibot.action.EquipAction.equipBestArmor(bot);"));
+                        + "                io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);"));
         assertFalse(source.contains("= MiningAssistCoordinator"), "the call's result is never used");
         assertFalse(source.contains("if (MiningAssistCoordinator"), "the call never gates the tick");
     }
@@ -77,7 +77,7 @@ class BotTickCoordinatorOrderingTest {
     @Test
     void theCoordinatorReturnsNothingSoItCannotConsumeTheTick() throws IOException {
         String coordinator = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/coordination/MiningAssistCoordinator.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/coordination/MiningAssistCoordinator.java"));
         assertTrue(coordinator.contains(
                 "public void tickBot(MinecraftServer server, AIPlayerEntity bot, boolean handled) {"));
     }

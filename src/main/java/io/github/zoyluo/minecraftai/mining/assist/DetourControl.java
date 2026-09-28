@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * The levers the coordinator gets on a live detour (mining-assist design 2.3 steps 3b and 3c), published in

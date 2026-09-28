@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
@@ -18,17 +18,21 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 /**
- * 探矿器(移植自玩家 magic mod 的 HelmetOreLocator):在大半径立方体内逐区块 / section 扫描,
- * 返回**最近的目标方块坐标**——供 OreDigTask 大范围定位矿脉、GatherQuotaTask 大范围定位树木(跨海拔/出高原)等共用。
+ * Ore prospector (ported from the player-side magic mod's HelmetOreLocator): scans chunk by chunk / section
+ * within a large-radius cube, returning **the nearest target block's coordinates** — shared by OreDigTask
+ * for long-range ore vein location, GatherQuotaTask for long-range tree location (across elevations / off
+ * the plateau), and similar callers.
  *
- * 高效关键(同参考):用 {@link ChunkSection#hasAny}(palette 级,不逐方块)快速跳过不含目标的 section,
- * 只深入含目标 section 精扫;故 64~128 格也不卡。仅扫**已加载区块**(getChunk FULL, create=false),调用方限频护 TPS。
+ * Performance key (same as the reference): uses {@link ChunkSection#hasAny} (palette-level, not per-block)
+ * to quickly skip sections that don't contain the target, and only deep-scans sections that do; so even
+ * 64~128 blocks doesn't lag. Only scans **already-loaded chunks** (getChunk FULL, create=false); callers
+ * rate-limit calls to protect TPS.
  */
 public final class OreProspector {
     private OreProspector() {
     }
 
-    /** 在 origin 周围 range 立方体的已加载区块内,找最近的目标矿;无则 null。全程主线程(只读世界数据)。 */
+    /** Within the loaded chunks of the range cube around origin, finds the nearest target ore; null if none. Runs entirely on the main thread (read-only world data). */
     public static BlockPos nearest(AIPlayerEntity bot, Set<Block> targets, int range) {
         if (targets == null || targets.isEmpty()) {
             return null;
@@ -37,16 +41,19 @@ public final class OreProspector {
     }
 
     /**
-     * 通用版:找最近的"满足 match 的方块"——找矿用 OreScan.isOre、找树用"原木集合 contains"等皆可复用。
-     * palette 级 section.hasAny(match) 快速跳过不含目标的 section,故大半径也不卡。
+     * General-purpose version: finds the nearest "block satisfying match" — reusable for ore search via
+     * OreScan.isOre, tree search via "log block set contains", and similar cases.
+     * Palette-level section.hasAny(match) quickly skips sections that don't contain the target, so even a
+     * large radius doesn't lag.
      */
     public static BlockPos nearest(AIPlayerEntity bot, int range, Predicate<BlockState> match) {
         return nearest(bot, range, match, null);
     }
 
     /**
-     * 带坐标过滤版:posFilter 拒绝的坐标跳过(如调用方拉黑"走不到的目标"防止反复 prospect 同一个死循环)。
-     * posFilter 为 null 时不过滤。
+     * Position-filtered version: positions rejected by posFilter are skipped (e.g. the caller blacklists
+     * "unreachable targets" to prevent repeatedly prospecting into the same infinite loop).
+     * No filtering is applied when posFilter is null.
      */
     public static BlockPos nearest(AIPlayerEntity bot, int range,
                                    Predicate<BlockState> match, Predicate<BlockPos> posFilter) {
@@ -68,7 +75,7 @@ public final class OreProspector {
                                               Predicate<BlockPos> posFilter) {
         ServerWorld world = bot.getEntityWorld();
         int range = Math.min(Math.max(1, requestedRange),
-                Math.max(1, io.github.zoyluo.aibot.AIBotConfig.get().perception().radius()));
+                Math.max(1, io.github.zoyluo.minecraftai.MinecraftAiConfig.get().perception().radius()));
         int minY = Math.max(world.getBottomY(), origin.getY() - range);
         int maxY = Math.min(world.getBottomY() + world.getHeight() - 1, origin.getY() + range);
         BlockPos best = null;
@@ -117,7 +124,7 @@ public final class OreProspector {
             for (int cz = minCZ; cz <= maxCZ; cz++) {
                 Chunk raw = world.getChunkManager().getChunk(cx, cz, ChunkStatus.FULL, false);
                 if (!(raw instanceof WorldChunk chunk)) {
-                    continue; // 未加载,跳过
+                    continue; // not loaded, skip
                 }
                 int startX = chunk.getPos().getStartX();
                 int startZ = chunk.getPos().getStartZ();
@@ -133,7 +140,7 @@ public final class OreProspector {
                     ChunkSection section = chunk.getSection(idx);
                     if (section == null || section.isEmpty()
                             || !section.hasAny(match)) {
-                        continue; // palette 级快速跳过不含目标的 section
+                        continue; // palette-level fast skip of sections that don't contain the target
                     }
                     int startY = ChunkSectionPos.getBlockCoord(sy);
                     int lMinY = Math.max(minY, startY) - startY;
@@ -154,7 +161,7 @@ public final class OreProspector {
                                 }
                                 BlockPos pos = new BlockPos(x, y, z);
                                 if (posFilter != null && !posFilter.test(pos)) {
-                                    continue; // 被调用方拉黑(如反复走不到的目标)
+                                    continue; // blacklisted by the caller (e.g. a repeatedly unreachable target)
                                 }
                                 bestDist = d;
                                 best = pos;

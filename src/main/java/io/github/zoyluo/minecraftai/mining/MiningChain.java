@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -10,19 +10,23 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * S2:矿物开采链单一数据源——把"矿方块 → 掉落物 → 冶炼产物 → 所需镐级 → 推荐 Y 层"收敛到一处。
+ * S2: Single source of truth for the ore mining chain -- collapses "ore block → drop → smelted
+ * product → required pickaxe tier → recommended Y level" into one place.
  *
- * 此前这些知识散落:`GoalPlanner.bestMiningY` 硬编码 Y 层、`ToolTier` 算镐级、`HarvestCore.expectedDropsFor` 算掉落、
- * 冶炼映射在各处。本表作为单一可信源:Y 层与冶炼产物由本类提供;镐级委托既有 {@link ToolTier}(保持镐级单一源)。
+ * Previously this knowledge was scattered: `GoalPlanner.bestMiningY` hardcoded the Y level,
+ * `ToolTier` computed pickaxe tier, `HarvestCore.expectedDropsFor` computed drops, and smelting
+ * mappings were spread everywhere. This table serves as the single source of truth: Y level and
+ * smelted product are provided by this class; pickaxe tier is delegated to the existing
+ * {@link ToolTier} (keeping pickaxe tier as a single source).
  */
 public final class MiningChain {
 
-    /** 矿物链条目。bestY=推荐下挖到的目标 Y(峰值层)。 */
+    /** An ore chain entry. bestY = the recommended target Y level to mine down to (the peak layer). */
     public record OreEntry(Block ore, Block deepslate, Item rawDrop, Item smelted, int pickaxeTier, int bestY) {
     }
 
     private static final OreEntry[] TABLE = {
-            //          普通矿石                深板岩变体                         掉落物            冶炼产物          镐级           峰值Y
+            //          Ore                     Deepslate variant                  Drop              Smelted product   Pickaxe tier   Peak Y
             // strict_survival can only inspect exposed blocks. Starting a branch mine at the
             // surface therefore turns coal acquisition into an endless dirt/forest spiral. Enter
             // the same rock layer used by OreScan before opening the observable search tunnel.
@@ -50,14 +54,15 @@ public final class MiningChain {
     private MiningChain() {
     }
 
-    /** 该矿方块(普通或深板岩)的链条目;非已知矿返回 null。 */
+    /** The chain entry for this ore block (regular or deepslate); returns null for an unknown ore. */
     public static OreEntry forOre(Block block) {
         return BY_BLOCK.get(block);
     }
 
     /**
-     * 这组矿物推荐下挖到的目标 Y:取所有已知矿中**最深**(最小 bestY)的层,以便一次下到位。
-     * 无已知矿 → 返回 Integer.MAX_VALUE(调用方据此不强制下挖)。
+     * The recommended target Y level to mine down to for this set of ores: takes the **deepest**
+     * layer (the smallest bestY) among all known ores, so a single descent reaches all of them.
+     * No known ore -> returns Integer.MAX_VALUE (the caller then does not force a descent).
      */
     public static int bestY(Set<Block> ores) {
         int best = Integer.MAX_VALUE;
@@ -70,12 +75,12 @@ public final class MiningChain {
         return best;
     }
 
-    /** 这组矿物所需镐级(委托既有 ToolTier,保持镐级单一源)。 */
+    /** The pickaxe tier required for this set of ores (delegated to the existing ToolTier, keeping pickaxe tier as a single source). */
     public static int pickaxeTier(Set<Block> ores) {
         return ToolTier.requiredPickaxeTier(ores);
     }
 
-    /** 生矿掉落物 → 冶炼产物(raw_iron→iron_ingot 等);非矿物掉落返回 null,由 SmeltChain(S5)兜其它冶炼。 */
+    /** Raw ore drop → smelted product (raw_iron→iron_ingot, etc.); returns null for non-ore drops, which SmeltChain (S5) handles for other smelting. */
     public static Item smeltOutput(Item rawDrop) {
         return SMELT_BY_RAW.get(rawDrop);
     }

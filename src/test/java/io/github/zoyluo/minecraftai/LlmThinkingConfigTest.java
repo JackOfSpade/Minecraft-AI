@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot;
+package io.github.zoyluo.minecraftai;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,15 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * unset or silently-changed effort level directly costs the bot tool calls.
  */
 class LlmThinkingConfigTest {
-    private static AIBotConfig.Llm llmConfig(Boolean thinking, String effort) {
-        return new AIBotConfig.Llm(
+    private static MinecraftAiConfig.Llm llmConfig(Boolean thinking, String effort) {
+        return new MinecraftAiConfig.Llm(
                 "key", "https://api.deepseek.com", "deepseek-v4-flash",
                 8192, 0.3D, 60, 3, 500, thinking, effort);
     }
 
     @Test
     void defaultsTargetTheCurrentFlashModelWithABudgetReasoningCanNotStarve() {
-        AIBotConfig.Llm defaults = AIBotConfig.defaults().llm();
+        MinecraftAiConfig.Llm defaults = MinecraftAiConfig.defaults().llm();
 
         assertEquals("deepseek-v4-flash", defaults.model());
         assertEquals(Boolean.TRUE, defaults.thinking());
@@ -30,8 +30,8 @@ class LlmThinkingConfigTest {
 
     @Test
     void unsetOverridesFallBackToDefaultsInsteadOfSilentlyDisablingThinking() {
-        AIBotConfig.Llm defaults = llmConfig(Boolean.TRUE, "low");
-        AIBotConfig.Llm merged = llmConfig(null, null).withDefaults(defaults);
+        MinecraftAiConfig.Llm defaults = llmConfig(Boolean.TRUE, "low");
+        MinecraftAiConfig.Llm merged = llmConfig(null, null).withDefaults(defaults);
 
         assertEquals(Boolean.TRUE, merged.thinking());
         assertEquals("low", merged.reasoningEffort());
@@ -39,7 +39,7 @@ class LlmThinkingConfigTest {
 
     @Test
     void explicitOverridesWin() {
-        AIBotConfig.Llm defaults = llmConfig(Boolean.TRUE, "low");
+        MinecraftAiConfig.Llm defaults = llmConfig(Boolean.TRUE, "low");
 
         assertEquals(Boolean.FALSE, llmConfig(Boolean.FALSE, "low")
                 .withDefaults(defaults).thinking());
@@ -49,7 +49,7 @@ class LlmThinkingConfigTest {
 
     @Test
     void unsupportedEffortFallsBackRatherThanReachingTheApi() {
-        AIBotConfig.Llm defaults = llmConfig(Boolean.TRUE, "low");
+        MinecraftAiConfig.Llm defaults = llmConfig(Boolean.TRUE, "low");
 
         assertEquals("low", llmConfig(Boolean.TRUE, "medium")
                 .withDefaults(defaults).reasoningEffort());
@@ -59,8 +59,8 @@ class LlmThinkingConfigTest {
 
     @Test
     void apiKeyRebindKeepsTheThinkingContract() {
-        AIBotConfig config = AIBotConfig.defaults();
-        AIBotConfig.Llm rebound = config.llm().withDefaults(config.llm());
+        MinecraftAiConfig config = MinecraftAiConfig.defaults();
+        MinecraftAiConfig.Llm rebound = config.llm().withDefaults(config.llm());
 
         assertNotNull(rebound.reasoningEffort());
         assertEquals(config.llm().thinking(), rebound.thinking());

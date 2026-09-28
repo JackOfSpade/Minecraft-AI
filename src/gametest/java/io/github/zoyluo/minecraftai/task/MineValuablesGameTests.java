@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * it never expands scope onto a valuable that only becomes visible after the snapshot was taken.
  */
 public final class MineValuablesGameTests {
-    @GameTest(environment = "aibot-gametest:mine_valuables_game_tests_visible_ore_is_mined_and_collected", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:mine_valuables_game_tests_visible_ore_is_mined_and_collected", maxTicks = 400)
     public void visibleOreIsMinedAndCollected(TestContext context) {
         Fixture fixture = fixture(context, "MineValuablesBasicGT");
         AIPlayerEntity bot = fixture.bot();
@@ -46,7 +46,7 @@ public final class MineValuablesGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mine_valuables_game_tests_frozen_snapshot_never_mines_newly_revealed_ore", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mine_valuables_game_tests_frozen_snapshot_never_mines_newly_revealed_ore", maxTicks = 500)
     public void frozenSnapshotNeverMinesNewlyRevealedOre(TestContext context) {
         Fixture fixture = fixture(context, "MineValuablesFrozenGT");
         AIPlayerEntity bot = fixture.bot();

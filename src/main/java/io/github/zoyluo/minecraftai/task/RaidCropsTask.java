@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.FarmAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.OreProspector;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.OreProspector;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.CropBlock;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -17,10 +17,10 @@ import net.minecraft.util.math.Direction;
 import java.util.Set;
 
 /**
- * 村庄/野外收菜:大范围扫描成熟作物(小麦/胡萝卜/马铃薯/甜菜)、走过去收割、捡起掉落,直到收够 target 个产出。
- * 与 FarmTask(在固定区域开垦自种)不同——本任务找的是世界里已存在的成熟作物田(典型即村庄农田),不种、只收。
- * best-effort:扫不到成熟作物/久无进展时,收到 ≥1 个就完成、一个没收到才失败。
- * 行为边界:只破坏并捡取作物本身(村民会自行补种,vanilla 不掉声望);不开村民箱子、不抢交易物——那不属于"收菜"。
+ * Village/wild crop raiding: wide-area scan for mature crops (wheat/carrots/potatoes/beetroot), walk over, harvest, pick up drops, until the target output count is reached.
+ * Unlike FarmTask (which tills and plants within a fixed area), this task looks for mature crop fields that already exist in the world (typically village farmland) — it doesn't plant, only harvests.
+ * best-effort: when no mature crops can be found / there's been no progress for a long time, completes once ≥1 has been harvested, and only fails if none were harvested.
+ * Behavior boundary: only breaks and picks up the crops themselves (villagers replant on their own; vanilla doesn't dock reputation); doesn't open villager chests or grab trade goods — that's outside the scope of "crop raiding".
  */
 public final class RaidCropsTask extends AbstractTask {
     private enum Phase {SCAN, GOTO, HARVEST, DONE}
@@ -28,7 +28,7 @@ public final class RaidCropsTask extends AbstractTask {
     private static final int SCAN_RADIUS = 64;
     private static final double REACH = 4.5D;
     private static final int NO_PROGRESS_LIMIT = 1200;
-    // 收割掉落要捡的产出(各作物的产出 + 副产种子)。
+    // Output items to pick up from harvest drops (each crop's yield + bonus seeds).
     private static final Set<Item> CROP_DROPS = Set.of(
             Items.WHEAT, Items.WHEAT_SEEDS, Items.CARROT, Items.POTATO, Items.BEETROOT, Items.BEETROOT_SEEDS);
 
@@ -98,7 +98,7 @@ public final class RaidCropsTask extends AbstractTask {
 
     private void goTo(AIPlayerEntity bot) {
         if (current == null || !isMatureCrop(bot.getEntityWorld().getBlockState(current))) {
-            phase = Phase.SCAN; // 目标没了(被吃/已收),重扫
+            phase = Phase.SCAN; // Target is gone (eaten/harvested), rescan
             return;
         }
         if (bot.getEyePos().distanceTo(current.toCenterPos()) <= REACH) {
@@ -125,7 +125,7 @@ public final class RaidCropsTask extends AbstractTask {
     private void harvest(AIPlayerEntity bot) {
         ActionResult result = FarmAction.harvest(bot, current);
         if (result.isSuccess()) {
-            // 收割掉落是地上 ItemEntity,reach 距离收割够不到自动拾取 → 强制捡(同 FarmTask/dig_down 修法)。
+            // Harvest drops are ItemEntities on the ground; auto-pickup can't reach them from harvest range → force pickup (same fix as FarmTask/dig_down).
             HarvestCore.forcePickupNearbyAnyOf(bot, CROP_DROPS, 5.0D, 4.0D);
             harvested++;
             lastProgressTick = elapsed;

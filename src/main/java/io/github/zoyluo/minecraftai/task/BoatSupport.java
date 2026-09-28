@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.craft.CraftingHelper;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.craft.CraftingHelper;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
@@ -61,7 +61,7 @@ final class BoatSupport {
         }
         ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
         if (!offHandStack.isEmpty() && isBoatItem(offHandStack.getItem())) {
-            return io.github.zoyluo.aibot.action.InventoryAction.promoteOffhandSlot(bot, 0);
+            return io.github.zoyluo.minecraftai.action.InventoryAction.promoteOffhandSlot(bot, 0);
         }
         return OptionalInt.empty();
     }

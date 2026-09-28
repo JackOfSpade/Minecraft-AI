@@ -1,67 +1,67 @@
-# AIBot 产品与工程路线图
+# Minecraft-AI Product & Engineering Roadmap
 
-状态：Active  
-基线日期：2026-07-10  
-适用分支：`main`
+Status: Active  
+Baseline date: 2026-07-10  
+Applicable branch: `main`
 
-本文件是当前项目路线图的唯一入口。仓库中的本地 `PLAN*.md`、`WORKORDERS*.md` 和 `reports/*roadmap*.md` 作为历史研发记录保留，不再代表当前优先级。
+This file is the single entry point for the current project roadmap. The local `PLAN*.md`, `WORKORDERS*.md`, and `reports/*roadmap*.md` files in the repo are kept as historical development records and no longer represent current priorities.
 
 ## 1. North Star
 
-目标不是让 Bob 展示“会做很多动作”，而是让它成为一个可信赖的 Minecraft 协作伙伴：
+The goal is not for Bob to demonstrate “doing a lot of actions,” but for it to become a trustworthy Minecraft collaboration partner:
 
-当前唯一最高产品优先级是 **Mining First**：先把“从零获得 64 颗钻石、从零获得 32 块黑曜石”做成可复现、可暂停恢复、可审计的 strict-survival 能力，再扩展其它高级能力。小规模演示、controlled fixture 或单 seed PASS 不算完成。
+The current single highest product priority is **Mining First**: first turn “obtaining 64 diamonds from zero, obtaining 32 obsidian blocks from zero” into a reproducible, pausable/resumable, auditable strict-survival capability, then expand to other advanced capabilities. A small-scale demo, a controlled fixture, or a single-seed PASS does not count as complete.
 
-> “Bob，跟我来，在这里用附近材料盖一个小屋；天黑先回家，完工后把剩余材料放进这个箱子。”
+> “Bob, come with me, build a small house here using nearby materials; go home first when it gets dark, and once finished put the leftover materials into this chest.”
 
-完成这句话意味着 Bob 必须能够：
+Fulfilling this sentence means Bob must be able to:
 
-- 理解 owner、地点、区域、目标容器和先后顺序；
-- 给出可执行计划并持续汇报真实进度；
-- 在危险、卡死和资源不足时安全恢复；
-- 正确处理暂停、继续、取消、替换和追加任务；
-- 重启后恢复未完成 Mission；
-- 只在最终状态经过验证后报告完成。
+- Understand the owner, location, area, target container, and sequencing;
+- Produce an executable plan and continuously report real progress;
+- Recover safely from danger, getting stuck, and insufficient resources;
+- Correctly handle pausing, resuming, canceling, replacing, and appending tasks;
+- Resume an unfinished Mission after a restart;
+- Only report completion after the final state has been verified.
 
-## 2. 产品定位
+## 2. Product Positioning
 
-AIBot 保持现有核心路线：
+Minecraft-AI keeps its existing core approach:
 
 ```text
-LLM 理解意图
-    → Mission / Goal 描述目标状态
-    → 确定性 Planner 展开依赖
-    → Task 状态机执行
-    → Action / Pathfinding 操作 Minecraft
+LLM interprets intent
+    → Mission / Goal describes the target state
+    → Deterministic Planner expands dependencies
+    → Task state machine executes
+    → Action / Pathfinding operates Minecraft
 ```
 
-不让 LLM 进入逐 tick 执行回路，也不以继续增加 Tool 数量作为主要进度指标。
+The LLM is not allowed into the per-tick execution loop, nor is continuing to add more Tools used as the primary progress metric.
 
-需要明确区分两种运行策略：
+Two operating strategies must be clearly distinguished:
 
-| 模式 | 定位 | 隐藏资源扫描 | 紧急传送 | 适用场景 |
+| Mode | Positioning | Hidden Resource Scan | Emergency Teleport | Applicable Scenario |
 |---|---|---:|---:|---|
-| `strict_survival` | 公平生存伙伴 | 禁止 | 禁止 | 生存服、展示真实游戏能力 |
-| `operator` | 服务器管理型助手 | 可配置 | 可配置 | 私服、调试、自动化运维 |
+| `strict_survival` | Fair survival partner | Forbidden | Forbidden | Survival servers, demonstrating real gameplay ability |
+| `operator` | Server-administration assistant | Configurable | Configurable | Private servers, debugging, automated ops |
 
-已实现：新安装默认 `strict_survival`，`operator` 必须显式开启；旧配置缺少模式字段时按 `operator` 兼容启动并输出一次迁移警告，无效配置和无效环境变量 fail closed 到 strict。四项增强能力均为独立开关，实际 profile/effective capabilities 同时显示在 UI、snapshot 与结构化日志中。
+Implemented: new installs default to `strict_survival`; `operator` must be explicitly enabled. When an old config is missing the mode field, it starts in `operator` mode for backward compatibility and emits a one-time migration warning; invalid config and invalid environment variables fail closed to strict. The four enhanced capabilities are each independent toggles, and the actual profile/effective capabilities are shown simultaneously in the UI, the snapshot, and the structured logs.
 
-`strict_survival` 不启用隐藏资源扫描、紧急传送、强制拾取或手动传送；资源目标在读取前先经过可见性边界。导航碰撞预检、首次 spawn/存档 restore、相邻 fake-player 下台阶、自己的 fishing hook 和显式 owner 跟随位置属于已记录的运行适配器，不可被资源搜索复用。
+`strict_survival` does not enable hidden resource scanning, emergency teleportation, forced pickup, or manual teleportation; resource targets pass through a visibility boundary before being read. Navigation collision pre-checks, the first spawn/save restore, stepping down next to a fake-player, the bot's own fishing hook, and an explicit owner-follow position are documented runtime adapters and must not be reused by resource search.
 
-## 3. 当前基线
+## 3. Current Baseline
 
-- Minecraft `1.21.11`、Fabric Loader `0.19.5`、Java `21`。
-- 9 类 Goal、63 个 Tool 注册点、34 个具体 Task 状态机。
-- testmod 的 `/aibot verify all` 含 100 个确定性场景；另有 5 个 opt-in 长跑/诊断场景和 4 个真实 LLM 场景；生产 jar 不包含 test/verify 命令。
-- `clean test` 通过，当前有 86 个 JUnit 类、415 个测试；`runGameTest` 共 588 个场景，其中 42 个因 1.21.5 GameTest 框架重写引入的既有并发/时序问题而失败（已单独跟踪排查，并非近期功能改动引入的回归，其余场景通过）。`capability_profile + runtime_control_suite` 在 strict/operator 下均为 7/7；两 JVM restart-resume 精确恢复非默认 checkpoint，并以原 Mission `COMPLETED 4/4` 结束。
-- PR CI、nightly 双 profile/seed matrix 与手动计费 LLM workflow 已建立；evidence bundle 会绑定 revision/config/actual seed/runtime/profile 并做不可变封存。
-- 现有多 seed 报告能用于诊断，但缺少 commit SHA、配置摘要和 actual seed 回读，不能作为 HEAD 的发布证明。
+- Minecraft `1.21.11`, Fabric Loader `0.19.5`, Java `21`.
+- 9 Goal categories, 63 Tool registration points, 34 concrete Task state machines.
+- The testmod's `/minecraftai verify all` includes 100 deterministic scenarios; there are also 5 opt-in long-run/diagnostic scenarios and 4 real-LLM scenarios; the production jar does not include test/verify commands.
+- `clean test` passes, with 86 JUnit classes and 415 tests currently; `runGameTest` has 588 scenarios in total, of which 42 fail due to pre-existing concurrency/timing issues introduced by the 1.21.5 GameTest framework rewrite (tracked separately, not a regression from recent feature changes; the rest pass). `capability_profile + runtime_control_suite` is 7/7 under both strict and operator; the two-JVM restart-resume precisely restores a non-default checkpoint and ends with the original Mission at `COMPLETED 4/4`.
+- PR CI, the nightly dual profile/seed matrix, and the manual billed-LLM workflow are established; the evidence bundle binds revision/config/actual seed/runtime/profile and is sealed immutably.
+- Existing multi-seed reports are usable for diagnostics but lack a commit SHA, config summary, and actual-seed readback, so they cannot serve as release proof for HEAD.
 
-当前能力快照与证据边界见 [能力矩阵](docs/CAPABILITY_MATRIX.md)。
+See the [Capability Matrix](docs/CAPABILITY_MATRIX.md) for the current capability snapshot and evidence boundaries.
 
-## 4. 目标运行时
+## 4. Target Runtime
 
-不重写现有 Task；先用一个统一 Runtime 包住现有模块，再逐步迁移状态所有权：
+Do not rewrite existing Tasks; first wrap the existing modules with a unified Runtime, then gradually migrate state ownership:
 
 ```text
 BotRuntime
@@ -75,7 +75,7 @@ BotRuntime
 └── EventLog(correlation id)
 ```
 
-每项可对外承诺的能力最终收敛为 `Capability`：
+Every externally-promisable capability ultimately converges into a `Capability`:
 
 ```text
 Capability
@@ -87,113 +87,113 @@ Capability
 └── Verification scenarios
 ```
 
-## 5. 阶段计划
+## 5. Phased Plan
 
-### P0：稳定运行时（实现完成）
+### P0: Stable Runtime (Implementation Complete)
 
-目标：让 Bob 可安全控制、可真正取消、可恢复且不会假完成。
+Goal: make Bob safely controllable, genuinely cancelable, resumable, and free of false completions.
 
-- 过期 LLM 响应隔离；
-- 原子暂停、恢复、取消与替换；
-- owner/OP 权限统一；
-- Goal 最终后置条件；
-- Mission 与队列持久化、统一 cleanup；
-- 运行模式契约；
-- 快速单元测试、CI 和可审计报告。
+- Isolation of stale LLM responses;
+- Atomic pause, resume, cancel, and replace;
+- Unified owner/OP permissions;
+- Final postconditions for Goals;
+- Mission and queue persistence, unified cleanup;
+- Operating-mode contract;
+- Fast unit tests, CI, and auditable reports.
 
-实现状态：上述范围已完成并通过自动化验证。当前本地工作树尚未提交，所以本轮真实 evidence 按规则标为 `UNVERIFIED`；这不是测试失败，而是防止 dirty source 被误 pin 为发布基线。clean commit/CI 才能产生可 pin 的 `VERIFIED` bundle。
+Implementation status: the scope above is complete and has passed automated verification. The local working tree is not yet committed, so this round's real evidence is marked `UNVERIFIED` per the rules; this is not a test failure, but a safeguard against a dirty source tree being mistakenly pinned as the release baseline. Only a clean commit/CI can produce a pinnable `VERIFIED` bundle.
 
-详细拆分见 [P0 Runtime Hardening](docs/P0_RUNTIME_HARDENING.md)。P0 全绿前，不新增高层 Goal 和大规模技能。
+See [P0 Runtime Hardening](docs/P0_RUNTIME_HARDENING.md) for the detailed breakdown. No new high-level Goals or large-scale skills will be added until P0 is fully green.
 
-### M1：Mining First（当前进行中，最高优先级）
+### M1: Mining First (In Progress, Highest Priority)
 
-目标不是“能挖到一颗”，而是以下两个最终能力：
+The goal is not “being able to mine one,” but the following two final capabilities:
 
-1. `diamond_stack_64`：自然地形、空背包、零目标给予，最终持有至少 64 颗钻石；
-2. `obsidian_half_stack_32`：自然地形、空背包，自主取得钻石镐与水桶，按原版流体规则最终持有至少 32 块黑曜石。
+1. `diamond_stack_64`: on natural terrain, with an empty inventory and zero target-item handouts, end up holding at least 64 diamonds;
+2. `obsidian_half_stack_32`: on natural terrain, with an empty inventory, autonomously obtain a diamond pickaxe and a water bucket, and end up holding at least 32 obsidian blocks following vanilla fluid rules.
 
-交付顺序固定为：
+The delivery order is fixed as:
 
-1. `controlled`：秒级验证 63/64、31/32 数量边界、持久化和 typed postcondition，不宣称游戏能力；
-2. `prepared`：只预给非目标装备，在确定性资源场验证长配额执行、工具更换、拾取和恢复；
-3. `from_zero`：最终用户口径，20 个公开 seed 成功率 `>=90%`、零死亡；
-4. 在钻石 `1/32/63`、黑曜石 `1/16/31` 进度点验证 pause/cancel/restart-resume 为 `100%`。
+1. `controlled`: second-level verification of the 63/64 and 31/32 quantity boundaries, persistence, and typed postconditions; makes no claim about in-game gameplay ability;
+2. `prepared`: only pre-grants non-target equipment, and verifies long-quota execution, tool replacement, pickup, and recovery in a deterministic resource field;
+3. `from_zero`: the end-user-facing bar — a `>=90%` success rate across 20 public seeds, with zero deaths;
+4. Verify pause/cancel/restart-resume at the diamond `1/32/63` and obsidian `1/16/31` progress checkpoints, at `100%`.
 
-普通 PR 只运行秒级 controlled contract；prepared/from-zero 必须通过显式本地或 nightly 入口运行。未达到多 seed 门槛前，两个 capability 在能力矩阵中保持 `MISSING`，不得用 controlled/prepared PASS 冒充完成。
+Ordinary PRs only run the second-level controlled contract; prepared/from-zero must be run through an explicit local or nightly entry point. Until the multi-seed bar is met, both capabilities remain `MISSING` in the capability matrix, and a controlled/prepared PASS must not be used to pass off completion.
 
-完整契约与 seed、timeout、evidence 规则见 [Mining First 能力契约](docs/MINING_ACCEPTANCE.md)。在 M1 达标前，v0.1 其它黄金链只做回归维护，不抢占主动开发优先级。
+See the [Mining First Capability Contract](docs/MINING_ACCEPTANCE.md) for the full contract and the seed, timeout, and evidence rules. Until M1 meets its bar, v0.1's other golden chains receive only regression maintenance and do not take priority over active development.
 
-### v0.1：可信赖的核心助手
+### v0.1: Trustworthy Core Assistant
 
-只打磨四条黄金链：
+Only polish four golden chains:
 
-1. 跟随 owner、待命、守卫指定位置；
-2. 从空背包获得稳定食物；
-3. 从零获得铁锭/铁装备，并送入指定容器；
-4. 在 owner 标记区域建造小屋，夜间暂停，白天继续并验收。
+1. Follow the owner, stand by, and guard a designated location;
+2. Obtain a stable food supply starting from an empty inventory;
+3. Obtain iron ingots/iron equipment from zero and deliver them into a designated container;
+4. Build a small house in an area marked by the owner, pause at night, resume during the day, and pass acceptance.
 
-发布门槛：
+Release bar:
 
-- 每条真实链路至少 20 个固定公开 seed，成功率 `>= 90%`；
-- `cancel/replace/restart-resume` 确定性场景 `100%` 通过；
-- 不允许无限循环、过期工具调用或 `PARTIAL` 冒充 `COMPLETED`；
-- 4 个 Bot 在约定参考机器上运行时 TPS `>= 19`；
-- 无未授权玩家控制、取物或传送路径。
+- Each real chain uses at least 20 fixed public seeds, with a success rate `>= 90%`;
+- `cancel/replace/restart-resume` deterministic scenarios pass at `100%`;
+- No infinite loops, no stale tool calls, and no `PARTIAL` passed off as `COMPLETED`;
+- TPS `>= 19` when running 4 Bots on the agreed reference machine;
+- No unauthorized player-control, item-taking, or teleport paths.
 
-### v0.2：协作体验
+### v0.2: Collaborative Experience
 
-- owner 坐标、视线目标、选中区域和目标容器进入上下文；
-- 支持“这里”“这个箱子”“跟我来”“剩余材料给我”等协作语义；
-- 工作区域、禁止破坏区域、材料预算和施工预览；
-- 面板展示 Mission 队列、真实进度、失败原因、资源预算和 token 成本；
-- 中文/英文 paraphrase 意图路由回归达到 `>= 95%`。
+- Owner coordinates, line-of-sight target, selected area, and target container enter the context;
+- Support collaborative phrasing such as “here,” “this chest,” “come with me,” and “give me the leftover materials”;
+- Work area, no-break area, material budget, and construction preview;
+- Panel displays the Mission queue, real progress, failure reasons, resource budget, and token cost;
+- Chinese/English paraphrase intent-routing regression reaches `>= 95%`.
 
-### v0.3：高级生存与生产
+### v0.3: Advanced Survival & Production
 
-- 在 Mining First 已认证基础上扩展附魔、Fortune、百量级其它矿物与自动归仓；
-- 建筑修复、续建和多蓝图组合；
-- 可持续农场、基地补给与长期经营；
-- Nether 与跨维度 WorldModel；
-- 单 Bot Runtime 稳定后再启用多 Bot 分工、租约和资源预留。
+- Building on the certified Mining First foundation, expand to enchanting, Fortune, hundreds-scale quantities of other ores, and automatic storage;
+- Building repair, continuation, and multi-blueprint composition;
+- Sustainable farms, base resupply, and long-term operation;
+- Nether and cross-dimensional WorldModel;
+- Enable multi-Bot division of labor, leasing, and resource reservation only after the single-Bot Runtime is stable.
 
-## 6. 工程门禁
+## 6. Engineering Gates
 
-每次合入必须满足对应层级：
+Every merge must satisfy the corresponding tier:
 
-| 层级 | PR 门禁 | Nightly 门禁 |
+| Tier | PR Gate | Nightly Gate |
 |---|---|---|
-| Pure logic | JUnit、静态不变量检查、编译 | 同一套 JUnit/静态检查/生产构建 |
-| Runtime contract | 取消、权限、生命周期、两 JVM restart probe、strict evidence | 7 项 profile/runtime 合约 × 2 profile × 2 seed |
-| Mining First contract | 64/32 数量边界、MissionSpec 往返；不执行长跑 | prepared/from-zero 由显式 strict-only 长跑入口执行并封存 evidence |
-| Game behavior | 3 个 Fabric GameTest | 现阶段同为 3 个 GameTest；v0.1 再分片扩到 98 场景、多 seed |
-| LLM routing | 不注入 API key | 独立手动 workflow，明确确认计费后运行 4 个真实 LLM story |
+| Pure logic | JUnit, static invariant checks, compile | the same set of JUnit/static checks/production build |
+| Runtime contract | Cancel, permissions, lifecycle, two-JVM restart probe, strict evidence | 7 profile/runtime contracts × 2 profiles × 2 seeds |
+| Mining First contract | 64/32 quantity boundaries, MissionSpec round-trip; no long-run execution | prepared/from-zero are run through an explicit strict-only long-run entry point and evidence is sealed |
+| Game behavior | 3 Fabric GameTests | Currently also 3 GameTests; expands to 98 sharded scenarios with multiple seeds in v0.1 |
+| LLM routing | No API key injected | A separate manual workflow runs 4 real-LLM stories after explicit billing confirmation |
 
-上表描述当前已落地门禁；98 场景多 seed 分片与 Nightly restart/resume matrix 是 v0.1 后续项，不作为当前 P0 完成度的既成事实。
+The table above describes gates already in place; the 98-scenario multi-seed sharding and the nightly restart/resume matrix are follow-on items for v0.1, and are not to be treated as an accomplished fact of current P0 completion.
 
-每次能力报告必须记录：
+Every capability report must record:
 
-- `commit_sha`、`build_version`、时间；
-- Java/Minecraft/Fabric 版本；
-- 配置 hash、requested seed、actual seed；
-- 场景、耗时、结果、失败阶段；
-- 是否允许 privileged perception/teleport。
+- `commit_sha`, `build_version`, timestamp;
+- Java/Minecraft/Fabric versions;
+- Config hash, requested seed, actual seed;
+- Scenario, duration, result, failure stage;
+- Whether privileged perception/teleport is allowed.
 
-## 7. 非目标
+## 7. Non-Goals
 
-在 v0.1 前明确不做：
+Explicitly out of scope before v0.1:
 
-- 端到端 LLM 或 RL 取代确定性 Task；
-- 为展示数量继续增加 Tool；
-- 未定义 lease/recovery 的多 Bot 编排；
-- 同时支持多个 Minecraft 大版本；
-- 没有验收标准的 UI 大改版。
+- End-to-end LLM or RL replacing deterministic Tasks;
+- Continuing to add Tools just to show a bigger count;
+- Multi-Bot orchestration without defined lease/recovery;
+- Supporting multiple major Minecraft versions simultaneously;
+- Major UI overhauls without acceptance criteria.
 
-## 8. 下一检查点
+## 8. Next Checkpoint
 
-P0 已完成，下一步进入 Mining First 可靠性收敛：
+P0 is complete; the next step moves into Mining First reliability convergence:
 
-1. clean CI 先生成 `mining_contract_suite` 的 strict `VERIFIED` evidence，但明确只代表数量契约；
-2. 依次跑 `diamond_stack_64_prepared`、`diamond_stack_64_from_zero`，按失败 stage 收敛到 20 seed `>=90%`；
-3. 让黑曜石链使用真实放水/原版流体反应，再依次跑 prepared/from-zero，禁止直接写目标方块的伪能力；
-4. 两条最终场景达到门槛后，才用 `pin_baseline.sh` 显式更新 `reports/baselines/index.tsv`；
-5. 以 strict 为发布口径，operator 仅作为单独可审计的服务器自动化模式持续回归。
+1. Clean CI first generates strict `VERIFIED` evidence for the `mining_contract_suite`, understanding that it represents only the quantity contract;
+2. Run `diamond_stack_64_prepared` and then `diamond_stack_64_from_zero` in sequence, converging on `>=90%` across 20 seeds by iterating on the failure stage;
+3. Have the obsidian chain use real water placement/vanilla fluid reactions, then run prepared/from-zero in sequence; a pseudo-capability that directly writes the target block is forbidden;
+4. Only after both final scenarios meet the bar, explicitly update `reports/baselines/index.tsv` using `pin_baseline.sh`;
+5. Use strict as the release bar, with operator continuing regression only as a separately auditable server-automation mode.

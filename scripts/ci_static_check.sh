@@ -12,10 +12,10 @@ fail() {
 required_files=(
   build.gradle
   src/gametest/resources/fabric.mod.json
-  src/gametest/java/io/github/zoyluo/aibot/gametest/AIBotDeterministicGameTests.java
-  src/gametest/java/io/github/zoyluo/aibot/gametest/AIBotHarnessTestMod.java
-  src/gametest/java/io/github/zoyluo/aibot/command/AIBotTestSubcommand.java
-  src/gametest/java/io/github/zoyluo/aibot/command/AIBotVerifySubcommand.java
+  src/gametest/java/io/github/zoyluo/minecraftai/gametest/MinecraftAiDeterministicGameTests.java
+  src/gametest/java/io/github/zoyluo/minecraftai/gametest/MinecraftAiHarnessTestMod.java
+  src/gametest/java/io/github/zoyluo/minecraftai/command/MinecraftAiTestSubcommand.java
+  src/gametest/java/io/github/zoyluo/minecraftai/command/MinecraftAiVerifySubcommand.java
   scripts/evidence_run.sh
   scripts/evidence_batch.sh
   scripts/evidence_validate.sh
@@ -43,7 +43,7 @@ done
 
 grep -Fq 'createSourceSet.set(true)' build.gradle \
   || fail 'Fabric GameTest must use an isolated source set'
-grep -Fq "modId.set('aibot-gametest')" build.gradle \
+grep -Fq "modId.set('minecraftai-gametest')" build.gradle \
   || fail 'Fabric GameTest mod id is not pinned'
 grep -Fq 'runHarnessServer' build.gradle \
   || fail 'command-driven harness run is missing'
@@ -52,14 +52,14 @@ grep -Fq 'must be a project-relative child directory' build.gradle \
 grep -Fq '"fabric-gametest"' src/gametest/resources/fabric.mod.json \
   || fail 'GameTest entrypoint is not registered'
 
-[[ ! -e src/main/java/io/github/zoyluo/aibot/command/AIBotTestSubcommand.java ]] \
+[[ ! -e src/main/java/io/github/zoyluo/minecraftai/command/MinecraftAiTestSubcommand.java ]] \
   || fail 'test command leaked into production source set'
-[[ ! -e src/main/java/io/github/zoyluo/aibot/command/AIBotVerifySubcommand.java ]] \
+[[ ! -e src/main/java/io/github/zoyluo/minecraftai/command/MinecraftAiVerifySubcommand.java ]] \
   || fail 'verify command leaked into production source set'
 if find src/main -type f \( -iname '*gametest*.java' -o -path '*/gametest/*' \) -print -quit | grep -q .; then
   fail 'GameTest implementation leaked into the production source set'
 fi
-if grep -RqE 'AIBot(Test|Verify)Subcommand|literal\("(test|verify)"\)' src/main/java; then
+if grep -RqE 'MinecraftAi(Test|Verify)Subcommand|literal\("(test|verify)"\)' src/main/java; then
   fail 'production command graph references a verification harness'
 fi
 
@@ -85,7 +85,7 @@ done
 
 for workflow in .github/workflows/ci.yml .github/workflows/nightly.yml; do
   grep -Fq 'runGameTest' "$workflow" || fail "$workflow does not execute runGameTest"
-  if grep -Eq '(DEEPSEEK|AIBOT_LLM)_API_KEY' "$workflow"; then
+  if grep -Eq '(DEEPSEEK|MINECRAFTAI_LLM)_API_KEY' "$workflow"; then
     fail "$workflow must not have access to the billed LLM secret"
   fi
 done
@@ -139,8 +139,8 @@ if grep -Eq '^[[:space:]]+(push|pull_request|schedule):' "$manual"; then
 fi
 grep -Fq 'secrets.DEEPSEEK_API_KEY' "$manual" \
   || fail 'manual LLM workflow does not receive its secret through GitHub Secrets'
-grep -Fq 'AIBOT_LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}' "$manual" \
-  || fail 'manual LLM workflow must expose its secret to the run as AIBOT_LLM_API_KEY'
+grep -Fq 'MINECRAFTAI_LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}' "$manual" \
+  || fail 'manual LLM workflow must expose its secret to the run as MINECRAFTAI_LLM_API_KEY'
 grep -Fq 'confirm_billing:' "$manual" \
   || fail 'manual LLM workflow does not require explicit billing confirmation'
 grep -Fq -- '--mode llm_story' "$manual" \
@@ -151,8 +151,8 @@ grep -Fq -- '--mode llm_story' "$manual" \
 # bundle, and no workflow may opt in (an explicit --assist mode is a local, non-certifying choice).
 grep -Fq 'ASSIST_MODE="off"' scripts/evidence_run.sh \
   || fail 'evidence_run.sh does not default the mining assist to off'
-[[ "$(grep -Fc 'AIBOT_MINING_ASSIST="$ASSIST_MODE"' scripts/evidence_run.sh)" == 2 ]] \
-  || fail 'evidence_run.sh must pin AIBOT_MINING_ASSIST in both --with-llm branches'
+[[ "$(grep -Fc 'MINECRAFTAI_MINING_ASSIST="$ASSIST_MODE"' scripts/evidence_run.sh)" == 2 ]] \
+  || fail 'evidence_run.sh must pin MINECRAFTAI_MINING_ASSIST in both --with-llm branches'
 grep -Fq 'certifying_bundle_has_mining_assist_mode' scripts/evidence_validate.sh \
   || fail 'evidence_validate.sh does not reject a non-off mining assist mode in certifying bundles'
 for workflow in .github/workflows/*.yml; do
@@ -165,10 +165,10 @@ for workflow in .github/workflows/*.yml; do
   while IFS= read -r assist_setting; do
     [[ -n "$assist_setting" ]] || continue
     assist_value="$(printf '%s' "$assist_setting" \
-      | sed -E "s/^(AIBOT_MINING_ASSIST[[:space:]]*[:=]|--assist[[:space:]=])[[:space:]]*//; s/[\"']//g")"
+      | sed -E "s/^(MINECRAFTAI_MINING_ASSIST[[:space:]]*[:=]|--assist[[:space:]=])[[:space:]]*//; s/[\"']//g")"
     [[ "$assist_value" == off ]] \
       || fail "$workflow sets the mining assist to '$assist_value'; only off is allowed in CI"
-  done < <(grep -hoE -- "(AIBOT_MINING_ASSIST[[:space:]]*[:=]|--assist[[:space:]=])[[:space:]]*[^[:space:]#]*" "$workflow" || true)
+  done < <(grep -hoE -- "(MINECRAFTAI_MINING_ASSIST[[:space:]]*[:=]|--assist[[:space:]=])[[:space:]]*[^[:space:]#]*" "$workflow" || true)
 done
 
 # When invoked after `build`, inspect every produced jar. Sources and production jars must both
@@ -178,7 +178,7 @@ if [[ "${CI_STATIC_CHECK_ARTIFACTS:-0}" == 1 ]]; then
   inspected=0
   while IFS= read -r -d '' jar_file; do
     inspected=1
-    if jar tf "$jar_file" | grep -Eq 'io/github/zoyluo/aibot/(gametest/|command/AIBot(Test|Verify)Subcommand)'; then
+    if jar tf "$jar_file" | grep -Eq 'io/github/zoyluo/minecraftai/(gametest/|command/MinecraftAi(Test|Verify)Subcommand)'; then
       fail "verification harness leaked into jar: $jar_file"
     fi
   done < <(find build/libs -maxdepth 1 -type f -name '*.jar' -print0)

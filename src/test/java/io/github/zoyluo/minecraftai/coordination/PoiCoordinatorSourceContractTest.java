@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
 import org.junit.jupiter.api.Test;
 
@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PoiCoordinatorSourceContractTest {
     private static final Path FILE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/coordination/PoiCoordinator.java");
+            "src/main/java/io/github/zoyluo/minecraftai/coordination/PoiCoordinator.java");
 
     private static String source() throws IOException {
         return Files.readString(FILE);
@@ -159,7 +159,7 @@ class PoiCoordinatorSourceContractTest {
     @Test
     void poiCoordinatorIsGuardedByTheAssistObservationBannedTokenScan() throws IOException {
         String contract = Files.readString(Path.of(
-                "src/test/java/io/github/zoyluo/aibot/mining/assist/AssistObservationSourceContractTest.java"));
+                "src/test/java/io/github/zoyluo/minecraftai/mining/assist/AssistObservationSourceContractTest.java"));
         assertTrue(contract.contains("\"coordination/PoiCoordinator.java\""),
                 "the banned-token scan must cover the new coordinator too");
     }

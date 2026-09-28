@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.function.LongPredicate;
 
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.BOT;
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.NOT_PLACED;
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.facts;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.BOT;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.NOT_PLACED;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.facts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;

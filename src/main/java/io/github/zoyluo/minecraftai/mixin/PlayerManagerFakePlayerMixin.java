@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.mixin;
+package io.github.zoyluo.minecraftai.mixin;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.network.AINetworkHandler;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.network.AINetworkHandler;
 import net.minecraft.network.ClientConnection;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerManager;
@@ -31,7 +31,7 @@ public abstract class PlayerManagerFakePlayerMixin {
      * this mixin only overrides its result for our own bots.
      */
     @ModifyVariable(method = "onPlayerConnect", at = @At("STORE"), ordinal = 0)
-    private ServerPlayNetworkHandler aibot$replaceNetworkHandler(ServerPlayNetworkHandler handler,
+    private ServerPlayNetworkHandler minecraftai$replaceNetworkHandler(ServerPlayNetworkHandler handler,
                                                                   ClientConnection connection,
                                                                   ServerPlayerEntity player,
                                                                   ConnectedClientData clientData) {

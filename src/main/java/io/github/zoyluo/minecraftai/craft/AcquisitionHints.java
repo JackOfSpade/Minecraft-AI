@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -61,8 +61,10 @@ public final class AcquisitionHints {
         if (isForageItem(item)) {
             return "forage";
         }
-        // 推导兜底(知识层数据驱动):手写表 unknown 的物品,有任何可用配方(含运行时索引/模组)→ craft;
-        // 有熔炼链 → smelt。让"手写表没见过"的物品也能进规划倒推,而不是直接 unresolved。
+        // Derived fallback (knowledge-layer, data-driven): for items unknown to the hand-written table,
+        // if any usable recipe exists (including the runtime index/mods) -> craft;
+        // if a smelting chain exists -> smelt. This lets items the hand-written table has never seen
+        // still participate in plan backward-chaining, instead of going straight to unresolved.
         if (RecipeRegistry.find(item).isPresent()) {
             return "craft";
         }

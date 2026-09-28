@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 import java.util.Objects;
 

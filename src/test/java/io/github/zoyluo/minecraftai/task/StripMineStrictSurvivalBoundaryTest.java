@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StripMineStrictSurvivalBoundaryTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
 
     @Test
     void strictSurvivalFailsClosedWhileOperatorKeepsLegacyCompatibility() {
@@ -27,7 +27,7 @@ class StripMineStrictSurvivalBoundaryTest {
     void taskGateRunsBeforeAnyLegacyWorldInitialization() throws IOException {
         String source = read("task/StripMineTask.java");
         int onStart = source.indexOf("protected void onStart");
-        int profileGate = source.indexOf("profileRejectionReason(AIBotConfig.get().profile())", onStart);
+        int profileGate = source.indexOf("profileRejectionReason(MinecraftAiConfig.get().profile())", onStart);
         int originRead = source.indexOf("origin = bot.getBlockPos()", onStart);
 
         assertTrue(onStart >= 0 && profileGate > onStart && originRead > profileGate,

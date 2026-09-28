@@ -1,20 +1,20 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mining.assist.AssistGate;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MandatoryLatch;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.PoiDetector;
-import io.github.zoyluo.aibot.mining.assist.PoiScorer;
-import io.github.zoyluo.aibot.mining.assist.SafeGate;
-import io.github.zoyluo.aibot.mining.assist.SafeGateInputs;
-import io.github.zoyluo.aibot.mining.assist.SafeReason;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mining.assist.AssistGate;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MandatoryLatch;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.PoiDetector;
+import io.github.zoyluo.minecraftai.mining.assist.PoiScorer;
+import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
+import io.github.zoyluo.minecraftai.mining.assist.SafeGateInputs;
+import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
@@ -34,12 +34,12 @@ import java.util.UUID;
  *       false) == null}, the origin, audit and TPS arguments being separate items), so a bot that is not opted in
  *       while the harness default is off never detours even though a state exists; the origin kind of
  *       {@code TaskManager.INSTANCE.activeOrigin(bot)} via {@code AssistGate.isRealOrigin} (the record is
- *       {@code io.github.zoyluo.aibot.runtime.TaskOrigin}); and {@code MiningEvidenceAudit.hasSession(uuid)}.</li>
+ *       {@code io.github.zoyluo.minecraftai.runtime.TaskOrigin}); and {@code MiningEvidenceAudit.hasSession(uuid)}.</li>
  *   <li>Item 2: {@code MiningAssistRuntime.tpsDegraded(bot)} (made public by P1) and
  *       {@code MiningAssistRuntime.headroom()}: START asks {@code canStart(tps)}, the TICK stages ask
  *       {@code shouldAbort(tps)} (which disarms, so never call a TICK stage without a live detour).</li>
  *   <li>Item 3: bot health, {@code hurtTime}, fire, lava, submerged, touching water, food level,
- *       {@code AIBotConfig.get().combat().retreatHp()}, {@code survival().hungerCriticalThreshold()},
+ *       {@code MinecraftAiConfig.get().combat().retreatHp()}, {@code survival().hungerCriticalThreshold()},
  *       {@code detour.startHpMargin}.</li>
  *   <li>Item 4: {@code NavSafetyNet.INSTANCE.isWaterRescueActive}, {@code TaskManager.pausedDepth},
  *       {@code isUserPaused}, origin SAFETY.</li>
@@ -113,8 +113,8 @@ public final class DetourSafetyGate {
             }
         }
         if (stage.reads(3)) {
-            AIBotConfig.Combat combat = AIBotConfig.get().combat();
-            AIBotConfig.Survival survival = AIBotConfig.get().survival();
+            MinecraftAiConfig.Combat combat = MinecraftAiConfig.get().combat();
+            MinecraftAiConfig.Survival survival = MinecraftAiConfig.get().survival();
             b.health(bot.getHealth())
                     .retreatHp(combat.retreatHp())
                     .startHpMargin(cfg.detour().startHpMargin())

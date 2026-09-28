@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot;
+package io.github.zoyluo.minecraftai;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -6,13 +6,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.annotations.SerializedName;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.OperatorCapabilities;
-import io.github.zoyluo.aibot.mode.CapabilityPolicy;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.mode.ProfileResolver;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.OperatorCapabilities;
+import io.github.zoyluo.minecraftai.mode.CapabilityPolicy;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.mode.ProfileResolver;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -25,11 +25,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
 
-public record AIBotConfig(
+public record MinecraftAiConfig(
         OperatingProfile profile,
         OperatorCapabilities operatorCapabilities,
         // The JSON section is "llm". "deepseek" is the pre-rename name and is still accepted so an
-        // existing aibot.json keeps working.
+        // existing minecraftai.json keeps working.
         @SerializedName(value = "llm", alternate = {"deepseek"}) Llm llm,
         Perception perception,
         Brain brain,
@@ -46,29 +46,29 @@ public record AIBotConfig(
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     /** Environment variable that overrides the API key from the config file (any provider). */
-    public static final String ENV_API_KEY = "AIBOT_LLM_API_KEY";
+    public static final String ENV_API_KEY = "MINECRAFTAI_LLM_API_KEY";
     /** Pre-rename environment variable; still honoured, but {@link #ENV_API_KEY} wins. */
     public static final String LEGACY_ENV_API_KEY = "DEEPSEEK_API_KEY";
 
-    private static AIBotConfig instance = defaults();
+    private static MinecraftAiConfig instance = defaults();
 
-    public static AIBotConfig get() {
+    public static MinecraftAiConfig get() {
         return instance;
     }
 
     /**
-     * Parses an already-read {@code aibot.json} root and fills every missing value from the
+     * Parses an already-read {@code minecraftai.json} root and fills every missing value from the
      * defaults. Both the {@code llm} section and the legacy {@code deepseek} section are read.
      * Returns null when the JSON maps to nothing.
      */
-    static AIBotConfig parse(JsonObject root, OperatingProfile profile) {
+    static MinecraftAiConfig parse(JsonObject root, OperatingProfile profile) {
         if (root.has("llm") && root.has("deepseek")) {
             // Both spellings present: the new name wins deterministically instead of depending on
             // which key Gson happens to read last.
             root = root.deepCopy();
             root.remove("deepseek");
         }
-        AIBotConfig parsed = GSON.fromJson(root, AIBotConfig.class);
+        MinecraftAiConfig parsed = GSON.fromJson(root, MinecraftAiConfig.class);
         return parsed == null ? null : parsed.withProfile(profile).withDefaults();
     }
 
@@ -83,9 +83,9 @@ public record AIBotConfig(
         return null;
     }
 
-    public static AIBotConfig load() {
-        Path path = FabricLoader.getInstance().getConfigDir().resolve("aibot.json");
-        AIBotConfig loaded = defaults();
+    public static MinecraftAiConfig load() {
+        Path path = FabricLoader.getInstance().getConfigDir().resolve("minecraftai.json");
+        MinecraftAiConfig loaded = defaults();
         ProfileResolver.Resolution profileResolution;
         if (Files.exists(path)) {
             try (Reader reader = Files.newBufferedReader(path)) {
@@ -100,7 +100,7 @@ public record AIBotConfig(
                     BotLog.warn(LogCategory.CONFIG, null, "config_legacy_key",
                             "key", "deepseek", "use", "llm");
                 }
-                AIBotConfig parsed = parse(root, profileResolution.profile());
+                MinecraftAiConfig parsed = parse(root, profileResolution.profile());
                 if (parsed != null) {
                     loaded = parsed;
                 }
@@ -138,17 +138,17 @@ public record AIBotConfig(
         return loaded;
     }
 
-    public AIBotConfig withLlm(Llm llm) {
-        return new AIBotConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
+    public MinecraftAiConfig withLlm(Llm llm) {
+        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
     }
 
-    private AIBotConfig withProfile(OperatingProfile profile) {
-        return new AIBotConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
+    private MinecraftAiConfig withProfile(OperatingProfile profile) {
+        return new MinecraftAiConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
     }
 
-    private AIBotConfig withDefaults() {
-        AIBotConfig defaults = defaults();
-        return new AIBotConfig(
+    private MinecraftAiConfig withDefaults() {
+        MinecraftAiConfig defaults = defaults();
+        return new MinecraftAiConfig(
                 profile == null ? defaults.profile : profile,
                 operatorCapabilities == null
                         ? defaults.operatorCapabilities
@@ -168,12 +168,13 @@ public record AIBotConfig(
                 conversation == null ? defaults.conversation : conversation.withDefaults(defaults.conversation));
     }
 
-    public static AIBotConfig defaults() {
-        return new AIBotConfig(
+    public static MinecraftAiConfig defaults() {
+        return new MinecraftAiConfig(
                 OperatingProfile.STRICT_SURVIVAL,
                 OperatorCapabilities.defaults(),
-                // V4 的 reasoning 与正文共享 max_tokens,故显式降低 effort 并放宽预算,
-                // 避免思考过程吃光额度、让本该发出的 tool_call 被截断。
+                // V4's reasoning shares max_tokens with the main response, so explicitly lower the
+                // effort and widen the budget, to keep the thinking process from eating the whole
+                // budget and truncating the tool_call that should have been emitted.
                 // The shipped defaults point at DeepSeek's public API; set llm.baseUrl / llm.model /
                 // llm.apiKey to use any other OpenAI-compatible or Gemini endpoint.
                 new Llm("", "https://api.deepseek.com", "deepseek-v4-flash", 8192, 0.3D, 60, 3, 500,
@@ -185,7 +186,7 @@ public record AIBotConfig(
                 // unless a player explicitly opts back in for blow-by-blow task telemetry.
                 new Brain(36, 6, 3, false, true, false, 3, false),
                 new Watchdog(200),
-                new Logging(true, "logs/aibot", true, "daily", 50, 30, 3, true, Map.of(
+                new Logging(true, "logs/minecraftai", true, "daily", 50, 30, 3, true, Map.of(
                         "LIFECYCLE", "INFO",
                         "COMM", "INFO",
                         "API", "INFO",
@@ -200,9 +201,9 @@ public record AIBotConfig(
                 new Combat(10, 2),
                 new Night(true, 8),
                 new Mining(2, 0.10D, true),
-                new Goal(24, true, true), // S7:配方补全后链更深(熟食/盾/钻装备等),16→24 留余量
+                new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3),
-                new Pickup(2.75D, 2.5D, 8.0D), // 实测 1.5/1.0 太小:砍树掉落物垂直差>1 就吸不到→countSoFar=0 死循环
+                new Pickup(2.75D, 2.5D, 8.0D), // measured 1.5/1.0 as too small: tree-drop items with a vertical gap >1 don't get pulled in → countSoFar=0 infinite loop
                 new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100));
     }
 
@@ -243,7 +244,7 @@ public record AIBotConfig(
     }
 
     /**
-     * LLM API settings (the {@code "llm"} section of {@code aibot.json}; the legacy name
+     * LLM API settings (the {@code "llm"} section of {@code minecraftai.json}; the legacy name
      * {@code "deepseek"} is still read). Any OpenAI-compatible chat-completions endpoint works, and
      * a {@code baseUrl} on Google's generativelanguage host selects the Gemini Interactions client.
      *
@@ -418,7 +419,7 @@ public record AIBotConfig(
     /**
      * Ambient bot-to-bot conversations: occasionally, when nobody is instructing them, 1+ eligible
      * companions have a short in-character back-and-forth, each line an independent LLM call (see
-     * {@link io.github.zoyluo.aibot.brain.AmbientConversationCoordinator}). Never routes through the
+     * {@link io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator}). Never routes through the
      * per-bot planner/tool-loop, so it never disrupts whatever a bot is doing.
      */
     public record Conversation(

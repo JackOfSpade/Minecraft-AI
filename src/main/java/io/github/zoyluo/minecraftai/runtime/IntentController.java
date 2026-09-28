@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.runtime;
+package io.github.zoyluo.minecraftai.runtime;
 
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.coordination.IdleCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.task.StuckWatcher;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.coordination.IdleCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.task.StuckWatcher;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -79,7 +79,7 @@ public final class IntentController {
         if (origin.notifiesUser()) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", "The current mission is paused. Queued goals are preserved and safety recovery can still run.");
         }
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
         return changed;
     }
 
@@ -98,14 +98,14 @@ public final class IntentController {
         if (origin.notifiesUser()) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", "Mission resumed from its paused point.");
         }
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
         return changed;
     }
 
     /** Returns true when an exact player phrase was handled without sending an LLM request. */
     public boolean routePlayerControlPhrase(AIPlayerEntity bot, ControlOrigin origin, String text) {
         String normalized = text == null ? "" : text.trim().toLowerCase(Locale.ROOT)
-                .replaceAll("[。.!！?？]+$", "");
+                .replaceAll("[.!?]+$", "");
         // Accept the literal bracketed phrase the batch-checkpoint prompt tells the player to
         // type ("[continue]" / "[stop]") in addition to its unbracketed form.
         if (normalized.length() > 1 && normalized.startsWith("[") && normalized.endsWith("]")) {
@@ -123,14 +123,13 @@ public final class IntentController {
             cancelCurrent(bot, origin, "goal_batch_checkpoint_stop");
             return true;
         }
-        if (java.util.Set.of("暂停", "暂停一下", "先停一下", "等一下", "pause", "hold").contains(normalized)) {
+        if (java.util.Set.of("pause", "hold").contains(normalized)) {
             pause(bot, origin, "control_phrase");
             return true;
         }
-        boolean explicitResume = java.util.Set.of("继续", "继续吧", "恢复", "resume", "go on", "continue").contains(normalized);
+        boolean explicitResume = java.util.Set.of("resume", "go on", "continue").contains(normalized);
         boolean pausedResume = TaskManager.INSTANCE.isUserPaused(bot)
-                && (normalized.startsWith("继续") || normalized.startsWith("恢复")
-                || normalized.startsWith("continue") || normalized.startsWith("resume"));
+                && (normalized.startsWith("continue") || normalized.startsWith("resume"));
         if (explicitResume || pausedResume) {
             resume(bot, origin, "control_phrase");
             return true;

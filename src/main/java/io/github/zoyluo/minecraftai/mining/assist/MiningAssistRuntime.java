@@ -1,14 +1,14 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.observe.TpsGuard;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.server.MinecraftServer;
 
 import java.io.IOException;
@@ -116,7 +116,7 @@ public final class MiningAssistRuntime {
      * is the call a harness makes; {@code false} restores the shipped default. (The design text spells the same
      * call {@code setHarnessDefault(false)}; the name here says what the flag means so a new harness entry point
      * cannot switch the assist on by mistake.) An explicit mode from the environment or from
-     * {@code config/aibot.json} still wins (design 2.1). Callable before or after the config load, see the
+     * {@code config/minecraftai.json} still wins (design 2.1). Callable before or after the config load, see the
      * class comment.
      */
     public static synchronized void setHarnessDefaultOff(boolean off) {
@@ -134,27 +134,27 @@ public final class MiningAssistRuntime {
     }
 
     /**
-     * Loads the {@code miningAssist} section of {@code config/aibot.json} (a separate pass, the main config
+     * Loads the {@code miningAssist} section of {@code config/minecraftai.json} (a separate pass, the main config
      * class ignores it), installs the result and logs every warning once. Never throws: an unreadable or
      * malformed file gives the defaults. A missing file is not an error.
      */
-    public static MiningAssistConfig load(Path aibotJson) {
+    public static MiningAssistConfig load(Path minecraftaiJson) {
         JsonObject root = null;
-        if (aibotJson != null && Files.isRegularFile(aibotJson)) {
-            try (Reader reader = Files.newBufferedReader(aibotJson)) {
+        if (minecraftaiJson != null && Files.isRegularFile(minecraftaiJson)) {
+            try (Reader reader = Files.newBufferedReader(minecraftaiJson)) {
                 JsonElement element = JsonParser.parseReader(reader);
                 if (element != null && element.isJsonObject()) {
                     root = element.getAsJsonObject();
                 }
             } catch (IOException | RuntimeException exception) {
                 BotLog.warn(LogCategory.CONFIG, null, "assist_config_read_failed",
-                        "path", aibotJson, "error", exception.getClass().getSimpleName());
+                        "path", minecraftaiJson, "error", exception.getClass().getSimpleName());
             }
         }
         return install(root, PROCESS_ENV);
     }
 
-    /** Parses {@code fileRoot} (the whole aibot.json, may be null) with {@code env} and installs the result. */
+    /** Parses {@code fileRoot} (the whole minecraftai.json, may be null) with {@code env} and installs the result. */
     public static synchronized MiningAssistConfig install(JsonObject fileRoot, Function<String, String> env) {
         lastFileRoot = fileRoot;
         lastEnv = env;
@@ -243,7 +243,7 @@ public final class MiningAssistRuntime {
     // ---------------------------------------------------------------------------------------
 
     /**
-     * The process-wide tick headroom. {@code AIBotMod} feeds it once per server tick with the measured
+     * The process-wide tick headroom. {@code MinecraftAiMod} feeds it once per server tick with the measured
      * work in milliseconds; the sensor reads {@code halveRays()}. It is rebuilt (and its history lost) when the
      * config or the forced set changes.
      */
@@ -256,7 +256,7 @@ public final class MiningAssistRuntime {
 
     /**
      * Feeds one server tick's measured work (end nanoTime minus START_SERVER_TICK nanoTime, in ms) to the
-     * headroom. {@code AIBotMod} calls it exactly once per tick from the END lambda, as its last statement.
+     * headroom. {@code MinecraftAiMod} calls it exactly once per tick from the END lambda, as its last statement.
      * Ticks before {@link #HEADROOM_WARMUP_TICKS} are ignored.
      */
     public static void recordTickWork(double workMs, int serverTicks) {

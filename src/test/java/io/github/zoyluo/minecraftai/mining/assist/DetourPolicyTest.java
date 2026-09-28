@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.assist.DetourPolicy.Admission;
-import io.github.zoyluo.aibot.mining.assist.DetourPolicy.Ranked;
-import io.github.zoyluo.aibot.mining.assist.DetourPolicy.TargetLock;
-import io.github.zoyluo.aibot.mining.assist.SightingLedger.Sighting;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy.Admission;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy.Ranked;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy.TargetLock;
+import io.github.zoyluo.minecraftai.mining.assist.SightingLedger.Sighting;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;

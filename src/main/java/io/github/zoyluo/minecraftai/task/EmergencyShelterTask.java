@@ -1,15 +1,16 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.LivingEntity;
@@ -93,7 +94,7 @@ public final class EmergencyShelterTask extends AbstractTask {
      */
     private static final int CLEANUP_MAX_AGE_TICKS = 20_000;
     private static final boolean AGE_PRUNING_ENABLED =
-            FabricLoader.getInstance().isModLoaded("aibot-gametest");
+            FabricLoader.getInstance().isModLoaded("minecraftai-gametest");
 
     private enum Phase {
         RETREAT_TO_SAFE_ANCHOR,
@@ -131,6 +132,13 @@ public final class EmergencyShelterTask extends AbstractTask {
     private int consecutiveDaylightTicks;
     private int observationReseals;
     private EatTask holdEatTask;
+    /**
+     * Rescue lifecycle (spec: no-food/cry-for-help/rescue), all reset in {@link #onStart}, so a
+     * later, separate emergency-shelter episode always starts this bookkeeping over from scratch.
+     */
+    private boolean waitingForRescue;
+    private boolean criedForHelp;
+    private boolean rescueResolvedAnnounced;
     private final LivingEntity initiatingThreat;
     private final BlockPos rememberedThreatPos;
     private BlockPos retreatGoal;
@@ -168,7 +176,10 @@ public final class EmergencyShelterTask extends AbstractTask {
                 + " pressured_egress=" + pressuredEgress.size()
                 + " daylight_ticks=" + consecutiveDaylightTicks
                 + " exit_age=" + exitAge()
-                + " force_pressure_exit=" + forcePressureExit;
+                + " force_pressure_exit=" + forcePressureExit
+                + " waiting_for_rescue=" + waitingForRescue
+                + " cried_for_help=" + criedForHelp
+                + " rescue_resolved=" + rescueResolvedAnnounced;
     }
 
     @Override
@@ -216,6 +227,9 @@ public final class EmergencyShelterTask extends AbstractTask {
         consecutiveDaylightTicks = 0;
         observationReseals = 0;
         holdEatTask = null;
+        waitingForRescue = false;
+        criedForHelp = false;
+        rescueResolvedAnnounced = false;
         retreatGoal = null;
         cleanupDebtRegistered = false;
         if (initiatingThreat != null || rememberedThreatPos != null) {
@@ -659,6 +673,13 @@ public final class EmergencyShelterTask extends AbstractTask {
         } else if (phaseAge() < MIN_HOLD_TICKS) {
             return;
         }
+        // A rescue in progress (or a healing run that just stalled for lack of food) is resolved
+        // before the ordinary eating primitive gets a turn, so a just-delivered food item is
+        // acknowledged on the same tick that it lets eating resume, and a genuinely stalled bot
+        // never wastes a tick asking EatTask to work with an empty inventory.
+        if (tickFoodRescueState(bot)) {
+            return;
+        }
         // Healing belongs inside the sealed safety transaction. Scheduling EatTask only after the
         // door opens exposes a critical-health bot to the exact hostile the shelter was built for.
         // Tick the ordinary physical eating primitive here so inventory selection, use duration,
@@ -668,11 +689,55 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         // This is a recovery shelter, not a night-time camp.  Do not reopen merely because a
         // daylight timer elapsed or health crossed an arbitrary near-full threshold: vanilla
-        // recovery gets a genuine safe window only after food is full and health is maxed.
-        if (!isFullyRecovered(bot)) {
+        // recovery gets a genuine safe window only after food is full and health is maxed (or,
+        // per isRecoveredEnoughToExit, until no more food remains to top it off with).
+        if (!isRecoveredEnoughToExit(bot)) {
             return;
         }
         beginRecoveredExit(bot);
+    }
+
+    /**
+     * Point 3/4/6 of the rescue contract: reacts to a healing run that has genuinely stalled for
+     * lack of food -- a materially different condition from simply having already reached full
+     * health (that case is left to {@link #isRecoveredEnoughToExit}). Below half health this
+     * seals the bot in and waits for a player-delivered rescue, crying for help exactly once per
+     * episode and re-checking every tick whether food has arrived (vanilla item pickup delivers
+     * it automatically once the player tosses it through a reopened wall block); at or above half
+     * health it gives up waiting and exits to fight instead, since sitting still cannot make it
+     * any healthier once there is nothing left to eat.
+     *
+     * @return true when tickHold must stop for this tick (still waiting, or a give-up exit began)
+     */
+    private boolean tickFoodRescueState(AIPlayerEntity bot) {
+        boolean hasFoodAvailable = InventoryAction.findFoodSlot(bot) >= 0;
+        if (waitingForRescue && hasFoodAvailable) {
+            waitingForRescue = false;
+            BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
+                    "Got the food, thank you! I will keep healing now.");
+            BotLog.action(bot, "shelter_rescue_food_received",
+                    "health", bot.getHealth(), "food", bot.getHungerManager().getFoodLevel());
+            return false; // let the ordinary eating primitive pick it up later this same tick
+        }
+        if (!isHealingStalledWithoutFood(bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable)) {
+            return false;
+        }
+        if (shouldAbandonRescueWaitAndFight(bot.getHealth(), bot.getMaxHealth())) {
+            beginOutOfFoodExit(bot);
+            return true;
+        }
+        waitingForRescue = true;
+        if (!criedForHelp) {
+            criedForHelp = true;
+            BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
+                    "I'm out of food and stuck healing at " + (int) bot.getHealth() + "/"
+                            + (int) bot.getMaxHealth() + " HP inside my emergency shelter. "
+                            + "Please bring me food: break one wall block, toss the food in, "
+                            + "then seal the block back up.");
+            BotLog.action(bot, "shelter_rescue_needed",
+                    "health", bot.getHealth(), "anchor", shelterFeet);
+        }
+        return true;
     }
 
     private boolean tickHoldEating(AIPlayerEntity bot) {
@@ -713,6 +778,55 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     private static boolean isFullyRecovered(AIPlayerEntity bot) {
         return isFullyRecovered(bot.getHealth(), bot.getMaxHealth(), bot.getHungerManager().getFoodLevel());
+    }
+
+    /**
+     * Point 6a vs 6b of the rescue contract: exiting the shelter needs full health, always -- but
+     * whether it also needs food topped all the way to twenty depends on WHY food stopped short
+     * of that. While more food remains, {@link #shouldStartHoldEating} keeps spending it for the
+     * extra durability buffer described there. Once there is none left, waiting any longer cannot
+     * buy anything: a bot that reached full health right as its last food item ran out (6a, the
+     * ordinary case) is safe to leave immediately, exactly like one that still has food to spare.
+     * (A bot that ran out of food while STILL below full health is the different, genuinely stuck
+     * case -- see {@link #isHealingStalledWithoutFood} -- and never reaches this method at all
+     * while that remains true, since the {@code health < maxHealth} guard below rejects it.)
+     */
+    static boolean isRecoveredEnoughToExit(float health,
+                                           float maxHealth,
+                                           int foodLevel,
+                                           boolean hasFoodAvailable) {
+        if (health < maxHealth) {
+            return false;
+        }
+        return foodLevel >= 20 || !hasFoodAvailable;
+    }
+
+    private static boolean isRecoveredEnoughToExit(AIPlayerEntity bot) {
+        return isRecoveredEnoughToExit(bot.getHealth(), bot.getMaxHealth(),
+                bot.getHungerManager().getFoodLevel(), InventoryAction.findFoodSlot(bot) >= 0);
+    }
+
+    /**
+     * True once healing has genuinely stalled: no food remains to eat and health is still below
+     * max. This is a materially different condition from simply having reached full health with
+     * food merely not (or no longer) toppable back up to twenty -- see
+     * {@link #isRecoveredEnoughToExit}, which handles that case instead. Point 6 of the rescue
+     * contract: "ran out of food while still hurt" must be distinguished from "reached full
+     * health and happened to run out of food around the same time".
+     */
+    static boolean isHealingStalledWithoutFood(float health, float maxHealth, boolean hasFoodAvailable) {
+        return !hasFoodAvailable && health < maxHealth;
+    }
+
+    /**
+     * Point 6's 50%-health exception: once healing has stalled for lack of food, a bot already at
+     * half health or more gives up waiting and comes out to fight rather than sitting on a rescue
+     * that may never arrive -- it is not going to get any healthier waiting with nothing to eat,
+     * and half health is enough to fight with. Below half health it stays sealed and cries for
+     * help instead; see {@link #tickFoodRescueState}.
+     */
+    static boolean shouldAbandonRescueWaitAndFight(float health, float maxHealth) {
+        return health >= maxHealth * 0.5F;
     }
 
     private void tickOpenExit(AIPlayerEntity bot) {
@@ -1820,6 +1934,21 @@ public final class EmergencyShelterTask extends AbstractTask {
      * owner after it steps out; resealing forever would turn recovery into a dirt prison.
      */
     private void beginRecoveredExit(AIPlayerEntity bot) {
+        beginSafeExit(bot, "shelter_recovery_complete", "shelter_recovery_complete_exit");
+    }
+
+    /**
+     * Point 6's 50%-health exception: healing has genuinely stalled (no food left, still below
+     * max HP) but the bot is healthy enough to fight rather than sit sealed in on a rescue that
+     * may never come. Physically identical to a full recovery exit -- forcing the door the same
+     * way and for the same reason -- only the log reason and rescue messaging differ.
+     */
+    private void beginOutOfFoodExit(AIPlayerEntity bot) {
+        beginSafeExit(bot, "shelter_out_of_food_exit", "shelter_out_of_food_exit");
+    }
+
+    private void beginSafeExit(AIPlayerEntity bot, String cancelReason, String logAction) {
+        announceRescueResolvedIfNeeded(bot);
         forcePressureExit = true;
         phase = Phase.OPEN_EXIT;
         phaseStartedElapsed = elapsed;
@@ -1828,13 +1957,34 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         elevatedForRoofSupport = false;
         exitMiningTarget = null;
-        cancelHoldEating(bot, "shelter_recovery_complete");
+        cancelHoldEating(bot, cancelReason);
         exitMiner.cancel(bot);
         bot.getActionPack().stopAll();
-        BotLog.action(bot, "shelter_recovery_complete_exit",
+        BotLog.action(bot, logAction,
                 "health", bot.getHealth(),
                 "max_health", bot.getMaxHealth(),
                 "food", bot.getHungerManager().getFoodLevel());
+    }
+
+    /**
+     * Point 5's third chat message: once a bot has cried for help this episode, it also tells the
+     * player when that need has passed -- either the 50%-and-out-of-food exception above fired,
+     * or enough food eventually arrived to finish healing normally. This is deliberately distinct
+     * from (and sent later than) the "got the food, continuing to heal" message in
+     * {@link #tickFoodRescueState}: that one confirms the food arrived, this one confirms the
+     * whole episode is over. Never fires for the ordinary case where the bot never ran short of
+     * food in the first place, and never repeats even if a pressure reseal sends this shelter
+     * back through HOLD before it physically steps outside.
+     */
+    private void announceRescueResolvedIfNeeded(AIPlayerEntity bot) {
+        if (!criedForHelp || rescueResolvedAnnounced) {
+            return;
+        }
+        rescueResolvedAnnounced = true;
+        BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
+                "I'm safe now and no longer need rescuing.");
+        BotLog.action(bot, "shelter_rescue_resolved",
+                "health", bot.getHealth(), "food", bot.getHungerManager().getFoodLevel());
     }
 
     /** Immutable proof that a cancelled shelter may reopen only its own two-cell doorway. */

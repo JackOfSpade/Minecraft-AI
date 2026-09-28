@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.BlockPos;

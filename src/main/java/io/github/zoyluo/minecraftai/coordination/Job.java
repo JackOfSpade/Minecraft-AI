@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
 import java.util.Map;
 import java.util.UUID;

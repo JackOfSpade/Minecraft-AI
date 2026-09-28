@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -63,6 +63,6 @@ final class WorkshopPreferenceSourceContractTest {
     }
 
     private static String read(String file) throws IOException {
-        return Files.readString(Path.of("src/main/java/io/github/zoyluo/aibot/task").resolve(file));
+        return Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/task").resolve(file));
     }
 }

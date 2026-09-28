@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import org.junit.jupiter.api.Test;
 
-import static io.github.zoyluo.aibot.mining.assist.AssistTestSupport.facts;
+import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.facts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

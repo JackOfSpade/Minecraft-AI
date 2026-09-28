@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
-import io.github.zoyluo.aibot.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 

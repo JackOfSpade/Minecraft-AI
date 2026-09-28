@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.util.math.BlockPos;
@@ -53,19 +53,25 @@ public final class EvadeTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         startBestEscapePath(bot);
-        // 逃命必须冲刺:走路 4.3m/s 对僵尸追击 4.0m/s 只快一线,寻路绕障/起步延迟就被贴脸磨死
-        //(实测无装备 bot 夜间远征被僵尸追杀致死)。冲刺 5.6m/s 才能真正甩开。
-        // escapeGoal==null(无处可逃)→ 不启动寻路,onTick 首 tick 即 fail 交筑墙升级。
+        // Escaping must sprint: walking at 4.3m/s against a zombie's 4.0m/s pursuit speed is only
+        // marginally faster, and pathfinding around obstacles or startup delay lets it close in and
+        // grind the bot down at melee range (field-tested: an unequipped bot on a nighttime
+        // expedition was chased down and killed by a zombie). Only sprinting at 5.6m/s actually
+        // shakes it off.
+        // escapeGoal==null (nowhere to flee) -> do not start pathfinding; onTick fails on the first
+        // tick and hands off to the wall-building escalation.
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (escapeGoal == null) {
-            // 无处可逃(深处隧道/被围)→ 干净失败,交 DangerWatcher 升级筑墙自保,不假完成空转挨打。
+            // Nowhere to flee (deep in a tunnel / surrounded) -> fail cleanly and hand off to
+            // DangerWatcher's wall-building self-defense escalation, rather than falsely completing
+            // and idling while taking hits.
             failNoValidEscapeRoute(bot, "initial");
             return;
         }
-        bot.getActionPack().setSprinting(true); // 持续保持(其他控制器可能每 tick 复位)
+        bot.getActionPack().setSprinting(true); // keep this set continuously (other controllers may reset it every tick)
         if (bot.getBlockPos().getSquaredDistance(escapeGoal) <= GOAL_REACHED_SQUARED) {
             // Reaching the originally projected point is not the same as escaping a moving mob.
             // The strict obsidian run reached its first waypoint while the same Creeper was still
@@ -203,7 +209,7 @@ public final class EvadeTask extends AbstractTask {
         for (int radius = 0; radius <= 4; radius++) {
             for (BlockPos candidate : BlockPos.iterate(
                     base.add(-radius, -2, -radius), base.add(radius, 2, radius))) {
-                if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(
+                if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
                         bot.getEntityWorld(), candidate)) {
                     return candidate.toImmutable();
                 }

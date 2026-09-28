@@ -1,16 +1,16 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.memory.BotMemory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.MoveTask;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.memory.BotMemory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.MoveTask;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
@@ -20,8 +20,8 @@ import java.util.Optional;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotMemorySubcommand {
-    private AIBotMemorySubcommand() {
+public final class MinecraftAiMemorySubcommand {
+    private MinecraftAiMemorySubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -85,7 +85,7 @@ public final class AIBotMemorySubcommand {
             return 0;
         }
         memory(bot.get()).remember(key, value);
-        source.sendFeedback(() -> Text.literal("[AIBot] remembered " + key), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] remembered " + key), false);
         return 1;
     }
 
@@ -95,7 +95,7 @@ public final class AIBotMemorySubcommand {
             return 0;
         }
         String value = memory(bot.get()).recall(key).orElse("<missing>");
-        source.sendFeedback(() -> Text.literal("[AIBot] " + key + " = " + value), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + key + " = " + value), false);
         return 1;
     }
 
@@ -105,7 +105,7 @@ public final class AIBotMemorySubcommand {
             return 0;
         }
         boolean removed = memory(bot.get()).forget(key);
-        source.sendFeedback(() -> Text.literal("[AIBot] forget " + key + " " + removed), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] forget " + key + " " + removed), false);
         return removed ? 1 : 0;
     }
 
@@ -115,7 +115,7 @@ public final class AIBotMemorySubcommand {
             return 0;
         }
         memory(bot.get()).markPlace(place, bot.get().getEntityWorld(), bot.get().getBlockPos());
-        source.sendFeedback(() -> Text.literal("[AIBot] marked place " + place + " at " + bot.get().getBlockPos().toShortString()), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] marked place " + place + " at " + bot.get().getBlockPos().toShortString()), false);
         return 1;
     }
 
@@ -126,11 +126,11 @@ public final class AIBotMemorySubcommand {
         }
         Optional<BotMemory.Place> target = memory(bot.get()).place(place);
         if (target.isEmpty()) {
-            source.sendError(Text.literal("[AIBot] unknown place: " + place));
+            source.sendError(Text.literal("[Minecraft-AI] unknown place: " + place));
             return 0;
         }
         if (!bot.get().getEntityWorld().getRegistryKey().getValue().toString().equals(target.get().dimension())) {
-            source.sendError(Text.literal("[AIBot] place is in another dimension: " + target.get().dimension()));
+            source.sendError(Text.literal("[Minecraft-AI] place is in another dimension: " + target.get().dimension()));
             return 0;
         }
         MoveTask task = new MoveTask(bot.get(), target.get().pos());
@@ -139,11 +139,11 @@ public final class AIBotMemorySubcommand {
                 IntentController.ControlOrigin.PLAYER_COMMAND,
                 "command_memory_goto:" + place,
                 () -> {
-                    io.github.zoyluo.aibot.task.TaskManager.INSTANCE.assign(bot.get(), task,
+                    io.github.zoyluo.minecraftai.task.TaskManager.INSTANCE.assign(bot.get(), task,
                             TaskOrigin.of(TaskOrigin.Kind.PLAYER_COMMAND, "command_memory_goto"));
                     return true;
                 });
-        source.sendFeedback(() -> Text.literal("[AIBot] moving to " + place), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] moving to " + place), false);
         return 1;
     }
 
@@ -153,7 +153,7 @@ public final class AIBotMemorySubcommand {
             return 0;
         }
         memory(bot.get()).setGoal(title, Arrays.asList(steps.split("\\|")));
-        source.sendFeedback(() -> Text.literal("[AIBot] " + memory(bot.get()).goalStatus("")), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + memory(bot.get()).goalStatus("")), false);
         return 1;
     }
 
@@ -162,7 +162,7 @@ public final class AIBotMemorySubcommand {
         if (bot.isEmpty()) {
             return 0;
         }
-        source.sendFeedback(() -> Text.literal("[AIBot] " + memory(bot.get()).advanceGoal(result)), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + memory(bot.get()).advanceGoal(result)), false);
         return 1;
     }
 
@@ -171,7 +171,7 @@ public final class AIBotMemorySubcommand {
         if (bot.isEmpty()) {
             return 0;
         }
-        source.sendFeedback(() -> Text.literal("[AIBot] " + memory(bot.get()).goalStatus("")), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + memory(bot.get()).goalStatus("")), false);
         return 1;
     }
 
@@ -181,7 +181,7 @@ public final class AIBotMemorySubcommand {
             return 0;
         }
         String text = memory(bot.get()).inject();
-        source.sendFeedback(() -> Text.literal("[AIBot] memory inject: " + (text.isBlank() ? "<empty>" : text)), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] memory inject: " + (text.isBlank() ? "<empty>" : text)), false);
         return 1;
     }
 

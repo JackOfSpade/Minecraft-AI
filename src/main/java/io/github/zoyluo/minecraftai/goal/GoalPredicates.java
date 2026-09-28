@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import net.minecraft.registry.Registries;
 
 import java.util.Set;

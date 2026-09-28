@@ -138,7 +138,7 @@ BATCH_ID="$(harness_run_id "batch-$SCENARIO" "$REVISION")"
 harness_prepare_root "$HARNESS_BATCH_ROOT" || exit 3
 STAGING="$(mktemp -d "$HARNESS_BATCH_ROOT/.staging.${BATCH_ID}.XXXXXX")" || exit 3
 FINAL="$HARNESS_BATCH_ROOT/$BATCH_ID"
-TMP_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/aibot-evidence-batch.XXXXXX")" || exit 3
+TMP_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/minecraftai-evidence-batch.XXXXXX")" || exit 3
 PUBLISHED=0
 BATCH_CHILD_PID=""
 

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.inventory;
+package io.github.zoyluo.minecraftai.inventory;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,15 +13,15 @@ final class BotInventoryScreenSourceContractTest {
     @Test
     void inventoryMenuUsesOnlyRealBotSlotsAndRegistersItsClientScreen() throws IOException {
         String entity = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/entity/AIPlayerEntity.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/entity/AIPlayerEntity.java"));
         String factory = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/inventory/BotInventoryScreenFactory.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/inventory/BotInventoryScreenFactory.java"));
         String handler = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/inventory/BotInventoryScreenHandler.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/inventory/BotInventoryScreenHandler.java"));
         String client = Files.readString(Path.of(
-                "src/client/java/io/github/zoyluo/aibot/client/AIBotClient.java"));
+                "src/client/java/io/github/zoyluo/minecraftai/client/MinecraftAiClient.java"));
         String screen = Files.readString(Path.of(
-                "src/client/java/io/github/zoyluo/aibot/client/screen/BotInventoryScreen.java"));
+                "src/client/java/io/github/zoyluo/minecraftai/client/screen/BotInventoryScreen.java"));
 
         assertTrue(entity.contains("BotAuthorizationPolicy.Operation.INVENTORY"));
         assertTrue(entity.contains("viewer.openHandledScreen(new BotInventoryScreenFactory(this, viewer))"));

@@ -20,7 +20,7 @@ Options:
   --profile <name>              strict_survival (default) or operator
   --operator-capabilities <csv> operator-only enabled flags, or all/none
   --mode <name>                 deterministic (default) or llm_story
-  --with-llm                    pass AIBOT_LLM_API_KEY (or legacy DEEPSEEK_API_KEY) to the isolated server
+  --with-llm                    pass MINECRAFTAI_LLM_API_KEY (or legacy DEEPSEEK_API_KEY) to the isolated server
   --assist <mode>               mining assist mode for the run: off (default), sense,
                                 detour, poi or all; certifying Mining First scenarios
                                 accept only off
@@ -30,7 +30,7 @@ The output root is fixed at artifacts/evidence. Existing evidence is never
 overwritten. Fixture evidence and dirty-worktree evidence are UNVERIFIED.
 
 The mining assist is pinned to off for every scenario unless --assist opts in. The
-mode is exported as AIBOT_MINING_ASSIST and written into both the runtime config and
+mode is exported as MINECRAFTAI_MINING_ASSIST and written into both the runtime config and
 the sealed effective config, so config_hash covers it.
 EOF
 }
@@ -80,8 +80,8 @@ case "$ASSIST_MODE" in
   off|sense|detour|poi|all) ;;
   *) printf 'evidence-run: invalid --assist mode: %s\n' "$ASSIST_MODE" >&2; exit 2 ;;
 esac
-if [[ $WITH_LLM -eq 1 && -z "${AIBOT_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]]; then
-  printf 'evidence-run: --with-llm requires AIBOT_LLM_API_KEY (or the legacy DEEPSEEK_API_KEY)\n' >&2
+if [[ $WITH_LLM -eq 1 && -z "${MINECRAFTAI_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]]; then
+  printf 'evidence-run: --with-llm requires MINECRAFTAI_LLM_API_KEY (or the legacy DEEPSEEK_API_KEY)\n' >&2
   exit 2
 fi
 if [[ -n "$FIXTURE_LOG" ]]; then
@@ -180,7 +180,7 @@ STARTED_AT="$(harness_now_utc)"
 RUN_ID="$(harness_run_id "$SCENARIO" "$COMMIT_SHA")"
 TMP_BASE="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
 REPO_KEY="$(printf '%s' "$ROOT" | cksum | awk '{print $1}')"
-LOCK_PATH="$TMP_BASE/aibot-evidence-$REPO_KEY.lock"
+LOCK_PATH="$TMP_BASE/minecraftai-evidence-$REPO_KEY.lock"
 
 SERVER_PID=""
 FIFO=""
@@ -238,7 +238,7 @@ cleanup() {
     esac
   fi
   if [[ -n "$RUN_DIR" && -d "$RUN_DIR" && ! -L "$RUN_DIR" ]]; then
-    case "$RUN_DIR" in "$TMP_BASE"/aibot-evidence-runs/run.*) rm -rf -- "$RUN_DIR" ;; esac
+    case "$RUN_DIR" in "$TMP_BASE"/minecraftai-evidence-runs/run.*) rm -rf -- "$RUN_DIR" ;; esac
   fi
   if [[ $PUBLISHED -eq 0 && -n "$STAGING" ]]; then
     harness_safe_remove_staging "$STAGING" "$HARNESS_ARTIFACT_ROOT" || true
@@ -259,9 +259,9 @@ STAGING="$(mktemp -d "$HARNESS_ARTIFACT_ROOT/.staging.${RUN_ID}.XXXXXX")" || exi
 FINAL="$HARNESS_ARTIFACT_ROOT/$RUN_ID"
 : > "$STAGING/server.log" || exit 3
 
-mkdir -p "$TMP_BASE/aibot-evidence-runs" || exit 3
-harness_assert_not_symlink "$TMP_BASE/aibot-evidence-runs" 'temporary run root' || exit 3
-RUN_DIR="$(mktemp -d "$TMP_BASE/aibot-evidence-runs/run.${RUN_ID}.XXXXXX")" || exit 3
+mkdir -p "$TMP_BASE/minecraftai-evidence-runs" || exit 3
+harness_assert_not_symlink "$TMP_BASE/minecraftai-evidence-runs" 'temporary run root' || exit 3
+RUN_DIR="$(mktemp -d "$TMP_BASE/minecraftai-evidence-runs/run.${RUN_ID}.XXXXXX")" || exit 3
 FIFO="$RUN_DIR/server.fifo"
 SERVER_PORT="$(harness_choose_port)" || exit 3
 EXEC_ROOT="$ROOT"
@@ -304,7 +304,7 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt" || exit 3
   printf 'simulation-distance=10\n'
   printf 'pause-when-empty-seconds=-1\n'
   printf 'max-tick-time=120000\n'
-  printf 'motd=AIBot isolated evidence run\n'
+  printf 'motd=MinecraftAi isolated evidence run\n'
 } > "$SERVER_RUN_DIR/server.properties" || exit 3
 
 # The runtime input contains no credential. A requested LLM key is supplied only
@@ -321,7 +321,7 @@ printf 'eula=true\n' > "$SERVER_RUN_DIR/eula.txt" || exit 3
   printf '  "llm": { "apiKey": "" },\n'
   printf '  "miningAssist": { "mode": "%s" }\n' "$ASSIST_MODE"
   printf '}\n'
-} > "$SERVER_RUN_DIR/config/aibot.json" || exit 3
+} > "$SERVER_RUN_DIR/config/minecraftai.json" || exit 3
 
 KEY_MARKER='<redacted:unset>'
 [[ $WITH_LLM -eq 1 ]] && KEY_MARKER='<redacted:env>'
@@ -355,15 +355,15 @@ else
   {
     printf '%s\n' 'gradle.projectsEvaluated {'
     printf '%s\n' '  rootProject.tasks.matching { it.name == "runHarnessServer" }.configureEach {'
-    printf '%s\n' '    workingDir = new File(System.getenv("AIBOT_HARNESS_RUN_DIR"))'
+    printf '%s\n' '    workingDir = new File(System.getenv("MINECRAFTAI_HARNESS_RUN_DIR"))'
     printf '%s\n' '    doFirst {'
-    printf '%s\n' '      def expected = new File(System.getenv("AIBOT_HARNESS_RUN_DIR")).canonicalFile'
+    printf '%s\n' '      def expected = new File(System.getenv("MINECRAFTAI_HARNESS_RUN_DIR")).canonicalFile'
     printf '%s\n' '      def actual = getWorkingDir().canonicalFile'
-    printf '%s\n' '      if (actual != expected) { throw new GradleException("AIBot evidence workingDir mismatch") }'
-    printf '%s\n' '      println("AIBOT_EVIDENCE_WORKDIR=" + actual)'
-    printf '%s\n' '      println("AIBOT_EVIDENCE_JAVA_HOME=" + System.getProperty("java.home"))'
-    printf '%s\n' '      println("AIBOT_EVIDENCE_JAVA_VERSION=" + System.getProperty("java.version"))'
-    printf '%s\n' '      println("AIBOT_EVIDENCE_JAVA_VENDOR=" + System.getProperty("java.vendor"))'
+    printf '%s\n' '      if (actual != expected) { throw new GradleException("MinecraftAi evidence workingDir mismatch") }'
+    printf '%s\n' '      println("MINECRAFTAI_EVIDENCE_WORKDIR=" + actual)'
+    printf '%s\n' '      println("MINECRAFTAI_EVIDENCE_JAVA_HOME=" + System.getProperty("java.home"))'
+    printf '%s\n' '      println("MINECRAFTAI_EVIDENCE_JAVA_VERSION=" + System.getProperty("java.version"))'
+    printf '%s\n' '      println("MINECRAFTAI_EVIDENCE_JAVA_VENDOR=" + System.getProperty("java.vendor"))'
     printf '%s\n' '    }'
     printf '%s\n' '  }'
     printf '%s\n' '}'
@@ -373,14 +373,14 @@ else
   FD_OPEN=1
 
   if [[ $WITH_LLM -eq 1 ]]; then
-    env AIBOT_PROFILE="$PROFILE" AIBOT_MINING_ASSIST="$ASSIST_MODE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
+    env MINECRAFTAI_PROFILE="$PROFILE" MINECRAFTAI_MINING_ASSIST="$ASSIST_MODE" MINECRAFTAI_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
       "$EXEC_ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
-      -p "$EXEC_ROOT" -PaibotHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
+      -p "$EXEC_ROOT" -PminecraftaiHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
       -I "$RUN_DIR/evidence.init.gradle" runHarnessServer <&9 >> "$STAGING/server.log" 2>&1 &
   else
-    env -u AIBOT_LLM_API_KEY -u DEEPSEEK_API_KEY AIBOT_PROFILE="$PROFILE" AIBOT_MINING_ASSIST="$ASSIST_MODE" AIBOT_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
+    env -u MINECRAFTAI_LLM_API_KEY -u DEEPSEEK_API_KEY MINECRAFTAI_PROFILE="$PROFILE" MINECRAFTAI_MINING_ASSIST="$ASSIST_MODE" MINECRAFTAI_HARNESS_RUN_DIR="$SERVER_RUN_DIR" \
       "$EXEC_ROOT/gradlew" --no-daemon --console=plain --no-build-cache \
-      -p "$EXEC_ROOT" -PaibotHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
+      -p "$EXEC_ROOT" -PminecraftaiHarnessRunDir="$RELATIVE_SERVER_RUN_DIR" \
       -I "$RUN_DIR/evidence.init.gradle" runHarnessServer <&9 >> "$STAGING/server.log" 2>&1 &
   fi
   SERVER_PID=$!
@@ -390,7 +390,7 @@ else
     kill -0 "$SERVER_PID" 2>/dev/null || break
     sleep 1
   done
-  if grep -aFq "AIBOT_EVIDENCE_WORKDIR=$SERVER_RUN_DIR" "$STAGING/server.log" 2>/dev/null; then
+  if grep -aFq "MINECRAFTAI_EVIDENCE_WORKDIR=$SERVER_RUN_DIR" "$STAGING/server.log" 2>/dev/null; then
     WORKDIR_VERIFIED=yes
   fi
 
@@ -404,13 +404,13 @@ else
     [[ -n "$ACTUAL_SEED" ]] || ACTUAL_SEED=unknown
     if [[ "$ACTUAL_SEED" == "$REQUESTED_SEED" ]]; then ACTUAL_SEED_VERIFIED=yes; fi
 
-    printf 'aibot spawn EvidenceBot assistant\n' >&9 || READY=no
+    printf 'minecraftai spawn EvidenceBot assistant\n' >&9 || READY=no
     sleep 5
-    printf 'aibot verify %s\n' "$SCENARIO" >&9 || READY=no
+    printf 'minecraftai verify %s\n' "$SCENARIO" >&9 || READY=no
     for ((i = 0; i < MAXWAIT; i++)); do
       observe_mining_timeout_contract
       [[ -z "$TIMEOUT_CONTRACT_ERROR" ]] || break
-      grep -aqE '\[AIBot Verify\] summary' "$STAGING/server.log" 2>/dev/null && break
+      grep -aqE '\[MinecraftAi Verify\] summary' "$STAGING/server.log" 2>/dev/null && break
       kill -0 "$SERVER_PID" 2>/dev/null || break
       sleep 1
     done
@@ -438,9 +438,9 @@ if [[ "$MODE" == fixture ]]; then
   [[ -n "$ACTUAL_SEED" ]] || ACTUAL_SEED=unknown
   [[ "$ACTUAL_SEED" == "$REQUESTED_SEED" ]] && ACTUAL_SEED_VERIFIED=yes
 fi
-JAVA_HOME_ACTUAL="$(sed -n 's/^AIBOT_EVIDENCE_JAVA_HOME=//p' "$STAGING/server.log" | tail -1)"
-JAVA_VERSION_ACTUAL="$(sed -n 's/^AIBOT_EVIDENCE_JAVA_VERSION=//p' "$STAGING/server.log" | tail -1)"
-JAVA_VENDOR_ACTUAL="$(sed -n 's/^AIBOT_EVIDENCE_JAVA_VENDOR=//p' "$STAGING/server.log" | tail -1)"
+JAVA_HOME_ACTUAL="$(sed -n 's/^MINECRAFTAI_EVIDENCE_JAVA_HOME=//p' "$STAGING/server.log" | tail -1)"
+JAVA_VERSION_ACTUAL="$(sed -n 's/^MINECRAFTAI_EVIDENCE_JAVA_VERSION=//p' "$STAGING/server.log" | tail -1)"
+JAVA_VENDOR_ACTUAL="$(sed -n 's/^MINECRAFTAI_EVIDENCE_JAVA_VENDOR=//p' "$STAGING/server.log" | tail -1)"
 JAVA_RUNTIME_VERIFIED=no
 if [[ -n "$JAVA_HOME_ACTUAL" && -n "$JAVA_VERSION_ACTUAL" && -n "$JAVA_VENDOR_ACTUAL" ]]; then
   JAVA_RUNTIME_VERIFIED=yes
@@ -462,7 +462,7 @@ path = sys.argv[1]
 with open(path, "rb") as handle:
     data = handle.read()
 count = 0
-for name in ("AIBOT_LLM_API_KEY", "DEEPSEEK_API_KEY"):
+for name in ("MINECRAFTAI_LLM_API_KEY", "DEEPSEEK_API_KEY"):
     secret = os.environ.get(name, "").encode()
     if secret:
         occurrences = data.count(secret)
@@ -470,7 +470,7 @@ for name in ("AIBOT_LLM_API_KEY", "DEEPSEEK_API_KEY"):
             data = data.replace(secret, b"<redacted:llm_api_key>")
             count += occurrences
 patterns = (
-    re.compile(rb"(?i)((?:AIBOT_LLM|DEEPSEEK)_API_KEY\s*[=:]\s*)([^\s]+)"),
+    re.compile(rb"(?i)((?:MINECRAFTAI_LLM|DEEPSEEK)_API_KEY\s*[=:]\s*)([^\s]+)"),
     re.compile(rb"(?i)(api[_-]?key\s*[=:]\s*)([\"']?)(sk-[A-Za-z0-9_-]{8,})([\"']?)"),
     re.compile(rb"sk-[A-Za-z0-9_-]{12,}"),
     re.compile(rb"AIza[A-Za-z0-9_-]{20,}"),
@@ -491,14 +491,14 @@ print(count)
 PY
 )" || exit 3
 [[ "$LOG_SECRET_REDACTIONS" =~ ^[0-9]+$ ]] || exit 3
-for llm_key_var in AIBOT_LLM_API_KEY DEEPSEEK_API_KEY; do
+for llm_key_var in MINECRAFTAI_LLM_API_KEY DEEPSEEK_API_KEY; do
   llm_key_value="${!llm_key_var:-}"
   if [[ -n "$llm_key_value" ]] && grep -aFq -- "$llm_key_value" "$STAGING/server.log"; then
     printf 'evidence-run: refusing to seal a log containing %s\n' "$llm_key_var" >&2
     exit 3
   fi
 done
-if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(AIBOT_LLM|DEEPSEEK)_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$STAGING/server.log"; then
+if grep -aEq 'sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(MINECRAFTAI_LLM|DEEPSEEK)_API_KEY[[:space:]]*[=:][[:space:]]*[^<[:space:]]' "$STAGING/server.log"; then
   printf 'evidence-run: refusing to seal a log containing credential-like data\n' >&2
   exit 3
 fi
@@ -512,7 +512,7 @@ else
   WORKTREE_STATE_END=clean
 fi
 
-SUMMARY="$(grep -aE '\[AIBot Verify\] summary' "$STAGING/server.log" 2>/dev/null | tail -1 || true)"
+SUMMARY="$(grep -aE '\[MinecraftAi Verify\] summary' "$STAGING/server.log" 2>/dev/null | tail -1 || true)"
 SUMMARY="$(harness_tsv_value "$SUMMARY")"
 PASSED="$(printf '%s\n' "$SUMMARY" | sed -nE 's/.*summary ([0-9]+)\/([0-9]+) PASS.*/\1/p')"
 TOTAL="$(printf '%s\n' "$SUMMARY" | sed -nE 's/.*summary ([0-9]+)\/([0-9]+) PASS.*/\2/p')"

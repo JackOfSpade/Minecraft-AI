@@ -1,17 +1,17 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.craft.CraftingHelper;
-import io.github.zoyluo.aibot.craft.RecipeRegistry;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.craft.CraftingHelper;
+import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
@@ -107,7 +107,9 @@ public final class CraftTask extends AbstractTask {
     }
 
     private void plan(AIPlayerEntity bot) {
-        // 幂等短路:工作台/熔炉这类功能方块,若附近已有(够得着)或背包已有,直接完成,不浪费材料重复制造。
+        // Idempotent short-circuit: for functional-block targets like a crafting table/furnace, if
+        // one is already available nearby (within reach) or already in inventory, complete
+        // immediately instead of wasting materials crafting a duplicate.
         if (utilityAlreadyAvailable(bot)) {
             BotLog.action(bot, "craft_skipped_already_available", "item", Registries.ITEM.getId(target).toString());
             complete();

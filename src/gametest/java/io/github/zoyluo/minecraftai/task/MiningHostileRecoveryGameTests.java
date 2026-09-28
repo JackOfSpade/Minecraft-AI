@@ -1,14 +1,14 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -89,7 +89,7 @@ public final class MiningHostileRecoveryGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_unmarked_straight_leg_rejects_wrong_side_and_owns_its_front_barricade", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_unmarked_straight_leg_rejects_wrong_side_and_owns_its_front_barricade", maxTicks = 40)
     public void unmarkedStraightLegRejectsWrongSideAndOwnsItsFrontBarricade(
             TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningUnmarkedBarricadeGT");
@@ -134,7 +134,7 @@ public final class MiningHostileRecoveryGameTests {
         finish(context, fixture);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_marker_only_reroute_rejects_standable_geometric_reverse_without_mutation", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_marker_only_reroute_rejects_standable_geometric_reverse_without_mutation", maxTicks = 40)
     public void markerOnlyRerouteRejectsStandableGeometricReverseWithoutMutation(
             TestContext context) {
         TunnelFixture fixture = quietTunnel(context, "MiningMarkerOnlyBarricadeGT");
@@ -191,13 +191,13 @@ public final class MiningHostileRecoveryGameTests {
     // This long live-entity sequence builds beyond EMPTY_STRUCTURE's tiny template.
     // Keep it out of the short sibling batch so a neighbouring context cannot complete
     // and clear one of these deliberately retained hostiles before the final assertion.
-    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_ore_dig_retreats_and_permanently_barricades_four_hostiles", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_ore_dig_retreats_and_permanently_barricades_four_hostiles", maxTicks = 500)
     public void oreDigRetreatsAndPermanentlyBarricadesFourHostiles(TestContext context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
         assertStrictCapabilities(context, bot);
         BlockPos finalNorthRear = fixture.workFace().south();
-        require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                         bot, finalNorthRear, "mining_hostile_corner_setup"),
                 "fixture could not enter the factual old north leg");
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 3));
@@ -225,7 +225,7 @@ public final class MiningHostileRecoveryGameTests {
         // south, while east's geometric reverse west has never been traversed.
         initial.tick(bot);
         bot.getActionPack().stopAll();
-        require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                         bot, fixture.workFace(), "mining_hostile_factual_corner_fixture"),
                 "fixture could not complete its final factual north step");
         initial.tick(bot);
@@ -366,7 +366,7 @@ public final class MiningHostileRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:mining_hostile_recovery_game_tests_one_block_cannot_commit_a_two_cell_mining_barricade", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_one_block_cannot_commit_a_two_cell_mining_barricade", maxTicks = 40)
     public void oneBlockCannotCommitATwoCellMiningBarricade(TestContext context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeOneBlockGT");
         AIPlayerEntity bot = fixture.bot();
@@ -549,8 +549,8 @@ public final class MiningHostileRecoveryGameTests {
     }
 
     private static void assertStrictCapabilities(TestContext context, AIPlayerEntity bot) {
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         for (PrivilegedCapability capability : PrivilegedCapability.values()) {
             require(context, !CapabilityRuntime.decide(
                             bot, capability, "mining_hostile_recovery_gametest").allowed(),

@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -20,10 +20,15 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * PLACE_STATIONS(Phase2 基建目标):把背包里的工作台 / 熔炉 / 箱子摆到 bot 周围的空地上,形成一个固定的生产+存储据点。
+ * PLACE_STATIONS (Phase 2 infrastructure goal): places the crafting table / furnace / chest from
+ * the inventory onto empty ground around the bot, forming a fixed production+storage station.
  *
- * 复用 {@link BuildAction#placeBlockAt}(与应急掩体同一放置原语):切手持 → 放在脚边可放置的空格(脚下实心、上方净空)。
- * 背包里缺哪件就跳过哪件(GoalPlanner 会先倒推备齐三件)。自包含状态机(G1),全程主线程(G2)。
+ * Reuses {@link BuildAction#placeBlockAt} (the same placement primitive as the emergency shelter):
+ * switch the held item, then place it in a placeable empty spot near the bot's feet (solid block
+ * underneath, clear space above).
+ * Whichever item is missing from the inventory is skipped (GoalPlanner already back-plans to
+ * gather all three beforehand). Self-contained state machine (G1), runs entirely on the main
+ * thread (G2).
  */
 public final class PlaceStationsTask extends AbstractTask {
     private static final int MAX_ELAPSED = 600;
@@ -89,7 +94,7 @@ public final class PlaceStationsTask extends AbstractTask {
         int slot = findSlot(bot, station);
         if (slot < 0) {
             BotLog.action(bot, "place_stations_missing_item", "item", Registries.ITEM.getId(station));
-            pending.remove(0); // 背包没这件了 → 跳过
+            pending.remove(0); // This item is no longer in the inventory -> skip it
             return;
         }
         BlockPos spot = findFreeSpot(bot);
@@ -115,7 +120,7 @@ public final class PlaceStationsTask extends AbstractTask {
         }
     }
 
-    // bot 周围 1~2 格、尚未用过、且"上方净空 + 脚下实心"的可放置空地。
+    // A placeable empty spot 1-2 blocks around the bot that hasn't been used yet, with clear space above and a solid block underneath.
     private BlockPos findFreeSpot(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();

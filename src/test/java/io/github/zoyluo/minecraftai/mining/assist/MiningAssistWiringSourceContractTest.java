@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,14 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Source contract of the process-level wiring of the mining assist, phase P0 (mining-assist design 8.1):
- * config load and tick-headroom measurement in {@code AIBotMod}, sidecar and cleanup ordering in
+ * config load and tick-headroom measurement in {@code MinecraftAiMod}, sidecar and cleanup ordering in
  * {@code RuntimeLifecycleCoordinator}, the harness default in the GameTest mod, and the promise that
  * {@code OreDigTask} is not touched in P0.
  */
 class MiningAssistWiringSourceContractTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
     private static final Path HARNESS = Path.of(
-            "src/gametest/java/io/github/zoyluo/aibot/gametest/AIBotHarnessTestMod.java");
+            "src/gametest/java/io/github/zoyluo/minecraftai/gametest/MinecraftAiHarnessTestMod.java");
 
     private static String read(Path path) throws IOException {
         return Files.readString(path);
@@ -34,26 +34,26 @@ class MiningAssistWiringSourceContractTest {
         return source.substring(start, end);
     }
 
-    // ---- AIBotMod ---------------------------------------------------------------------------------------
+    // ---- MinecraftAiMod ---------------------------------------------------------------------------------------
 
     @Test
     void theAssistConfigIsLoadedRightAfterTheMainConfigAndItsLogsAreStarted() throws IOException {
-        String mod = read(MAIN.resolve("AIBotMod.java"));
-        int mainConfig = mod.indexOf("AIBotConfig config = AIBotConfig.load();");
+        String mod = read(MAIN.resolve("MinecraftAiMod.java"));
+        int mainConfig = mod.indexOf("MinecraftAiConfig config = MinecraftAiConfig.load();");
         int logStart = mod.indexOf("BotLogWriter.INSTANCE.start(config);");
         int configLogged = mod.indexOf("BotLog.config(\"config_loaded\"");
-        int assistLoad = mod.indexOf("MiningAssistRuntime.load(FabricLoader.getInstance().getConfigDir().resolve(\"aibot.json\"));");
+        int assistLoad = mod.indexOf("MiningAssistRuntime.load(FabricLoader.getInstance().getConfigDir().resolve(\"minecraftai.json\"));");
         int brain = mod.indexOf("BrainCoordinator.INSTANCE.configure(config);");
         assertTrue(mainConfig > 0 && logStart > mainConfig && configLogged > logStart,
                 "the existing start-up order is unchanged");
-        assertTrue(assistLoad > configLogged, "loaded after AIBotConfig.load() and once logging is up");
+        assertTrue(assistLoad > configLogged, "loaded after MinecraftAiConfig.load() and once logging is up");
         assertTrue(assistLoad < brain, "and before any bot subsystem is configured");
         assertEquals(1, count(mod, "MiningAssistRuntime.load("));
     }
 
     @Test
     void theTickStartIsRecordedAndTheHeadroomEndIsTheLastStatementOfTheEndLambda() throws IOException {
-        String mod = read(MAIN.resolve("AIBotMod.java"));
+        String mod = read(MAIN.resolve("MinecraftAiMod.java"));
         int start = mod.indexOf("ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());");
         int end = mod.indexOf("ServerTickEvents.END_SERVER_TICK.register(server -> {");
         assertTrue(start > 0 && end > start, "START is registered before END");

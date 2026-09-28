@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 /**
  * Everything {@link SafeGate#evaluate} may look at, as plain values (mining-assist design 4.4). Built by
@@ -16,7 +16,7 @@ package io.github.zoyluo.aibot.mining.assist;
  * @param headroomStartOk     item 2, START: {@code TickHeadroom.canStart(tpsDegraded)}
  * @param headroomAbort       item 2, TICK: {@code TickHeadroom.shouldAbort(tpsDegraded)} (side effect: disarms; only call while a detour is live)
  * @param health              item 3: the bot's current health
- * @param retreatHp           item 3: {@code AIBotConfig.combat().retreatHp()}
+ * @param retreatHp           item 3: {@code MinecraftAiConfig.combat().retreatHp()}
  * @param startHpMargin       item 3: {@code detour.startHpMargin}
  * @param hurtTime            item 3: {@code bot.hurtTime}
  * @param onFire              item 3
@@ -24,7 +24,7 @@ package io.github.zoyluo.aibot.mining.assist;
  * @param submerged           item 3: {@code bot.isSubmergedInWater()}
  * @param touchingWater       item 3: {@code bot.isTouchingWater()}
  * @param foodLevel           item 3: the hunger manager's food level
- * @param hungerCritical      item 3: {@code AIBotConfig.survival().hungerCriticalThreshold()}
+ * @param hungerCritical      item 3: {@code MinecraftAiConfig.survival().hungerCriticalThreshold()}
  * @param waterRescueActive   item 4: {@code NavSafetyNet.isWaterRescueActive(bot)}
  * @param pausedDepth         item 4: {@code TaskManager.pausedDepth(bot)}
  * @param userPaused          item 4: {@code TaskManager.isUserPaused(bot)}
@@ -39,7 +39,7 @@ package io.github.zoyluo.aibot.mining.assist;
  * @param poiEvidenceStale    item 9: the POI facts are not fresh (score never computed or older than 60 ticks while {@code poi.enabled}, no state, or the window cannot be trusted); fails closed as POI_EVIDENCE
  * @param poiWindowVeto       item 9: {@link SafeGate#poiWindowVeto} of the POI window
  * @param poiCandidatePending item 9: a POI candidate is pending, see {@link SafeGate#candidatePending}
- * @param inNoDetourZone      item 9: inside a mandatory no-detour zone ({@link io.github.zoyluo.aibot.mining.assist.MandatoryLatch#inNoDetourZone})
+ * @param inNoDetourZone      item 9: inside a mandatory no-detour zone ({@link io.github.zoyluo.minecraftai.mining.assist.MandatoryLatch#inNoDetourZone})
  * @param trapNear            item 10: a remembered TRAP cell within 3 blocks of the bot, the stand pose or the valuable
  */
 public record SafeGateInputs(

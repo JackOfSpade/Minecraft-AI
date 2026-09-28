@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -26,9 +26,9 @@ class ToolRegistryStrictMiningBoundaryTest {
     @Test
     void everyPublicRouteRejectsBeforeReplacingTheCurrentTask() throws IOException {
         String registry = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/brain/ToolRegistry.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/brain/ToolRegistry.java"));
         String command = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/command/AIBotTaskSubcommand.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/command/MinecraftAiTaskSubcommand.java"));
 
         assertTrue(occurrences(registry, "legacyMiningTaskRejection(\"") >= 2,
                 "direct strip_mine and mine_vein handlers must both reject strict mode");

@@ -1,17 +1,17 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.AbstractTask;
-import io.github.zoyluo.aibot.task.StripMineTask;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.AbstractTask;
+import io.github.zoyluo.minecraftai.task.StripMineTask;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.command.permission.LeveledPermissionPredicate;
@@ -101,9 +101,9 @@ public final class ToolRegistryMiningGameTests {
                     .withOutput(output);
 
             runRejectedCommand(context, fixture, playerSource, output,
-                    "aibot task assign StripCmdGT strip_mine north 8 4");
+                    "minecraftai task assign StripCmdGT strip_mine north 8 4");
             runRejectedCommand(context, fixture, playerSource, output,
-                    "aibot task assign StripCmdGT mine_vein minecraft:diamond_ore");
+                    "minecraftai task assign StripCmdGT mine_vein minecraft:diamond_ore");
         } finally {
             cleanupFixture(context, fixture);
         }

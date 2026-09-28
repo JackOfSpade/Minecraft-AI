@@ -1,19 +1,19 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.BucketAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.BucketAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
@@ -419,7 +419,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             collected = total;
             lastProgressTick = totalBudget();
             BotLog.action(bot, "create_obsidian_collected", "total", collected + "/" + targetCount);
-            io.github.zoyluo.aibot.brain.BotReporter.INSTANCE.onGoalMessage(bot,
+            io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
                     "Collected obsidian: " + collected + "/" + targetCount + ".");
         }
         // Transaction safety phases outrank goal satisfaction. A drop can enter inventory while
@@ -953,7 +953,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean hasSearchLightingResource(AIPlayerEntity bot) {
-        if (!AIBotConfig.get().mining().placeTorches()) {
+        if (!MinecraftAiConfig.get().mining().placeTorches()) {
             fail("create_obsidian_search_lighting_disabled");
             return false;
         }
@@ -1001,7 +1001,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static int searchLightThreshold() {
-        return Math.max(1, Math.min(14, AIBotConfig.get().night().torchLightThreshold()));
+        return Math.max(1, Math.min(14, MinecraftAiConfig.get().night().torchLightThreshold()));
     }
 
     private static int combinedSearchLight(ServerWorld world, BlockPos pos) {
@@ -1145,9 +1145,11 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         waterSource = pourPlan.destination().toImmutable();
         waterBucketBaseline = waterBefore;
-        // 平摊池地形的倒水点离线索最远 4 格,而原版水每 5 tick 才推进一格:固定 4-tick 等待
-        // 意味着水永远到不了岩浆、回收时世界零变化,同一线索无限重放(F4 活锁)。等待时长
-        // 按实际距离缩放,并记住这次浇的是哪个线索,供排空后判定"颗粒无收"时拒绝。
+        // On flat-pool terrain the pour destination can be up to 4 blocks from the clue, and
+        // vanilla water only advances one block per 5 ticks: a fixed 4-tick wait would mean the
+        // water never reaches the lava, the world shows zero change on recovery, and the same
+        // clue gets replayed forever (an F4 livelock). Scale the wait by the actual distance, and
+        // remember which clue this pour targeted so a drain that converts nothing can reject it.
         int flowDistance = Math.max(
                 Math.abs(waterSource.getX() - lavaClue.getX()),
                 Math.abs(waterSource.getZ() - lavaClue.getZ()));
@@ -3145,7 +3147,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                                   Predicate<BlockPos> posFilter) {
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        int range = Math.min(PROSPECT_RANGE, Math.max(1, AIBotConfig.get().perception().radius()));
+        int range = Math.min(PROSPECT_RANGE, Math.max(1, MinecraftAiConfig.get().perception().radius()));
         int minY = Math.max(world.getBottomY(), origin.getY() - range);
         int maxY = Math.min(world.getBottomY() + world.getHeight() - 1, origin.getY() + range);
         BlockPos best = null;

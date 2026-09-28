@@ -1,44 +1,44 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.brain.BotReporter;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.task.BlueprintSchema;
-import io.github.zoyluo.aibot.task.BuildTask;
-import io.github.zoyluo.aibot.task.CheckpointableTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.CreateObsidianTask;
-import io.github.zoyluo.aibot.task.DescendToYTask;
-import io.github.zoyluo.aibot.task.DigDownTask;
-import io.github.zoyluo.aibot.task.FarmTask;
-import io.github.zoyluo.aibot.task.GatherQuotaTask;
-import io.github.zoyluo.aibot.task.HuntSearchCursor;
-import io.github.zoyluo.aibot.task.HuntPickupCheckpoint;
-import io.github.zoyluo.aibot.task.HuntTask;
-import io.github.zoyluo.aibot.task.MilkCowTask;
-import io.github.zoyluo.aibot.task.MiningServiceTask;
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.PlaceStationsTask;
-import io.github.zoyluo.aibot.task.ResupplyTask;
-import io.github.zoyluo.aibot.task.SmeltTask;
-import io.github.zoyluo.aibot.task.StockpileTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskState;
-import io.github.zoyluo.aibot.task.TaskStatus;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.persist.MissionRecord;
-import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
-import io.github.zoyluo.aibot.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.brain.BotReporter;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.task.BlueprintLoader;
+import io.github.zoyluo.minecraftai.task.BlueprintSchema;
+import io.github.zoyluo.minecraftai.task.BuildTask;
+import io.github.zoyluo.minecraftai.task.CheckpointableTask;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.CreateObsidianTask;
+import io.github.zoyluo.minecraftai.task.DescendToYTask;
+import io.github.zoyluo.minecraftai.task.DigDownTask;
+import io.github.zoyluo.minecraftai.task.FarmTask;
+import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
+import io.github.zoyluo.minecraftai.task.HuntSearchCursor;
+import io.github.zoyluo.minecraftai.task.HuntPickupCheckpoint;
+import io.github.zoyluo.minecraftai.task.HuntTask;
+import io.github.zoyluo.minecraftai.task.MilkCowTask;
+import io.github.zoyluo.minecraftai.task.MiningServiceTask;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.PlaceStationsTask;
+import io.github.zoyluo.minecraftai.task.ResupplyTask;
+import io.github.zoyluo.minecraftai.task.SmeltTask;
+import io.github.zoyluo.minecraftai.task.StockpileTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskState;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.persist.MissionRecord;
+import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
@@ -141,12 +141,12 @@ public final class GoalExecutor {
             "pocket_clear_index");
 
     private final Map<UUID, ActivePlan> activePlans = new ConcurrentHashMap<>();
-    // P0 目标队列(对话式助手根基):复合指令"先搞吃的再挖铁"需要连续目标。原单 plan 模型下
-    // 第二个目标会被拒/覆盖(prompt 甚至要求"一次一个,调完 STOP")。现在:活跃目标存在时新目标入队,
-    // 当前目标完成/失败后自动出队衔接(像真人:手头干完接着办下一件,办不成说一声跳过)。
+    // P0 goal queue (foundation of the conversational assistant): a compound instruction like "get food first, then mine iron" needs sequential goals. Under the original single-plan model,
+    // the second goal would be rejected/overwritten (the prompt even required "one at a time, wait for STOP before the next"). Now: when an active goal exists, a new goal is enqueued,
+    // and once the current goal completes/fails it automatically dequeues the next one (like a real person: finish what's in hand, then move to the next thing; if it can't be done, say so and skip).
     private final Map<UUID, java.util.Deque<Goal>> goalQueue = new ConcurrentHashMap<>();
-    private final Map<UUID, Integer> lastGoalFailTick = new ConcurrentHashMap<>(); // 优化2:goal 整体失败时刻,拦大脑随后手动逐格挖矿
-    private final Map<UUID, Goal> userGoal = new ConcurrentHashMap<>(); // B:用户原始高层目标,防大脑把它降级成其前置子目标(挖钻石→做铁镐)
+    private final Map<UUID, Integer> lastGoalFailTick = new ConcurrentHashMap<>(); // Optimization 2: the tick when the goal failed overall, used to block the brain's subsequent manual block-by-block mining
+    private final Map<UUID, Goal> userGoal = new ConcurrentHashMap<>(); // B: the user's original high-level goal, to prevent the brain from downgrading it to one of its prerequisite sub-goals (mine diamond -> make iron pickaxe)
     private final Map<UUID, GoalResult> lastResults = new ConcurrentHashMap<>();
     // Death is a recoverable interruption for long-running Missions. The exact Mission record is
     // detached while the safety-origin corpse run owns TaskManager, then restored with the same id.
@@ -238,15 +238,15 @@ public final class GoalExecutor {
         if (suspendedSubmission.isPresent()) {
             return suspendedSubmission.orElseThrow();
         }
-        // GOALFIX-GF3:幂等——同一 bot 已有相同目标的活跃计划时,忽略重复 submit
-        //(防大脑连点 mine_ore/achieve_goal 覆盖计划、打断进行中的步骤)。
+        // GOALFIX-GF3: idempotency -- when the same bot already has an active plan for the same goal, ignore the duplicate submit
+        // (prevents the brain from repeatedly calling mine_ore/achieve_goal, overwriting the plan and interrupting a step in progress).
         ActivePlan existing = activePlans.get(bot.getUuid());
         if (existing != null && existing.goal.equals(goal)) {
             BotLog.task(bot, "goal_submit_ignored", "goal", goal, "reason", "duplicate_active_plan");
             return true;
         }
-        // P0 队列:已有进行中的目标 → 新目标入队(去重),手头干完自动接续。复合指令/连续吩咐的根基。
-        // 注意放在"前置降级拦截"之后判定才安全?不——降级拦截在下面,先让它检查:子目标仍要拦。
+        // P0 queue: an in-progress goal already exists -> the new goal is enqueued (de-duplicated), and once the current work finishes it automatically continues to the next one. This is the foundation for compound instructions/sequential requests.
+        // Note: is it only safe to check this after the "prerequisite downgrade block"? No -- the downgrade block is below; let it run its check first: a sub-goal must still be blocked.
         java.util.Deque<Goal> queued = goalQueue.computeIfAbsent(bot.getUuid(), k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
         if (existing != null) {
             Goal ugQ = userGoal.get(bot.getUuid());
@@ -265,8 +265,8 @@ public final class GoalExecutor {
             markDirty(bot);
             return true;
         }
-        // B:保护用户原始目标——大脑不能把它降级成其前置子目标。实测:挖钻石失败后大脑 achieve_goal 做铁镐、
-        // mine_ore 挖铁(都是挖钻石的前置)覆盖了目标,做完铁镐还误报"任务完成、最初要求是挖铁做镐"。
+        // B: protect the user's original goal -- the brain must not downgrade it to one of its prerequisite sub-goals. Observed in testing: after mining diamond failed, the brain's achieve_goal to make an iron pickaxe,
+        // and mine_ore to mine iron (both prerequisites of mining diamond), overwrote the goal -- and after making the iron pickaxe it falsely reported "task complete", when the original request was to mine iron and make a pickaxe.
         Goal ug = userGoal.get(bot.getUuid());
         if (ug != null && !ug.equals(goal) && isPrerequisiteOf(bot, goal, ug)) {
             BotLog.task(bot, "goal_downgrade_blocked", "sub", goal, "user", ug);
@@ -413,7 +413,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_mining_service_checkpoint");
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "mission_restore_isolated", "type", "MINING_SERVICE",
                     "reason", "invalid_task_checkpoint");
             return false;
@@ -467,7 +467,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_ore_dig_checkpoint");
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "mission_restore_isolated", "type", "MINE_ORE",
                     "reason", "invalid_task_checkpoint");
             return false;
@@ -503,7 +503,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_mining_checkpoint");
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "mission_restore_isolated", "type", "MINING_CURSOR",
                     "reason", "invalid_mining_checkpoint");
             return false;
@@ -675,7 +675,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_dig_down_checkpoint");
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "mission_restore_isolated", "type", "MINE",
                     "reason", "invalid_task_checkpoint");
             return false;
@@ -691,7 +691,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_descend_checkpoint");
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "mission_restore_isolated", "type", "DESCEND_TO_Y",
                     "reason", "invalid_task_checkpoint");
             return false;
@@ -711,7 +711,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_obsidian_checkpoint");
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "mission_restore_isolated", "type", "MAKE_OBSIDIAN",
                     "reason", "invalid_task_checkpoint");
             return false;
@@ -1246,7 +1246,7 @@ public final class GoalExecutor {
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false), reason,
                     restoredSkippedResults);
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, bot, "goal_plan_failed",
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.TASK, bot, "goal_plan_failed",
                     "goal", goal,
                     "unresolved", plan.unresolved());
             return false;
@@ -1373,8 +1373,8 @@ public final class GoalExecutor {
         if (interruptedDescend) {
             reconcileDescendSteps(restoredSteps, restoredDescend.orElseThrow().targetY());
         }
-        // replace 边界:A 活跃、B 已排队，随后同批 stop + B。只有 B 已成功规划后才从旧队列移除；
-        // 若 replacement 规划失败，保留 B 让下一 tick 的常规 queue drain 再处理，不能静默丢目标。
+        // replace boundary: A is active, B is already queued, then in the same batch: stop + B. B is removed from the old queue only after it has been successfully planned;
+        // if planning the replacement fails, keep B so the next tick's normal queue drain can handle it again -- the goal must never be silently dropped.
         queued.removeFirstOccurrence(goal);
         if (restoredSteps.isEmpty()) {
             activePlans.remove(bot.getUuid());
@@ -1499,10 +1499,10 @@ public final class GoalExecutor {
             active.snapHuntVisitedSectors = active.huntSearchCursor.visitedCount();
         }
         activePlans.put(bot.getUuid(), active);
-        // 工作记忆 episode 边界:新目标=新 episode,上一件事的排除项/轨迹作废。
-        // (replan 不走这里——handleStepFailure 原地改 plan.steps,工作记忆跨 replan 存活,这正是设计。)
-        io.github.zoyluo.aibot.task.EpisodeMemory.INSTANCE.reset(bot.getUuid());
-        userGoal.putIfAbsent(bot.getUuid(), goal); // B:首个目标记为"用户原始目标";后续前置子目标被上面拦下,换目标由用户消息清空
+        // Working-memory episode boundary: a new goal = a new episode, so the previous task's exclusions/trajectory are invalidated.
+        // (A replan does not go through here -- handleStepFailure modifies plan.steps in place, and working memory surviving across a replan is intentional by design.)
+        io.github.zoyluo.minecraftai.task.EpisodeMemory.INSTANCE.reset(bot.getUuid());
+        userGoal.putIfAbsent(bot.getUuid(), goal); // B: record the first goal as the "user's original goal"; subsequent prerequisite sub-goals are blocked above, and switching goals is cleared by a user message
         BotLog.task(bot, "goal_plan", "goal", goal,
                 "steps", restoredSteps.stream().map(GoalStep::describe).toList());
         if (!pocketRestorePreflights.contains(bot.getUuid())
@@ -1596,20 +1596,20 @@ public final class GoalExecutor {
                     // branch below settles the original task exactly once.
                     return true;
                 }
-                // FREEZE fix:有外来活跃任务时,先看我们的 step 是否被暂存进 paused 池。
-                // 生存任务(战斗/逃跑/进食)抢占会把当前 step pauseFor 进 paused 池——这是临时抢占,
-                // 打完会 resume,绝不能放弃整个目标(实测:刷怪→combat→goal_abandoned×12→从零重规划空转)。
+                // FREEZE fix: when a foreign task is active, first check whether our step was parked into the paused pool.
+                // A survival task (combat/flee/eat) preempting the bot moves the current step's pauseFor into the paused pool -- this is a temporary preemption;
+                // it resumes once that task is done, so the whole goal must never be abandoned (observed in testing: mob spawn -> combat -> goal_abandoned x12 -> replanning from scratch in a loop).
                 if (TaskManager.INSTANCE.hasPaused(bot)) {
                     return true;
                 }
-                // step 既不活跃也不在暂停池 = 被玩家显式指令真正替换 → 放弃目标让位。
+                // The step is neither active nor in the paused pool = it was genuinely replaced by an explicit player instruction -> abandon the goal and yield.
                 BotLog.task(bot, "goal_abandoned", "goal", plan.goal, "reason", "foreign_task_assigned");
                 finishActive(bot, plan, evaluate(bot, plan), "foreign_task_assigned", false, true);
                 return false;
             }
             return true;
         }
-        // GOALFIX-GF1 P0-B:当前步被安全网暂停(生存任务抢占)→ 等待 resume,不要误判为步骤结束而跳步。
+        // GOALFIX-GF1 P0-B: the current step was paused by the safety net (survival task preemption) -> wait for resume; do not mistake this for the step ending and skip ahead.
         if (TaskManager.INSTANCE.hasPaused(bot)) {
             return true;
         }
@@ -1737,7 +1737,7 @@ public final class GoalExecutor {
                 retireClosedAuxiliaryMiningCheckpoint(plan);
             }
             clearCompletedTaskCheckpoint(plan);
-            plan.completedSteps++; // Phase A:完成一步=进展信号
+            plan.completedSteps++; // Phase A: completing a step = a progress signal
             GoalEvaluation completedEvaluation = evaluate(bot, plan);
             if (completedEvaluation.state() == GoalEvaluation.State.SATISFIED) {
                 finishActive(bot, plan, completedEvaluation,
@@ -1761,8 +1761,8 @@ public final class GoalExecutor {
             handleStepFailure(server, bot, plan, status.failureReason());
             return true;
         }
-        // GOALFIX-GF1 P0-B:其它状态(如上一任务残留的 lastStatus)→ 防御性 no-op,
-        // 步骤推进只由 COMPLETED 分支驱动,失败由 FAILED 分支驱动。
+        // GOALFIX-GF1 P0-B: other statuses (such as a leftover lastStatus from the previous task) -> defensive no-op;
+        // step advancement is driven only by the COMPLETED branch, and failure only by the FAILED branch.
         return true;
     }
 
@@ -1862,7 +1862,7 @@ public final class GoalExecutor {
                 metadata.expectedRawItemId())) {
             return false;
         }
-        int inventory = io.github.zoyluo.aibot.action.HarvestCore.countInventoryItems(
+        int inventory = io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
                 bot, Set.of(expected));
         int pickupStat = bot.getStatHandler().getStat(Stats.PICKED_UP, expected);
         return trustedClosedHuntPickupReceipt(
@@ -1911,7 +1911,7 @@ public final class GoalExecutor {
         changed |= userGoal.remove(uuid) != null;
         changed |= lastGoalFailTick.remove(uuid) != null;
         if (changed) {
-            io.github.zoyluo.aibot.task.EpisodeMemory.INSTANCE.reset(uuid);
+            io.github.zoyluo.minecraftai.task.EpisodeMemory.INSTANCE.reset(uuid);
             // Suspended/quarantined Missions have no ActivePlan for finishActive to persist.
             // Explicit cancellation must durably remove their raw physical checkpoint as well.
             markDirty(bot);
@@ -2024,7 +2024,7 @@ public final class GoalExecutor {
         dimensionSuspended.remove(uuid);
         restoreQuarantined.remove(uuid);
         pocketRestorePreflights.remove(uuid);
-        io.github.zoyluo.aibot.task.EpisodeMemory.INSTANCE.reset(uuid);
+        io.github.zoyluo.minecraftai.task.EpisodeMemory.INSTANCE.reset(uuid);
     }
 
     public void clearAllRuntime() {
@@ -2209,7 +2209,7 @@ public final class GoalExecutor {
                             "invalid_goal_for_mining_service_pocket");
                     return;
                 }
-                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                         "mission_restore_isolated", "type", activeRecord.spec().type(), "reason", "invalid_spec");
             }
         }
@@ -2218,7 +2218,7 @@ public final class GoalExecutor {
             if (queued.isPresent()) {
                 submit(bot, queued.get());
             } else {
-                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                         "mission_queue_restore_isolated", "type", spec.type(), "reason", "invalid_spec");
             }
         }
@@ -2277,7 +2277,7 @@ public final class GoalExecutor {
         lastResults.remove(uuid);
         lastGoalFailTick.remove(uuid);
         TaskManager.INSTANCE.resetToIdle(bot);
-        BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                 "mission_restore_quarantined", "reason", reason,
                 "mission_id", runtime.active() == null
                         ? "queued_only" : runtime.active().missionId());
@@ -2830,7 +2830,7 @@ public final class GoalExecutor {
             try {
                 blueprint = BlueprintLoader.load(build.blueprint());
             } catch (IOException exception) {
-                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, bot,
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                         "mission_checkpoint_blueprint_missing", "blueprint", build.blueprint());
             }
         }
@@ -3268,13 +3268,13 @@ public final class GoalExecutor {
         return advanceQueue(bot);
     }
 
-    /** 诊断埋点:当前激活的顶层目标(无则 "none")。日志用,保留英文便于排查。 */
+    /** Diagnostic tracepoint: the currently active top-level goal (or "none" if there isn't one). For logging; kept in English to make troubleshooting easier. */
     public String describeActiveGoal(AIPlayerEntity bot) {
         ActivePlan plan = activePlans.get(bot.getUuid());
         return plan == null ? "none" : String.valueOf(plan.goal);
     }
 
-    /** 面板任务链条:目标标题(中文)。物品 id 保留 minecraft:xxx,客户端再本地化成中文名。 */
+    /** Panel task chain: goal title (Chinese). Item ids stay as minecraft:xxx; the client localizes them into a Chinese display name. */
     public String activeGoalTitle(AIPlayerEntity bot) {
         ActivePlan plan = activePlans.get(bot.getUuid());
         return plan == null ? "No active goal" : goalLabel(plan.goal);
@@ -3299,23 +3299,23 @@ public final class GoalExecutor {
         return id == null ? "unknown item" : id.getPath().replace('_', ' ');
     }
 
-    /** 诊断埋点:当前正在执行的步骤 + 进度 [第几步/总步数](无激活步则 "")。 */
+    /** Diagnostic tracepoint: the step currently being executed + progress [step number/total steps] (or "" if there is no active step). */
     public String describeActiveStep(AIPlayerEntity bot) {
         ActivePlan plan = activePlans.get(bot.getUuid());
         if (plan == null || plan.current == null) {
             return "";
         }
-        int idx = plan.totalSteps - plan.steps.size(); // current 已从 steps 取出,正在做第 idx 步
+        int idx = plan.totalSteps - plan.steps.size(); // current has already been taken out of steps; we are now on step idx
         return plan.current.describe() + " [" + idx + "/" + plan.totalSteps + "]";
     }
 
-    /** 面板任务链条:完整步骤描述列表(无激活计划则空)。 */
+    /** Panel task chain: the full list of step descriptions (empty if there is no active plan). */
     public java.util.List<String> activeGoalSteps(AIPlayerEntity bot) {
         ActivePlan plan = activePlans.get(bot.getUuid());
         return plan == null ? java.util.List.of() : plan.stepLabels;
     }
 
-    /** 面板任务链条:当前所处步骤的 0 基下标。 */
+    /** Panel task chain: the 0-based index of the current step. */
     public int activeGoalCurrentIndex(AIPlayerEntity bot) {
         ActivePlan plan = activePlans.get(bot.getUuid());
         if (plan == null || plan.current == null) {
@@ -3324,13 +3324,13 @@ public final class GoalExecutor {
         return Math.max(0, plan.totalSteps - plan.steps.size() - 1);
     }
 
-    /** 面板任务链条:总步数。 */
+    /** Panel task chain: the total number of steps. */
     public int activeGoalTotalSteps(AIPlayerEntity bot) {
         ActivePlan plan = activePlans.get(bot.getUuid());
         return plan == null ? 0 : plan.totalSteps;
     }
 
-    // P0 队列衔接:当前目标了结(完成/失败)后,自动开始队列里的下一个;规划失败的逐个跳过并说明。
+    // P0 queue continuation: once the current goal is settled (completed/failed), automatically start the next one in the queue; ones that fail to plan are skipped one by one, with an explanation each time.
     private boolean advanceQueue(AIPlayerEntity bot) {
         java.util.Deque<Goal> queued = goalQueue.get(bot.getUuid());
         if (queued == null) {
@@ -3343,9 +3343,9 @@ public final class GoalExecutor {
                 if (hasActivePlan(bot)) {
                     return true;
                 }
-                // 目标已经满足、没有创建 active plan：继续检查队列下一项。
+                // The goal is already satisfied and no active plan was created: keep checking the next item in the queue.
             }
-            // submit 失败(规划不成/被拦)已在内部 report 过原因,继续试队列里再下一个
+            // If submit failed (planning failed / blocked), the reason was already reported internally; keep trying the next one in the queue
         }
         goalQueue.remove(bot.getUuid(), queued);
         return false;
@@ -3476,7 +3476,7 @@ public final class GoalExecutor {
         Optional<Task> task = stepToTask(bot, step, plan);
         if (task.isEmpty()) {
             finishActive(bot, plan, evaluate(bot, plan), "unmapped_step:" + step.describe(), false, true);
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, bot, "goal_step_unmapped", "step", step.describe());
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.TASK, bot, "goal_step_unmapped", "step", step.describe());
             return;
         }
         plan.current = step;
@@ -3506,17 +3506,17 @@ public final class GoalExecutor {
                 || !java.util.Objects.equals(candidateFingerprint, lastFingerprint);
     }
 
-    // Phase A 进度信号:目标产物当前库存计数(HaveItem/Stockpile 用其物品,MineOre 用矿石掉落)。
+    // Phase A progress signal: the current inventory count of the goal's target product (HaveItem/Stockpile use its item; MineOre uses ore drops).
     private static int goalTargetCount(AIPlayerEntity bot, Goal goal) {
         if (goal instanceof Goal.HaveItem hi) {
-            return io.github.zoyluo.aibot.action.HarvestCore.countInventoryItems(bot, java.util.Set.of(hi.item()));
+            return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot, java.util.Set.of(hi.item()));
         }
         if (goal instanceof Goal.Stockpile sp) {
-            return io.github.zoyluo.aibot.action.HarvestCore.countInventoryItems(bot, java.util.Set.of(sp.item()));
+            return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot, java.util.Set.of(sp.item()));
         }
         if (goal instanceof Goal.MineOre mo) {
-            return io.github.zoyluo.aibot.action.HarvestCore.countInventoryItems(bot,
-                    io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(mo.ores()));
+            return io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(bot,
+                    io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(mo.ores()));
         }
         return 0;
     }
@@ -4031,12 +4031,12 @@ public final class GoalExecutor {
             plan.taskCheckpoint.clear();
             plan.taskCheckpointKind = null;
         }
-        // 第4层:显式 best-effort 步骤失败不阻断整体目标——跳过它直接继续下一步。
-        // 长配额挖矿的地表食物 readiness 不带该标记，HUNT/COOK 失败必须阻断，不能把缺粮拖到矿底。
-        // 打猎(Goal.Food)整体 best-effort:任何前置(砍树/做剑)失败都降级继续(用现有工具/空手猎),绝不卡死/发呆。
-        // 例外:Food 目标的 COOK_FOOD 是终局产出步——失败(no_raw_food)=整个目标必败,skip 等于无声放弃。
-        // 放行到下面的 replan:重新感知择源(打猎扑空后动物多半已不在,replan 会落到浆果/面包等兜底源;
-        // 实测打猎 1t 扑空 → 烤无肉 → 静默结束,从未给过兜底源机会)。
+        // Layer 4: a failure in an explicitly best-effort step does not block the overall goal -- skip it and continue directly to the next step.
+        // Surface food readiness for long-quota mining does not carry this flag; a HUNT/COOK failure must block, so a food shortage can't be carried all the way down to the bottom of the mine.
+        // Hunting (Goal.Food) is best-effort as a whole: a failure in any prerequisite (chopping wood/making a sword) is downgraded and continues (using existing tools/hunting bare-handed), and must never get stuck/stall.
+        // Exception: within a Food goal, COOK_FOOD is the final output step -- its failure (no_raw_food) means the whole goal must fail; skipping it would be a silent abandonment.
+        // Fall through to the replan below: re-sense and pick a new source (after a hunt comes up empty the animals are mostly gone by now; the replan will fall back to a source like berries/bread;
+        // observed in testing: hunting whiffs for 1 tick -> cooking with no meat -> silently ends, never giving the fallback source a chance).
         if (shouldSkipFailedStep(plan.goal, plan.current, reason)) {
             if (settledTerminalService.isEmpty()) {
                 captureTaskEvidence(bot, plan);
@@ -4059,9 +4059,9 @@ public final class GoalExecutor {
             captureTransitionAndAssignNext(bot, plan);
             return;
         }
-        // Phase A 进度感知预算(断点恢复核心):有进展→清零"连续无进展"计数。HUNT
-        // 只把净新增生肉或首次访问的搜索 sector 视为额外进展，绝不让追逐造成的横移/下潜
-        // 刷新预算；其他步骤保留矿道横移与下潜语义。
+        // Phase A progress-aware budget (the core of checkpoint/resume): progress made -> reset the "consecutive no-progress" counter. For HUNT,
+        // only a net increase in raw meat or a search sector visited for the first time counts as additional progress; lateral movement/descent caused by chasing prey must never
+        // refresh the budget. Other steps keep the semantics of mine-shaft lateral movement and descent.
         net.minecraft.util.math.BlockPos bp = bot.getBlockPos();
         int curTarget = goalTargetCount(bot, plan.goal);
         int currentHuntRawMeat = rawMeatCount(bot);
@@ -4078,7 +4078,7 @@ public final class GoalExecutor {
                 bp.getX(), bp.getY(), bp.getZ(),
                 plan.snapX, plan.snapY, plan.snapZ);
         if (madeProgress) {
-            plan.replanCount = 0; // 进展赦免
+            plan.replanCount = 0; // progress grants amnesty
         }
         plan.snapSteps = plan.completedSteps;
         plan.snapTargetCount = curTarget;
@@ -4088,10 +4088,10 @@ public final class GoalExecutor {
         plan.snapDimension = currentDimension;
         plan.snapHuntRawMeat = currentHuntRawMeat;
         plan.snapHuntVisitedSectors = currentHuntVisitedSectors;
-        // 死亡闸:连续 3 次无进展 replan，或耗尽与原始长配额批次数绑定的终生预算，
-        // 或 replan 关闭 → 判死。计数在闸后递增，因此上限表示实际允许的 replan 次数。
+        // Death gate: 3 consecutive no-progress replans, or the lifetime budget tied to the original long-quota batch count is exhausted,
+        // or replanning is disabled -> declare death. The counter increments after the gate check, so the cap represents the actual number of replans allowed.
         if (!withinReplanBudget(plan.goal, plan.replanCount, plan.lifetimeReplans)
-                || !AIBotConfig.get().goal().replanOnFailureEnabled()) {
+                || !MinecraftAiConfig.get().goal().replanOnFailureEnabled()) {
             finishActive(bot, plan, evaluate(bot, plan), reason, false, true);
             return;
         }
@@ -4120,8 +4120,8 @@ public final class GoalExecutor {
                     replanned, metadata.targetCount(), metadata.transactionOpen(),
                     isObsidianMissingResourceFailure(reason));
             if (metadata.transactionOpen() && resumeIndex > 0) {
-                // F5:缺物资失败下,补给前缀先于开放事务的 resume 步物理执行,否则恢复任务
-                // 第一 tick 以同因重败,三次零进展 replan 即判死。
+                // F5: under a missing-resource failure, the resupply prefix physically executes ahead of the open transaction's resume step; otherwise the resumed task
+                // would fail again for the same reason on its very first tick, and three zero-progress replans would declare it dead.
                 BotLog.task(bot, "goal_obsidian_resume_resupply_first",
                         "reason", reason,
                         "supply_steps", resumeIndex,
@@ -4178,18 +4178,17 @@ public final class GoalExecutor {
             }
         }
         if (plan.capacityParentNamespace != null && fresh.success()) {
-            // F8:通用 replan 即将清空整条步骤队列,容量服务的精确 retry 步会一并销毁。若 fresh
-            // 计划里不存在能重新绑定该 debit 的同族 MINE_ORE 步(checkpointForMineOre +
-            // isCapacityParentRetry 在指派时按 fingerprint/count 重新选中),capacity-parent 标记
-            // 将永久失去结算路径:证据采集从此拒绝所有 MINE_ORE 的 miningCheckpoint 更新,下一个
-            // 成功提交的稀有批次会在成功那一刻死于 rare_batch_commit_checkpoint_invalid。此处在
-            // 安装新队列的同一事务内回滚该标记。带未结物理台账(拾取/断块)或无法解码的 parent
-            // 保持既有 fail-closed 语义,不回滚。
+            // F8: a general replan is about to clear the entire step queue, which would also destroy the capacity service's precise retry step. If the fresh
+            // plan no longer contains a MINE_ORE step of the same family that could rebind this debit (checkpointForMineOre + isCapacityParentRetry
+            // re-select by fingerprint/count when assigning), the capacity-parent marker would permanently lose its settlement path: evidence capture would from then on reject
+            // every MINE_ORE miningCheckpoint update, and the next successfully committed rare batch would die at the moment of success with rare_batch_commit_checkpoint_invalid. Here, within
+            // the same transaction that installs the new queue, roll back that marker. A parent carrying an unsettled physical ledger (pickup/block-break) or one that can't be decoded
+            // keeps the existing fail-closed semantics and is not rolled back.
             Map<String, String> capacityParentCheckpoint = plan.capacityParentNamespace
                     == CapacityParentNamespace.AUXILIARY
                     ? plan.auxiliaryMiningCheckpoint : plan.miningCheckpoint;
-            // 与 settleCompletedCapacityParent 同一鉴别式:capacity parent 只可能是普通
-            // (rare_mission_target=0)批次;标记指向稀有游标属于不可解释状态,保持 fail-closed。
+            // Uses the same discriminant as settleCompletedCapacityParent: a capacity parent can only be a plain
+            // (rare_mission_target=0) batch; a marker pointing to a rare cursor is an unexplainable state, so it stays fail-closed.
             Optional<OreDigTask.RestoreMetadata> capacityParent =
                     OreDigTask.inspectCheckpoint(capacityParentCheckpoint, 0)
                             .filter(value -> value.rareMissionTarget() == 0);
@@ -4216,14 +4215,14 @@ public final class GoalExecutor {
                 plan.capacityParentFace = null;
                 plan.capacityParentServicesUsed = 0;
                 if (rolledBack == CapacityParentNamespace.AUXILIARY) {
-                    // 悬空的 open 普通批次游标没有物理债务;丢弃它,已交付产物在背包里,规划器按
-                    // 库存如实重算。保留它反而会让重启在缺 capacity 标记的 aux 命名空间上
-                    // fail-closed(mission_restore_invalid_auxiliary_mining_checkpoint)。
+                    // A dangling open plain-batch cursor carries no physical debt; discard it -- the delivered product is already in the inventory, and the planner
+                    // will recompute honestly from that inventory. Keeping it would instead cause a restart to fail-closed on the aux namespace
+                    // for missing a capacity marker (mission_restore_invalid_auxiliary_mining_checkpoint).
                     plan.auxiliaryMiningCheckpoint.clear();
                     plan.auxiliaryMiningContinuationFingerprint = "";
                 } else {
-                    // 与上方 goal_failed_primary_service_retired 同型:fresh 计划不再包含该
-                    // 家族时退役其游标,避免陈旧 open 批次绑架后续无关任务的重启校验。
+                    // Same pattern as goal_failed_primary_service_retired above: when the fresh plan no longer includes this
+                    // family, retire its cursor, to avoid a stale open batch hijacking the restart validation of a later, unrelated task.
                     plan.miningCheckpoint.clear();
                 }
             }
@@ -4239,8 +4238,8 @@ public final class GoalExecutor {
                     false, true);
             return;
         }
-        // 防呆:若重规划的第一步与刚失败的步骤完全相同,且失败是"硬卡死"类(挖不动/卡住/超时),
-        // 重试只会原样再失败一次(实测#9 的 replan 风暴根因)。直接判失败,交大脑/玩家换思路。
+        // Foolproofing: if the replanned first step is exactly the same as the step that just failed, and the failure is a "hard stuck" type (can't dig/stuck/timeout),
+        // retrying would just fail again the same way (this was the root cause of the replan storm observed in test #9). Declare failure immediately and hand it back to the brain/player to try a different approach.
         if (plan.current != null && plan.current.equals(replanned.get(0))
                 && isHardFailure(reason) && !madeProgress) {
             finishActive(bot, plan, evaluate(bot, plan), "replan_same_step:" + reason, false, true);
@@ -4775,19 +4774,19 @@ public final class GoalExecutor {
         return true;
     }
 
-    // 优化2:目标最近(withinTicks 内)是否整体失败过——供 ActionDispatcher 拦截大脑失败后的手动逐格挖矿。
+    // Optimization 2: whether the goal has failed overall recently (within withinTicks) -- used by ActionDispatcher to intercept the brain's manual block-by-block mining after a failure.
     public boolean recentlyFailed(AIPlayerEntity bot, int withinTicks) {
         Integer t = lastGoalFailTick.get(bot.getUuid());
         return t != null && bot.getEntityWorld().getServer().getTicks() - t < withinTicks;
     }
 
-    // B:用户发来新消息时清空原始目标记忆(允许用户正常更换目标);由 BrainCoordinator 在收到用户消息时调用。
+    // B: clear the memory of the original goal when the user sends a new message (allowing the user to switch goals normally); called by BrainCoordinator when it receives a user message.
     public void clearUserGoal(AIPlayerEntity bot) {
         userGoal.remove(bot.getUuid());
     }
 
-    // B:sub 是否是 parent(用户原始目标)的前置——sub 的产物落在 parent 计划某一步的产出里。
-    // 覆盖主 case:做铁镐(HaveItem)/挖铁(MineOre)都是挖钻石计划里的前置步骤,会被拦下。
+    // B: whether sub is a prerequisite of parent (the user's original goal) -- sub's product falls within the output of some step in parent's plan.
+    // Covers the main case: making an iron pickaxe (HaveItem) / mining iron (MineOre) are both prerequisite steps within a mine-diamond plan, and will be blocked.
     private boolean isPrerequisiteOf(AIPlayerEntity bot, Goal sub, Goal parent) {
         GoalPlanner.GoalPlan parentPlan = GoalPlanner.plan(bot, parent);
         Set<Item> items = new HashSet<>();
@@ -4821,12 +4820,12 @@ public final class GoalExecutor {
             // 29 existing logs is misread as an already-satisfied absolute target of 3.
             case GATHER -> Optional.of(new GatherQuotaTask(step.item(), gatherTargetCount(
                     GatherQuotaTask.acceptedInventoryCount(bot, step.item()), step.count())));
-            // DIGDOWN(实测#8):MINE 步改用 DigDownTask——站着就近垂直下挖,不定位/不寻路,
-            // 永不"够不到/走不过去"空转。取代旧的 OreSeekTask.digBlocks(它会锁定垂直够不到的石头 stuck)。
+            // DIGDOWN (observed in test #8): the MINE step switches to DigDownTask -- digs straight down from wherever it's standing, no positioning/no pathfinding,
+            // so it never idles with "can't reach it/can't walk there". Replaces the old OreSeekTask.digBlocks (which would lock up stuck on stone it couldn't reach vertically).
             case MINE -> Optional.of(new DigDownTask(
                     step.block(), step.count(), plan.takeTaskCheckpoint(GoalStep.Kind.MINE)));
-            // OREDIG(实测#10):MINE_ORE 步改用 OreDigTask(BlockMiner 控制式直挖隧道),
-            // 取代 OreSeekTask——后者"A*接近被埋矿"在 #6/#8/#10 连续 stuck。
+            // OREDIG (observed in test #10): the MINE_ORE step switches to OreDigTask (a BlockMiner-controlled direct tunnel dig),
+            // replacing OreSeekTask -- whose "A* approach to buried ore" got stuck repeatedly across tests #6/#8/#10.
             case MINE_ORE -> {
                 Map<String, String> oreCheckpoint =
                         plan.checkpointForMineOre(step.ores());
@@ -4865,35 +4864,35 @@ public final class GoalExecutor {
             // absolute inventory target. Preserve already-crafted copies when the planner emits
             // multiple batches of the same tool (for example 1 bootstrap + 4 expedition picks).
             case CRAFT -> Optional.of(new CraftTask(step.item(), craftTargetCount(
-                    io.github.zoyluo.aibot.action.InventoryAction.countItem(bot, step.item()),
+                    io.github.zoyluo.minecraftai.action.InventoryAction.countItem(bot, step.item()),
                     step.count())));
             case SMELT -> Optional.of(new SmeltTask(step.input(), step.output(), step.count()));
             case MOVE -> Optional.of(new MoveTask(bot, step.pos()));
-            // P3:FARM 步 → 数量受限的 FarmTask(就地开垦/播种/等熟/收割,收够 count 个产出即完成)。
+            // P3: the FARM step -> a count-limited FarmTask (till/plant/wait for growth/harvest in place; completes once count units of produce are collected).
             case FARM -> Optional.of(new FarmTask(bot.getBlockPos(), 4, step.input(), step.block(),
                     true, false, step.item(), step.count()));
-            // 第4层:HUNT 步 → HuntTask 猎杀动物取生肉(备粮)。
+            // Layer 4: the HUNT step -> HuntTask kills animals for raw meat (to stock food).
             case HUNT -> Optional.of(new HuntTask(
                     step.count(), !step.bestEffort(), plan.huntSearchCursor,
                     plan.peekTaskCheckpoint(GoalStep.Kind.HUNT)));
-            // P0 食物闭环:COOK_FOOD 步 → SmeltTask cookAll 模式,把背包生肉逐种烤成熟肉。
+            // P0 food loop: the COOK_FOOD step -> SmeltTask in cookAll mode, cooking each type of raw meat in the inventory into cooked meat.
             case COOK_FOOD -> Optional.of(new SmeltTask(step.count(), !step.bestEffort()));
-            // 蛋糕链:MILK_COW 步 → MilkCowTask 用空桶挤 count 桶牛奶。
+            // Cake chain: the MILK_COW step -> MilkCowTask uses an empty bucket to milk count buckets of milk.
             case MILK_COW -> Optional.of(new MilkCowTask(step.count()));
-            // Phase2:PLACE_STATIONS 步 → 摆好工作台/熔炉/箱子。
+            // Phase 2: the PLACE_STATIONS step -> set up a crafting table/furnace/chest.
             case PLACE_STATIONS -> Optional.of(new PlaceStationsTask());
-            // Phase3:STOCKPILE 步 → 把背包资源存进附近箱子(存所有非工具)。
+            // Phase 3: the STOCKPILE step -> store inventory resources into a nearby chest (store everything that isn't a tool).
             case STOCKPILE -> Optional.of(new StockpileTask(true));
-            // 挖深层矿:DESCEND_TO_Y 步 → 连续挖竖井下到矿层。
+            // Deep mining: the DESCEND_TO_Y step -> continuously dig a shaft down to the ore layer.
             case DESCEND_TO_Y -> Optional.of(new DescendToYTask(
                     step.pos().getY(), plan.takeTaskCheckpoint(GoalStep.Kind.DESCEND_TO_Y)));
-            case ACQUIRE_WATER -> Optional.of(new io.github.zoyluo.aibot.task.AcquireWaterTask(
+            case ACQUIRE_WATER -> Optional.of(new io.github.zoyluo.minecraftai.task.AcquireWaterTask(
                     plan.origin, plan.peekTaskCheckpoint(GoalStep.Kind.ACQUIRE_WATER)));
             case MAKE_OBSIDIAN -> Optional.of(new CreateObsidianTask(
                     step.count(), plan.checkpointForObsidian()));
-            // 盖房:BUILD 步 → BuildTask(自动选址 autoSite + 整地 flatten,真实起伏地形也能落成);材料已由规划期备齐;
-            // 蓝图读取失败(被删/坏档)→ empty,assignNext 按"步骤无法执行"收尾。
-            // flatten=true:真实地形罕有现成平地,lenient 选址选最平点 + FLATTEN 挖高填低整平(治 real_build no_flat_site)。
+            // Building: the BUILD step -> BuildTask (auto site selection + ground flattening, so it can still complete on real, uneven terrain); materials are already prepared during the planning phase;
+            // if loading the blueprint fails (deleted/corrupted save) -> empty, and assignNext wraps up treating it as "step cannot be executed".
+            // flatten=true: ready-made flat ground is rare on real terrain, so lenient site selection picks the flattest spot + FLATTEN cuts down high ground and fills in low ground to level it (fixes real_build no_flat_site).
             case BUILD -> {
                 try {
                     BlockPos anchor = plan.buildAnchor;
@@ -5060,7 +5059,7 @@ public final class GoalExecutor {
         if (steps == null || steps.isEmpty() || ores == null || ores.isEmpty()) {
             return List.of();
         }
-        int targetY = io.github.zoyluo.aibot.mining.MiningChain.bestY(ores);
+        int targetY = io.github.zoyluo.minecraftai.mining.MiningChain.bestY(ores);
         String fingerprint = OreDigTask.oreFingerprint(ores);
         for (int index = 0; index + 2 < steps.size(); index++) {
             GoalStep descend = steps.get(index);
@@ -5214,7 +5213,7 @@ public final class GoalExecutor {
     private static int directObsidianRemainingTarget(AIPlayerEntity bot,
                                                      Goal goal,
                                                      GoalEvaluation evaluation) {
-        int carried = io.github.zoyluo.aibot.action.HarvestCore.countInventoryItems(
+        int carried = io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
                 bot, Set.of(Items.OBSIDIAN));
         if (goal instanceof Goal.HaveItem haveItem && haveItem.item() == Items.OBSIDIAN) {
             return Math.max(0, haveItem.count() - carried);
@@ -5236,11 +5235,11 @@ public final class GoalExecutor {
                                       boolean resupplyBeforeResume) {
         GoalStep restored = GoalStep.makeObsidian(restoredTarget);
         if (resumeFirst) {
-            // resume-first 契约:开放事务(水源/拾取/断块)是物理义务,默认排在一切新采购之前。
-            // 例外(F5):失败原因本身就是"缺物资"类(need_better_tool / bucket-lost /
-            // missing-water)时,把 resume 原样置顶只会让恢复任务第一 tick 以同因重败,三次零进展
-            // replan 即杀死整个 mission。此时保留 fresh 计划里 MAKE_OBSIDIAN 之前的补给前缀并让
-            // 它先物理执行;其余失败原因(物理续作)维持今天的 resume-first 顺序。
+            // resume-first contract: an open transaction (water source/pickup/block-break) is a physical obligation, and by default is placed ahead of any new procurement.
+            // Exception (F5): when the failure reason is itself a "missing resource" type (need_better_tool / bucket-lost /
+            // missing-water), putting resume at the top unchanged would just make the resumed task fail again for the same reason on its very first tick, and three zero-progress
+            // replans would kill the whole mission. In that case, keep the resupply prefix that precedes MAKE_OBSIDIAN in the fresh plan and let
+            // it physically execute first; for every other failure reason (physical continuation) keep today's resume-first ordering.
             int firstMake = -1;
             for (int index = 0; index < steps.size(); index++) {
                 if (steps.get(index).kind() == GoalStep.Kind.MAKE_OBSIDIAN) {
@@ -5274,9 +5273,9 @@ public final class GoalExecutor {
     }
 
     /**
-     * F5:黑曜石开放事务在这些"缺物资"失败前缀下恢复必然第一 tick 重败(工具/水桶/水源不会
-     * 凭空出现),必须先让 fresh 计划的补给前缀物理执行。范围精确钉死到这三个前缀,其余原因
-     * 保持 resume-first(物理续作的正确顺序)。
+     * F5: resuming an open obsidian transaction under these "missing resource" failure prefixes is bound to fail again on the very first tick (a tool/bucket/water source won't
+     * appear out of nowhere), so the fresh plan's resupply prefix must be allowed to physically execute first. The scope is pinned precisely to these three prefixes; every other reason
+     * keeps resume-first (the correct order for physical continuation).
      */
     static boolean isObsidianMissingResourceFailure(String reason) {
         return reason != null && (reason.startsWith("need_better_tool:")
@@ -5528,7 +5527,7 @@ public final class GoalExecutor {
     }
 
     private static boolean miningStepFeedsGoal(Goal goal, Set<Block> ores) {
-        Set<Item> drops = io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(ores);
+        Set<Item> drops = io.github.zoyluo.minecraftai.action.HarvestCore.expectedDropsFor(ores);
         if (goal instanceof Goal.HaveItem haveItem) {
             return drops.contains(haveItem.item());
         }
@@ -5543,9 +5542,9 @@ public final class GoalExecutor {
             return drops.contains(Items.RAW_IRON);
         }
         if (goal instanceof Goal.HavePickaxeTier pickaxe) {
-            return pickaxe.tier() >= io.github.zoyluo.aibot.mining.ToolTier.DIAMOND
+            return pickaxe.tier() >= io.github.zoyluo.minecraftai.mining.ToolTier.DIAMOND
                     ? drops.contains(Items.DIAMOND)
-                    : pickaxe.tier() >= io.github.zoyluo.aibot.mining.ToolTier.IRON
+                    : pickaxe.tier() >= io.github.zoyluo.minecraftai.mining.ToolTier.IRON
                     && drops.contains(Items.RAW_IRON);
         }
         return false;
@@ -5577,7 +5576,7 @@ public final class GoalExecutor {
 
     private static GoalSnapshotCollector.Context initialContext(AIPlayerEntity bot, Goal goal) {
         if (goal instanceof Goal.Stockpile) {
-            net.minecraft.util.math.BlockPos base = io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE
+            net.minecraft.util.math.BlockPos base = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE
                     .of(bot.getUuid())
                     .placeIn(bot.getEntityWorld(), "base")
                     .orElse(bot.getBlockPos());
@@ -5669,11 +5668,11 @@ public final class GoalExecutor {
                 "skipped", result.skippedSteps().size(),
                 "evidence", result.evaluation().evidence());
         if (result.status() == GoalResult.Status.COMPLETED) {
-            io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.record(bot,
-                    io.github.zoyluo.aibot.memory.EpisodeLog.Type.GOAL_DONE, bot.getBlockPos(), goalLabel(result.goal()));
+            io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
+                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_DONE, bot.getBlockPos(), goalLabel(result.goal()));
         } else if (result.status() != GoalResult.Status.CANCELLED) {
-            io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.record(bot,
-                    io.github.zoyluo.aibot.memory.EpisodeLog.Type.GOAL_FAILED, bot.getBlockPos(), goalLabel(result.goal()));
+            io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
+                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_FAILED, bot.getBlockPos(), goalLabel(result.goal()));
         }
         String message = resultMessage(result.status(), result.evaluation(), result.reason());
         reportTerminal(bot, message, result.status());
@@ -5681,7 +5680,7 @@ public final class GoalExecutor {
     }
 
     private static void markDirty(AIPlayerEntity bot) {
-        io.github.zoyluo.aibot.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
     }
 
     private static String resultMessage(GoalResult.Status status, GoalEvaluation evaluation, String reason) {
@@ -5702,7 +5701,7 @@ public final class GoalExecutor {
         BotReporter.INSTANCE.onGoalMessage(bot, text);
     }
 
-    // 硬卡死类失败:原样重试只会再失败(挖不动/卡住/超时/够不到)。区别于"缺料/缺镐"这类重规划能补的。
+    // Hard-stuck class of failure: retrying unchanged will just fail again (can't dig/stuck/timeout/can't reach). Distinct from "missing materials/missing pickaxe" type failures, which a replan can fix.
     private static boolean isHardFailure(String reason) {
         if (reason == null) {
             return false;
@@ -5714,11 +5713,11 @@ public final class GoalExecutor {
                 || reason.contains("no_reachable");
     }
 
-    // P1:目标失败时给出可执行的中文引导,避免大脑收到原始 reason 后用 move 乱走探索而遇险。
+    // P1: when the goal fails, give the player actionable English guidance, to prevent the brain from wandering around exploring with move after receiving the raw reason and getting into danger.
     private static String humanGoalFailure(String reason) {
         String r = reason == null ? "" : reason;
         if (r.contains("no_resource_after_explore")) {
-            // EXPLORE 已定向走出去几片区域都找过(非"原地没找到"),如实区分,免得大脑再让 move 乱走重试。
+            // EXPLORE has already headed out and searched several areas (not just "didn't find it right where it stood") -- distinguish this honestly, so the brain doesn't have it retry by wandering around with move again.
             return "I searched several areas and still could not find the needed resource, so I cannot continue yet. I will stay put rather than wander or mine bare-handed.";
         }
         if (r.contains("no_resource_nearby") || r.contains("no_reachable") || r.contains("no_ore_found")) {
@@ -5742,7 +5741,7 @@ public final class GoalExecutor {
         private net.minecraft.util.math.BlockPos origin;
         private final Set<net.minecraft.util.math.BlockPos> boundContainers = new HashSet<>();
         private final ArrayDeque<GoalStep> steps;
-        private final java.util.List<String> stepLabels; // 完整步骤描述(steps 会随执行 poll 空,这里留全量供面板任务链条展示)
+        private final java.util.List<String> stepLabels; // full step descriptions (steps gets polled empty as execution proceeds; this keeps the full list for the panel's task-chain display)
         private final List<GoalResult.SkippedStep> skippedSteps = new ArrayList<>();
         private final List<SkippedTargetReceipt> skippedTargetReceipts = new ArrayList<>();
         private GoalStep current;
@@ -5759,22 +5758,22 @@ public final class GoalExecutor {
         private int batchStepLimit = DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT;
         /** True only after the executor has committed a whole step and asked the player to continue. */
         private boolean awaitingPlayerContinuation;
-        private int replanCount;       // Phase A:语义=连续无进展 replan 数(有进展则清零)
+        private int replanCount;       // Phase A: semantics = the count of consecutive no-progress replans (reset to zero once progress is made)
         private int postconditionReplans;
         private int lastEvaluationMatched;
         private String lastRepairFingerprint = "";
-        // Phase A 韧性·进度感知预算(断点恢复):
-        private int completedSteps;    // 累计完成步数(单调增)
-        private int lifetimeReplans;   // 终生 replan 数(永不重置,长稀有矿按原始批次数扩展)
-        // 当前稀有矿批次的资源 epoch(0=首个,1=批内 retry,>=2=margin epoch)：replan 保留，
-        // 只在该批 closed commit 后归零。
+        // Phase A resilience: progress-aware budget (checkpoint/resume):
+        private int completedSteps;    // cumulative completed step count (monotonically increasing)
+        private int lifetimeReplans;   // lifetime replan count (never reset; for long rare-ore missions, extended by the original batch count)
+        // The resource epoch of the current rare-ore batch (0 = first, 1 = intra-batch retry, >=2 = margin epoch): preserved across a replan,
+        // and reset to zero only after that batch is closed and committed.
         private int rareResourceRetriesUsed;
-        // 任务级 margin epoch 抽取账本(F2)：跨批次单调递增,批次 commit 不归零,
-        // 只有全新 mission 才从 0 开始;上限 = MiningBudget.rareMissionEpochMargin(batchCount)。
+        // Mission-level margin epoch draw ledger (F2): monotonically increases across batches, not reset when a batch commits,
+        // and only starts back at 0 for a brand-new mission; the cap = MiningBudget.rareMissionEpochMargin(batchCount).
         private int rareEpochMarginUsed;
-        private int snapSteps;         // 上次 replan 时 completedSteps 快照
-        private int snapTargetCount;   // 上次 replan 时目标产物库存计数
-        private int snapX, snapY, snapZ; // 上次 replan 时 bot 坐标(横向位移/下潜=进展判据)
+        private int snapSteps;         // snapshot of completedSteps at the last replan
+        private int snapTargetCount;   // inventory count of the target product at the last replan
+        private int snapX, snapY, snapZ; // bot coordinates at the last replan (lateral movement/descent = progress criterion)
         private String snapDimension = "";
         private int snapHuntRawMeat;
         private int snapHuntVisitedSectors;

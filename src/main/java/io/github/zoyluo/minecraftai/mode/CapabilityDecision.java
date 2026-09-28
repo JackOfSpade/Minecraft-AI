@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 /** Structured audit seam emitted before any privileged operation can run. */
 public record CapabilityDecision(

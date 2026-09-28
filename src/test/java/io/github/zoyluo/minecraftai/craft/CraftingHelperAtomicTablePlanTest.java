@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class CraftingHelperAtomicTablePlanTest {
     @Test
     void tableIsReservedBeforeTheTargetAgainstOneVirtualInventory() throws IOException {
-        String helper = Files.readString(Path.of("src/main/java/io/github/zoyluo/aibot/craft/CraftingHelper.java"));
+        String helper = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/craft/CraftingHelper.java"));
 
         assertTrue(helper.contains("planFromCounts("));
         assertTrue(helper.contains("boolean craftingTableAvailable"));
@@ -30,7 +30,7 @@ final class CraftingHelperAtomicTablePlanTest {
 
     @Test
     void craftTaskUsesTheAtomicPlanInsteadOfConcatenatingTwoIndependentPlans() throws IOException {
-        String task = Files.readString(Path.of("src/main/java/io/github/zoyluo/aibot/task/CraftTask.java"));
+        String task = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/task/CraftTask.java"));
 
         assertTrue(task.contains("boolean tableAvailable = WorkshopLocator.hasNearbyCraftingTable(bot)"));
         assertTrue(task.contains("CraftingHelper.plan(bot, target, targetCount, tableAvailable)"));

@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.client.screen.ui.cards;
+package io.github.zoyluo.minecraftai.client.screen.ui.cards;
 
-import io.github.zoyluo.aibot.client.screen.ui.Theme;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.item.Item;
@@ -16,7 +16,7 @@ public final class InventoryCard extends PanelCard {
 
     @Override
     protected String titleKey() {
-        return "card.aibot.inventory";
+        return "card.minecraftai.inventory";
     }
 
     @Override
@@ -27,11 +27,11 @@ public final class InventoryCard extends PanelCard {
     @Override
     protected void renderBody(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer, int bx, int by, int bw, int bh) {
         if (snapshot == null) {
-            context.drawTextWithShadow(renderer, Theme.tr("status.aibot.waiting"), bx, by, Theme.TEXT_DIM);
+            context.drawTextWithShadow(renderer, Theme.tr("status.minecraftai.waiting"), bx, by, Theme.TEXT_DIM);
             return;
         }
         if (snapshot.inventory().isEmpty()) {
-            context.drawTextWithShadow(renderer, Theme.tr("inventory.aibot.empty"), bx, by, Theme.TEXT_DIM);
+            context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.empty"), bx, by, Theme.TEXT_DIM);
             return;
         }
         int visible = Math.min(snapshot.inventory().size(), COLS * 2);

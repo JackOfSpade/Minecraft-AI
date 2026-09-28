@@ -1,34 +1,34 @@
-package io.github.zoyluo.aibot.coordination;
+package io.github.zoyluo.minecraftai.coordination;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.brain.PoiAdvisor;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.memory.BotMemory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.assist.MandatoryLatch;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
-import io.github.zoyluo.aibot.mining.assist.PoiCache;
-import io.github.zoyluo.aibot.mining.assist.PoiConsultBudget;
-import io.github.zoyluo.aibot.mining.assist.PoiDecisionPolicy;
-import io.github.zoyluo.aibot.mining.assist.PoiDetector;
-import io.github.zoyluo.aibot.mining.assist.PoiEvidenceWindow;
-import io.github.zoyluo.aibot.mining.assist.PoiNotice;
-import io.github.zoyluo.aibot.mining.assist.PoiPrompt;
-import io.github.zoyluo.aibot.mining.assist.PoiRegistry;
-import io.github.zoyluo.aibot.mining.assist.PoiScorer;
-import io.github.zoyluo.aibot.persist.BotPersistence;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.task.DetourSafetyGate;
-import io.github.zoyluo.aibot.task.DigDownTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.brain.PoiAdvisor;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.memory.BotMemory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.assist.MandatoryLatch;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.minecraftai.mining.assist.PoiCache;
+import io.github.zoyluo.minecraftai.mining.assist.PoiConsultBudget;
+import io.github.zoyluo.minecraftai.mining.assist.PoiDecisionPolicy;
+import io.github.zoyluo.minecraftai.mining.assist.PoiDetector;
+import io.github.zoyluo.minecraftai.mining.assist.PoiEvidenceWindow;
+import io.github.zoyluo.minecraftai.mining.assist.PoiNotice;
+import io.github.zoyluo.minecraftai.mining.assist.PoiPrompt;
+import io.github.zoyluo.minecraftai.mining.assist.PoiRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.PoiScorer;
+import io.github.zoyluo.minecraftai.persist.BotPersistence;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.DetourSafetyGate;
+import io.github.zoyluo.minecraftai.task.DigDownTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -307,7 +307,7 @@ public final class PoiCoordinator {
             return false;
         }
         if (!PoiAdvisor.hasTestTransport()) {
-            String apiKey = AIBotConfig.get().llm().apiKey();
+            String apiKey = MinecraftAiConfig.get().llm().apiKey();
             if (apiKey == null || apiKey.isBlank()) {
                 return false;
             }
@@ -573,7 +573,7 @@ public final class PoiCoordinator {
     }
 
     /** Evidence lines for the payload: {@link PoiEvidenceWindow}'s structural (non-natural) cells grouped by
-     * {@link io.github.zoyluo.aibot.mining.assist.PoiBucket} name, most-populous first. */
+     * {@link io.github.zoyluo.minecraftai.mining.assist.PoiBucket} name, most-populous first. */
     private static List<PoiPrompt.EvidenceItem> evidenceItemsFor(MiningAssistState state, int limit) {
         Map<String, Integer> counts = new HashMap<>();
         for (PoiEvidenceWindow.Entry entry : state.poiWindow().structuralEntries()) {
@@ -743,7 +743,7 @@ public final class PoiCoordinator {
         for (ServerPlayerEntity player : world.getServer().getPlayerManager().getPlayerList()) {
             if (recipients == MiningAssistConfig.NoticeRecipients.BROADCAST
                     || BotAuthorizationGate.INSTANCE.canCommand(player, bot)) {
-                player.sendMessage(Text.literal("[AIBot] " + text), false);
+                player.sendMessage(Text.literal("[Minecraft-AI] " + text), false);
             }
         }
     }

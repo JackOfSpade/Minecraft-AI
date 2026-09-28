@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -78,7 +78,7 @@ public record GoalStep(Kind kind,
      * the same batch retries or its parent expedition starts the next underground dependency. */
     public static GoalStep miningHandoffService(Set<Block> ores, int completedTarget) {
         return miningHandoffService(ores, completedTarget,
-                io.github.zoyluo.aibot.mining.MiningBudget.EMERGENCY_STONE_LIKE);
+                io.github.zoyluo.minecraftai.mining.MiningBudget.EMERGENCY_STONE_LIKE);
     }
 
     public static GoalStep miningHandoffService(Set<Block> ores,
@@ -87,7 +87,7 @@ public record GoalStep(Kind kind,
         return new GoalStep(Kind.MINING_SERVICE, null, Math.max(1, completedTarget),
                 null, ores, null, null, null,
                 "after_final_handoff:stone=" + Math.max(
-                        io.github.zoyluo.aibot.mining.MiningBudget.EMERGENCY_STONE_LIKE,
+                        io.github.zoyluo.minecraftai.mining.MiningBudget.EMERGENCY_STONE_LIKE,
                         protectedStoneLike), false);
     }
 
@@ -160,12 +160,12 @@ public record GoalStep(Kind kind,
         return new GoalStep(Kind.MOVE, null, 1, null, Set.of(), null, null, pos, null, false);
     }
 
-    /** P3:FARM 步——block=作物方块,input=种子,item=产出物,count=要收的数量。 */
+    /** P3: FARM step -- block=crop block, input=seed, item=produce item, count=amount to harvest. */
     public static GoalStep farm(Block crop, Item seed, Item produce, int count) {
         return new GoalStep(Kind.FARM, produce, count, crop, Set.of(), seed, null, null, null, false);
     }
 
-    /** 第4层:HUNT 步——猎杀动物获取 count 个生肉(best-effort:周围没动物时跳过,不阻断挖矿目标)。 */
+    /** Layer 4: HUNT step -- kill animals to obtain count raw meat (best-effort: skipped when no animals are nearby, does not block the mining goal). */
     public static GoalStep hunt(int count) {
         return new GoalStep(Kind.HUNT, null, count, null, Set.of(), null, null, null, null, false);
     }
@@ -176,44 +176,44 @@ public record GoalStep(Kind kind,
                 "food_batch:" + Math.max(1, batchIndex), false);
     }
 
-    /** P0 食物闭环:COOK_FOOD 步——把背包里所有生食烤成 count 个熟食(best-effort,无熔炉/燃料则跳过)。 */
+    /** P0 food loop: COOK_FOOD step -- cook all raw food in the inventory into count cooked food (best-effort, skipped if there's no furnace/fuel). */
     public static GoalStep cookFood(int count) {
         return new GoalStep(Kind.COOK_FOOD, null, count, null, Set.of(), null, null, null, null, false);
     }
 
-    /** 蛋糕链:MILK_COW 步——用空桶挤 count 桶牛奶(需背包有空桶 + 周围有牛;缺则 best-effort 失败)。 */
+    /** Cake chain: MILK_COW step -- milk count buckets of milk using an empty bucket (requires an empty bucket in the inventory + a nearby cow; fails as best-effort if either is missing). */
     public static GoalStep milkCow(int count) {
         return new GoalStep(Kind.MILK_COW, null, count, null, Set.of(), null, null, null, null, false);
     }
 
-    /** Phase2:放置工作台/熔炉/箱子三件套(方块固定,无参数)。 */
+    /** Phase 2: place the crafting table/furnace/chest trio (fixed blocks, no parameters). */
     public static GoalStep placeStations() {
         return new GoalStep(Kind.PLACE_STATIONS, null, 1, null, Set.of(), null, null, null, null, false);
     }
 
-    /** Phase3:把背包资源存进附近箱子(best-effort;item 仅作语义标记)。 */
+    /** Phase 3: store inventory resources into a nearby chest (best-effort; item is only a semantic marker). */
     public static GoalStep stockpile(Item item) {
         return new GoalStep(Kind.STOCKPILE, item, 1, null, Set.of(), null, null, null, null, false);
     }
 
-    /** 挖深层矿:DESCEND_TO_Y 步——下挖到指定 Y(用 pos.y 携带,允许负数;x/z 忽略)。 */
+    /** Deep mining: DESCEND_TO_Y step -- dig down to the specified Y (carried via pos.y, negative values allowed; x/z are ignored). */
     public static GoalStep descendToY(int y) {
         return new GoalStep(Kind.DESCEND_TO_Y, null, 1, null, Set.of(), null, null,
                 new BlockPos(0, y, 0), null, false);
     }
 
-    /** 黑曜石远征取水：携空桶返回任务地表锚点，物理搜索可见水源并用原版交互装水。 */
+    /** Obsidian expedition water fetch: carry an empty bucket back to the mission's surface anchor, physically search for a visible water source, and fill the bucket using vanilla interaction. */
     public static GoalStep acquireWater() {
         return new GoalStep(Kind.ACQUIRE_WATER, null, 1, null, Set.of(), null, null,
                 null, "strict_survival", false);
     }
 
-    /** 造黑曜石:MAKE_OBSIDIAN 步——水浇岩浆现造 count 块(需背包桶+钻石镐)。 */
+    /** Make obsidian: MAKE_OBSIDIAN step -- pour water on lava to create count blocks on the spot (requires a bucket + diamond pickaxe in the inventory). */
     public static GoalStep makeObsidian(int count) {
         return new GoalStep(Kind.MAKE_OBSIDIAN, null, count, null, Set.of(), null, null, null, null, false);
     }
 
-    /** 盖房:BUILD 步——tag=蓝图名(如 small_hut/hut_5x5),材料已由规划期倒推备齐。 */
+    /** Build a house: BUILD step -- tag=blueprint name (e.g. small_hut/hut_5x5), materials already back-calculated and prepared during the planning phase. */
     public static GoalStep build(String blueprintName) {
         return new GoalStep(Kind.BUILD, null, 1, null, Set.of(), null, null, null, blueprintName, false);
     }
@@ -239,12 +239,12 @@ public record GoalStep(Kind kind,
 
     public int miningHandoffStoneLikeReserve() {
         if (!isMiningHandoffService()) {
-            return io.github.zoyluo.aibot.mining.MiningBudget.EMERGENCY_STONE_LIKE;
+            return io.github.zoyluo.minecraftai.mining.MiningBudget.EMERGENCY_STONE_LIKE;
         }
         for (String component : tag.split(":")) {
             if (component.startsWith("stone=")) {
                 int reserve = Integer.parseInt(component.substring("stone=".length()));
-                if (reserve < io.github.zoyluo.aibot.mining.MiningBudget.EMERGENCY_STONE_LIKE) {
+                if (reserve < io.github.zoyluo.minecraftai.mining.MiningBudget.EMERGENCY_STONE_LIKE) {
                     throw new IllegalStateException("invalid_mining_handoff_stone_reserve");
                 }
                 return reserve;

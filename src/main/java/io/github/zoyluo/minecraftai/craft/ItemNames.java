@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.craft;
+package io.github.zoyluo.minecraftai.craft;
 
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -10,9 +10,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 物品 / 方块 → 中文名 对照表。供任务链条({@code GoalStep.describe} / {@code GoalExecutor} 目标标题)在
- * **服务端就翻译好**中文,面板与日志直接显示,不依赖客户端语言文件(实测客户端本地化未必生效)。
- * 未收录的物品回退到英文 id 的 path(如 {@code oak_log}),比完整 {@code minecraft:oak_log} 简洁。
+ * Item / Block → display-name lookup table. Used by the goal chain ({@code GoalStep.describe} /
+ * {@code GoalExecutor} goal titles) to resolve human-readable names **server-side**, so the panel
+ * and logs can show them directly without depending on client language files (in practice,
+ * client-side localization does not reliably take effect).
+ * Items not covered here fall back to the path portion of the English id (e.g. {@code oak_log}),
+ * which is more concise than the full {@code minecraft:oak_log}.
  */
 public final class ItemNames {
     private static final Map<Item, String> ITEMS = new HashMap<>();
@@ -46,120 +49,120 @@ public final class ItemNames {
     }
 
     static {
-        // ── 木材 / 基础 ──
-        i(Items.OAK_LOG, "橡木");
-        i(Items.BIRCH_LOG, "白桦木");
-        i(Items.SPRUCE_LOG, "云杉木");
-        i(Items.JUNGLE_LOG, "丛林木");
-        i(Items.ACACIA_LOG, "金合欢木");
-        i(Items.DARK_OAK_LOG, "深色橡木");
-        i(Items.MANGROVE_LOG, "红树木");
-        i(Items.CHERRY_LOG, "樱花木");
-        i(Items.OAK_PLANKS, "橡木板");
-        i(Items.BIRCH_PLANKS, "白桦木板");
-        i(Items.SPRUCE_PLANKS, "云杉木板");
-        i(Items.JUNGLE_PLANKS, "丛林木板");
-        i(Items.ACACIA_PLANKS, "金合欢木板");
-        i(Items.DARK_OAK_PLANKS, "深色橡木板");
-        i(Items.MANGROVE_PLANKS, "红树木板");
-        i(Items.CHERRY_PLANKS, "樱花木板");
-        i(Items.STICK, "木棍");
-        i(Items.CRAFTING_TABLE, "工作台");
-        i(Items.FURNACE, "熔炉");
-        i(Items.CHEST, "箱子");
-        i(Items.TORCH, "火把");
-        i(Items.DIRT, "泥土");
+        // ── Wood / Basics ──
+        i(Items.OAK_LOG, "Oak Log");
+        i(Items.BIRCH_LOG, "Birch Log");
+        i(Items.SPRUCE_LOG, "Spruce Log");
+        i(Items.JUNGLE_LOG, "Jungle Log");
+        i(Items.ACACIA_LOG, "Acacia Log");
+        i(Items.DARK_OAK_LOG, "Dark Oak Log");
+        i(Items.MANGROVE_LOG, "Mangrove Log");
+        i(Items.CHERRY_LOG, "Cherry Log");
+        i(Items.OAK_PLANKS, "Oak Planks");
+        i(Items.BIRCH_PLANKS, "Birch Planks");
+        i(Items.SPRUCE_PLANKS, "Spruce Planks");
+        i(Items.JUNGLE_PLANKS, "Jungle Planks");
+        i(Items.ACACIA_PLANKS, "Acacia Planks");
+        i(Items.DARK_OAK_PLANKS, "Dark Oak Planks");
+        i(Items.MANGROVE_PLANKS, "Mangrove Planks");
+        i(Items.CHERRY_PLANKS, "Cherry Planks");
+        i(Items.STICK, "Stick");
+        i(Items.CRAFTING_TABLE, "Crafting Table");
+        i(Items.FURNACE, "Furnace");
+        i(Items.CHEST, "Chest");
+        i(Items.TORCH, "Torch");
+        i(Items.DIRT, "Dirt");
 
-        // ── 工具 / 武器 / 防具 ──
-        i(Items.WOODEN_PICKAXE, "木镐");
-        i(Items.STONE_PICKAXE, "石镐");
-        i(Items.IRON_PICKAXE, "铁镐");
-        i(Items.GOLDEN_PICKAXE, "金镐");
-        i(Items.DIAMOND_PICKAXE, "钻石镐");
-        i(Items.NETHERITE_PICKAXE, "下界合金镐");
-        i(Items.WOODEN_SWORD, "木剑");
-        i(Items.STONE_SWORD, "石剑");
-        i(Items.IRON_SWORD, "铁剑");
-        i(Items.DIAMOND_SWORD, "钻石剑");
-        i(Items.WOODEN_AXE, "木斧");
-        i(Items.STONE_AXE, "石斧");
-        i(Items.IRON_AXE, "铁斧");
-        i(Items.WOODEN_SHOVEL, "木锹");
-        i(Items.STONE_SHOVEL, "石锹");
-        i(Items.IRON_SHOVEL, "铁锹");
-        i(Items.WOODEN_HOE, "木锄");
-        i(Items.STONE_HOE, "石锄");
-        i(Items.IRON_HOE, "铁锄");
-        i(Items.SHIELD, "盾牌");
-        i(Items.IRON_HELMET, "铁头盔");
-        i(Items.IRON_CHESTPLATE, "铁胸甲");
-        i(Items.IRON_LEGGINGS, "铁护腿");
-        i(Items.IRON_BOOTS, "铁靴");
+        // ── Tools / Weapons / Armor ──
+        i(Items.WOODEN_PICKAXE, "Wooden Pickaxe");
+        i(Items.STONE_PICKAXE, "Stone Pickaxe");
+        i(Items.IRON_PICKAXE, "Iron Pickaxe");
+        i(Items.GOLDEN_PICKAXE, "Golden Pickaxe");
+        i(Items.DIAMOND_PICKAXE, "Diamond Pickaxe");
+        i(Items.NETHERITE_PICKAXE, "Netherite Pickaxe");
+        i(Items.WOODEN_SWORD, "Wooden Sword");
+        i(Items.STONE_SWORD, "Stone Sword");
+        i(Items.IRON_SWORD, "Iron Sword");
+        i(Items.DIAMOND_SWORD, "Diamond Sword");
+        i(Items.WOODEN_AXE, "Wooden Axe");
+        i(Items.STONE_AXE, "Stone Axe");
+        i(Items.IRON_AXE, "Iron Axe");
+        i(Items.WOODEN_SHOVEL, "Wooden Shovel");
+        i(Items.STONE_SHOVEL, "Stone Shovel");
+        i(Items.IRON_SHOVEL, "Iron Shovel");
+        i(Items.WOODEN_HOE, "Wooden Hoe");
+        i(Items.STONE_HOE, "Stone Hoe");
+        i(Items.IRON_HOE, "Iron Hoe");
+        i(Items.SHIELD, "Shield");
+        i(Items.IRON_HELMET, "Iron Helmet");
+        i(Items.IRON_CHESTPLATE, "Iron Chestplate");
+        i(Items.IRON_LEGGINGS, "Iron Leggings");
+        i(Items.IRON_BOOTS, "Iron Boots");
 
-        // ── 石 / 矿 / 锭 ──
-        i(Items.STONE, "石头");
-        i(Items.COBBLESTONE, "圆石");
-        i(Items.COBBLED_DEEPSLATE, "深板岩圆石");
-        i(Items.BLACKSTONE, "黑石");
-        i(Items.COAL, "煤炭");
-        i(Items.CHARCOAL, "木炭");
-        i(Items.RAW_IRON, "粗铁");
-        i(Items.IRON_INGOT, "铁锭");
-        i(Items.RAW_GOLD, "粗金");
-        i(Items.GOLD_INGOT, "金锭");
-        i(Items.RAW_COPPER, "粗铜");
-        i(Items.COPPER_INGOT, "铜锭");
-        i(Items.DIAMOND, "钻石");
-        i(Items.REDSTONE, "红石");
-        i(Items.LAPIS_LAZULI, "青金石");
+        // ── Stone / Ores / Ingots ──
+        i(Items.STONE, "Stone");
+        i(Items.COBBLESTONE, "Cobblestone");
+        i(Items.COBBLED_DEEPSLATE, "Cobbled Deepslate");
+        i(Items.BLACKSTONE, "Blackstone");
+        i(Items.COAL, "Coal");
+        i(Items.CHARCOAL, "Charcoal");
+        i(Items.RAW_IRON, "Raw Iron");
+        i(Items.IRON_INGOT, "Iron Ingot");
+        i(Items.RAW_GOLD, "Raw Gold");
+        i(Items.GOLD_INGOT, "Gold Ingot");
+        i(Items.RAW_COPPER, "Raw Copper");
+        i(Items.COPPER_INGOT, "Copper Ingot");
+        i(Items.DIAMOND, "Diamond");
+        i(Items.REDSTONE, "Redstone");
+        i(Items.LAPIS_LAZULI, "Lapis Lazuli");
 
-        // ── 食物 ──
-        i(Items.SWEET_BERRIES, "甜浆果");
-        i(Items.GLOW_BERRIES, "发光浆果");
-        i(Items.MELON_SLICE, "西瓜片");
-        i(Items.APPLE, "苹果");
-        i(Items.WHEAT, "小麦");
-        i(Items.WHEAT_SEEDS, "小麦种子");
-        i(Items.BREAD, "面包");
-        i(Items.HAY_BLOCK, "干草块");
-        i(Items.CARROT, "胡萝卜");
-        i(Items.POTATO, "土豆");
-        i(Items.BAKED_POTATO, "烤土豆");
-        i(Items.BEETROOT, "甜菜根");
-        i(Items.BEEF, "生牛肉");
-        i(Items.COOKED_BEEF, "牛排");
-        i(Items.PORKCHOP, "生猪排");
-        i(Items.COOKED_PORKCHOP, "熟猪排");
-        i(Items.MUTTON, "生羊肉");
-        i(Items.COOKED_MUTTON, "熟羊肉");
-        i(Items.CHICKEN, "生鸡肉");
-        i(Items.COOKED_CHICKEN, "熟鸡肉");
-        i(Items.RABBIT, "生兔肉");
-        i(Items.COOKED_RABBIT, "熟兔肉");
-        i(Items.COD, "生鳕鱼");
-        i(Items.COOKED_COD, "熟鳕鱼");
-        i(Items.SALMON, "生鲑鱼");
-        i(Items.COOKED_SALMON, "熟鲑鱼");
+        // ── Food ──
+        i(Items.SWEET_BERRIES, "Sweet Berries");
+        i(Items.GLOW_BERRIES, "Glow Berries");
+        i(Items.MELON_SLICE, "Melon Slice");
+        i(Items.APPLE, "Apple");
+        i(Items.WHEAT, "Wheat");
+        i(Items.WHEAT_SEEDS, "Wheat Seeds");
+        i(Items.BREAD, "Bread");
+        i(Items.HAY_BLOCK, "Hay Bale");
+        i(Items.CARROT, "Carrot");
+        i(Items.POTATO, "Potato");
+        i(Items.BAKED_POTATO, "Baked Potato");
+        i(Items.BEETROOT, "Beetroot");
+        i(Items.BEEF, "Raw Beef");
+        i(Items.COOKED_BEEF, "Steak");
+        i(Items.PORKCHOP, "Raw Porkchop");
+        i(Items.COOKED_PORKCHOP, "Cooked Porkchop");
+        i(Items.MUTTON, "Raw Mutton");
+        i(Items.COOKED_MUTTON, "Cooked Mutton");
+        i(Items.CHICKEN, "Raw Chicken");
+        i(Items.COOKED_CHICKEN, "Cooked Chicken");
+        i(Items.RABBIT, "Raw Rabbit");
+        i(Items.COOKED_RABBIT, "Cooked Rabbit");
+        i(Items.COD, "Raw Cod");
+        i(Items.COOKED_COD, "Cooked Cod");
+        i(Items.SALMON, "Raw Salmon");
+        i(Items.COOKED_SALMON, "Cooked Salmon");
 
-        // ── 方块(MINE / FARM 步用 Block) ──
-        b(Blocks.STONE, "石头");
-        b(Blocks.DEEPSLATE, "深板岩");
-        b(Blocks.COAL_ORE, "煤矿石");
-        b(Blocks.DEEPSLATE_COAL_ORE, "深层煤矿石");
-        b(Blocks.IRON_ORE, "铁矿石");
-        b(Blocks.DEEPSLATE_IRON_ORE, "深层铁矿石");
-        b(Blocks.COPPER_ORE, "铜矿石");
-        b(Blocks.DEEPSLATE_COPPER_ORE, "深层铜矿石");
-        b(Blocks.GOLD_ORE, "金矿石");
-        b(Blocks.DEEPSLATE_GOLD_ORE, "深层金矿石");
-        b(Blocks.DIAMOND_ORE, "钻石矿石");
-        b(Blocks.DEEPSLATE_DIAMOND_ORE, "深层钻石矿石");
-        b(Blocks.REDSTONE_ORE, "红石矿石");
-        b(Blocks.DEEPSLATE_REDSTONE_ORE, "深层红石矿石");
-        b(Blocks.WHEAT, "小麦");
-        b(Blocks.CARROTS, "胡萝卜");
-        b(Blocks.POTATOES, "土豆");
-        b(Blocks.SWEET_BERRY_BUSH, "甜浆果丛");
-        b(Blocks.MELON, "西瓜");
+        // ── Blocks (used by MINE / FARM steps) ──
+        b(Blocks.STONE, "Stone");
+        b(Blocks.DEEPSLATE, "Deepslate");
+        b(Blocks.COAL_ORE, "Coal Ore");
+        b(Blocks.DEEPSLATE_COAL_ORE, "Deepslate Coal Ore");
+        b(Blocks.IRON_ORE, "Iron Ore");
+        b(Blocks.DEEPSLATE_IRON_ORE, "Deepslate Iron Ore");
+        b(Blocks.COPPER_ORE, "Copper Ore");
+        b(Blocks.DEEPSLATE_COPPER_ORE, "Deepslate Copper Ore");
+        b(Blocks.GOLD_ORE, "Gold Ore");
+        b(Blocks.DEEPSLATE_GOLD_ORE, "Deepslate Gold Ore");
+        b(Blocks.DIAMOND_ORE, "Diamond Ore");
+        b(Blocks.DEEPSLATE_DIAMOND_ORE, "Deepslate Diamond Ore");
+        b(Blocks.REDSTONE_ORE, "Redstone Ore");
+        b(Blocks.DEEPSLATE_REDSTONE_ORE, "Deepslate Redstone Ore");
+        b(Blocks.WHEAT, "Wheat");
+        b(Blocks.CARROTS, "Carrots");
+        b(Blocks.POTATOES, "Potatoes");
+        b(Blocks.SWEET_BERRY_BUSH, "Sweet Berry Bush");
+        b(Blocks.MELON, "Melon");
     }
 }

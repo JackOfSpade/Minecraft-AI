@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.network.payload;
+package io.github.zoyluo.minecraftai.network.payload;
 
-import io.github.zoyluo.aibot.AIBotMod;
+import io.github.zoyluo.minecraftai.MinecraftAiMod;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
@@ -43,7 +43,7 @@ public record BotSnapshotS2C(
         List<ItemEntry> inventory,
         List<ItemEntry> equipment
 ) implements CustomPayload {
-    public static final Id<BotSnapshotS2C> ID = new Id<>(Identifier.of(AIBotMod.MOD_ID, "bot_snapshot"));
+    public static final Id<BotSnapshotS2C> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "bot_snapshot"));
     public static final PacketCodec<RegistryByteBuf, BotSnapshotS2C> CODEC = PacketCodec.of(BotSnapshotS2C::write, BotSnapshotS2C::new);
 
     private BotSnapshotS2C(RegistryByteBuf buf) {

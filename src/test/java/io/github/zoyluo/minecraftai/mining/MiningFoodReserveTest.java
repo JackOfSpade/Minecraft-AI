@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
 import org.junit.jupiter.api.Test;
 
@@ -28,7 +28,7 @@ class MiningFoodReserveTest {
     @Test
     void safeItemWhitelistIsExplicitAndExcludesRawOrHarmfulFood() throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/mining/MiningFoodReserve.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/mining/MiningFoodReserve.java"));
         int start = source.indexOf("private static final List<Item> ONE_UNIT_PRIORITY");
         int end = source.indexOf(");", start);
         String whitelist = source.substring(start, end);

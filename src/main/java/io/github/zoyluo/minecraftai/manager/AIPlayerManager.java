@@ -1,18 +1,18 @@
-package io.github.zoyluo.aibot.manager;
+package io.github.zoyluo.minecraftai.manager;
 
 import com.mojang.authlib.GameProfile;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogFields;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.network.FakeClientConnection;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.Standability;
-import io.github.zoyluo.aibot.persist.BotPersistence;
-import io.github.zoyluo.aibot.persist.BotRecord;
-import io.github.zoyluo.aibot.runtime.RuntimeLifecycleCoordinator;
-import io.github.zoyluo.aibot.util.OfflineProfileFactory;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.network.FakeClientConnection;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.persist.BotPersistence;
+import io.github.zoyluo.minecraftai.persist.BotRecord;
+import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
+import io.github.zoyluo.minecraftai.util.OfflineProfileFactory;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.network.DisconnectionInfo;
@@ -57,15 +57,18 @@ public final class AIPlayerManager {
     }
 
     /**
-     * SAFE-DEAD:bot 死亡(hp<=0)后停在原地无限收到 evade,不会自动重生(假玩家无客户端发重生包,
-     * ServerPlayerEntity 死后也不会被移除)。这里满血复活并传送到地表安全点,清空残留死亡状态。
-     * 返回 true=已复活。
+     * SAFE-DEAD: after a bot dies (hp<=0) it sits in place indefinitely receiving evade requests
+     * and never respawns on its own (a fake player has no client to send the vanilla respawn
+     * packet, and the ServerPlayerEntity isn't removed after death either). This revives it to
+     * full health and teleports it to a safe surface point, clearing any leftover death state.
+     * Returns true if it was revived.
      */
     public boolean respawnDeadBot(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
-        // 情景记忆:死亡入流(用死亡位置=当前位置,在传送地表之前记)。蒸馏规则:同区两死 → 危险区。
-        io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.record(bot,
-                io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, bot.getBlockPos(),
+        // Episodic memory: record the death event (using the death position = current position,
+        // before teleporting to the surface). Distillation rule: two deaths in the same area -> danger zone.
+        io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
+                io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, bot.getBlockPos(),
                 bot.getRecentDamageSource() == null ? "unknown" : bot.getRecentDamageSource().getName());
         RuntimeLifecycleCoordinator.INSTANCE.onBotDeath(bot);
         boolean enhancedRespawn = CapabilityRuntime.decide(
@@ -133,13 +136,15 @@ public final class AIPlayerManager {
         server.getPlayerManager().onPlayerConnect(connection, player, clientData);
         player.teleport(world, safePos.x, safePos.y, safePos.z, Collections.emptySet(), yaw, pitch, true);
         player.setHealth(20.0F);
-        player.reviveForAIBotSpawn();
+        player.reviveForMinecraftAiSpawn();
         EntityAttributeInstance stepHeight = player.getAttributeInstance(EntityAttributes.STEP_HEIGHT);
         if (stepHeight != null) {
             stepHeight.setBaseValue(0.6D);
         }
-        // AI 助手固定生存模式:创造模式破方块不掉落、冒险模式禁止破坏/放置,都会让采集/建造失效。
-        // 故忽略传入的 gameMode(可能是召唤者的创造,或旧存档恢复的 creative),一律 SURVIVAL。
+        // The AI assistant is locked to survival mode: in creative mode broken blocks don't
+        // drop, and in adventure mode breaking/placing is disallowed, both of which would break
+        // gathering/building. So the incoming gameMode is ignored (it may be the summoner's
+        // creative mode, or creative restored from an old save) and SURVIVAL is always used.
         GameMode effectiveMode = GameMode.SURVIVAL;
         player.interactionManager.changeGameMode(effectiveMode);
 
@@ -157,7 +162,7 @@ public final class AIPlayerManager {
 
     public Optional<AIPlayerEntity> respawnFromRecord(MinecraftServer server, BotRecord record) {
         RestoreTarget target = restoreTarget(server, record);
-        GameMode gameMode = GameMode.SURVIVAL;  // AI 助手一律生存,忽略旧存档可能存的 creative
+        GameMode gameMode = GameMode.SURVIVAL;  // The AI assistant is always survival; ignore any creative mode that may have been saved in the old record
         Optional<AIPlayerEntity> spawned = spawn(
                 server,
                 record.name(),
@@ -194,7 +199,7 @@ public final class AIPlayerManager {
         nameIndex.remove(normalizeName(name));
         roles.remove(entity.getUuid());
         clearOwner(entity.getUuid());
-        disconnect(server, entity, "AIBot despawn");
+        disconnect(server, entity, "MinecraftAi despawn");
         BotLog.lifecycle(entity, "bot_despawned", "reason", "command_or_shutdown");
         BotPersistence.INSTANCE.markDirty(server);
         return true;
@@ -290,7 +295,7 @@ public final class AIPlayerManager {
         int count = players.size();
         for (AIPlayerEntity player : players.values().toArray(AIPlayerEntity[]::new)) {
             RuntimeLifecycleCoordinator.INSTANCE.unloadBot(player);
-            disconnect(server, player, "AIBot server unload");
+            disconnect(server, player, "MinecraftAi server unload");
         }
         players.clear();
         nameIndex.clear();
@@ -335,13 +340,13 @@ public final class AIPlayerManager {
         try {
             worldKey = RegistryKey.of(RegistryKeys.WORLD, Identifier.of(record.dimension()));
         } catch (RuntimeException exception) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_restore_dimension_invalid",
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null, "bot_restore_dimension_invalid",
                     "name", record.name(), "dimension", record.dimension());
             return overworldSpawn(server);
         }
         ServerWorld world = server.getWorld(worldKey);
         if (world == null) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_restore_world_missing",
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null, "bot_restore_world_missing",
                     "name", record.name(), "dimension", record.dimension());
             return overworldSpawn(server);
         }
@@ -361,11 +366,11 @@ public final class AIPlayerManager {
         }
         Optional<BlockPos> safe = Standability.findNearestStandable(world, requestedBlock, 8, 128, 32);
         if (safe.isEmpty()) {
-            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_spawn_position_unsafe",
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null, "bot_spawn_position_unsafe",
                     "name", name, "requested", LogFields.pos(requestedBlock));
             return requested;
         }
-        BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_spawn_position_snapped",
+        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null, "bot_spawn_position_snapped",
                 "name", name,
                 "from", LogFields.pos(requestedBlock),
                 "to", LogFields.pos(safe.get()));

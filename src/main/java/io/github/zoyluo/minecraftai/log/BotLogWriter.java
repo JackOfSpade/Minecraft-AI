@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.log;
+package io.github.zoyluo.minecraftai.log;
 
-import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class BotLogWriter {
     public static final BotLogWriter INSTANCE = new BotLogWriter();
 
-    private static final Logger MIRROR = LoggerFactory.getLogger("aibot");
+    private static final Logger MIRROR = LoggerFactory.getLogger("minecraftai");
     private static final DateTimeFormatter TS_FORMAT = DateTimeFormatter.ISO_INSTANT;
     private static final DateTimeFormatter SESSION_ID_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
@@ -39,7 +39,7 @@ public final class BotLogWriter {
     private final AtomicLong droppedCount = new AtomicLong();
     private final Map<String, BufferedWriter> botWriters = new ConcurrentHashMap<>();
 
-    private AIBotConfig.Logging config = AIBotConfig.defaults().logging();
+    private MinecraftAiConfig.Logging config = MinecraftAiConfig.defaults().logging();
     private Path baseDir;
     private BufferedWriter allWriter;
     private Thread workerThread;
@@ -54,11 +54,11 @@ public final class BotLogWriter {
     /**
      * Each server start is one play session (matching the played-session-then-review workflow):
      * logs live under {@code <directory>/sessions/<sessionId>/}, and only the {@link
-     * AIBotConfig.Logging#maxSessions()} most recently started sessions are kept -- older session
+     * MinecraftAiConfig.Logging#maxSessions()} most recently started sessions are kept -- older session
      * directories are deleted outright on the next start, so historical logs never accumulate
      * past that bound regardless of how much any one session logs.
      */
-    public synchronized void start(AIBotConfig config) {
+    public synchronized void start(MinecraftAiConfig config) {
         if (started) {
             return;
         }
@@ -78,13 +78,13 @@ public final class BotLogWriter {
             allWriter = Files.newBufferedWriter(baseDir.resolve("all.log"), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
             pruneOldSessions(sessionsDir);
             stopRequested = false;
-            workerThread = new Thread(this::workerLoop, "AIBotLogWriter");
+            workerThread = new Thread(this::workerLoop, "MinecraftAiLogWriter");
             workerThread.setDaemon(true);
             workerThread.start();
             started = true;
             flushBootstrapEntries();
         } catch (IOException exception) {
-            MIRROR.warn("[AIBot] structured log disabled, failed to start writer", exception);
+            MIRROR.warn("[Minecraft-AI] structured log disabled, failed to start writer", exception);
         }
     }
 
@@ -121,11 +121,11 @@ public final class BotLogWriter {
                 try {
                     Files.deleteIfExists(path);
                 } catch (IOException exception) {
-                    MIRROR.warn("[AIBot] failed to delete stale session log entry {}", path, exception);
+                    MIRROR.warn("[Minecraft-AI] failed to delete stale session log entry {}", path, exception);
                 }
             });
         } catch (IOException exception) {
-            MIRROR.warn("[AIBot] failed to prune stale session log directory {}", root, exception);
+            MIRROR.warn("[Minecraft-AI] failed to prune stale session log directory {}", root, exception);
         }
     }
 
@@ -149,7 +149,7 @@ public final class BotLogWriter {
         if (!queue.offer(entry)) {
             droppedCount.incrementAndGet();
             if (security) {
-                MIRROR.error("[AIBot] SECURITY log queue full; denial remained mirrored but structured copy was dropped");
+                MIRROR.error("[Minecraft-AI] SECURITY log queue full; denial remained mirrored but structured copy was dropped");
             }
         }
         if (!security && config.mirrorToSlf4j() && level.toInt() >= Level.INFO.toInt()) {
@@ -265,7 +265,7 @@ public final class BotLogWriter {
                     try {
                         writeRawWarn("LOG QUEUE OVERFLOW: dropped " + dropped + " entries");
                     } catch (IOException exception) {
-                        MIRROR.warn("[AIBot] failed to write overflow warning", exception);
+                        MIRROR.warn("[Minecraft-AI] failed to write overflow warning", exception);
                     }
                 }
             } catch (InterruptedException exception) {
@@ -299,7 +299,7 @@ public final class BotLogWriter {
             }
             maybeRotateForSize();
         } catch (IOException exception) {
-            MIRROR.warn("[AIBot] failed to write structured log", exception);
+            MIRROR.warn("[Minecraft-AI] failed to write structured log", exception);
         }
     }
 
@@ -370,7 +370,7 @@ public final class BotLogWriter {
             allWriter = Files.newBufferedWriter(baseDir.resolve("all.log"), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
             cleanupArchives();
         } catch (IOException exception) {
-            MIRROR.warn("[AIBot] failed to rotate structured logs", exception);
+            MIRROR.warn("[Minecraft-AI] failed to rotate structured logs", exception);
         }
     }
 
@@ -423,7 +423,7 @@ public final class BotLogWriter {
     }
 
     private void mirror(LogEntry entry) {
-        String line = "[AIBot] " + entry.category() + " event=" + entry.event() + " bot=" + entry.botName() + " " + entry.fields();
+        String line = "[Minecraft-AI] " + entry.category() + " event=" + entry.event() + " bot=" + entry.botName() + " " + entry.fields();
         switch (entry.level()) {
             case ERROR -> MIRROR.error(line, entry.throwable());
             case WARN -> MIRROR.warn(line);
@@ -453,7 +453,7 @@ public final class BotLogWriter {
         return map;
     }
 
-    private static Map<LogCategory, Level> thresholds(AIBotConfig.Logging logging) {
+    private static Map<LogCategory, Level> thresholds(MinecraftAiConfig.Logging logging) {
         Map<LogCategory, Level> map = defaultThresholds();
         logging.categories().forEach((key, value) -> {
             try {

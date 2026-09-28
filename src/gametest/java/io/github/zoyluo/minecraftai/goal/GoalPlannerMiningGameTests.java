@@ -1,11 +1,11 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
-import io.github.zoyluo.aibot.craft.RecipeRegistry;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.task.EmergencyShelterTask;
-import io.github.zoyluo.aibot.task.MiningServiceTask;
+import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
+import io.github.zoyluo.minecraftai.task.MiningServiceTask;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;

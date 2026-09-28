@@ -81,7 +81,7 @@ if [[ "${1:-}" == --self-test ]]; then
   ! same_provenance commit-a config-a runtime-a commit-b config-a runtime-a
   ! same_provenance commit-a config-a runtime-a commit-a config-b runtime-a
   ! same_provenance commit-a config-a runtime-a commit-a config-a runtime-b
-  descriptor="$(mktemp -d "${TMPDIR:-/tmp}/aibot-shard-envelope.XXXXXX")"
+  descriptor="$(mktemp -d "${TMPDIR:-/tmp}/minecraftai-shard-envelope.XXXXXX")"
   trap 'rm -rf -- "$descriptor"' EXIT
   {
     printf 'schema_version\t1\nshard_id\ttest-primary-1-r1\ntarget\ttest\nrole\tprimary\n'
@@ -123,11 +123,11 @@ if [[ -n "$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)" ]]; th
 fi
 HEAD_COMMIT="$(git rev-parse HEAD 2>/dev/null)" || exit 3
 
-TMP_EXPECTED="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-expected.XXXXXX")"
-TMP_ACTUAL="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-actual.XXXXXX")"
-USED_EVIDENCE="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-used.XXXXXX")"
-PRIMARY_RESULTS="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-primary.XXXXXX")"
-SENTINEL_RESULTS="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-sentinel.XXXXXX")"
+TMP_EXPECTED="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-expected.XXXXXX")"
+TMP_ACTUAL="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-actual.XXXXXX")"
+USED_EVIDENCE="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-used.XXXXXX")"
+PRIMARY_RESULTS="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-primary.XXXXXX")"
+SENTINEL_RESULTS="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-sentinel.XXXXXX")"
 STAGING=""
 cleanup() {
   local status=$?

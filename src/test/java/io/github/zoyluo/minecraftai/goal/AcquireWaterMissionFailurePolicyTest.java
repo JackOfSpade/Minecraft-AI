@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.goal;
+package io.github.zoyluo.minecraftai.goal;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Source guardrail: an exhausted physical water search must not receive a fresh mission budget. */
 class AcquireWaterMissionFailurePolicyTest {
     private static final Path EXECUTOR = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java");
+            "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java");
 
     @Test
     void exhaustedOrInvalidWaterSearchTerminatesTheMissionFailClosed() throws IOException {

@@ -36,19 +36,19 @@ their own mode and only after these numbers are known. P1 is the detour; it is d
 
 Resolution order, first match wins:
 
-1. Environment variable `AIBOT_MINING_ASSIST` (non-blank).
-2. `miningAssist.mode` in `config/aibot.json`.
+1. Environment variable `MINECRAFTAI_MINING_ASSIST` (non-blank).
+2. `miningAssist.mode` in `config/minecraftai.json`.
 3. The shipped default (`sense`).
 
 Names are case-insensitive. An explicit but unknown value resolves to `off` and logs a warning.
-`AIBOT_MINING_ASSIST_DETERMINISTIC=1` removes time-based throttling (used by reproducible runs).
+`MINECRAFTAI_MINING_ASSIST_DETERMINISTIC=1` removes time-based throttling (used by reproducible runs).
 
 ### Turning it off or on
 
-- Off for a server: set `"miningAssist": { "mode": "off" }` in `config/aibot.json`, or start the server with
-  `AIBOT_MINING_ASSIST=off`. Restart is required; the config is read once at start-up.
+- Off for a server: set `"miningAssist": { "mode": "off" }` in `config/minecraftai.json`, or start the server with
+  `MINECRAFTAI_MINING_ASSIST=off`. Restart is required; the config is read once at start-up.
 - Only the shadow log lines off, sensor still running: `"miningAssist": { "sense": { "shadowLog": false } }`.
-- GameTests and `/aibot verify` scenarios run with the assist off by default (see Tests and evidence).
+- GameTests and `/minecraftai verify` scenarios run with the assist off by default (see Tests and evidence).
 
 ## When it senses
 
@@ -102,7 +102,7 @@ the cache. A change of verdict writes one `assist_gate` line with the reason.
   estimate into a band: `NONE`, `POSSIBLE`, `CAVERN_ONLY`, `STRUCTURE_CERTAIN` or `MANDATORY` (warden risk).
   Only band changes are logged. It is the one heavy operation of the tick; nothing acts on it.
 - **The bot's own edits.** Blocks a bot placed (torches, planks, beds, seals) are recorded per dimension and
-  never count as structure evidence. The record is persisted to `config/aibot/mining_assist_edits.json`,
+  never count as structure evidence. The record is persisted to `config/minecraftai/mining_assist_edits.json`,
   written by a background thread when it changed and at least 1200 ticks have passed, plus one synchronous
   write on server stop. A missing or corrupt file is treated as empty. `edits.sidecar=false` keeps it in memory.
 - **Biome.** The biome id at the bot's own feet (the F3 equivalent) is read once per POI evaluation. It marks
@@ -114,7 +114,7 @@ memory never expires by time; a stopped mission is the only time-based exit.
 
 ## Configuration
 
-All keys are optional and live under `miningAssist` in `config/aibot.json`. Out-of-range values are clamped
+All keys are optional and live under `miningAssist` in `config/minecraftai.json`. Out-of-range values are clamped
 and wrong-typed values fall back to the default, each with one `assist_config_warning` at start-up. Keys that
 are read in P0:
 
@@ -208,15 +208,15 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
 
 - JUnit covers the pure kernels, the adapters' source contracts (no raw world reads outside the one
   first-hit read, no privileged primitive, no task assignment), the tick coordinator's position between the
-  danger scan and the goal executor, and the wiring in `AIBotMod` and `RuntimeLifecycleCoordinator`.
+  danger scan and the goal executor, and the wiring in `MinecraftAiMod` and `RuntimeLifecycleCoordinator`.
 - The GameTest and verify harness call `MiningAssistRuntime.setHarnessDefaultOff(true)`, which keeps the mode but
   turns the harness-off flag on. The gate then refuses every bot, and the hooks do nothing at all, until a
   test opts a bot in with `MiningAssistRuntime.forceEnable(uuid)` (which also makes the run deterministic).
-  An explicit `AIBOT_MINING_ASSIST` or file mode still wins. The method is named for what the flag means:
+  An explicit `MINECRAFTAI_MINING_ASSIST` or file mode still wins. The method is named for what the flag means:
   the design text spells the same call `setHarnessDefault(false)`, which reads inverted, so a harness entry
   point written from the design must use `setHarnessDefaultOff(true)`. A source-contract test pins it as the
-  first statement of `AIBotHarnessTestMod.onInitialize`.
-- `MiningAssistSenseGameTests` (GameTest, `src/gametest/java/io/github/zoyluo/aibot/mining/assist`) runs the
+  first statement of `MinecraftAiHarnessTestMod.onInitialize`.
+- `MiningAssistSenseGameTests` (GameTest, `src/gametest/java/io/github/zoyluo/minecraftai/mining/assist`) runs the
   sensor in a real Minecraft world, through the real coordinator, with strict-survival capabilities. Every test
   builds its own sealed stone fixture, waits until the bot is underground by the world's own sky test, opts the
   bot in with `forceEnable` and gives it a real mining-class task (`MISSION`, `PLAYER_COMMAND`); the tests that
@@ -238,7 +238,7 @@ of changes it held back); `assist_sighting` for rare finds (at most 6 per window
   resolver with fakes and pinned by a source contract on the live lookups, so an edit that ignored the audit
   session or treated a missing origin as real would fail a test.
 - `scripts/evidence_run.sh` pins the assist to `off` for every scenario. `--assist <mode>` opts in for a local
-  run. The mode is exported as `AIBOT_MINING_ASSIST` and written into both the runtime `config/aibot.json` and
+  run. The mode is exported as `MINECRAFTAI_MINING_ASSIST` and written into both the runtime `config/minecraftai.json` and
   the sealed `effective-config.redacted.json`, so `config_hash` covers it, and into the manifest as
   `mining_assist_mode`. The validator checks that the two agree and refuses a non-`off` mode for the
   certifying `*_from_zero` Mining First scenarios. `scripts/ci_static_check.sh` fails if any workflow sets a

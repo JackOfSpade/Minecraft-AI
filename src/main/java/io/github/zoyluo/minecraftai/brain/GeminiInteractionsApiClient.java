@@ -1,12 +1,12 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -36,15 +36,15 @@ public final class GeminiInteractionsApiClient {
     /** Never execute more than this many model calls in one interaction response. */
     public static final int DEFAULT_MAX_FUNCTION_CALLS_PER_RESPONSE = 3;
 
-    private final AIBotConfig.Llm config;
+    private final MinecraftAiConfig.Llm config;
     private final HttpClient httpClient;
     private final int maxFunctionCallsPerResponse;
 
-    public GeminiInteractionsApiClient(AIBotConfig.Llm config) {
+    public GeminiInteractionsApiClient(MinecraftAiConfig.Llm config) {
         this(config, DEFAULT_MAX_FUNCTION_CALLS_PER_RESPONSE);
     }
 
-    public GeminiInteractionsApiClient(AIBotConfig.Llm config, int maxFunctionCallsPerResponse) {
+    public GeminiInteractionsApiClient(MinecraftAiConfig.Llm config, int maxFunctionCallsPerResponse) {
         this.config = Objects.requireNonNull(config, "config");
         if (!isGoogleInteractionsEndpoint(config)) {
             throw new IllegalArgumentException("gemini_interactions_requires_google_endpoint");
@@ -59,7 +59,7 @@ public final class GeminiInteractionsApiClient {
     }
 
     /** True when a configured OpenAI-compatible Gemini URL can be converted to /interactions. */
-    public static boolean isGoogleInteractionsEndpoint(AIBotConfig.Llm config) {
+    public static boolean isGoogleInteractionsEndpoint(MinecraftAiConfig.Llm config) {
         if (config == null || config.baseUrl() == null) {
             return false;
         }

@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
@@ -22,39 +22,51 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * SAFE-1 / NAV-12:执行期环境安全网。每 tick 在所有其它检查之前运行,只在"真正致命地形"
- * (溺水 / 站在岩浆里或将陷入 / 高坠落即将砸地)时即时接管 ActionPack 自救,脱险后让出控制。
+ * SAFE-1 / NAV-12: Runtime environment safety net. Runs every tick before all other checks, and
+ * takes over ActionPack self-rescue immediately only for "genuinely lethal terrain" (drowning /
+ * standing in or about to fall into lava / a high fall about to hit ground), yielding control back
+ * once the danger has passed.
  *
- * 设计要点:
- * - 在 BotTickCoordinator 的每 bot 循环最前面调用;返回 true 表示本 tick 已接管,后续 watcher 跳过。
- * - 它在 TaskManager.tickAll(任务驱动 ActionPack)之后运行(见 AIBotMod tick 顺序),
- *   因此可以在危险 tick 覆盖任务设置的移动输入,危险解除后任务输入照常生效。
- * - 不杀任务；fake player 无客户端 travel,水中返岸必须用逐格、可验证的物理移动。
+ * Design notes:
+ * - Called at the very front of BotTickCoordinator's per-bot loop; returning true means this tick
+ *   has been taken over, and later watchers are skipped.
+ * - It runs after TaskManager.tickAll (task-driven ActionPack) (see the tick order in
+ *   MinecraftAiMod), so it can override the task's movement input on a dangerous tick, and the
+ *   task's input takes effect normally again once the danger is resolved.
+ * - Does not kill the task; the fake player has no client-side travel, so returning to shore in
+ *   water must use verified, cell-by-cell physical movement.
  */
 public final class NavSafetyNet {
     public static final NavSafetyNet INSTANCE = new NavSafetyNet();
 
-    private static final int AIR_SURFACE_THRESHOLD = 120; // 满 300;低于此且在水下→上浮换气
-    private static final int EMERGENCY_AIR = 60;           // 低于此且上浮无望→紧急传送到可呼吸落点
+    private static final int AIR_SURFACE_THRESHOLD = 120; // Max is 300; below this while underwater -> surface to breathe
+    private static final int EMERGENCY_AIR = 60;           // Below this with no hope of surfacing -> emergency teleport to a breathable landing spot
     // FollowTask renews this tiny lease only while it is physically swimming toward a waterborne
     // player and still has a generous oxygen margin.  It is deliberately not a general "ignore
     // water" switch: expiry, target transitions, and low air immediately restore normal rescue.
     private static final int FOLLOW_SWIM_LEASE_TICKS = 6;
-    private static final int BREATHE_SCAN_UP = 5;          // 头顶向上找空气的格数
+    private static final int BREATHE_SCAN_UP = 5;          // Number of cells scanned upward above the head to find air
     private static final int RESCUE_RADIUS_H = 16;
     private static final int RESCUE_RADIUS_V = 16;
-    private static final int SUFFOCATION_CLIMB_UP = 24;   // 窒息脱困优先垂直向上钻出的最大格数(地表方向)
+    private static final int SUFFOCATION_CLIMB_UP = 24;   // Max cells to climb straight up (toward the surface) when escaping suffocation, tried first
     private final Map<UUID, Integer> nextLogTick = new ConcurrentHashMap<>();
-    // SAFE-DROWN2:水危机接管标志。旧逻辑只在 submerged&&air<阈值 的 tick 接管(jump 一口气),
-    // bot 露头 air 回升就放手 → 任务的移动输入又把它怼回水里 → 反复半淹、hp 被溺水伤害磨光
-    //(实测 hunt roam 路过湖:30s 内 navsafe 触发 12 次仍 drowned)。改:一旦触发即置危机态,
-    // 持续接管(jump+朝最近可呼吸岸点游)直到脚踩实地才释放——自救的目标是"上岸",不是"换口气"。
+    // SAFE-DROWN2: Water-crisis takeover flag. The old logic only took over on ticks where
+    // submerged && air < threshold (one jump for air), and let go as soon as the bot surfaced and
+    // air started climbing -> the task's movement input immediately shoved it back into the water
+    // -> repeated half-drowning, HP ground down by drowning damage (measured: during hunt roam
+    // passing a lake, navsafe fired 12 times in 30s and the bot still drowned). Fix: once
+    // triggered, enter crisis state and keep taking over (jump + swim toward the nearest
+    // breathable shore point) until the feet are actually on solid ground before releasing control
+    // -- the goal of self-rescue is "reach shore", not "grab one breath".
     private final Map<UUID, BlockPos> waterRescueShore = new ConcurrentHashMap<>();
-    // SAFE-DROWN3:水危机开始 tick。游向岸点可能永远到不了(岸壁 2 格高跳不上去/被流推回,
-    // 实测平原湖远征 hp 2.2 仍 drowned)——危机持续超时就放弃体面,直接紧急传送上岸保命。
+    // SAFE-DROWN3: The tick the water crisis began. Swimming toward the shore point may never
+    // succeed (a 2-block-high shore wall that can't be jumped onto / current pushing the bot back
+    // -- measured: on a plains-lake expedition the bot still drowned at HP 2.2) -- once the crisis
+    // has dragged on past a timeout, give up on doing it gracefully and just emergency-teleport
+    // ashore to survive.
     private final Map<UUID, Integer> waterRescueSince = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
-    private static final int WATER_RESCUE_TELEPORT_AFTER = 200; // 10s 还没脱水 → 强制传送
+    private static final int WATER_RESCUE_TELEPORT_AFTER = 200; // Still not out of the water after 10s -> force a teleport
 
     private NavSafetyNet() {
     }
@@ -124,23 +136,25 @@ public final class NavSafetyNet {
         ServerWorld world = bot.getEntityWorld();
         BlockPos feet = bot.getBlockPos();
 
-        // 0) 窒息/卡方块:玩家身体盒真实侵入实体碰撞体时,优先**向上**钻出地表。
-        // 不能只看 getBlockPos() 所在整格：dirt_path/slab 等低矮支撑会让正常站立玩家的
-        // floored BlockPos 落在支撑格内，但实体 AABB 仅与其顶面接触，并没有被活埋。
+        // 0) Suffocation/stuck-in-block: when the player's body hitbox is actually intersecting a
+        // solid collision shape, prefer climbing **upward** out to the surface first.
+        // Can't just look at the whole cell at getBlockPos(): low supports like dirt_path/slabs put
+        // a normally standing player's floored BlockPos inside the support cell, even though the
+        // entity's AABB only touches its top face and the player isn't actually buried.
         if (!FakePlayerMotion.isBlockCollisionFree(bot)
                 && escapeSuffocation(bot, world, feet)) {
             throttledLog(server, bot, "navsafe_suffocation_snap", feet);
             return true;
         }
 
-        // 1) 岩浆:站在岩浆里 / 脚下是岩浆 → 立即逃离(最高优先级)
+        // 1) Lava: standing in lava / lava underfoot -> escape immediately (highest priority)
         if (inLava(world, feet) || inLava(world, feet.down())) {
             escapeLava(bot, world, feet);
             throttledLog(server, bot, "navsafe_lava_escape", feet);
             return true;
         }
 
-        // 2) 溺水/水危机:触发后持续接管到上岸(见 waterRescueShore 注释)。
+        // 2) Drowning/water crisis: once triggered, keep taking over until ashore (see the waterRescueShore comment).
         if (hasFollowSwimLease(bot, server.getTicks())) {
             // The lease is renewed only by an active FollowTask and only above the safety oxygen
             // threshold.  Once air falls, the normal branch below immediately resumes rescue.
@@ -148,16 +162,18 @@ public final class NavSafetyNet {
         }
         boolean inCrisis = waterRescueShore.containsKey(bot.getUuid());
         if (!inCrisis && bot.isSubmergedInWater()) {
-            inCrisis = true; // 新触发
+            inCrisis = true; // newly triggered
         }
         if (inCrisis) {
             // Fluid blocks can disappear/spread from vanilla scheduled ticks without going
             // through our block actions, so the global standability cache may describe the
             // previous water shape. Rescue decisions must use the current shape every tick.
             Standability.clearCache();
-            // 释放条件:到达经服务端方块状态验证的干燥可站位 → 危机解除,交还控制。
-            // Fake player 的逐格物理移动没有客户端落地包，isOnGround() 可能在已经站到
-            // 实体地面后仍为 false；继续依赖它会把 bot 在两个干地格之间来回搬运。
+            // Release condition: once the bot reaches a dry, standable position verified by
+            // server-side block state -> the crisis is over, hand control back.
+            // The fake player's cell-by-cell physical movement has no client landing packet, so
+            // isOnGround() can still be false even after it is already standing on solid ground;
+            // continuing to rely on it would shuttle the bot back and forth between two dry cells.
             if (isDryStandable(bot, world, feet)) {
                 waterRescueShore.remove(bot.getUuid());
                 waterRescueSince.remove(bot.getUuid());
@@ -169,8 +185,10 @@ public final class NavSafetyNet {
             }
             int now = server.getTicks();
             Integer since = waterRescueSince.putIfAbsent(bot.getUuid(), now);
-            // SAFE-DROWN:空气危急且头顶无空气可上浮(被石头封顶的水兜)→ 紧急传送到最近可呼吸落点。
-            // SAFE-DROWN3:或者危机拖太久(游向岸点到不了:岸壁高/水流推)→ 同样强制传送保命。
+            // SAFE-DROWN: Air is critical and there's no air above to surface into (a water pocket
+            // capped by stone) -> emergency-teleport to the nearest breathable landing spot.
+            // SAFE-DROWN3: Or the crisis has dragged on too long (can't reach the shore point: tall
+            // shore wall / current pushing back) -> likewise force a teleport to survive.
             boolean rescueTimedOut = since != null && now - since > WATER_RESCUE_TELEPORT_AFTER;
             if (rescueTimedOut || (bot.getAir() <= EMERGENCY_AIR && !breathableAbove(world, feet))) {
                 if (emergencyTeleportToAir(bot, world, feet)) {
@@ -207,7 +225,8 @@ public final class NavSafetyNet {
                 throttledLog(server, bot, "navsafe_surface_for_air", feet);
                 return true;
             }
-            // Legacy local fallback:缓存的还有效就用,否则重找(最近"可站+脚头都是空气"的落点)。
+            // Legacy local fallback: use the cached shore if it is still valid, otherwise search
+            // again (the nearest landing spot that is both standable and has air at feet and head).
             BlockPos shore = waterRescueShore.get(bot.getUuid());
             if (shore == null || shore.equals(feet) || !Standability.isStandable(world, shore)) {
                 shore = findNearestBreathableStandable(world, feet).orElse(null);
@@ -226,13 +245,13 @@ public final class NavSafetyNet {
                 bot.setYaw((float) yaw);
                 bot.setHeadYaw((float) yaw);
                 bot.setBodyYaw((float) yaw);
-                bot.getActionPack().setForward(1.0F); // 朝岸游
+                bot.getActionPack().setForward(1.0F); // swim toward shore
             } else {
-                waterRescueShore.put(bot.getUuid(), feet.toImmutable()); // 无岸点(开阔深水):占位保持危机态,先上浮
+                waterRescueShore.put(bot.getUuid(), feet.toImmutable()); // no shore point (open deep water): placeholder to hold crisis state, surface for air first
                 bot.getActionPack().setForward(0.0F);
             }
             bot.getActionPack().setSprinting(false);
-            bot.getActionPack().setJumping(true); // 水中持续 jump = 上浮/游泳
+            bot.getActionPack().setJumping(true); // continuous jump in water = surfacing/swimming
             throttledLog(server, bot, "navsafe_surface_for_air", feet);
             return true;
         }
@@ -332,23 +351,33 @@ public final class NavSafetyNet {
     }
 
     /**
-     * 窒息脱困:优先**垂直向上**找第一个可站点(地表方向)并传送上去。
-     * 修"越救越深"——旧实现用 snapPlayerToNearestStandable 找欧氏最近可站点,bot 被埋时最近点
-     * 往往在下方/侧下方,反复 snap 把 bot 一格格往坑里拽(实测 994 列 64→63→62→61 困死)。
-     * 向上钻出是被埋的正解(Standability.isStandable 已保证落点脚位+头位空气、脚下有支撑=能站能呼吸);
-     * 向上 SUFFOCATION_CLIMB_UP 格内无解(深埋封顶)才回退到全向最近可站点,至少脱离当前窒息格。
+     * Escaping suffocation: prefer finding the first standable cell **straight up** (toward the
+     * surface) first and teleport onto it.
+     * Fixes "rescued deeper each time" -- the old implementation used
+     * snapPlayerToNearestStandable to find the Euclidean-nearest standable cell, but while the bot
+     * is buried that nearest cell is often below/diagonally below it, so repeated snaps dragged the
+     * bot one cell at a time deeper into the pit (measured: at column 994 it got stuck going
+     * 64->63->62->61). Climbing straight up is the correct fix for being buried
+     * (Standability.isStandable already guarantees the landing cell has air at feet and head, with
+     * support underfoot = can stand and breathe); only fall back to the omnidirectional nearest
+     * standable cell -- at least escaping the current suffocating cell -- if nothing works within
+     * SUFFOCATION_CLIMB_UP cells upward (buried deep, capped overhead).
      */
     private boolean escapeSuffocation(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
-        // 缓存必脏:走到"被埋"这一步说明方块刚变过(塌方/活埋场景 setBlockState),Standability 缓存
-        // 还是变更前的世界——拿旧值判"向上无可站点"会走 fallback 全向 snap,把 bot 拽进远处洞里
-        //(实测平原活埋:向上 2 格明明可站,却被 snap 到 y20 黑洞再触发保命传送,场景 aborted)。
+        // The cache must be invalidated: reaching this "buried" branch means a block just changed
+        // (a cave-in / live-burial scenario calling setBlockState), so the Standability cache still
+        // reflects the world before the change -- judging "no standable cell upward" from stale
+        // values would fall back to the omnidirectional snap and drag the bot into a distant hole
+        // (measured: a plains live-burial case where 2 cells up was clearly standable, but the bot
+        // was still snapped into a y20 black hole and then triggered a life-saving teleport,
+        // aborting the scenario).
         Standability.clearCache();
         int top = world.getBottomY() + world.getHeight();
         for (int dy = 1; dy <= SUFFOCATION_CLIMB_UP && feet.getY() + dy < top - 1; dy++) {
             BlockPos candidate = feet.up(dy);
             if (Standability.isStandable(world, candidate)) {
-                boolean moved = io.github.zoyluo.aibot.mode.CapabilityRuntime.run(
-                        bot, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+                boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
+                        bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                         "navsafe_suffocation", () -> {
                             bot.getActionPack().stopAll();
                             bot.teleport(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
@@ -365,7 +394,7 @@ public final class NavSafetyNet {
                 break;
             }
         }
-        // 向上无解(深埋/封顶)→ 回退原逻辑:全向最近可站点。
+        // No solution upward (buried deep / capped overhead) -> fall back to the original logic: nearest standable cell in any direction.
         boolean escaped = bot.getActionPack().snapPlayerToNearestStandable("navsafe_suffocation");
         if (escaped) {
             // The path that entered the collision is no longer valid after an emergency side-step.
@@ -379,7 +408,7 @@ public final class NavSafetyNet {
         return escaped;
     }
 
-    // 头顶 BREATHE_SCAN_UP 格内是否能露头呼吸(遇到非水的可通过格=能呼吸;遇到实体方块顶盖=封死)
+    // Whether the bot can surface and breathe within BREATHE_SCAN_UP cells above its head (a non-water passable cell = can breathe; hitting a solid block ceiling = sealed off)
     private static boolean breathableAbove(ServerWorld world, BlockPos feet) {
         for (int dy = 1; dy <= BREATHE_SCAN_UP; dy++) {
             BlockPos p = feet.up(dy);
@@ -387,10 +416,10 @@ public final class NavSafetyNet {
             boolean water = s.getFluidState().isIn(FluidTags.WATER);
             boolean solid = !s.getCollisionShape(world, p).isEmpty();
             if (!water && !solid) {
-                return true;   // 非水的空气格 → 上浮能呼吸
+                return true;   // a non-water air cell -> can surface and breathe
             }
             if (solid) {
-                return false;  // 撞到实体方块顶盖,上浮无望
+                return false;  // hit a solid block ceiling, no hope of surfacing
             }
         }
         return false;
@@ -402,8 +431,8 @@ public final class NavSafetyNet {
             return false;
         }
         BlockPos to = safe.get();
-        boolean moved = io.github.zoyluo.aibot.mode.CapabilityRuntime.run(
-                bot, io.github.zoyluo.aibot.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
+        boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
+                bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                 "navsafe_drowning", () -> {
                     bot.getActionPack().stopAll();
                     bot.teleport(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
@@ -415,7 +444,7 @@ public final class NavSafetyNet {
         return moved;
     }
 
-    // 最近的"可站 + 脚位与头位都是空气(可呼吸,不是水)"落点
+    // The nearest landing spot that is both standable and has air at feet and head (breathable, not water)
     private static Optional<BlockPos> findNearestBreathableStandable(ServerWorld world, BlockPos origin) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         BlockPos best = null;
@@ -431,7 +460,7 @@ public final class NavSafetyNet {
                         continue;
                     }
                     if (!world.getBlockState(cursor).isAir() || !world.getBlockState(cursor.up()).isAir()) {
-                        continue;   // 脚位或头位是水/方块 → 不可呼吸
+                        continue;   // feet or head cell is water/solid block -> not breathable
                     }
                     double distance = cursor.getSquaredDistance(origin);
                     if (distance < bestDistance) {
@@ -503,12 +532,12 @@ public final class NavSafetyNet {
     }
 
     private static void escapeLava(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
-        // 朝最近的"安全可站"水平方向冲出 + 起跳
+        // Rush out toward the nearest horizontal direction that is "safe and standable" + jump
         Direction best = null;
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos side = feet.offset(dir);
             if (!inLava(world, side) && !inLava(world, side.down())
-                    && io.github.zoyluo.aibot.pathfinding.Standability.isStandable(world, side)) {
+                    && io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, side)) {
                 best = dir;
                 break;
             }
@@ -520,7 +549,7 @@ public final class NavSafetyNet {
             bot.setBodyYaw((float) yaw);
             bot.getActionPack().setForward(1.0F);
         }
-        // 无论是否找到方向,起跳脱离岩浆体
+        // Jump to get out of the lava regardless of whether a direction was found
         bot.getActionPack().setJumping(true);
         bot.getActionPack().jumpOnce();
     }

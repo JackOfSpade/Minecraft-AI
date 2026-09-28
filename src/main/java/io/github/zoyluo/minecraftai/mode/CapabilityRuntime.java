@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -21,7 +21,7 @@ public final class CapabilityRuntime {
     public static CapabilityDecision decide(AIPlayerEntity bot,
                                             PrivilegedCapability capability,
                                             String context) {
-        AIBotConfig config = AIBotConfig.get();
+        MinecraftAiConfig config = MinecraftAiConfig.get();
         CapabilityDecision decision = CapabilityPolicy.decide(
                 config.profile(), config.operatorCapabilities(), capability);
         MiningEvidenceAudit.recordCapabilityDecision(bot, decision.allowed());

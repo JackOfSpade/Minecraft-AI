@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;

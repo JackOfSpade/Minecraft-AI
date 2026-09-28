@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.entity.passive.CowEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -9,7 +9,7 @@ import net.minecraft.server.world.ServerWorld;
 
 import java.util.Comparator;
 
-/** 挤奶:用一个空桶在最近的成年牛身上挤一桶奶。简化:不模拟右键交互,直接换物 + 日志(与 till/placeWater 同风格)。 */
+/** Milk cow: use an empty bucket to milk one bucket of milk from the nearest adult cow. Simplified: does not simulate the right-click interaction; instead it swaps items directly + logs (same style as till/placeWater). */
 public final class MilkCowAction {
     public static final double REACH = 4.0D;
 
@@ -21,7 +21,7 @@ public final class MilkCowAction {
         return world.getEntitiesByClass(CowEntity.class, bot.getBoundingBox().expand(radius),
                         cow -> cow.isAlive() && !cow.isBaby())
                 .stream()
-                .filter(cow -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, cow))
+                .filter(cow -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, cow))
                 .min(Comparator.comparingDouble(bot::squaredDistanceTo))
                 .orElse(null);
     }

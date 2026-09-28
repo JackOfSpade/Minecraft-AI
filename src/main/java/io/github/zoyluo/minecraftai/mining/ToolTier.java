@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.mining;
+package io.github.zoyluo.minecraftai.mining;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -35,8 +35,10 @@ public final class ToolTier {
     }
 
     public static int requiredPickaxeTier(Block block) {
-        // 数据驱动优先(模组兼容):vanilla 的工具分级 tag 是权威来源,模组矿物按惯例给自己打这些 tag
-        //(暮色森林等模组的新矿无需改代码即正确分级)。tag 未命中再走下面的手写表兜底(保持历史行为)。
+        // Data-driven first (mod compatibility): vanilla's tool-tier tags are the authoritative source,
+        // and by convention modded ores tag themselves with these tags (e.g. new ores from mods like
+        // Twilight Forest are correctly tiered with no code changes needed). If no tag matches, fall back
+        // to the hand-written table below (preserves legacy behavior).
         var state = block.getDefaultState();
         if (state.isIn(net.minecraft.registry.tag.BlockTags.NEEDS_DIAMOND_TOOL)) {
             return DIAMOND;
@@ -47,7 +49,7 @@ public final class ToolTier {
         if (state.isIn(net.minecraft.registry.tag.BlockTags.NEEDS_STONE_TOOL)) {
             return STONE;
         }
-        // 黑曜石/哭泣的黑曜石/远古残骸:需钻石镐(否则破坏无掉落)。
+        // Obsidian / Crying Obsidian / Ancient Debris: require a diamond pickaxe (otherwise breaking drops nothing).
         if (block == Blocks.OBSIDIAN || block == Blocks.CRYING_OBSIDIAN || block == Blocks.ANCIENT_DEBRIS) {
             return DIAMOND;
         }
@@ -115,16 +117,18 @@ public final class ToolTier {
         return false;
     }
 
-    // 耐久闸:剩 1 耐久的镐视作没有——挖矿半路镐碎了才发现是最差时机(空手对深层矿干瞪眼),
-    // 提前一格触发 need_better_tool,GoalExecutor 既有 replan 链就地取材补新镐。与 ToolSelector
-    // 的"近耗尽评分 0.001"同一阈值,两层口径一致。
+    // Durability gate: a pickaxe with 1 durability left is treated as having none at all -- discovering
+    // mid-dig that the pickaxe just broke is the worst possible moment (left empty-handed against deep-layer
+    // ore), so we trip need_better_tool one point early and let GoalExecutor's existing replan chain source
+    // a replacement pickaxe on the spot. This matches ToolSelector's "near-exhausted score of 0.001" at the
+    // same threshold, keeping the two layers consistent.
     private static boolean nearlyBroken(ItemStack stack) {
         return stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1;
     }
 
     private static Item pickaxeItem(int tier) {
         if (tier >= DIAMOND) {
-            return Items.DIAMOND_PICKAXE; // 黑曜石级:漏这档时 need_better_tool 误报 iron,规划补错镐
+            return Items.DIAMOND_PICKAXE; // Obsidian tier: missing this case makes need_better_tool falsely report iron, causing the plan to fetch the wrong pickaxe
         }
         if (tier >= IRON) {
             return Items.IRON_PICKAXE;

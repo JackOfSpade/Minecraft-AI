@@ -121,7 +121,7 @@ mining_verify_timeout_covers_ticks() {
 mining_running_timeout_ticks_from_log() {
   local scenario="${1:-}" log_file="${2:-}" marker
   [[ -n "$scenario" && -f "$log_file" ]] || return 1
-  marker="[AIBot Verify] $scenario RUNNING timeout="
+  marker="[MinecraftAi Verify] $scenario RUNNING timeout="
   awk -v marker="$marker" '
     {
       start = index($0, marker)
@@ -142,7 +142,7 @@ mining_running_timeout_ticks_from_log() {
 mining_running_timeout_announcement_count_from_log() {
   local scenario="${1:-}" log_file="${2:-}" marker
   [[ -n "$scenario" && -f "$log_file" ]] || return 1
-  marker="[AIBot Verify] $scenario RUNNING timeout="
+  marker="[MinecraftAi Verify] $scenario RUNNING timeout="
   awk -v marker="$marker" 'index($0, marker) { count++ } END { print count + 0 }' "$log_file"
 }
 

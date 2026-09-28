@@ -7,10 +7,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "$ROOT/scripts/lib/mining_acceptance_contract.sh"
 TIER="${1:-controlled}"
 TARGET="${2:-all}"
-SEEDS="${AIBOT_MINING_SEEDS:-20260610,3000,777}"
-RUNS="${AIBOT_MINING_RUNS:-1}"
-STARTUP_TIMEOUT="${AIBOT_MINING_STARTUP_TIMEOUT:-480}"
-TIMEOUT_OVERRIDE="${AIBOT_MINING_TIMEOUT:-}"
+SEEDS="${MINECRAFTAI_MINING_SEEDS:-20260610,3000,777}"
+RUNS="${MINECRAFTAI_MINING_RUNS:-1}"
+STARTUP_TIMEOUT="${MINECRAFTAI_MINING_STARTUP_TIMEOUT:-480}"
+TIMEOUT_OVERRIDE="${MINECRAFTAI_MINING_TIMEOUT:-}"
 PUBLIC_SEEDS="$MINING_PUBLIC_SEEDS"
 SENTINEL_SEEDS="$MINING_SENTINEL_SEEDS"
 
@@ -19,10 +19,10 @@ usage() {
 usage: scripts/mining_acceptance.sh <controlled|prepared|from_zero> <diamond|obsidian|obsidian64|all>
 
 Environment:
-  AIBOT_MINING_SEEDS             diagnostic seeds (controlled/prepared only)
-  AIBOT_MINING_RUNS              diagnostic repetitions (controlled/prepared only)
-  AIBOT_MINING_TIMEOUT           per-run seconds; tier/target default otherwise
-  AIBOT_MINING_STARTUP_TIMEOUT   startup seconds (default: 480)
+  MINECRAFTAI_MINING_SEEDS             diagnostic seeds (controlled/prepared only)
+  MINECRAFTAI_MINING_RUNS              diagnostic repetitions (controlled/prepared only)
+  MINECRAFTAI_MINING_TIMEOUT           per-run seconds; tier/target default otherwise
+  MINECRAFTAI_MINING_STARTUP_TIMEOUT   startup seconds (default: 480)
 
 All runs are strict_survival deterministic evidence. controlled proves only
 the count/persistence/postcondition contract; prepared/from_zero are opt-in
@@ -92,7 +92,7 @@ timeout_for_scenario() {
 run_evidence_batch() {
   local output_variable="$1" scenario="$2" seeds="$3" runs="$4" timeout="$5"
   local output status evidence_dir
-  output="$(mktemp "${TMPDIR:-/tmp}/aibot-mining-acceptance.XXXXXX")"
+  output="$(mktemp "${TMPDIR:-/tmp}/minecraftai-mining-acceptance.XXXXXX")"
   set +e
   bash scripts/evidence_batch.sh \
     --scenario "$scenario" \
@@ -114,7 +114,7 @@ run_evidence_batch() {
 }
 
 if [[ "$TIER" == from_zero ]]; then
-  if [[ -n "${AIBOT_MINING_SEEDS+x}" || ( -n "${AIBOT_MINING_RUNS+x}" && "$RUNS" != 1 ) ]]; then
+  if [[ -n "${MINECRAFTAI_MINING_SEEDS+x}" || ( -n "${MINECRAFTAI_MINING_RUNS+x}" && "$RUNS" != 1 ) ]]; then
     printf '[mining-acceptance] from_zero release seeds/runs are fixed; use prepared for custom diagnostics\n' >&2
     exit 2
   fi

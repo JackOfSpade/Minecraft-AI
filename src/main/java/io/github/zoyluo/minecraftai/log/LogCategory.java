@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.log;
+package io.github.zoyluo.minecraftai.log;
 
 public enum LogCategory {
     LIFECYCLE,

@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import com.mojang.datafixers.util.Either;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import net.minecraft.block.BedBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -74,8 +74,9 @@ public final class SleepTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 3000) {
-            // phase+bed 一起带上:3000t 超时在 FIND_BED/PLACE_BED/WALK_TO_BED 任一阶段都可能触发(最常见
-            // 是 WALK_TO_BED 卡路径),光看 "sleep_timeout" 分不清是找不到床、放不下床还是走不到床边。
+            // Include phase+bed together: this 3000t timeout can fire during any of FIND_BED/PLACE_BED/WALK_TO_BED
+            // (most commonly WALK_TO_BED getting stuck on pathing) -- "sleep_timeout" alone wouldn't tell us whether
+            // we failed to find a bed, failed to place one, or failed to reach it.
             fail("sleep_timeout phase=" + phase + (bedPos == null ? "" : " bed=" + compact(bedPos)));
             return;
         }
@@ -223,7 +224,7 @@ public final class SleepTask extends AbstractTask {
         BlockPos origin = bot.getBlockPos();
         return BlockPos.stream(center.add(-radius, -3, -radius), center.add(radius, 3, radius))
                 .map(BlockPos::toImmutable)
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> bot.getEntityWorld().getBlockState(pos).getBlock() instanceof BedBlock)
                 .min((left, right) -> Double.compare(left.getSquaredDistance(origin), right.getSquaredDistance(origin)))
                 .orElse(null);
@@ -236,7 +237,7 @@ public final class SleepTask extends AbstractTask {
     private static BlockPos rememberedBed(AIPlayerEntity bot) {
         return BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .placeIn(bot.getEntityWorld(), "bed", "home", "base")
-                .map(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
+                .map(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
                         && bot.getEntityWorld().getBlockState(pos).getBlock() instanceof BedBlock
                         ? pos.toImmutable()
                         : findBedNear(bot, pos, 4))
@@ -294,7 +295,7 @@ public final class SleepTask extends AbstractTask {
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos candidate = target.offset(direction);
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
                 return candidate;
             }
         }

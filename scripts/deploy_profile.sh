@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Build the AIBot mod and install it into a Minecraft launcher profile.
+# Build the MinecraftAi mod and install it into a Minecraft launcher profile.
 #
 #   bash scripts/deploy_profile.sh [--profile-dir <dir>] [--no-build] [--no-config] [--check-key]
 #
 #   1. refuses to run while a Minecraft game client is running (the jar would be locked);
 #   2. builds the mod jar (skipped with --no-build);
 #   3. copies build/libs/Minecraft-AI-*.jar into <profile>/mods, replacing any older Minecraft-AI-*.jar
-#      (and any older aibot-*.jar left over from before the jar was renamed);
-#   4. applies the LLM settings from the gitignored .env to <profile>/config/aibot.json (the "llm"
+#      (and any older minecraftai-*.jar left over from before the jar was renamed);
+#   4. applies the LLM settings from the gitignored .env to <profile>/config/minecraftai.json (the "llm"
 #      section; the pre-rename "deepseek" section is migrated) and makes sure logging is enabled
 #      (skipped with --no-config). The API key is never printed;
 #   5. verifies the result and prints a summary. --check-key also asks the provider whether the key
 #      is accepted (prints only the HTTP status).
 #
-# .env (gitignored; template: .env.example): AIBOT_LLM_API_KEY, AIBOT_LLM_BASE_URL, AIBOT_LLM_MODEL.
+# .env (gitignored; template: .env.example): MINECRAFTAI_LLM_API_KEY, MINECRAFTAI_LLM_BASE_URL, MINECRAFTAI_LLM_MODEL.
 # The same variables in the process environment win over the file. The game never reads .env itself.
 #
 # Default profile: %APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.11
@@ -63,15 +63,15 @@ if [ -f "$ENV_FILE" ]; then
     value="${line#*=}"
     value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
     case "$name" in
-      AIBOT_LLM_API_KEY) KEY="$value" ;;
-      AIBOT_LLM_BASE_URL) BASE="$value" ;;
-      AIBOT_LLM_MODEL) MODEL="$value" ;;
+      MINECRAFTAI_LLM_API_KEY) KEY="$value" ;;
+      MINECRAFTAI_LLM_BASE_URL) BASE="$value" ;;
+      MINECRAFTAI_LLM_MODEL) MODEL="$value" ;;
     esac
   done < "$ENV_FILE"
 fi
-KEY="${AIBOT_LLM_API_KEY:-$KEY}"
-BASE="${AIBOT_LLM_BASE_URL:-$BASE}"
-MODEL="${AIBOT_LLM_MODEL:-$MODEL}"
+KEY="${MINECRAFTAI_LLM_API_KEY:-$KEY}"
+BASE="${MINECRAFTAI_LLM_BASE_URL:-$BASE}"
+MODEL="${MINECRAFTAI_LLM_MODEL:-$MODEL}"
 
 # ---- 2. build
 if [ "$DO_BUILD" = 1 ]; then
@@ -91,7 +91,7 @@ fi
 # ---- 3. install the jar
 JAR="$(ls -1 build/libs/Minecraft-AI-*.jar 2>/dev/null | grep -v -E -- '-(sources|dev)\.jar$' | head -n1 || true)"
 [ -n "$JAR" ] && [ -f "$JAR" ] || die "no built jar in build/libs (build first)"
-for old in "$MODS_DIR"/Minecraft-AI-*.jar "$MODS_DIR"/aibot-*.jar; do
+for old in "$MODS_DIR"/Minecraft-AI-*.jar "$MODS_DIR"/minecraftai-*.jar; do
   [ -e "$old" ] && rm -f -- "$old"
 done
 cp -- "$JAR" "$MODS_DIR/"
@@ -99,25 +99,25 @@ DEPLOYED="$MODS_DIR/$(basename "$JAR")"
 [ "$(sha256sum < "$JAR")" = "$(sha256sum < "$DEPLOYED")" ] || die "deployed jar does not match the build"
 printf 'deploy: installed %s (%s KB)\n' "$(basename "$JAR")" "$(( $(wc -c < "$JAR") / 1024 ))"
 
-# ---- 4. LLM settings + logging in config/aibot.json (key only travels through the environment)
+# ---- 4. LLM settings + logging in config/minecraftai.json (key only travels through the environment)
 if [ "$DO_CONFIG" = 1 ]; then
   mkdir -p "$CONFIG_DIR"
-  CONFIG_FILE="$CONFIG_DIR/aibot.json"
-  [ -z "$KEY" ] && printf 'deploy: warning: no AIBOT_LLM_API_KEY in .env or the environment; the API key is left as it is\n'
+  CONFIG_FILE="$CONFIG_DIR/minecraftai.json"
+  [ -z "$KEY" ] && printf 'deploy: warning: no MINECRAFTAI_LLM_API_KEY in .env or the environment; the API key is left as it is\n'
   [ -f "$CONFIG_FILE" ] && cp -- "$CONFIG_FILE" "$CONFIG_FILE.bak"
-  AIBOT_DEPLOY_CONFIG_PATH="$(cygpath -w "$CONFIG_FILE")" \
-  AIBOT_LLM_API_KEY="$KEY" AIBOT_LLM_BASE_URL="$BASE" AIBOT_LLM_MODEL="$MODEL" \
+  MINECRAFTAI_DEPLOY_CONFIG_PATH="$(cygpath -w "$CONFIG_FILE")" \
+  MINECRAFTAI_LLM_API_KEY="$KEY" MINECRAFTAI_LLM_BASE_URL="$BASE" MINECRAFTAI_LLM_MODEL="$MODEL" \
   powershell.exe -NoProfile -Command '
     $ErrorActionPreference = "Stop"
-    $path = $env:AIBOT_DEPLOY_CONFIG_PATH
+    $path = $env:MINECRAFTAI_DEPLOY_CONFIG_PATH
     if (Test-Path -LiteralPath $path) { $j = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
     else { $j = [pscustomobject]@{ profile = "strict_survival" } }
-    if ($null -eq $j) { throw "aibot.json is empty" }
+    if ($null -eq $j) { throw "minecraftai.json is empty" }
     $names = @($j.PSObject.Properties.Name)
     if ($names -contains "llm") { $llm = $j.llm }
     elseif ($names -contains "deepseek") { $llm = $j.deepseek }
     else { $llm = [pscustomobject]@{} }
-    foreach ($pair in @(@("apiKey", $env:AIBOT_LLM_API_KEY), @("baseUrl", $env:AIBOT_LLM_BASE_URL), @("model", $env:AIBOT_LLM_MODEL))) {
+    foreach ($pair in @(@("apiKey", $env:MINECRAFTAI_LLM_API_KEY), @("baseUrl", $env:MINECRAFTAI_LLM_BASE_URL), @("model", $env:MINECRAFTAI_LLM_MODEL))) {
       if (-not [string]::IsNullOrWhiteSpace($pair[1])) { $llm | Add-Member -NotePropertyName $pair[0] -NotePropertyValue $pair[1] -Force }
     }
     if ($names -contains "deepseek") { $j.PSObject.Properties.Remove("deepseek") }
@@ -132,8 +132,8 @@ if [ "$DO_CONFIG" = 1 ]; then
   ' | tr -d '\r' | sed 's/^/deploy: /'
 
   # ---- 5. verify, without ever printing the key
-  AIBOT_DEPLOY_CONFIG_PATH="$(cygpath -w "$CONFIG_FILE")" powershell.exe -NoProfile -Command '
-    $j = Get-Content -LiteralPath $env:AIBOT_DEPLOY_CONFIG_PATH -Raw | ConvertFrom-Json
+  MINECRAFTAI_DEPLOY_CONFIG_PATH="$(cygpath -w "$CONFIG_FILE")" powershell.exe -NoProfile -Command '
+    $j = Get-Content -LiteralPath $env:MINECRAFTAI_DEPLOY_CONFIG_PATH -Raw | ConvertFrom-Json
     $l = $j.llm
     $host_ = ""; try { $host_ = ([uri]$l.baseUrl).Host } catch { $host_ = "(invalid url)" }
     $key = if ([string]::IsNullOrEmpty($l.apiKey)) { "NOT SET" } else { "set (" + $l.apiKey.Length + " chars)" }

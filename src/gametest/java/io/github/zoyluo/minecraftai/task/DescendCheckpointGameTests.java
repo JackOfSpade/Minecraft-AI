@@ -1,18 +1,18 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.goal.GoalPlanner;
-import io.github.zoyluo.aibot.goal.GoalResult;
-import io.github.zoyluo.aibot.goal.GoalStep;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.pathfinding.Standability;
-import io.github.zoyluo.aibot.persist.MissionRecord;
-import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
-import io.github.zoyluo.aibot.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalPlanner;
+import io.github.zoyluo.minecraftai.goal.GoalResult;
+import io.github.zoyluo.minecraftai.goal.GoalStep;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.persist.MissionRecord;
+import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -32,7 +32,7 @@ import net.minecraft.text.Text;
 
 /** Restart contracts for the exact staircase hand-off owned by {@link DescendToYTask}. */
 public final class DescendCheckpointGameTests {
-    @GameTest(environment = "aibot-gametest:descend_checkpoint_game_tests_full_depth_deepslate_descent_with_five_stone_pickaxes_fits_its_persisted_window", maxTicks = 9_000)
+    @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_full_depth_deepslate_descent_with_five_stone_pickaxes_fits_its_persisted_window", maxTicks = 9_000)
     public void fullDepthDeepslateDescentWithFiveStonePickaxesFitsItsPersistedWindow(
             TestContext context) {
         BlockPos relativeOrigin = context.getAbsolutePos(new BlockPos(4, 0, 80));
@@ -843,7 +843,7 @@ public final class DescendCheckpointGameTests {
         finish(context, bot, name);
     }
 
-    @GameTest(environment = "aibot-gametest:descend_checkpoint_game_tests_settled_landing_survives_safety_task_displacement", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_settled_landing_survives_safety_task_displacement", maxTicks = 40)
     public void settledLandingSurvivesSafetyTaskDisplacement(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
         BlockPos firstLanding = start.north().down();
@@ -867,7 +867,7 @@ public final class DescendCheckpointGameTests {
         require(context, "none".equals(task.checkpoint().get("pending_landing_origin"))
                         && "none".equals(task.checkpoint().get("pending_landing_target")),
                 "pause retained a dry factual landing debt: " + task.checkpoint());
-        require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                         bot, displaced, "gametest_safety_displacement"),
                 "fixture could not apply an ordinary safety-task displacement");
 
@@ -885,7 +885,7 @@ public final class DescendCheckpointGameTests {
         finish(context, bot, "DescendSafetyPauseGT");
     }
 
-    @GameTest(environment = "aibot-gametest:descend_checkpoint_game_tests_threat_pause_preserves_rejection_at_the_settled_landing", maxTicks = 30)
+    @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_threat_pause_preserves_rejection_at_the_settled_landing", maxTicks = 30)
     public void threatPausePreservesRejectionAtTheSettledLanding(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
         BlockPos landing = start.north().down();

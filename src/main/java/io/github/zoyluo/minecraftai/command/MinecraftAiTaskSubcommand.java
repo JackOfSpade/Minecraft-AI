@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.command;
+package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -6,36 +6,36 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.auth.BotAuthorizationGate;
-import io.github.zoyluo.aibot.auth.BotAuthorizationPolicy;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.runtime.IntentController;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.action.FarmAction;
-import io.github.zoyluo.aibot.task.BreedTask;
-import io.github.zoyluo.aibot.task.BuildTask;
-import io.github.zoyluo.aibot.task.CombatTask;
-import io.github.zoyluo.aibot.task.ContainerTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.EatTask;
-import io.github.zoyluo.aibot.task.FarmTask;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.task.BlueprintLoader;
+import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.task.BreedTask;
+import io.github.zoyluo.minecraftai.task.BuildTask;
+import io.github.zoyluo.minecraftai.task.CombatTask;
+import io.github.zoyluo.minecraftai.task.ContainerTask;
+import io.github.zoyluo.minecraftai.task.CraftTask;
+import io.github.zoyluo.minecraftai.task.EatTask;
+import io.github.zoyluo.minecraftai.task.FarmTask;
 import net.minecraft.item.Items;
-import io.github.zoyluo.aibot.task.GatherQuotaTask;
-import io.github.zoyluo.aibot.task.LightAreaTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.SleepTask;
-import io.github.zoyluo.aibot.task.SmeltTask;
-import io.github.zoyluo.aibot.task.StockpileTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.StripMineTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
+import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
+import io.github.zoyluo.minecraftai.task.LightAreaTask;
+import io.github.zoyluo.minecraftai.task.MineTask;
+import io.github.zoyluo.minecraftai.task.MoveTask;
+import io.github.zoyluo.minecraftai.task.SleepTask;
+import io.github.zoyluo.minecraftai.task.SmeltTask;
+import io.github.zoyluo.minecraftai.task.StockpileTask;
+import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.StripMineTask;
+import io.github.zoyluo.minecraftai.task.Task;
+import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.minecraft.block.Block;
 import net.minecraft.command.argument.IdentifierArgumentType;
 import net.minecraft.item.Item;
@@ -53,8 +53,8 @@ import java.util.Set;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-public final class AIBotTaskSubcommand {
-    private AIBotTaskSubcommand() {
+public final class MinecraftAiTaskSubcommand {
+    private MinecraftAiTaskSubcommand() {
     }
 
     public static LiteralArgumentBuilder<ServerCommandSource> build() {
@@ -62,7 +62,7 @@ public final class AIBotTaskSubcommand {
                 .then(literal("assign")
                         .then(botName()
                                 .then(literal("move")
-                                        .then(blockPosArgs(AIBotTaskSubcommand::assignMove)))
+                                        .then(blockPosArgs(MinecraftAiTaskSubcommand::assignMove)))
                                 .then(literal("forage")
                                         .executes(context -> assignForage(context, 4))
                                         .then(argument("count", IntegerArgumentType.integer(1))
@@ -107,9 +107,9 @@ public final class AIBotTaskSubcommand {
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignCraft(context, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("eat")
-                                        .executes(AIBotTaskSubcommand::assignEat))
+                                        .executes(MinecraftAiTaskSubcommand::assignEat))
                                 .then(literal("sleep")
-                                        .executes(AIBotTaskSubcommand::assignSleep))
+                                        .executes(MinecraftAiTaskSubcommand::assignSleep))
                                 .then(literal("light_area")
                                         .executes(context -> assignLightArea(context, 8, 8))
                                         .then(argument("radius", IntegerArgumentType.integer(2))
@@ -197,16 +197,16 @@ public final class AIBotTaskSubcommand {
                                                                 .executes(context -> assignBuild(context, true, true))))))))
                 .then(literal("status")
                         .then(botName()
-                                .executes(AIBotTaskSubcommand::status)))
+                                .executes(MinecraftAiTaskSubcommand::status)))
                 .then(literal("pause")
                         .then(botName()
-                                .executes(AIBotTaskSubcommand::pause)))
+                                .executes(MinecraftAiTaskSubcommand::pause)))
                 .then(literal("resume")
                         .then(botName()
-                                .executes(AIBotTaskSubcommand::resume)))
+                                .executes(MinecraftAiTaskSubcommand::resume)))
                 .then(literal("abort")
                         .then(botName()
-                                .executes(AIBotTaskSubcommand::abort)));
+                                .executes(MinecraftAiTaskSubcommand::abort)));
     }
 
     private static RequiredArgumentBuilder<ServerCommandSource, String> botName() {
@@ -232,7 +232,7 @@ public final class AIBotTaskSubcommand {
         return assign(context, bot -> new CombatTask(
                 Registries.ENTITY_TYPE.get(IdentifierArgumentType.getIdentifier(context, "entity_type")),
                 count,
-                io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp()));
+                io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp()));
     }
 
     private static int assignMine(CommandContext<ServerCommandSource> context, int count) {
@@ -263,7 +263,7 @@ public final class AIBotTaskSubcommand {
     }
 
     private static void requireLegacyMiningProfile() {
-        StripMineTask.profileRejectionReason(AIBotConfig.get().profile())
+        StripMineTask.profileRejectionReason(MinecraftAiConfig.get().profile())
                 .ifPresent(reason -> {
                     throw new IllegalArgumentException(reason);
                 });
@@ -352,7 +352,7 @@ public final class AIBotTaskSubcommand {
             return 0;
         }
         TaskStatus status = TaskManager.INSTANCE.status(bot.get());
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] task "
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] task "
                 + status.name()
                 + " state=" + status.state()
                 + " progress=" + String.format(java.util.Locale.ROOT, "%.2f", status.progress())
@@ -369,7 +369,7 @@ public final class AIBotTaskSubcommand {
         }
         IntentController.INSTANCE.cancelAll(
                 bot.get(), IntentController.ControlOrigin.PLAYER_COMMAND, "command_task_abort");
-        context.getSource().sendFeedback(() -> Text.literal("[AIBot] task aborted"), false);
+        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] task aborted"), false);
         return 1;
     }
 
@@ -409,10 +409,10 @@ public final class AIBotTaskSubcommand {
                                 TaskOrigin.of(TaskOrigin.Kind.PLAYER_COMMAND, "command_task_assign"));
                         return true;
                     });
-            context.getSource().sendFeedback(() -> Text.literal("[AIBot] task assigned: " + task.name()), false);
+            context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] task assigned: " + task.name()), false);
             return 1;
         } catch (RuntimeException exception) {
-            context.getSource().sendError(Text.literal("[AIBot] task assign failed: " + exception.getMessage()));
+            context.getSource().sendError(Text.literal("[Minecraft-AI] task assign failed: " + exception.getMessage()));
             return 0;
         }
     }

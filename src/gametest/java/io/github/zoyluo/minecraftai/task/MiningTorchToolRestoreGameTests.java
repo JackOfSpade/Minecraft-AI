@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -23,7 +23,7 @@ import net.minecraft.entity.EquipmentSlot;
 public final class MiningTorchToolRestoreGameTests {
     private static final String BATCH = "miningTorchToolRestoreStrict";
 
-    @GameTest(environment = "aibot-gametest:mining_torch_tool_restore_game_tests_descend_torch_attempt_restores_active_stone_pick", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_torch_tool_restore_game_tests_descend_torch_attempt_restores_active_stone_pick", maxTicks = 40)
     public void descendTorchAttemptRestoresActiveStonePick(TestContext context) {
         Fixture fixture = spawn(context, "DescendTorchRestoreGT", new BlockPos(4, 4, 4));
         BlockMiner miner = beginActiveStoneClear(context, fixture, false);
@@ -35,7 +35,7 @@ public final class MiningTorchToolRestoreGameTests {
         cleanup(context, fixture, miner);
     }
 
-    @GameTest(environment = "aibot-gametest:mining_torch_tool_restore_game_tests_ore_dig_torch_attempt_restores_active_channel_pick", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:mining_torch_tool_restore_game_tests_ore_dig_torch_attempt_restores_active_channel_pick", maxTicks = 40)
     public void oreDigTorchAttemptRestoresActiveChannelPick(TestContext context) {
         Fixture fixture = spawn(context, "OreDigTorchRestoreGT", new BlockPos(10, 4, 4));
         BlockMiner miner = beginActiveStoneClear(context, fixture, true);

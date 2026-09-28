@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.client.screen.ui.cards;
+package io.github.zoyluo.minecraftai.client.screen.ui.cards;
 
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.client.screen.ui.PanelComponent;
-import io.github.zoyluo.aibot.client.screen.ui.Theme;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.client.screen.ui.PanelComponent;
+import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 

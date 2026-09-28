@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ObservableWorldQueryInsetFaceTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/mode/ObservableWorldQuery.java");
+            "src/main/java/io/github/zoyluo/minecraftai/mode/ObservableWorldQuery.java");
 
     @Test
     void insetEndpointUsesDeterministicTangentsInsideTheRequestedFace() {
@@ -47,7 +47,7 @@ class ObservableWorldQueryInsetFaceTest {
 
         String insetBody = source.substring(inset, facePolicy);
         assertTrue(insetBody.contains("Math.min("));
-        assertTrue(insetBody.contains("AIBotConfig.get().perception().radius()"));
+        assertTrue(insetBody.contains("MinecraftAiConfig.get().perception().radius()"));
         assertTrue(insetBody.contains("bot.getBlockInteractionRange()"));
         assertTrue(insetBody.contains("RaycastContext.FluidHandling.ANY"));
         assertTrue(insetBody.contains("hit.getBlockPos().equals(pos)"));

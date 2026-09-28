@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.log.LogFields;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.log.LogFields;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.world.ServerWorld;
@@ -45,7 +45,7 @@ public final class WalkToController {
 
         var player = pack.player();
         ServerWorld world = player.getEntityWorld();
-        AIBotConfig.Nav nav = AIBotConfig.get().nav();
+        MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
         Vec3d current = player.getEntityPos();
         double dx = target.x - current.x;
         double dz = target.z - current.z;
@@ -62,9 +62,10 @@ public final class WalkToController {
         pack.setStrafing(sidle.strafing);
 
         JumpDecision jump = shouldJump(current, move, world, nav);
-        // 拟人化:只在"已落地 + 前方确有台阶/缺口"时点跳一次(单跳),绝不长按跳键。
-        // 旧实现 setJumping(jump.jump) 会在障碍持续存在的多 tick 里一直按住跳——bot 落地即连跳(兔子跳),
-        // 既不像正常玩家,跳跃还会拉低水平速度(实测"边跳边砍树、影响速度")。落地门控确保一台阶只跳一次。
+        // Humanize: only tap jump once (a single jump) when "already grounded + there is actually a step/gap ahead", and never hold the jump key down.
+        // The old implementation, setJumping(jump.jump), kept holding jump for every tick the obstacle persisted -- causing the bot to bunny-hop
+        // continuously the instant it landed, which not only looks unlike a real player but also lowers horizontal speed while jumping (observed in
+        // testing as "jumping while chopping trees slows movement"). The on-ground gate ensures only one jump per step.
         if (jump.jump && player.isOnGround()) {
             pack.jumpOnce();
         }
@@ -101,7 +102,7 @@ public final class WalkToController {
         return ActionResult.IN_PROGRESS;
     }
 
-    private SidleCommand sidleCommand(Vec3d move, AIBotConfig.Nav nav) {
+    private SidleCommand sidleCommand(Vec3d move, MinecraftAiConfig.Nav nav) {
         if (noProgressTicks < nav.sidleAfter()) {
             return new SidleCommand(move, 0.0F);
         }
@@ -114,7 +115,7 @@ public final class WalkToController {
         };
     }
 
-    private static JumpDecision shouldJump(Vec3d current, Vec3d move, ServerWorld world, AIBotConfig.Nav nav) {
+    private static JumpDecision shouldJump(Vec3d current, Vec3d move, ServerWorld world, MinecraftAiConfig.Nav nav) {
         BlockPos front = footPos(current, move, nav.jumpReach());
         BlockState frontState = world.getBlockState(front);
         BlockState aboveFront = world.getBlockState(front.up());
@@ -147,7 +148,7 @@ public final class WalkToController {
                 && hasCollision(world.getBlockState(landing.down()), world, landing.down());
     }
 
-    private static boolean shouldSprint(double horizontalDistance, JumpDecision jump, Vec3d current, Vec3d move, ServerWorld world, AIBotConfig.Nav nav) {
+    private static boolean shouldSprint(double horizontalDistance, JumpDecision jump, Vec3d current, Vec3d move, ServerWorld world, MinecraftAiConfig.Nav nav) {
         if (horizontalDistance < nav.sprintMinDist()) {
             return false;
         }

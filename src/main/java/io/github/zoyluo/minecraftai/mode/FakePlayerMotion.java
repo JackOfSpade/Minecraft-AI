@@ -1,10 +1,10 @@
-package io.github.zoyluo.aibot.mode;
+package io.github.zoyluo.minecraftai.mode;
 
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mixin.ServerEntityManagerCacheAccessorMixin;
-import io.github.zoyluo.aibot.mixin.ServerWorldEntityManagerAccessorMixin;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mixin.ServerEntityManagerCacheAccessorMixin;
+import io.github.zoyluo.minecraftai.mixin.ServerWorldEntityManagerAccessorMixin;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.predicate.entity.EntityPredicates;
@@ -388,9 +388,9 @@ public final class FakePlayerMotion {
     private static boolean hasLandingEntityCollision(AIPlayerEntity bot, Box landingBox) {
         var world = bot.getEntityWorld();
         var manager = ((ServerWorldEntityManagerAccessorMixin) (Object) world)
-                .aibot$getEntityManager();
+                .minecraftai$getEntityManager();
         var cache = ((ServerEntityManagerCacheAccessorMixin) (Object) manager)
-                .aibot$getSectionCache();
+                .minecraftai$getSectionCache();
         int minSectionX = ChunkSectionPos.getSectionCoord(landingBox.minX - 2.0D);
         int minSectionY = ChunkSectionPos.getSectionCoord(landingBox.minY - 4.0D);
         int minSectionZ = ChunkSectionPos.getSectionCoord(landingBox.minZ - 2.0D);

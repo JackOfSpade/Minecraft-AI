@@ -1,8 +1,8 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.brain.ChatMessage;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.brain.ChatMessage;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,11 +43,15 @@ public final class MemoryStore {
     }
 
     /**
-     * 发送前兜底:保证 OpenAI 兼容接口的消息配对合法,杜绝 400
-     * "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
-     * 任何 trim/截断/注入把 assistant(tool_calls) 与其后的 tool 回应切断后,这里统一修正:
-     * - 丢弃"孤儿 tool"(前一条不是带 tool_calls 的 assistant、也不是另一条 tool)。
-     * - assistant 带 tool_calls 但后面没有 tool 回应(被裁断)→ 剥掉 tool_calls 降级为普通 assistant。
+     * Final safety net before sending: keeps message pairing valid for the OpenAI-compatible API,
+     * preventing the 400 error
+     * "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'".
+     * Whenever trim/truncation/injection severs an assistant(tool_calls) message from the tool
+     * response that follows it, this normalizes things in one place:
+     * - Drop "orphan tool" messages (the preceding entry is neither an assistant with tool_calls
+     *   nor another tool message).
+     * - assistant has tool_calls but no tool response follows it (got truncated) -> strip the
+     *   tool_calls and downgrade it to a plain assistant message.
      */
     private static List<ChatMessage> sanitize(List<ChatMessage> in) {
         List<ChatMessage> out = new ArrayList<>(in.size());
@@ -60,7 +64,7 @@ public final class MemoryStore {
                 if (validResponse) {
                     out.add(m);
                 }
-                // 否则:孤儿 tool,丢弃
+                // Otherwise: orphan tool message, discard it
             } else if ("assistant".equals(m.role()) && hasToolCalls(m)) {
                 boolean toolFollows = (i + 1 < in.size()) && "tool".equals(in.get(i + 1).role());
                 if (toolFollows) {

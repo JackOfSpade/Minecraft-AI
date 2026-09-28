@@ -1,6 +1,6 @@
-package io.github.zoyluo.aibot.persist;
+package io.github.zoyluo.minecraftai.persist;
 
-import io.github.zoyluo.aibot.coordination.Job;
+import io.github.zoyluo.minecraftai.coordination.Job;
 
 import java.util.List;
 

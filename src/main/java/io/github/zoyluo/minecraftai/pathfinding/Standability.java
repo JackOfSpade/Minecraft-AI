@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -132,7 +132,7 @@ public final class Standability {
         if (isDangerous(feet) || isDangerous(head) || isDangerous(below)) {
             return false;
         }
-        // NAV-11:梯子/藤蔓等可攀爬方块,站在其中即可,无需下方支撑。
+        // NAV-11: Ladders/vines and other climbable blocks only need the bot standing inside them; no support below is required.
         if (feet.isIn(BlockTags.CLIMBABLE)) {
             return true;
         }

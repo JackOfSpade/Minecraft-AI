@@ -4,9 +4,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 ROUNDS="${1:-1}"
-SEEDS="${AIBOT_NIGHT_SEEDS:-20260610,3000,777}"
-PROFILE_VALUE="${AIBOT_PROFILE:-strict_survival}"
-SCENARIOS="${AIBOT_NIGHT_SCENARIOS:-capability_profile+runtime_control_suite,food_suite,mining}"
+SEEDS="${MINECRAFTAI_NIGHT_SEEDS:-20260610,3000,777}"
+PROFILE_VALUE="${MINECRAFTAI_PROFILE:-strict_survival}"
+SCENARIOS="${MINECRAFTAI_NIGHT_SCENARIOS:-capability_profile+runtime_control_suite,food_suite,mining}"
 REPORT="$ROOT/reports/night_$(date '+%Y%m%d_%H%M').md"
 
 [[ "$ROUNDS" =~ ^[1-9][0-9]*$ && "$ROUNDS" -le 20 ]] || {
@@ -17,7 +17,7 @@ REPORT="$ROOT/reports/night_$(date '+%Y%m%d_%H%M').md"
 mkdir -p "$ROOT/reports"
 overall=0
 {
-  printf '# 夜间值守报告 %s\n\n' "$(date '+%F %T')"
+  printf '# Night Watch Report %s\n\n' "$(date '+%F %T')"
   printf -- '- profile: `%s`\n- seeds: `%s`\n- runs per seed: `%s`\n\n' "$PROFILE_VALUE" "$SEEDS" "$ROUNDS"
 } > "$REPORT"
 
@@ -26,9 +26,9 @@ IFS=',' read -r -a scenario_list <<< "$SCENARIOS"
 IFS="$old_ifs"
 for scenario in "${scenario_list[@]}"; do
   args=(--scenario "$scenario" --seeds "$SEEDS" --runs "$ROUNDS"
-    --timeout "${AIBOT_NIGHT_TIMEOUT:-2400}" --profile "$PROFILE_VALUE")
-  [[ "$PROFILE_VALUE" != operator ]] || args+=(--operator-capabilities "${AIBOT_OPERATOR_CAPABILITIES:-all}")
-  output="$(mktemp "${TMPDIR:-/tmp}/aibot-night.XXXXXX")"
+    --timeout "${MINECRAFTAI_NIGHT_TIMEOUT:-2400}" --profile "$PROFILE_VALUE")
+  [[ "$PROFILE_VALUE" != operator ]] || args+=(--operator-capabilities "${MINECRAFTAI_OPERATOR_CAPABILITIES:-all}")
+  output="$(mktemp "${TMPDIR:-/tmp}/minecraftai-night.XXXXXX")"
   set +e
   "$ROOT/scripts/evidence_batch.sh" "${args[@]}" | tee "$output"
   status=${PIPESTATUS[0]}

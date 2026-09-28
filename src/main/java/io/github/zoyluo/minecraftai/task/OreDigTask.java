@@ -1,58 +1,58 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BlockMiner;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.HarvestCore;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.action.ToolSelector;
-import io.github.zoyluo.aibot.action.WalkToController;
-import io.github.zoyluo.aibot.brain.BrainCoordinator;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.mining.MiningBudget;
-import io.github.zoyluo.aibot.mining.MiningCursor;
-import io.github.zoyluo.aibot.mining.MiningMissionBudget;
-import io.github.zoyluo.aibot.mining.MiningEvidenceAudit;
-import io.github.zoyluo.aibot.mining.OreProspector;
-import io.github.zoyluo.aibot.mining.OreScan;
-import io.github.zoyluo.aibot.mining.ToolTier;
-import io.github.zoyluo.aibot.mining.assist.BotEdits;
-import io.github.zoyluo.aibot.mining.assist.CoverageGrid;
-import io.github.zoyluo.aibot.mining.assist.DetourControl;
-import io.github.zoyluo.aibot.mining.assist.DetourPhase;
-import io.github.zoyluo.aibot.mining.assist.DetourPolicy;
-import io.github.zoyluo.aibot.mining.assist.HazardField;
-import io.github.zoyluo.aibot.mining.assist.InventoryHeadroom;
-import io.github.zoyluo.aibot.mining.assist.LegChooser;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistLog;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
-import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
-import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
-import io.github.zoyluo.aibot.mining.assist.ObservedGraphSearch;
-import io.github.zoyluo.aibot.mining.assist.ObservedOccupancy;
-import io.github.zoyluo.aibot.mining.assist.ObservedReach;
-import io.github.zoyluo.aibot.mining.assist.OreClaims;
-import io.github.zoyluo.aibot.mining.assist.FrontierPlanner;
-import io.github.zoyluo.aibot.mining.assist.PoiRegistry;
-import io.github.zoyluo.aibot.mining.assist.RouteBudget;
-import io.github.zoyluo.aibot.mining.assist.SafeGate;
-import io.github.zoyluo.aibot.mining.assist.SafeReason;
-import io.github.zoyluo.aibot.mining.assist.SenseBudget;
-import io.github.zoyluo.aibot.mining.assist.SightingLedger;
-import io.github.zoyluo.aibot.mining.assist.SweepEngine;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
-import io.github.zoyluo.aibot.memory.EpisodeLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
-import io.github.zoyluo.aibot.mode.ObservableWorldQuery;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BlockMiner;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.action.WalkToController;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.MiningBudget;
+import io.github.zoyluo.minecraftai.mining.MiningCursor;
+import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
+import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
+import io.github.zoyluo.minecraftai.mining.OreProspector;
+import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.ToolTier;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
+import io.github.zoyluo.minecraftai.mining.assist.CoverageGrid;
+import io.github.zoyluo.minecraftai.mining.assist.DetourControl;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
+import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy;
+import io.github.zoyluo.minecraftai.mining.assist.HazardField;
+import io.github.zoyluo.minecraftai.mining.assist.InventoryHeadroom;
+import io.github.zoyluo.minecraftai.mining.assist.LegChooser;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistLog;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
+import io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.minecraftai.mining.assist.ObservedGraphSearch;
+import io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy;
+import io.github.zoyluo.minecraftai.mining.assist.ObservedReach;
+import io.github.zoyluo.minecraftai.mining.assist.OreClaims;
+import io.github.zoyluo.minecraftai.mining.assist.FrontierPlanner;
+import io.github.zoyluo.minecraftai.mining.assist.PoiRegistry;
+import io.github.zoyluo.minecraftai.mining.assist.RouteBudget;
+import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
+import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
+import io.github.zoyluo.minecraftai.mining.assist.SenseBudget;
+import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
+import io.github.zoyluo.minecraftai.mining.assist.SweepEngine;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.memory.EpisodeLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -81,16 +81,23 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * OREDIG(实测#10):可靠的矿石采集,取代 GoalExecutor 的 MINE_ORE 步原本用的 OreSeekTask。
+ * OREDIG (field-tested #10): reliable ore mining, replacing the OreSeekTask that GoalExecutor's
+ * MINE_ORE step originally used.
  *
- * OreSeek 的"扫描→A*接近→走廊兜底"接近逻辑在被石头包裹的矿上连续 stuck(#6/#8/#10)。
- * 本任务改用已被验证**永不卡死**的模式:**控制式直挖隧道 + 共享 {@link BlockMiner}**,绝不寻路/走路:
- *  - SCAN:用服务端全数据找最近目标矿(限频);找不到就向下挖一格换层再扫;
- *  - DIG:每 tick 只挖"朝矿方向的下一格"(水平或向下一格),BlockMiner 驱动一块一块成形,
- *    bot 自然跟进;矿进入伸手范围 → 直接挖它,并把相邻同脉矿一起挖净;
- *  - 全程无进展看门狗:超时没破任何块即干净失败,交 GoalExecutor。
+ * OreSeek's "scan -> A* approach -> corridor fallback" approach logic kept getting stuck
+ * (#6/#8/#10) on ore wrapped in stone.
+ * This task instead uses a mode already verified to **never deadlock**: **controlled direct-dig
+ * tunneling + a shared {@link BlockMiner}**, never pathfinding/walking:
+ *  - SCAN: use full server-side data to find the nearest target ore (rate-limited); if none is
+ *    found, dig down one block to change layer and scan again;
+ *  - DIG: each tick only mine "the next cell toward the ore" (horizontal or one down); BlockMiner
+ *    drives the shaping block by block,
+ *    and the bot naturally follows; once the ore enters reach -> mine it directly, and clear out
+ *    adjacent same-vein ore along with it;
+ *  - a no-progress watchdog runs throughout: if no block is broken before timeout, fail cleanly
+ *    and hand off to GoalExecutor.
  *
- * 自包含状态机(铁律 G1),不在内部 assign;全程主线程(G2)。
+ * Self-contained state machine (Iron Rule G1), no internal assign; runs entirely on the main thread (G2).
  */
 public final class OreDigTask extends AbstractTask implements CheckpointableTask {
     private enum PickupEgressResult {
@@ -135,26 +142,31 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static final int MAX_ELAPSED_BASE = MiningMissionBudget.ORE_DIG_HARD_WINDOW_TICKS;
     private static final int MAX_CHECKPOINT_TARGET_COUNT = 4096;
     private static final int MAX_CURSOR_LEGS = 4096;
-    private static final int STRIP_AFTER_SKIPS = 3;     // 连续这么多次"锁矿够不到被跳过" → 强制 strip 推进一步(破原地死锁)
-    private static final int NO_PROGRESS_LIMIT = 200;   // 10s 没破任何块 → 失败
+    private static final int STRIP_AFTER_SKIPS = 3;     // this many consecutive "locked ore out of reach, skipped" events -> force one strip-mine advance step (breaks an in-place deadlock)
+    private static final int NO_PROGRESS_LIMIT = 200;   // 10s with no block broken -> fail
     private static final int RESTORE_FACE_LIMIT = 1200;
     // Closed batches carry geometry only: a farther handoff is a new physical work region.
     private static final long MAX_COMMITTED_CURSOR_HANDOFF_DISTANCE_SQUARED = 16L * 16L;
     private static final int SCAN_INTERVAL = 10;
     private static final int SCAN_RADIUS = 24;
-    private static final int PROSPECT_RANGE = 64;       // 探矿(大范围定位最近矿)半径——身边扫不到时启用
-    private static final int PROSPECT_INTERVAL = 40;    // 探矿较贵(逐区块 section 扫),2s 一次
+    private static final int PROSPECT_RANGE = 64;       // prospecting (wide-range locate of the nearest ore) radius -- kicks in when nothing is found nearby
+    private static final int PROSPECT_INTERVAL = 40;    // prospecting is relatively expensive (scans section by section), once every 2s
     private static final int VERTICAL_SCAN = 10;
-    // 4.5^2:与 BlockMiner 内部验证一致(5.5 时边缘开挖被 miner 拒→FAILED→矿被误拉黑,geo_wall 实测
-    // 锁定 2s 即弃)。历史 5.1 死区的前提已不存在——接近目标现在是矿正下方格,寻路会真走到贴脸位。
+    // 4.5^2: matches BlockMiner's own internal check (at 5.5, edge-of-range mining was rejected by
+    // the miner -> FAILED -> ore wrongly blacklisted; geo_wall testing showed it got abandoned
+    // within 2s of locking on). The premise behind the old 5.1 dead zone no longer holds -- the
+    // approach target is now the cell directly under the ore, so pathfinding actually walks right
+    // up against it.
     private static final double REACH_SQUARED = 20.25D;
     private static final int MIN_Y = -60;
     private static final int VEIN_CAP = 64;
     private static final int PICKUP_GRACE_TICKS = 30;
     private static final int TARGET_DROP_RECOVERY_LIMIT = 200;
     private static final int TARGET_DROP_LAST_SEEN_RANGE = 16;
-    // 恢复窗口内原地滞留(同格 nudge/静默寻路失败都算)超过该阈值 → 升级为观察扫描:
-    // 走到 last-seen 周边可观察站位,让被遮挡/被弹飞的掉落重新进入视野或碰撞盒。
+    // Staying in place within the recovery window (a same-cell nudge or a silent pathfinding
+    // failure both count) beyond this threshold -> escalate to an observation sweep: walk to an
+    // observable stance near the last-seen position so an occluded or knocked-away drop can
+    // re-enter view or its hitbox.
     private static final int PICKUP_STALL_SWEEP_TICKS = 30;
     private static final int[][] PICKUP_SWEEP_OFFSETS = {
             {1, 0}, {0, 1}, {-1, 0}, {0, -1},
@@ -163,9 +175,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     };
     private static final int MIN_TARGET_BREAK_DY = -1;
     private static final int MAX_TARGET_BREAK_DY = 2;
-    private static final int BONUS_CAP = 8;            // R3 顺路矿单任务上限:白捡是好,改行不行
-    private static final int APPROACH_LIMIT = 80;       // P0:锁定矿超过此 tick 仍没靠近 → 判够不到,放弃换矿/下挖
-    private static final int STRIP_SEGMENT = 48;        // 覆盖效率:扫描是全知 24 格球,巷道价值=移动覆盖;长段直线减少转向与重叠扫描
+    private static final int BONUS_CAP = 8;            // R3 opportunistic-ore per-task cap: free pickups are good, but not at the cost of the main job
+    private static final int APPROACH_LIMIT = 80;       // P0: if locked ore still hasn't been approached after this many ticks -> judge it unreachable, give up and switch ore/dig down
+    private static final int STRIP_SEGMENT = 48;        // Coverage efficiency: the scan is an omniscient 24-block sphere, so a tunnel's value is the ground it covers by moving; a long straight segment reduces turning and overlapping scans
     private static final int HOSTILE_BARRICADE_RETREAT = 4;
     private static final Direction[] STRIP_DIRS = {
             Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
@@ -174,8 +186,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private final Set<Item> targetDrops;
     private final int targetCount;
     private final BlockMiner miner = new BlockMiner();
-    // 排除项收编进 EpisodeMemory(工作记忆,goal 级生命周期+TTL 复活):原实例 Set 在 replan 后丢失、
-    // 又需一次性"特赦"补救;TTL 短排除(30s)语义更细腻——过期自然复活,无需特赦。
+    // Exclusions are folded into EpisodeMemory (working memory, goal-scoped lifecycle + TTL
+    // revival): the old instance Set was lost after a replan and needed a one-time "amnesty" fix;
+    // a short TTL exclusion (30s) is finer-grained semantics -- it naturally revives on expiry, no
+    // amnesty needed.
     private final Deque<BlockPos> veinQueue = new ArrayDeque<>();
     /**
      * A finite observation ledger, not a cached safety verdict. Each value was a strictly visible,
@@ -193,11 +207,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int lastProspectTick = -100;
     private int pickupGrace;
     private BlockPos targetOre;
-    private double lastTargetDist = Double.MAX_VALUE; // P0:锁定矿的历史最近距离²(监控是否在接近)
+    private double lastTargetDist = Double.MAX_VALUE; // P0: the historical closest squared distance to the locked ore (monitors whether we're actually approaching)
     private int targetApproachTick;
-    private int stripDirIndex = -1;   // 优化1:矿层水平找矿当前掘进方向(STRIP_DIRS 下标),-1=未开始
-    private int stripStepsLeft;       // 优化1:当前隧道段剩余格数
-    private int stripLegIndex;        // 方形螺旋第几条边；每两边扩大一次，避免四边走回原点
+    private int stripDirIndex = -1;   // Optimization 1: current horizontal digging direction for finding ore at this layer (index into STRIP_DIRS), -1 = not started
+    private int stripStepsLeft;       // Optimization 1: cells remaining in the current tunnel segment
+    private int stripLegIndex;        // Which leg of the square spiral we're on; expands every two legs, avoiding returning to the origin every four legs
     private int stripLegLength = STRIP_SEGMENT;
     private BlockPos stripProgressPos;
     // P4 (design 5.3, off by default): L1 LegChooser's own coverage memory, mission-scoped like
@@ -215,13 +229,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private BlockPos cursorOrigin;
     private BlockPos lastFace;
     private int completedBatches;
-    private int consecutiveSkips;     // 连续"锁矿够不到被跳过"次数(挖到矿清零);超阈值强制 strip 推进破死锁
-    private BlockPos lastSkipPos;     // 上次弃矿时 bot 所在格:原地反复弃矿(位置不变)不喂活看门狗,让其能熔断破thrash
-    private final int maxElapsed;     // 硬超时:大配额(整套铁甲26铁)按量缩放,小配额用基线
-    private BlockPos bonusOre;        // R3 顺路矿:reach 内的非目标矿,顺手一镐(单块,不追脉)
-    private int bonusMined;           // 顺路预算计数(防喧宾夺主)
+    private int consecutiveSkips;     // Count of consecutive "locked ore out of reach, skipped" events (reset to zero on a successful mine); above the threshold, force a strip-mine advance to break the deadlock
+    private BlockPos lastSkipPos;     // The bot's cell the last time ore was abandoned: repeatedly abandoning ore in place (unchanged position) does not feed the watchdog, letting it trip and break the thrash
+    private final int maxElapsed;     // Hard timeout: scales with a large quota (a full suit of iron armor = 26 iron), a small quota uses the baseline
+    private BlockPos bonusOre;        // R3 opportunistic ore: non-target ore within reach, mined in passing (single block, does not chase the vein)
+    private int bonusMined;           // Opportunistic-mining budget counter (prevents it from overshadowing the main job)
     private int lastBonusScanTick = -100;
-    private int lastReLockTick = -100;  // 接近途中重扫改投更近矿的限频
+    private int lastReLockTick = -100;  // Rate limit for re-scanning mid-approach to switch to a closer ore
     private final MiningCursor restoredCursor;
     private final OreDigCheckpoint restoredCheckpoint;
     private final boolean invalidCheckpoint;
@@ -424,12 +438,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     public boolean isWaiting() {
-        // 挖掘/下挖期 bot 基本站着挖,视为 waiting 让 StuckWatcher 不误判(它正是 #10 反复 abort 的元凶);
-        // 由本任务自己的 NO_PROGRESS_LIMIT 看门狗负责卡死保护。
+        // During mining/digging-down the bot basically stands still and mines, treated as waiting
+        // so StuckWatcher doesn't misjudge it (StuckWatcher was exactly the culprit behind #10's
+        // repeated aborts); this task's own NO_PROGRESS_LIMIT watchdog handles deadlock protection
+        // instead.
         return true;
     }
 
-    // EpisodeMemory 薄包装:排除"够不到/挖空"的矿(TTL 30s 自动复活),goal 级生命周期跨 replan 存活。
+    // Thin wrapper over EpisodeMemory: excludes ore that is "unreachable/mined out" (TTL 30s auto-revival), goal-scoped lifecycle survives across replans.
     private void excludeOre(AIPlayerEntity bot, BlockPos pos) {
         EpisodeMemory.INSTANCE.exclude(bot.getUuid(), pos, bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_SHORT);
         forgetRememberedHighWorkPose(pos);
@@ -598,7 +614,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!MiningBarricadeTask.hasMaterialsForOpenGate(bot)) {
             BotLog.danger(bot, "ore_dig_hostile_barricade_rejected",
                     "reason", "insufficient_gate_blocks",
-                    "available", io.github.zoyluo.aibot.action.MaterialPalette
+                    "available", io.github.zoyluo.minecraftai.action.MaterialPalette
                             .countShelterBlocks(bot));
             return Optional.empty();
         }
@@ -840,8 +856,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "remaining", stripStepsLeft,
                     "batches", completedBatches);
         }
-        // R6 入口地标:开挖处自动 mark(goto_place mine_entry 一步回来;玩家问'矿洞在哪'也答得出)。
-        io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        // R6 entry landmark: auto-mark the dig site (goto_place mine_entry walks back in one step; can also answer when a player asks "where's the mine?").
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .markPlace("mine_entry", bot.getEntityWorld(), bot.getBlockPos());
     }
 
@@ -920,9 +936,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
-    // R6/R7 作业面地标:任务结束处=下次续挖起点。矿种一并 remember,resume_mining 免问。
+    // R6/R7 work-face landmark: where the task ends = the starting point for next time it resumes digging. The ore type is remembered alongside it, so resume_mining doesn't need to ask.
     private void markMineFace(AIPlayerEntity bot) {
-        var mem = io.github.zoyluo.aibot.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
+        var mem = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
         mem.markPlace("mine_face", bot.getEntityWorld(), bot.getBlockPos());
         String ores = targetOres.stream()
                 .map(b -> net.minecraft.registry.Registries.BLOCK.getId(b).toString())
@@ -1003,8 +1019,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
         }
 
-        // 水下作业不等到 5 秒氧气才失败重规划。让共享安全网先物理回到干燥工作面，并保持
-        // 当前 OreDig/branch cursor；否则 replan 会按矿底位置生成“砍树”等地表前置。
+        // Underwater work doesn't wait until 5 seconds of oxygen remain before failing and
+        // replanning. Let the shared safety net physically return to a dry work face first, while
+        // preserving the current OreDig/branch cursor; otherwise a replan would generate surface
+        // prerequisites like "chop trees" based on the ore-floor position.
         if (bot.isSubmergedInWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
             clearStripMovementOwnership();
             miner.cancel(bot);
@@ -1014,13 +1032,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
-        // 工具闸:挖不动目标矿(无合格镐)立即失败,交 GoalExecutor 倒推补镐。
+        // Tool gate: if the target ore can't be mined (no qualifying pickaxe), fail immediately and hand off to GoalExecutor to backward-chain acquiring a pickaxe.
         if (!canHarvestAnyTarget(bot)) {
             fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(targetOres));
             return;
         }
 
-        // 收集计数:固定基线绝对增量(刚破矿的掉落物随后落袋会被算进来)。
+        // Collection count: a fixed-baseline absolute increment (drops from ore just broken that then land in the inventory get counted in).
         HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops, 3.0D, 3.0D);
         int total = Math.max(0, HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline);
         boolean targetInventoryAdvanced = total > collected;
@@ -1028,7 +1046,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             collected = total;
             noteProgress();
             BotLog.action(bot, "ore_dig_collected", "total", collected + "/" + targetCount);
-            io.github.zoyluo.aibot.brain.BotReporter.INSTANCE.onGoalMessage(bot,
+            io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
                     "Collected " + Registries.ITEM.getId(targetDrops.iterator().next())
                             .getPath().replace('_', ' ') + ": " + collected + "/" + targetCount + ".");
         }
@@ -1062,10 +1080,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
-        // 无进展看门狗:NO_PROGRESS_LIMIT 内没破任何块 → 干净失败。fail 前 dump 内部状态,
-        // 供无头测试诊断"找到矿却无进展"到底卡在哪个环节(锁定丢失/接近失败/挖不动)。
+        // No-progress watchdog: if no block is broken within NO_PROGRESS_LIMIT -> fail cleanly.
+        // Dump internal state before failing, so headless tests can diagnose exactly which stage
+        // "found ore but no progress" got stuck at (lost lock / approach failure / can't mine).
         if (totalBudget() - lastProgressBudget > NO_PROGRESS_LIMIT) {
-            // (原"一次性特赦"已被 EpisodeMemory 的 TTL 短排除取代:30s 自动复活,比大赦更细腻。)
+            // (The old one-time "amnesty" has been replaced by EpisodeMemory's short TTL exclusion: 30s auto-revival, finer-grained than a blanket amnesty.)
             BotLog.action(bot, "ore_dig_stall_dump",
                     "target", targetOre == null ? "none"
                             : targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ(),
@@ -1076,9 +1095,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "ignored", EpisodeMemory.INSTANCE.excludedCount(bot.getUuid()),
                     "vein_queue", veinQueue.size(),
                     "strip_left", stripStepsLeft);
-            // 自动地形快照(诊断 real_diamond seed777 深层接近抖动的钥匙):把 bot↔矿 之间的几何
-            // 按 Y 层 dump 成紧凑 ASCII(#实心/.空气/O矿/~流体/B=bot/T=矿),记进日志(测试 log 可 grep
-            // 还原)。盲改深层接近已回归过 geo_deep——必须拿确切几何冻成确定性复现再精修。零行为改动。
+            // Automatic terrain snapshot (the key to diagnosing real_diamond seed777's deep-approach
+            // jitter): dump the geometry between bot and ore as a compact per-Y-layer ASCII map
+            // (#solid/.air/O=ore/~=fluid/B=bot/T=target-ore) into the log (test logs can grep it
+            // back out). Blind changes to deep approach have regressed geo_deep before -- we must
+            // freeze the exact geometry into a deterministic repro before refining further. Zero
+            // behavior change here.
             dumpStallRegion(bot, world);
             miner.cancel(bot);
             fail("ore_dig_no_progress collected=" + collected);
@@ -1109,16 +1131,21 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
-        // 1) 先清相邻矿脉队列(挖到一块矿后,把同脉相邻矿一起挖净)。
+        // 1) First drain the adjacent-vein queue (after mining one ore block, clear out same-vein neighbors along with it).
         if (targetOre == null && advanceVein(bot, world)) {
             clearStripMovementOwnership();
             return;
         }
 
-        // R3 顺路矿(真实玩家肌肉记忆):赶路/掘进途中伸手可及处出现非目标矿——煤是燃料刚需、
-        // 铁是工具通货,白送的不捡是傻。锁定目标矿的接近途中正是顺路高发段(geo_bonus 首验:
-        // 原来只在'无锁定'分支扫,掘进全程锁着铁,顺路永不触发)。唯一不顺的时机:miner 正咬着
-        // 目标矿(挖一半换目标清进度)。约束:单块不追脉、预算封顶、不计目标数。
+        // R3 opportunistic ore (real-player muscle memory): non-target ore appearing within reach
+        // while en route/digging -- coal is a fuel essential, iron is tool currency, and passing up
+        // a free pickup would be foolish. The approach to a locked target ore is exactly where
+        // opportunistic pickups are most frequent (geo_bonus's first validation: previously this
+        // only scanned in the "no lock" branch, so while digging with iron locked in the whole time,
+        // opportunistic pickup never triggered). The one time it should NOT trigger: while the miner
+        // is already mid-bite on the target ore (switching targets halfway through would wipe its
+        // progress). Constraints: single block only, no vein chasing, budget-capped, does not count
+        // toward the target count.
         // A single BlockMiner owns target ore, channel rock and bonus ore. Never discover a new
         // bonus while that miner is working on any other block: beginMine would switch targets and
         // reset a slower channel block every scan interval. Dense copper beside an iron branch was
@@ -1165,7 +1192,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             boolean bonusStillPresent = bonusState == OreScan.Observation.OBSERVED_PRESENT;
             if (!bonusStillPresent || !withinReach(bot, bonusOre)) {
-                bonusOre = null; // 被其它执行器挖完或走远:放手,别为顺路矿回头
+                bonusOre = null; // Mined by another executor or we walked away: let it go, don't backtrack for an opportunistic-ore pickup
             } else {
                 // Tick an active bonus even after its block became air. BlockMiner owns the DONE
                 // transition; clearing bonusOre first loses bonusMined/noteProgress and leaves the
@@ -1174,11 +1201,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // the first operation inside BlockMiner.tick and must not be cancelled by stale
                 // movement after the physical break.
                 BlockMiner.Status st = beginMine(bot, bonusOre);
-                targetApproachTick = elapsed; // 顺路一镐不算接近停滞,别让 APPROACH_LIMIT 误杀目标矿
+                targetApproachTick = elapsed; // An opportunistic swing doesn't count as approach stalling; don't let APPROACH_LIMIT wrongly kill the target ore
                 if (st == BlockMiner.Status.DONE) {
                     bonusMined++;
                     noteProgress();
-                    HarvestCore.forcePickupNearbyAnyOf(bot, null, 7.0D, 4.0D); // 捡一切:掉落不在 targetDrops 里
+                    HarvestCore.forcePickupNearbyAnyOf(bot, null, 7.0D, 4.0D); // Pick up everything: the drop isn't in targetDrops
                     BotLog.action(bot, "ore_dig_bonus", "pos", bonusOre.toShortString(),
                             "total", bonusMined + "/" + BONUS_CAP);
                     bonusOre = null;
@@ -1191,7 +1218,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
         }
 
-        // 2) 当前有锁定矿:可达就挖它(挖到后入脉队列),不可达就朝它挖一格隧道。
+        // 2) There is a currently locked ore: if reachable, mine it (queue same-vein neighbors after mining); if not reachable, dig one tunnel cell toward it.
         if (targetOre != null) {
             clearStripMovementOwnership();
             boolean miningTarget = miner.target() != null && miner.target().equals(targetOre);
@@ -1247,9 +1274,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
             if (targetState == OreScan.Observation.OBSERVED_GONE) {
-                // 矿没了——多数是寻路执行器接近时把"头位=矿"顺手挖掉了(approach 目标=矿正下方的设计),
-                // 掉落已在地上:开驻留窗大半径捡(geo_wall 实测 mine_complete 由执行器打、不走 DONE 分支,
-                // 不在这接驻留就 0 捡取白挖)。同脉排队照旧。
+                // The ore is gone -- most often the pathfinding executor mined it in passing while
+                // approaching, because the head-position cell happened to equal the ore (the
+                // approach target is by design the cell directly under the ore). The drop is
+                // already on the ground: open a dwell window and pick up with a wide radius
+                // (geo_wall testing showed mine_complete is triggered by the executor and skips the
+                // DONE branch, so without a dwell-and-pickup step here the collected count stays at
+                // 0 for a mined-for-nothing block). Same-vein queueing proceeds as usual.
                 int inventoryNow = HarvestCore.countInventoryItems(bot, targetDrops);
                 int breakBaseline = activeTargetBreakPos != null && activeTargetBreakPos.equals(targetOre)
                         ? activeTargetBreakInventory
@@ -1266,11 +1297,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // cannot resume from a now-forbidden high-shaft pose.
                 return;
             }
-            // 接近途中改投更近矿(real_diamond seed777 主因,确诊):bot 从 35 格外锁定一块钻石、掘进
-            // 途中路过同脉更近的矿块(dist 3-4)却死盯远锁不放,最后 8 格在远矿局部几何里抖死
-            // (三个静态合成场景都复现不出——因为它们 bot 一开局 targetOre 为空就选了最近矿)。
-            // 每 SCAN_INTERVAL 重扫:发现显著更近(<0.6×当前距)且未排除的目标矿就改投——就近开挖,
-            // 自然绕开远矿的抖动死角。不打断正在挖的矿(miningNow),阈值 0.6 防同距反复横跳。
+            // Re-lock onto a closer ore mid-approach (root cause confirmed for real_diamond
+            // seed777): the bot locks onto a diamond 35 blocks away, then digs past a closer
+            // same-vein ore block (dist 3-4) along the way but stubbornly keeps chasing the far
+            // lock, and ends up jittering to death in the far ore's local geometry over the last 8
+            // blocks. (This couldn't be reproduced in any of the three static synthetic scenarios --
+            // because in those, targetOre starts null and the bot simply picks the nearest ore from
+            // the start.) Re-scan every SCAN_INTERVAL: if a significantly closer (<0.6x current
+            // distance), unexcluded target ore is found, switch to it -- mine the nearer one and
+            // naturally avoid the far ore's jitter dead zone. Never interrupt ore currently being
+            // mined (miningNow); the 0.6 threshold prevents flip-flopping between ore at similar
+            // distances.
             boolean miningNow = miningTarget;
             int nowRe = bot.getEntityWorld().getServer().getTicks();
             if (!miningNow && nowRe - lastReLockTick >= SCAN_INTERVAL) {
@@ -1287,39 +1324,55 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     return;
                 }
             }
-            // P0:接近监控——朝矿挖了一阵仍没靠近(斜下方够不到等)→ 放弃该矿,别原地空转
-            //(实测在 Y=48 反复锁定斜下方钻石、dist 卡死、no_progress 11 分钟的根因)。
+            // P0: approach monitoring -- if digging toward the ore for a while still hasn't gotten
+            // closer (e.g. unreachable diagonally-below position) -> abandon that ore instead of
+            // spinning in place (testing found this was the root cause of a bot at Y=48 repeatedly
+            // locking onto a diagonally-below diamond, dist stuck, no_progress after 11 minutes).
             double dist2 = bot.getEyePos().squaredDistanceTo(targetOre.toCenterPos());
             if (dist2 < lastTargetDist - 0.25D) {
                 lastTargetDist = dist2;
                 targetApproachTick = elapsed;
-                // 接近也是进展:远矿 DIG 接近一格一挖,16 格隧道就要 ~190t,只认"挖到矿"的
-                // no_progress(200t)会把正常长接近误杀在半路(geo_rich 单跑实测 dist 16→停在 201t)。
+                // Approach also counts as progress: for a far ore, DIG-approach mines one cell at a
+                // time, and a 16-cell tunnel takes ~190t; a no_progress (200t) that only recognizes
+                // "ore actually mined" would wrongly kill a normal long approach halfway through
+                // (geo_rich testing showed a run with dist 16 stalling out at 201t).
                 noteProgress();
             } else if (elapsed - targetApproachTick > APPROACH_LIMIT) {
                 excludeOre(bot, targetOre);
-                consecutiveSkips++; // 累计够不到的跳过;连跳超阈值 → 下面扫描分支强制 strip 推进,破"原地锁远矿-跳"死锁
+                consecutiveSkips++; // Accumulate unreachable skips; too many in a row -> the scan branch below forces a strip-mine advance, breaking the "lock far ore in place, skip" deadlock
                 BotLog.action(bot, "ore_dig_unreachable_skip",
                         "pos", targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ(),
                         "skips", consecutiveSkips);
                 targetOre = null;
                 lastTargetDist = Double.MAX_VALUE;
-                // 主动换目标是决策性进展:嵌深处的天然矿可能要连排除好几块才轮到可达矿/富区兜底,合理轮换不该被误杀。
-                // 但【大配额(整套铁甲≥16)】下原地反复锁同片够不到的矿(位置不变)若无条件喂活看门狗,会 thrash 100s+
-                // 永不熔断、strip/replan 永不接管(real_armor 实测 found324/collected9/bot静止106s)。故大配额仅在 bot
-                // 真换territory(位移)才算进展;小配额(稀疏钻石 targetCount<16)沿用旧无条件喂活,零回归。
+                // Proactively switching targets is decision-driven progress: naturally embedded ore
+                // may need several blocks excluded in a row before a reachable one or the rich-zone
+                // fallback comes up, and that legitimate rotation shouldn't be killed by mistake.
+                // But under a [large quota (a full suit of armor, >=16)], repeatedly re-locking onto
+                // the same unreachable ore in the same spot (position unchanged), if the watchdog
+                // were fed unconditionally, would thrash for 100s+ and never trip, with strip/replan
+                // never taking over (real_armor testing: found324/collected9/bot motionless for
+                // 106s). So under a large quota, only an actual change of territory (bot moved)
+                // counts as progress; a small quota (sparse diamond, targetCount<16) keeps the old
+                // unconditional feed, zero regression.
                 if (targetCount < 16 || !bot.getBlockPos().equals(lastSkipPos)) {
                     noteProgress();
                     lastSkipPos = bot.getBlockPos().toImmutable();
                 }
                 return;
             }
-            // 挖掘锁定:只有水平贴近矿块后才开挖。原版在 reach 边缘直接破块，掉落物随机
-            // 弹到基座拐角后可能既不可见也无可观测回收站位（seed3000: dx=1,dz=2）。
-            // 已对这块矿开挖就继续挖完,不管当前是否仍在 reach 内——bot 站在阶梯上微移会让
-            // dist 在 reach 边缘(4.5)来回抖,原逻辑 reach 内开挖→出 reach 切去挖隧道格→回 reach 重新开挖,
-            // 挖掘进度每次清零永远挖不完(实测 mine_start 5 坐标轮换 1s 一换、石镐 2.5s 的矿 300t 零产出)。
-            // bot 真走远时 BlockMiner 自身的失败判定会兜底(FAILED→ignored)。
+            // Mining lock: only start mining once horizontally close to the ore block. Vanilla
+            // behavior breaks the block right at the edge of reach, and the drop can bounce
+            // randomly into a base corner where it's neither visible nor has an observable recovery
+            // stance (seed3000: dx=1,dz=2). Once mining on this ore block has started, keep mining
+            // it to completion regardless of whether it's still within reach right now -- a bot
+            // standing on stairs shifting slightly can make dist oscillate back and forth around the
+            // reach edge (4.5); the old logic would mine while in reach -> step out of reach to dig
+            // a tunnel cell -> come back into reach and restart mining, resetting mining progress
+            // every time and never finishing (testing showed mine_start cycling through 5
+            // coordinates once a second with a stone pickaxe's 2.5s mining time on ore producing 300t
+            // of zero output). If the bot actually walks far away, BlockMiner's own failure
+            // determination provides the fallback (FAILED -> ignored).
             if (miningTarget || canBreakTargetFromHere(bot, targetOre)) {
                 // Never remove the block carrying the bot. Fake-player motion can settle one tick
                 // into the freshly opened cell; surrounding solids then deal suffocation damage.
@@ -1354,9 +1407,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         return;
                     }
                 }
-                // P0 封岩浆再挖(真实玩家标准操作):矿邻面贴岩浆,挖掉矿的瞬间岩浆涌入——烧 bot+烧掉落。
-                // 独立封堵阶段:岩浆格可能比矿远一格,刚进 reach 时够不着 → 继续贴近(向矿正下走),
-                // 够着了用低值方块替换岩浆源(一 tick 一格);没块可封才安全弃挖(命比矿值钱)。
+                // P0 seal lava before mining (standard real-player technique): an ore's neighbor
+                // face is touching lava, and the instant the ore is mined the lava floods in --
+                // burning the bot and burning the drop. Separate sealing stage: the lava cell may be
+                // one block farther than the ore, out of reach the moment reach is entered -> keep
+                // closing in (walk toward the cell directly under the ore); once in reach, replace
+                // the lava source with a low-value block (one tick, one cell); only abandon the ore
+                // safely if there's no block left to seal with (life is worth more than ore).
                 if (!miningTarget) {
                     AdjacentFluidObservation adjacentFluid = adjacentDangerFluidOf(bot, targetOre);
                     if (adjacentFluid.state() == OreScan.Observation.UNKNOWN) {
@@ -1383,7 +1440,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         ActionResult sealResult = BuildAction.placeBlockAt(bot, lava);
                         if (!sealResult.isFailed()) {
                             BotLog.action(bot, "ore_dig_fluid_seal", "sealed", lava.toShortString());
-                            noteProgress(); // 封堵也是进展
+                            noteProgress(); // Sealing also counts as progress
                         } else {
                             BotLog.action(bot, "ore_dig_seal_fail",
                                     "lava", lava.toShortString(), "reason", sealResult.reason());
@@ -1391,7 +1448,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         if (sealResult.isFailed()
                                 && bot.getActionPack().isPathExecutorIdle()) {
                             bot.getActionPack().startDigPathTo(
-                                    targetOre.down(), protectedStoneLikeReserve); // 贴近到封得着
+                                    targetOre.down(), protectedStoneLikeReserve); // Close in until sealing is reachable
                         }
                         return;
                     }
@@ -1406,13 +1463,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         ? miner.tick(bot)
                         : beginTargetMine(bot, targetOre);
                 if (st == BlockMiner.Status.DONE) {
-                    // 掉落捡取半径跟上 reach:寻路接近停在 reach 边缘(5.5)挖,掉落落在矿位、
-                    // 超出每 tick 3 格被动捡取(旧贴脸直挖 1-2 格才没暴露);挖掉即定向大半径捡一把,
-                    // 否则 collected 不涨、bot 被下一个目标拉走白挖(geo_wall 实测 mine_complete 后 0/1)。
+                    // Drop pickup radius keeps pace with reach: pathfinding approach stops mining at
+                    // the reach edge (5.5), the drop lands at the ore's position, beyond the passive
+                    // per-tick 3-block pickup radius (the old close-quarters direct-dig only exposed
+                    // this at 1-2 blocks away); as soon as it's mined, do a directed wide-radius
+                    // pickup sweep, otherwise collected never increases and the bot gets pulled away
+                    // by the next target having mined for nothing (geo_wall testing: 0/1 after
+                    // mine_complete).
                     finishTargetBreak(bot, targetOre, activeTargetBreakInventory);
                     targetOre = null;
                     noteProgress();
-                    consecutiveSkips = 0; // 挖到了 → 清空跳过计数(当前这片可达,无需强制 strip)
+                    consecutiveSkips = 0; // Successfully mined -> reset the skip count (this area is reachable, no need to force strip-mining)
                 } else if (st == BlockMiner.Status.FAILED
                         && !failMissingMiningChannelTool(bot)) {
                     clearActiveTargetBreak(targetOre);
@@ -1421,22 +1482,30 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
                 return;
             }
-            // 不在安全开挖位 → 统一接近原语:挖掘感知寻路直达矿邻位(A* DIG 大预算,终点豁免允许
-            // "挖开即站"的实心格)。无可观测安全侧位或寻路被拒时，digTowardStep 只开一格
-            // controlled tunnel，下一 tick 重新尝试侧位；APPROACH_LIMIT 仍负责对真正无法靠近的矿熔断。
+            // Not at a safe mining position -> fall back to the unified approach primitive:
+            // dig-aware pathfinding straight to a position adjacent to the ore (A* DIG with a large
+            // budget, with a destination exemption allowing a solid cell that becomes standable once
+            // dug). When no observable safe side stance exists or pathfinding is rejected,
+            // digTowardStep only opens one cell of controlled tunnel, then retries the side stance
+            // next tick; APPROACH_LIMIT still handles circuit-breaking for ore that truly can't be
+            // reached.
             approachTargetOre(bot, world, targetOre);
             return;
         }
 
-        // 3) 无锁定矿:扫描最近目标矿(限频)。
+        // 3) No locked ore: scan for the nearest target ore (rate-limited).
         int now = bot.getEntityWorld().getServer().getTicks();
         if (now - lastScanTick < SCAN_INTERVAL) {
             return;
         }
         lastScanTick = now;
-        // 破"原地锁远矿-跳"死锁:连续 STRIP_AFTER_SKIPS 次锁矿都够不到被跳过 → 别再锁(多半又是够不到的远矿),
-        // 强制 strip 推进一步(直挖隧道前进,把矿挖近到 reach 内 + 暴露新矿面)。推进后清零,下轮正常扫描,
-        // 此时近处矿已可达即锁挖(real_armor 治本:原地 372 跳只挖 9 → strip 推进后稳定挖到)。
+        // Break the "lock far ore in place, skip" deadlock: if STRIP_AFTER_SKIPS consecutive locked
+        // ores in a row have all been unreachable and skipped -> stop locking on (it's most likely
+        // another unreachable far ore); force one strip-mine advance step instead (dig a tunnel
+        // forward, bringing ore closer into reach + exposing new ore faces). Reset the count after
+        // advancing, resume normal scanning next round; nearby ore is now reachable and gets locked
+        // and mined (real_armor's actual fix: 372 skips in place mining only 9 -> stable mining
+        // after strip-mine advances).
         if (consecutiveSkips >= STRIP_AFTER_SKIPS) {
             consecutiveSkips = 0;
             stripMine(bot, world);
@@ -1446,11 +1515,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (found != null) {
             clearStripMovementOwnership();
             targetOre = found;
-            lastTargetDist = Double.MAX_VALUE;  // P0:新锁定矿,重置接近监控
+            lastTargetDist = Double.MAX_VALUE;  // P0: newly locked ore, reset approach monitoring
             targetApproachTick = elapsed;
-            // 情景记忆:资源发现入流 → 蒸馏成资源点(8 格去重),下次"附近有没有铁"先问知识库不瞎挖。
-            io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.record(bot,
-                    io.github.zoyluo.aibot.memory.EpisodeLog.Type.RESOURCE_FOUND, found,
+            // Episodic memory: resource discoveries flow in -> distilled into resource points
+            // (deduplicated within 8 blocks), so next time "is there iron nearby" can ask the
+            // knowledge base first instead of digging blind.
+            io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
+                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, found,
                     net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(found).getBlock()).toString());
             BotLog.action(bot, "ore_dig_found",
                     "pos", found.getX() + "," + found.getY() + "," + found.getZ(),
@@ -1458,8 +1529,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "collected", collected + "/" + targetCount);
             return;
         }
-        // 近处(24 格)无矿 → 大范围探矿(64 格,移植玩家 magic mod 的 HelmetOreLocator 扫描)定位最近矿脉,
-        // 锁定后由上面的 digTowardStep 定向挖隧道过去。比盲目 strip 高效——能找到几十格外的钻石,不再"附近没矿就放弃"。
+        // No ore nearby (24 blocks) -> wide-range prospecting (64 blocks, ported from the player
+        // magic mod's HelmetOreLocator scan) to locate the nearest ore vein; once locked on, the
+        // digTowardStep above digs a directed tunnel to it. More efficient than blind strip-mining
+        // -- can find diamonds dozens of blocks away, no longer "give up if nothing nearby."
         BlockPos prospected = prospect(bot, world);
         if (prospected != null) {
             clearStripMovementOwnership();
@@ -1471,27 +1544,33 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "dist", (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(prospected)));
             return;
         }
-        // 探矿也没有 → 先问知识库富矿区(以前总在那挖到的地方,128 格内、≥3 点聚在 24 格):
-        // 簇心是"资源点坐标"不是矿格——当 targetOre 用会被"矿没了"分支秒清成死循环(实测每秒
-        // 重触发原地打转)。正确语义=导航去富区,人到了近距扫描自然接管;到了还没矿说明记忆过期,
-        // 销掉这片资源点换下一策略。
+        // No prospecting hit either -> first ask the knowledge base for a rich zone (a place we've
+        // consistently mined ore before, within 128 blocks, with >=3 points clustered within 24
+        // blocks): the cluster center is a "resource-point coordinate," not an ore cell -- using it
+        // as targetOre would get instantly wiped by the "ore is gone" branch into an infinite loop
+        // (testing showed it re-triggering every second, spinning in place). The correct semantics
+        // are: navigate to the rich zone, and once close, the short-range scan naturally takes over;
+        // if there's still no ore once there, the memory is stale, so invalidate that resource point
+        // and move to the next strategy.
         for (Block oreBlock : targetOres) {
             String oreId = net.minecraft.registry.Registries.BLOCK.getId(oreBlock).toString();
-            var rich = io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE
+            var rich = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
                     .richZoneNear(bot.getUuid(), oreId, bot.getBlockPos(), 128, 3, 24);
             if (rich.isPresent() && !oreExcluded(bot, rich.get())) {
                 BlockPos zone = rich.get();
                 if (bot.getBlockPos().isWithinDistance(zone, 16)) {
-                    io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE
+                    io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
                             .invalidateResource(bot.getUuid(), zone);
                     BotLog.action(bot, "ore_dig_rich_zone_stale", "at", zone.toShortString());
                 } else if (bot.getActionPack().isPathExecutorIdle()) {
                     clearStripMovementOwnership();
-                    // walk 优先(startPathTo 两阶段):富区常在百格级,大预算 DIG 单阶段 50ms 必
-                    // TIMEOUT→每个冷却期重发一次失败寻路,原地风暴到超时(实测每秒 2 发零移动)。
+                    // Prefer walk (startPathTo's two-phase approach): a rich zone is often 100+
+                    // blocks away, and a single-phase large-budget DIG pathfind at 50ms would always
+                    // TIMEOUT -> resending a failed pathfind every cooldown period, storming in place
+                    // until timeout (testing showed 2 sends per second with zero movement).
                     bot.getActionPack().startPathTo(zone, protectedStoneLikeReserve);
                     BotLog.action(bot, "ore_dig_rich_zone", "to", zone.toShortString());
-                    noteProgress(); // 启程也是进展
+                    noteProgress(); // Setting out also counts as progress
                 }
                 return;
             }
@@ -1507,7 +1586,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // P4 (design 5.3, off by default): note the ground under the bot as covered before the strip
         // itself runs, so LegChooser's freshFraction sees the trail this exact tick leaves behind.
         markStripCoverage(bot);
-        // 水平 strip-mine 掘进暴露新矿面。
+        // Horizontal strip-mine digging exposes new ore faces.
         stripMine(bot, world);
     }
 
@@ -1601,7 +1680,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             boolean preserveRestoreTarget = restoringFace;
             miner.cancel(bot);
             bot.getActionPack().stopAll();
-            boolean moved = io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            boolean moved = io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                     bot, retreat, "ore_dig_blocked_body_retreat");
             if (moved && bot.getBlockPos().equals(retreat)) {
                 blockedBodyRecoveryTarget = null;
@@ -1772,10 +1851,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return null;
     }
 
-    // 水平 strip-mine:沿当前方向直挖隧道暴露新矿面(每前进一格,下一轮 nearestOre 都会扫到隧道两侧新矿);
-    // 一整段(STRIP_SEGMENT)挖完仍无矿 → 向下换一层 + 换个水平方向继续。比旧的"只垂直换层"找矿快得多。
-    // 既是"附近彻底没矿"的兜底,也是"找到矿却全够不到(连跳 STRIP_AFTER_SKIPS 次)"时的破死锁手段——
-    // 推进到新territory + 把原本够不到的矿挖近到 reach 内(real_armor 实测:不强制 strip 会原地锁远矿-跳 372 次只挖到 9)。
+    // Horizontal strip-mine: dig a straight tunnel in the current direction, exposing new ore faces
+    // (each cell advanced, the next round's nearestOre will pick up new ore on both sides of the
+    // tunnel); if a whole segment (STRIP_SEGMENT) is dug with no ore found -> drop down one layer +
+    // switch horizontal direction and continue. Much faster at finding ore than the old
+    // "only change layer vertically" approach. Serves both as the fallback for "nothing nearby at
+    // all" and as the deadlock-breaker for "found ore but it's all unreachable (skipped
+    // STRIP_AFTER_SKIPS times in a row)" -- advancing into new territory also brings previously
+    // unreachable ore into reach (real_armor testing: without forced strip-mining, it would lock
+    // onto far ore and skip 372 times in place, mining only 9).
     private void stripMine(AIPlayerEntity bot, ServerWorld world) {
         Direction activeDirection = stripDirIndex < 0 ? null : STRIP_DIRS[stripDirIndex];
         BlockPos factualRear = publishStripProgress(bot, activeDirection);
@@ -1790,7 +1874,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         boolean darkLightingBoundary = stripStepsLeft % 10 == 0
                 && world.getLightLevel(net.minecraft.world.LightType.BLOCK, bot.getBlockPos()) < 8;
         if (darkLightingBoundary) {
-            var torchSlot = io.github.zoyluo.aibot.action.InventoryAction.findItem(
+            var torchSlot = io.github.zoyluo.minecraftai.action.InventoryAction.findItem(
                     bot, net.minecraft.item.Items.TORCH);
             if (rareExpeditionBatch
                     && (torchPlacements >= MiningBudget.RARE_BATCH_TORCH_LIMIT || torchSlot.isEmpty())) {
@@ -1800,8 +1884,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
             if (torchSlot.isPresent()) {
-                io.github.zoyluo.aibot.action.InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
-                ActionResult placement = io.github.zoyluo.aibot.action.BuildAction.placeBlockAt(
+                io.github.zoyluo.minecraftai.action.InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
+                ActionResult placement = io.github.zoyluo.minecraftai.action.BuildAction.placeBlockAt(
                         bot, bot.getBlockPos());
                 if (!placement.isFailed()) {
                     if (rareExpeditionBatch) {
@@ -1820,7 +1904,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         restoreActiveChannelTool(bot, world, miner);
         Direction dir = STRIP_DIRS[stripDirIndex];
         digTowardStep(bot, world, bot.getBlockPos().offset(dir, 2),
-                TunnelIntent.BLIND_BRANCH, factualRear); // 复用掘进原语:挖脚位+头位→走进去
+                TunnelIntent.BLIND_BRANCH, factualRear); // Reuses the digging primitive: mine the foot cell + head cell -> walk in
     }
 
     /**
@@ -1864,8 +1948,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         } else {
             int clockwiseDir = (stripDirIndex + 1) % STRIP_DIRS.length;
             stripLegIndex++;
-            // 方形螺旋：N48,E48,S96,W96,N144...。旧实现每段后强制下挖，
-            // 在钻石峰值层 Y=-59 会立即撞 MIN_Y=-60；螺旋扩面保持最佳层且不会四边回原点。
+            // Square spiral: N48,E48,S96,W96,N144.... The old implementation forced a layer drop
+            // after every leg, which at the diamond peak layer Y=-59 would immediately hit
+            // MIN_Y=-60; the expanding spiral stays on the best layer and never returns to the
+            // origin every four legs.
             int defaultLegLength = stripLegIndex % 2 == 0
                     ? Math.min(STRIP_SEGMENT * 8, stripLegLength + STRIP_SEGMENT)
                     : stripLegLength;
@@ -1997,7 +2083,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         double nearestDistSq = Double.MAX_VALUE;
         for (Block oreBlock : targetOres) {
             String oreId = Registries.BLOCK.getId(oreBlock).toString();
-            var zone = io.github.zoyluo.aibot.memory.KnowledgeBase.INSTANCE.richZoneNear(
+            var zone = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.richZoneNear(
                     bot.getUuid(), oreId, origin, LEG_CHOOSER_ZONE_MAX_DIST,
                     LEG_CHOOSER_ZONE_MIN_POINTS, LEG_CHOOSER_ZONE_RADIUS);
             if (zone.isPresent()) {
@@ -2107,8 +2193,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // Clear it alongside face/progress/steps so every observable checkpoint is internally
         // equivalent to uninterrupted execution.
         boundaryRerouteOrigin = null;
-        // 扩面本身就是有效进展。strict 模式看不到墙后的矿，连续掘进数百格是正常搜索过程；
-        // 若只在矿物入包时喂看门狗，第二批会在真实向前移动时被 200 tick no-progress 错杀。
+        // Expanding the dug face is itself valid progress. In strict mode, ore behind a wall isn't
+        // visible, and digging hundreds of blocks in a row is a normal part of the search process;
+        // if the watchdog were only fed when ore lands in the inventory, a second batch would be
+        // wrongly killed by the 200-tick no-progress check while genuinely moving forward.
         noteProgress();
         return factualRear;
     }
@@ -3201,7 +3289,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
-    // ── 矿脉:挖净已锁定矿周围的同脉相邻矿 ──
+    // ── Ore vein: clear out the same-vein ore adjacent to the currently locked ore ──
     private boolean advanceVein(AIPlayerEntity bot, ServerWorld world) {
         if (veinQueue.isEmpty()) {
             return false;
@@ -3594,10 +3682,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
-        var blockSlot = io.github.zoyluo.aibot.action.MaterialPalette
+        var blockSlot = io.github.zoyluo.minecraftai.action.MaterialPalette
                 .pickPathSupportBlockSlot(bot, protectedStoneLikeReserve);
         if (blockSlot.isEmpty()
-                || io.github.zoyluo.aibot.action.InventoryAction.equipFromSlot(
+                || io.github.zoyluo.minecraftai.action.InventoryAction.equipFromSlot(
                 bot, blockSlot.getAsInt()) < 0) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
@@ -3605,7 +3693,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "reason", blockSlot.isEmpty() ? "no_material" : "equip_rejected");
             return;
         }
-        ActionResult placed = io.github.zoyluo.aibot.action.BuildAction.placeBlockAt(bot, support);
+        ActionResult placed = io.github.zoyluo.minecraftai.action.BuildAction.placeBlockAt(bot, support);
         if (placed.isFailed()) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
@@ -3722,12 +3810,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // collision pickup happen from a diagonal/lower stand, and the vanished entity no longer
         // has a factual coordinate to chase. This closes the old 64-broken/32-collected failure
         // mode without reading hidden entities or accepting a privileged inventory mutation.
-        io.github.zoyluo.aibot.pathfinding.Standability.clearCache();
+        io.github.zoyluo.minecraftai.pathfinding.Standability.clearCache();
         // ServerPlayerEntity's onGround bit normally comes from client movement packets and is
         // therefore not durable for a clientless fake player. The collision-checked support/head
         // envelope is the authoritative settled-pose invariant here: it rejects the transient
         // upper cell from an elevated pickup while accepting a physically supported shaft floor.
-        boolean settledOnStandablePose = io.github.zoyluo.aibot.pathfinding.Standability.isStandable(
+        boolean settledOnStandablePose = io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
                 bot.getEntityWorld(), bot.getBlockPos());
         if (pendingPickupGainTick >= 0
                 && totalBudget() - pendingPickupGainTick >= 5
@@ -3927,14 +4015,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (!p.equals(around)
                     && !veinQueue.contains(p)
                     && !oreExcluded(bot, p)
-                    && io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, p)) {
+                    && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, p)) {
                 rememberObservedHighWorkPose(bot, world, p);
                 veinQueue.addLast(p.toImmutable());
             }
         }
     }
 
-    // ── 朝目标挖一格隧道(只挖伸手可及的那一格,BlockMiner 驱动) ──
+    // ── Dig one tunnel cell toward the target (only the cell within reach, driven by BlockMiner) ──
     private void digTowardStep(AIPlayerEntity bot,
                                ServerWorld world,
                                BlockPos goal,
@@ -3948,15 +4036,23 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                TunnelIntent intent,
                                BlockPos factualRear) {
         BlockPos feet = bot.getBlockPos();
-        // P0(治深层斜下矿零位移空转):目标深在脚下(低≥2)且水平已贴近(≤2)→ 同层横向兜不到它,
-        // 改走安全台阶下沉一级(digDownOneLayer 自带避水/避岩浆/补头顶净空,与下潜矿道同款可靠原语)。
-        // 实测 real_armor:bot 站 Y47 锁 Y40 矿,stepToward 只水平东走永不下降→dist不降→skip→thrash 100s+。
+        // P0 (fixes zero-displacement spinning on deep diagonally-below ore): the target is deep
+        // underfoot (>=2 lower) and already horizontally close (<=2) -> the same-layer horizontal
+        // approach can never reach it, so switch to a safe-stair descent by one layer
+        // (digDownOneLayer comes with its own water/lava avoidance and headroom clearing, the same
+        // reliable primitive used for dive-mining shafts). Testing on real_armor: bot stands at Y47
+        // locked onto ore at Y40, stepToward only ever walks east horizontally and never descends ->
+        // dist never shrinks -> skip -> thrash for 100s+.
         int dyToGoal = goal.getY() - feet.getY();
         if (dyToGoal <= -2) {
             clearStripMovementOwnership();
-            // 目标明显在下方(低≥2):同层横向永远够不到它(real_armor 实测死钉 Y47 锁 Y40 矿、skip265/collected9)。
-            // 走安全台阶下沉(digDownOneLayer 避水/避岩浆/补头顶净空),并把台阶方向【偏向矿的水平方位】——
-            // 形成"斜向下直奔矿"的阶梯:既降 Y 也朝矿靠拢,降到矿层后同层逻辑自然够到。比旧"仅水平≤2才降"宽。
+            // The target is clearly below (>=2 lower): the same-layer horizontal approach can never
+            // reach it (real_armor testing: bot stuck fast at Y47 locked onto ore at Y40,
+            // skip265/collected9). Descend via a safe stair (digDownOneLayer avoids water/lava, clears
+            // headroom), and bias the stair direction [toward the ore's horizontal bearing] -- this
+            // forms a "diagonal descent straight at the ore" staircase: it both drops Y and closes in
+            // horizontally, so once it reaches the ore's layer the same-layer logic naturally takes
+            // over. Broader than the old "only descend if horizontal distance <=2" rule.
             int dx = goal.getX() - feet.getX();
             int dz = goal.getZ() - feet.getZ();
             if (Math.abs(dx) >= Math.abs(dz)) {
@@ -4090,8 +4186,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
         }
-        // 该格已挖通(空气)→ 走进去占住这一格,把 bot 推进到隧道前沿,再继续朝矿挖。
-        // 必须主动 walk:本任务不寻路,水平推进只能靠这一步,否则会站着不动直到看门狗失败。
+        // This cell is already dug through (air) -> walk into it to occupy the cell, advancing the
+        // bot to the tunnel front, then continue digging toward the ore.
+        // Must actively walk: this task never pathfinds, so horizontal advancement relies entirely
+        // on this step, otherwise the bot just stands still until the watchdog fails it.
         miner.cancel(bot);
         // A default 0.6-block arrival radius can report success just before the player crosses
         // the BlockPos boundary, especially while moving east/south. Recreating that walker
@@ -4106,7 +4204,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         } else {
             clearPendingBlindAdvance();
         }
-        // 走到新格也算进展(避免在"挖通一段后走过去"的几 tick 里被看门狗误杀)。
+        // Reaching a new cell also counts as progress (avoids the watchdog wrongly killing the task during the few ticks of "dug through, now walking there").
         if (bot.getBlockPos().equals(step)) {
             noteProgress();
         }
@@ -4360,9 +4458,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "blocked", blocked == null ? "none" : blocked.toShortString());
     }
 
-    // 台阶式斜向下换层(拟人 + 安全):绝不直挖脚下——下方可能是水/岩浆,一镐捅穿就溺水/葬身岩浆。
-    // 沿当前掘进方向斜前下方挖"下一级台阶"(ahead 头位 + next 脚位),遇水/岩浆就换斜下方向,
-    // 像挖楼梯一样下到新平面(与 DescendToYTask / DigDownTask 台阶逻辑一致)。
+    // Staircase-style diagonal layer descent (human-like + safe): never dig straight down underfoot
+    // -- there may be water/lava below, and one pickaxe swing through it means drowning or burning
+    // in lava. Dig "the next step down" diagonally ahead in the current digging direction (ahead =
+    // head cell, next = foot cell); if water/lava is hit, switch to a different diagonal direction,
+    // descending to the new plane like digging a staircase (consistent with the staircase logic in
+    // DescendToYTask / DigDownTask).
     private boolean digDownOneLayer(AIPlayerEntity bot, ServerWorld world) {
         BlockPos feet = bot.getBlockPos();
         if (feet.down().getY() <= MIN_Y) {
@@ -4371,14 +4472,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         Direction dir = safeStairDir(bot, world, feet);
         if (dir == null) {
-            // 这只是当前目标矿的接近路线失败。让调用方排除该有限目标并继续搜索，不能把
-            // 一个洞穴边缘或四向流体边界升级成整条 OreDig 任务的永久失败。
+            // This is only a failure of the approach route to the current target ore. Let the caller
+            // exclude this one finite target and keep searching -- a cave edge or a four-way fluid
+            // boundary must not be escalated into a permanent failure of the entire OreDig task.
             return false;
         }
-        BlockPos ahead = feet.offset(dir);   // 下一级头位 (x+d, y)
-        BlockPos next = ahead.down();         // 下一级站位 (x+d, y-1)
-        // 清三格身位:ahead(前方头位,可见先挖) + ahead.up()(前上头顶净空) + next(脚位)。补挖 ahead.up()
-        // 让下潜矿道沿对角线 2 格可走高——只清 next+ahead 时玩家下台阶头撞前方实心顶,巷道等效 1 格高过不去。
+        BlockPos ahead = feet.offset(dir);   // Next step's head cell (x+d, y)
+        BlockPos next = ahead.down();         // Next step's foot cell (x+d, y-1)
+        // Clear three body cells: ahead (front head cell, mine first if visible) + ahead.up() (headroom
+        // above the front) + next (foot cell). Digging ahead.up() too keeps the dive shaft 2 cells
+        // tall along the diagonal -- clearing only next+ahead would leave a player descending the
+        // stairs bumping their head on the solid ceiling ahead, making the passage effectively only
+        // 1 block tall and impassable.
         BlockPos solid = firstSolid(world, ahead, ahead.up(), next);
         if (solid != null) {
             BlockMiner.Status st = miner.target() != null && miner.target().equals(solid)
@@ -4391,7 +4496,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             return true;
         }
-        // 身位已通 → 斜下踏到下一级台阶(1 格微位移,非 roam 那种跨图闪现)。
+        // Body clearance confirmed -> step diagonally down onto the next stair (a 1-block micro-move, not the map-crossing teleport that roam uses).
         boolean moved = bot.getActionPack().descendInto(next);
         if (moved && bot.getBlockPos().equals(next)) {
             publishSynchronousMove(feet, next);
@@ -4419,8 +4524,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         noteProgress();
     }
 
-    // 选一个"不挨水/岩浆"的斜下台阶方向:优先沿当前掘进方向(自然延续隧道),否则按 STRIP_DIRS 顺序找;
-    // 四面斜下都被水/岩浆挡返回 null。
+    // Pick a diagonal-down stair direction that is "not adjacent to water/lava": prefer the current
+    // digging direction (naturally continues the tunnel), otherwise search in STRIP_DIRS order;
+    // returns null if all four diagonal-down directions are blocked by water/lava.
     private Direction safeStairDir(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
         int base = stripDirIndex < 0 ? 0 : stripDirIndex;
         for (int i = 0; i < STRIP_DIRS.length; i++) {
@@ -4609,8 +4715,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return dx + dz == 1L;
     }
 
-    // 接近落点:只选目标矿的水平相邻安全站位，绝不把矿本体/矿正下交给 DIG_THROUGH。
-    // 后者可能一条 path step 同时破掉脚位和头位两块矿，绕过逐块掉落账本。
+    // Approach landing spot: only pick a horizontally-adjacent safe stance next to the target ore,
+    // never hand the ore block itself or the cell directly under it to DIG_THROUGH.
+    // The latter could break both the foot-cell and head-cell ore blocks in a single path step,
+    // bypassing the per-block drop accounting.
     private static BlockPos approachGoalFor(AIPlayerEntity bot, ServerWorld world, BlockPos ore) {
         AdjacentFluidObservation fluid = adjacentDangerFluidOf(bot, ore);
         BlockPos lava = fluid.position();
@@ -4632,7 +4740,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())) {
                 continue;
             }
-            if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(world, candidate)
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, candidate)
                     && OreScan.adjacentHazard(bot, candidate)
                     == OreScan.Observation.OBSERVED_GONE) {
                 return candidate;
@@ -4648,8 +4756,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return approachGoalFor(bot, world, ore);
     }
 
-    // 危险流体(岩浆|水)统一:水虽不烧人,但挖开矿的瞬间涌入会推走 bot 和掉落物、淹没巷道,
-    // 接近监控反复超时弃矿(深层含水矿高发)。封堵语义与岩浆完全一致——放块替换源。
+    // Hazardous fluids (lava | water) handled uniformly: water doesn't burn, but the instant it
+    // floods in when the ore is mined it can push the bot and the drop away and flood the tunnel,
+    // repeatedly causing approach monitoring to time out and abandon the ore (common with deep
+    // water-adjacent ore). The sealing semantics are identical to lava -- place a block to replace
+    // the source.
     private static AdjacentFluidObservation adjacentDangerFluidOf(AIPlayerEntity bot,
                                                                    BlockPos pos) {
         boolean unknown = false;
@@ -4666,9 +4777,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 : OreScan.Observation.OBSERVED_GONE, null);
     }
 
-    // 卡死现场地形快照:把 bot 与目标矿构成的包围盒(各向外扩 3)按 Y 层 dump 成 ASCII,记进日志。
-    // 字符:B=bot 脚位,T=目标矿,O=其它矿,~=流体,#=实心(挖得动),X=实心(挖不动/基岩),.=空气。
-    // 用途:把"A* 返回路径、执行器破块却不缩 dist"的真实地形冻成确定性复现场景,精修接近抖动。
+    // Stall-site terrain snapshot: dump the bounding box formed by the bot and the target ore
+    // (expanded 3 blocks in each direction) as ASCII, per Y layer, into the log.
+    // Characters: B=bot foot cell, T=target ore, O=other ore, ~=fluid, #=solid (mineable),
+    // X=solid (unmineable/bedrock), .=air.
+    // Purpose: freeze the real terrain behind cases like "A* returns a path, the executor breaks
+    // blocks, but dist doesn't shrink" into a deterministic repro scenario, to refine approach
+    // jitter.
     private void dumpStallRegion(AIPlayerEntity bot, ServerWorld world) {
         CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_dig_stall_dump");
         BlockPos b = bot.getBlockPos();
@@ -4697,14 +4812,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     }
                     row.append(c);
                 }
-                row.append('|'); // 分隔 x 行(每段是固定 z 跨度)
+                row.append('|'); // Separates x rows (each segment is a fixed z span)
             }
             BotLog.action(bot, "ore_dig_region_y", "y", y, "row", row.toString());
         }
     }
 
     private BlockMiner.Status beginMine(AIPlayerEntity bot, BlockPos pos) {
-        bot.getActionPack().stopMovement(); // 互斥:开挖矿本体即停掉接近寻路(执行器的 DIG_THROUGH 与 BlockMiner 不抢手)
+        bot.getActionPack().stopMovement(); // Mutual exclusion: mining the ore block itself stops approach pathfinding (the executor's DIG_THROUGH and BlockMiner don't compete for control)
         miner.begin(bot, pos, true);
         return miner.tick(bot);
     }
@@ -5216,10 +5331,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 != OreScan.Observation.OBSERVED_PRESENT;
     }
 
-    // R3 顺路矿扫描:bot 周身 ±2(伸手范围)找任何"非目标、可挖、不贴危险流体"的矿。
-    // 顺手收益不得降低工作面的站立高度。脚下/更低的矿会连续掏空支撑，使恢复后的 branch
-    // cursor 留在旧高度而 bot 落进矿脉；因此 fail-closed 排除整个下方半空间。范围仍刻意小
-    // 并复用 SCAN_INTERVAL 节拍，原有同层/上方顺路矿合同保持不变。
+    // R3 opportunistic-ore scan: search a bot-centered +-2 (reach range) box for any ore that is
+    // "non-target, mineable, and not adjacent to a hazardous fluid."
+    // The opportunistic gain must not lower the work face's standing elevation. Ore underfoot or
+    // lower would keep hollowing out the support, leaving the restored branch cursor at the old
+    // elevation while the bot falls into the ore vein; so the entire lower half-space is excluded
+    // fail-closed. The range is still deliberately kept small and reuses the SCAN_INTERVAL cadence;
+    // the existing same-layer/above-layer opportunistic-ore contract is unchanged.
     private BlockPos scanBonusOre(AIPlayerEntity bot, ServerWorld world) {
         BlockPos feet = bot.getBlockPos();
         for (BlockPos p : BlockPos.iterate(feet.add(-2, -1, -2), feet.add(2, 3, 2))) {
@@ -5241,11 +5359,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 continue;
             }
             if (!ToolTier.canHarvestWithInventory(bot, world.getBlockState(pos))) {
-                continue; // 挖不动的不顺(挖钻石路过绿宝石但只有石镐:别空手刨)
+                continue; // Skip anything unmineable as opportunistic (e.g. mining diamond and passing emerald with only a stone pickaxe: don't swing for nothing)
             }
             if (adjacentDangerFluidOf(bot, pos).state()
                     == OreScan.Observation.OBSERVED_PRESENT) {
-                continue; // 已观察到贴浆/贴水的矿不顺路；UNKNOWN 不得被偷读成安全或危险
+                continue; // Ore observed adjacent to lava/water is skipped as opportunistic; UNKNOWN must never be silently read as either safe or dangerous
             }
             return pos;
         }
@@ -5289,7 +5407,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (occ == null) {
             return false;
         }
-        double radius = SenseBudget.sweepRadius(AIBotConfig.get().perception().radius());
+        double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
         Vec3d eye = bot.getEyePos();
         double openVolume = state.ring().volume(now, SweepEngine.eyeCell(eye.x, eye.y, eye.z), radius);
         if (openVolume < FRONTIER_MIN_OPEN_VOLUME) {
@@ -5298,7 +5416,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (bot.getHealth() < FRONTIER_MIN_HP) {
             return false;
         }
-        if (io.github.zoyluo.aibot.coordination.PoiCoordinator.INSTANCE.awaitingContinue(bot)) {
+        if (io.github.zoyluo.minecraftai.coordination.PoiCoordinator.INSTANCE.awaitingContinue(bot)) {
             return false;
         }
         if (detourHost == null) {
@@ -5316,7 +5434,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         java.util.Map<BlockPos, Double> costs = ObservedGraphSearch.search(feet, env);
-        int bestY = io.github.zoyluo.aibot.mining.MiningChain.bestY(targetOres);
+        int bestY = io.github.zoyluo.minecraftai.mining.MiningChain.bestY(targetOres);
         List<FrontierPlanner.Candidate> scored = new ArrayList<>();
         // Keyed by the Candidate record itself (field-equality hashCode/equals, verified): recovers the
         // winning BlockPos in O(1) with no risk of two candidates colliding on cost+distance alone (a
@@ -5416,7 +5534,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     /**
-     * True line-of-sight free-run check using {@link io.github.zoyluo.aibot.mining.assist.RayGrid#traverse}
+     * True line-of-sight free-run check using {@link io.github.zoyluo.minecraftai.mining.assist.RayGrid#traverse}
      * (Amanatides-Woo DDA, already used elsewhere in this package for exactly this "walk cells along a
      * line" job) instead of a rounding-based interpolation -- a prior draft's ad hoc
      * {@code Math.round(dx * (i / (float) steps))} loop can skip or double-visit a cell near a diagonal
@@ -5429,7 +5547,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         int[] openRun = {0};
         boolean[] blocked = {false};
-        io.github.zoyluo.aibot.mining.assist.RayGrid.traverse(
+        io.github.zoyluo.minecraftai.mining.assist.RayGrid.traverse(
                 feet.getX() + 0.5D, feet.getY() + 0.5D, feet.getZ() + 0.5D,
                 dx / horiz, 0.0D, dz / horiz, horiz,
                 (x, y, z) -> {
@@ -6475,15 +6593,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
-    // 探矿:近处扫不到矿时,在 PROSPECT_RANGE 大范围(只扫已加载区块)定位最近的目标矿;限频护 TPS。
+    // Prospecting: when no ore is found nearby, locate the nearest target ore over the wider
+    // PROSPECT_RANGE (only scans loaded chunks); rate-limited to protect TPS.
     private BlockPos prospect(AIPlayerEntity bot, ServerWorld world) {
         int now = bot.getEntityWorld().getServer().getTicks();
         if (now - lastProspectTick < PROSPECT_INTERVAL) {
             return null;
         }
         lastProspectTick = now;
-        // 拉黑过滤:不带 posFilter 时,unreachable_skip 刚排除的矿会被 prospect 原样再选——
-        // skip→prospect→同矿→skip 死循环直到 no_progress(geo_rich 套跑实测 637,47,-11 五连)。
+        // Blacklist filter: without posFilter, ore just excluded by unreachable_skip would get
+        // picked right back up by prospect unchanged --
+        // skip -> prospect -> same ore -> skip, an infinite loop until no_progress (geo_rich batch
+        // testing showed this happening five times in a row at 637,47,-11).
         return OreProspector.nearest(bot, PROSPECT_RANGE,
                 state -> OreScan.isOre(state, targetOres),
                 p -> !oreExcluded(bot, p));
@@ -6497,7 +6618,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         double bestDist = Double.MAX_VALUE;
         for (BlockPos pos : BlockPos.iterate(min, max)) {
             if (oreExcluded(bot, pos)
-                    || !io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
+                    || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
                     || !OreScan.isOre(world.getBlockState(pos), targetOres)) {
                 continue;
             }
@@ -6600,7 +6721,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         || !ObservableWorldQuery.canObserveCell(bot, candidate)
                         || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
                         || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())
-                        || !io.github.zoyluo.aibot.pathfinding.Standability.isStandable(
+                        || !io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
                                 bot.getEntityWorld(), candidate)) {
                     continue;
                 }
@@ -6618,8 +6739,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return throttled;
     }
 
-    // 3 参版:依次返回第一个"固体且非流体"的格(流体跳过不挖→防溃浆/溃水)。下潜台阶清三格身位
-    // (ahead 头位 + ahead.up 头顶净空 + next 脚位),保证下潜矿道 2 格可走高、正常玩家能通过。
+    // 3-argument version: returns, in order, the first cell that is "solid and not a fluid" (a
+    // fluid cell is skipped, never mined -> prevents a lava/water breach). The dive-shaft stair
+    // clears three body cells (ahead = head cell + ahead.up = headroom + next = foot cell),
+    // guaranteeing the dive shaft is 2 cells tall and passable for a normal player.
     private static BlockPos firstSolid(ServerWorld world, BlockPos a, BlockPos b, BlockPos c) {
         for (BlockPos p : new BlockPos[]{a, b, c}) {
             if (!world.getBlockState(p).isAir() && world.getFluidState(p).isEmpty()) {
@@ -6639,7 +6762,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         return null;
     }
 
-    // 朝目标的下一格:竖直优先(目标更低则下挖),否则较大的水平分量(避免对角穿墙角)。
+    // The next cell toward the target: vertical takes priority (dig down if the target is lower), otherwise the larger horizontal component (avoids cutting diagonally through a wall corner).
     private static BlockPos stepToward(BlockPos from, BlockPos target) {
         int dy = target.getY() - from.getY();
         int dx = target.getX() - from.getX();

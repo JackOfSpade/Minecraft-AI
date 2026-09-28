@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,11 +59,11 @@ public record BlueprintSchema(
     }
 
     /**
-     * P3 参数化房屋:按 "custom:宽x深x高:材质" 规格生成(如 custom:7x5x4:stone)。
-     * 结构与 small_hut 同款:地板 + 空心墙体 + 平屋顶 + 正面居中 2 高门洞。
-     * 宽/深=外径含墙(钳制 3..16 防巨构耗尽材料),高=墙体净高(钳制 2..8;总高=高+地板1+屋顶1)。
-     * 材质=palette 名(planks/stone_like/glass…见 MaterialPalette;未知按 planks),备料/建造接受家族任意成员。
-     * 规格非法返回 null(调用方报 IOException)。
+     * P3 parametric house: generated from a "custom:widthxdepthxheight:material" spec (e.g. custom:7x5x4:stone).
+     * Structure matches small_hut: floor + hollow walls + flat roof + a 2-block-high door opening centered on the front face.
+     * width/depth = outer dimension including walls (clamped to 3..16 to keep oversized structures from exhausting materials); height = net wall height (clamped to 2..8; total height = height + 1 floor + 1 roof).
+     * material = palette name (planks/stone_like/glass... see MaterialPalette; unknown defaults to planks); gathering/building accepts any member of the family.
+     * Returns null for an invalid spec (the caller reports an IOException).
      */
     public static BlueprintSchema parametricHouse(String spec) {
         try {
@@ -79,7 +79,7 @@ public record BlueprintSchema(
             int d = Math.max(3, Math.min(16, Integer.parseInt(dims[1].trim())));
             int h = Math.max(2, Math.min(8, Integer.parseInt(dims[2].trim())));
             String palette = parts.length >= 3 && !parts[2].isBlank() ? parts[2].trim() : "planks";
-            int doorX = w / 2; // 正面(z=0)居中门洞,2 格高
+            int doorX = w / 2; // door opening centered on the front face (z=0), 2 blocks high
             List<BlockPlacement> door = List.of(
                     new BlockPlacement(doorX, 1, 0, "minecraft:air"),
                     new BlockPlacement(doorX, 2, 0, "minecraft:air"));

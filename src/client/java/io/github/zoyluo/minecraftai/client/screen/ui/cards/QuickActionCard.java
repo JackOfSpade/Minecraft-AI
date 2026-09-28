@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.client.screen.ui.cards;
+package io.github.zoyluo.minecraftai.client.screen.ui.cards;
 
-import io.github.zoyluo.aibot.client.BotCommandBridge;
-import io.github.zoyluo.aibot.client.screen.ui.Theme;
-import io.github.zoyluo.aibot.client.BotClientState;
-import io.github.zoyluo.aibot.network.payload.BotSnapshotS2C;
+import io.github.zoyluo.minecraftai.client.BotCommandBridge;
+import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
+import io.github.zoyluo.minecraftai.client.BotClientState;
+import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -36,7 +36,7 @@ public final class QuickActionCard extends PanelCard {
 
     @Override
     protected String titleKey() {
-        return "card.aibot.quick";
+        return "card.minecraftai.quick";
     }
 
     @Override
@@ -53,29 +53,29 @@ public final class QuickActionCard extends PanelCard {
     @Override
     public void addWidgets(Consumer<ClickableWidget> sink) {
         TextRenderer renderer = MinecraftClient.getInstance().textRenderer;
-        idField = new TextFieldWidget(renderer, 0, 0, 84, INPUT_H, Text.translatable("quick.aibot.id"));
+        idField = new TextFieldWidget(renderer, 0, 0, 84, INPUT_H, Text.translatable("quick.minecraftai.id"));
         idField.setText("minecraft:stone");
         idField.setMaxLength(128);
-        idField.setSuggestion(Theme.tr("quick.aibot.id"));
-        countField = new TextFieldWidget(renderer, 0, 0, 36, INPUT_H, Text.translatable("quick.aibot.count"));
+        idField.setSuggestion(Theme.tr("quick.minecraftai.id"));
+        countField = new TextFieldWidget(renderer, 0, 0, 36, INPUT_H, Text.translatable("quick.minecraftai.count"));
         countField.setText("1");
         countField.setMaxLength(3);
-        countField.setSuggestion(Theme.tr("quick.aibot.count"));
+        countField.setSuggestion(Theme.tr("quick.minecraftai.count"));
 
-        comeButton = button("btn.aibot.come", () -> {
+        comeButton = button("btn.minecraftai.come", () -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player != null) {
                 BotCommandBridge.command(target, "move", client.player.getBlockPos().toShortString().replace(",", ""), "", 1);
             }
         });
-        pauseButton = button("btn.aibot.pause", () -> BotCommandBridge.command(
+        pauseButton = button("btn.minecraftai.pause", () -> BotCommandBridge.command(
                 target, snapshot != null && snapshot.missionPaused() ? "resume" : "pause", "", "", 1));
-        stopButton = button("btn.aibot.stop", () -> BotCommandBridge.command(target, "abort", "", "", 1));
-        eatButton = button("btn.aibot.eat", () -> BotCommandBridge.command(target, "eat", "", "", 1));
-        sleepButton = button("btn.aibot.sleep", () -> BotCommandBridge.command(target, "sleep", "", "", 1));
-        mineButton = button("btn.aibot.mine", () -> BotCommandBridge.command(target, "mine", idField.getText(), "", count()));
-        craftButton = button("btn.aibot.craft", () -> BotCommandBridge.command(target, "craft", idField.getText(), "", count()));
-        smeltButton = button("btn.aibot.smelt", () -> BotCommandBridge.command(target, "smelt", idField.getText(), "minecraft:iron_ingot", count()));
+        stopButton = button("btn.minecraftai.stop", () -> BotCommandBridge.command(target, "abort", "", "", 1));
+        eatButton = button("btn.minecraftai.eat", () -> BotCommandBridge.command(target, "eat", "", "", 1));
+        sleepButton = button("btn.minecraftai.sleep", () -> BotCommandBridge.command(target, "sleep", "", "", 1));
+        mineButton = button("btn.minecraftai.mine", () -> BotCommandBridge.command(target, "mine", idField.getText(), "", count()));
+        craftButton = button("btn.minecraftai.craft", () -> BotCommandBridge.command(target, "craft", idField.getText(), "", count()));
+        smeltButton = button("btn.minecraftai.smelt", () -> BotCommandBridge.command(target, "smelt", idField.getText(), "minecraft:iron_ingot", count()));
 
         layoutWidgets();
         sink.accept(idField);
@@ -95,13 +95,13 @@ public final class QuickActionCard extends PanelCard {
         super.refresh(snapshot, chat);
         if (pauseButton != null) {
             pauseButton.setMessage(Text.translatable(snapshot != null && snapshot.missionPaused()
-                    ? "btn.aibot.resume" : "btn.aibot.pause"));
+                    ? "btn.minecraftai.resume" : "btn.minecraftai.pause"));
         }
     }
 
     @Override
     protected void renderBody(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer, int bx, int by, int bw, int bh) {
-        context.drawTextWithShadow(renderer, Theme.tr("quick.aibot.input_hint"), bx, by, Theme.TEXT_DIM);
+        context.drawTextWithShadow(renderer, Theme.tr("quick.minecraftai.input_hint"), bx, by, Theme.TEXT_DIM);
     }
 
     private ButtonWidget button(String key, Runnable action) {

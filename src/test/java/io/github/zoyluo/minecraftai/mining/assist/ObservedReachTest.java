@@ -1,9 +1,9 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
-import static io.github.zoyluo.aibot.mining.assist.ObservedReach.Status;
+import static io.github.zoyluo.minecraftai.mining.assist.ObservedReach.Status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

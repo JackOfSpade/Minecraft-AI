@@ -1,23 +1,23 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.pathfinding.MoveType;
-import io.github.zoyluo.aibot.pathfinding.Node;
-import io.github.zoyluo.aibot.pathfinding.PathExecutor;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.goal.Goal;
-import io.github.zoyluo.aibot.goal.GoalExecutor;
-import io.github.zoyluo.aibot.goal.GoalResult;
-import io.github.zoyluo.aibot.goal.GoalStep;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.persist.MissionRecord;
-import io.github.zoyluo.aibot.persist.MissionRuntimeRecord;
-import io.github.zoyluo.aibot.persist.MissionSpec;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.pathfinding.MoveType;
+import io.github.zoyluo.minecraftai.pathfinding.Node;
+import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.goal.Goal;
+import io.github.zoyluo.minecraftai.goal.GoalExecutor;
+import io.github.zoyluo.minecraftai.goal.GoalResult;
+import io.github.zoyluo.minecraftai.goal.GoalStep;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.persist.MissionRecord;
+import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
+import io.github.zoyluo.minecraftai.persist.MissionSpec;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.ItemEntity;
@@ -151,7 +151,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_safety_pause_rejoins_trusted_tail_and_fails_only_after_exact_return", maxTicks = 320)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_safety_pause_rejoins_trusted_tail_and_fails_only_after_exact_return", maxTicks = 320)
     public void safetyPauseRejoinsTrustedTailAndFailsOnlyAfterExactReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
@@ -169,7 +169,7 @@ public final class DigDownReturnGameTests {
         task.start(bot);
         require(context, task.state() == TaskState.RUNNING,
                 "fixture DESCEND task did not start: " + task.failureReason());
-        require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+        require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                         bot, pauseAnchor, "gametest_dig_down_pause_anchor"),
                 "fixture could not settle the adjacent pause anchor");
 
@@ -188,7 +188,7 @@ public final class DigDownReturnGameTests {
 
         for (int step = 1; step <= 5; step++) {
             BlockPos safetyStep = pauseAnchor.east(step);
-            require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                             bot, safetyStep, "gametest_dig_down_safety_displacement"),
                     "fixture could not apply safety displacement step " + step);
         }
@@ -244,7 +244,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_safety_interrupted_goal_replan_quarantines_old_entry_and_relocates_physically", maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_safety_interrupted_goal_replan_quarantines_old_entry_and_relocates_physically", maxTicks = 500)
     public void safetyInterruptedGoalReplanQuarantinesOldEntryAndRelocatesPhysically(
             TestContext context) {
         var world = context.getWorld();
@@ -274,7 +274,7 @@ public final class DigDownReturnGameTests {
         AIPlayerEntity bot = spawn(context, name, tail);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 2));
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival");
 
         Goal goal = new Goal.HaveItem(Items.COBBLESTONE, 8);
@@ -400,7 +400,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_paused_checkpoint_restart_keeps_old_entry_return_debt", maxTicks = 260)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_paused_checkpoint_restart_keeps_old_entry_return_debt", maxTicks = 260)
     public void pausedCheckpointRestartKeepsOldEntryReturnDebt(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -423,7 +423,7 @@ public final class DigDownReturnGameTests {
         pausedTask.cancel(bot, "simulate_process_restart");
 
         for (int step = 1; step <= 4; step++) {
-            require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                             bot, tail.east(step), "gametest_dig_down_restart_displacement"),
                     "fixture could not apply restart displacement step " + step);
         }
@@ -471,7 +471,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_return_pause_reanchors_the_current_factual_cell", maxTicks = 220)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_return_pause_reanchors_the_current_factual_cell", maxTicks = 220)
     public void returnPauseReanchorsTheCurrentFactualCell(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
@@ -508,7 +508,7 @@ public final class DigDownReturnGameTests {
                         + task.checkpoint());
 
         for (int step = 1; step <= 4; step++) {
-            require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                             bot, middle.east(step), "gametest_dig_down_return_repause_displacement"),
                     "fixture could not apply RETURN displacement step " + step);
         }
@@ -539,7 +539,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_disconnected_descent_immediately_becomes_safety_return", maxTicks = 40)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_disconnected_descent_immediately_becomes_safety_return", maxTicks = 40)
     public void disconnectedDescentImmediatelyBecomesSafetyReturn(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
@@ -555,7 +555,7 @@ public final class DigDownReturnGameTests {
                 descentCheckpoint(start, List.of(start, tail), 8, 1));
         task.start(bot);
         for (int step = 1; step <= 4; step++) {
-            require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                             bot, tail.east(step), "gametest_dig_down_unexpected_displacement"),
                     "fixture could not apply unexpected displacement step " + step);
         }
@@ -632,7 +632,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_remembered_walled_entry_physically_relocates_before_mining", maxTicks = 900)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_remembered_walled_entry_physically_relocates_before_mining", maxTicks = 900)
     public void rememberedWalledEntryPhysicallyRelocatesBeforeMining(TestContext context) {
         var world = context.getWorld();
         BlockPos failedEntry = context.getAbsolutePos(new BlockPos(1, 6, 3));
@@ -655,7 +655,7 @@ public final class DigDownReturnGameTests {
 
         AIPlayerEntity bot = spawn(context, "DigDownEntryRelocationGT", failedEntry);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival");
         require(context, !CapabilityRuntime.decide(bot,
                         PrivilegedCapability.EMERGENCY_TELEPORT,
@@ -790,7 +790,7 @@ public final class DigDownReturnGameTests {
         });
     }
 
-    @GameTest(environment = "aibot-gametest:dig_down_return_game_tests_safety_displacement_can_dig_back_after_legacy_return_limit", maxTicks = 2600)
+    @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_safety_displacement_can_dig_back_after_legacy_return_limit", maxTicks = 2600)
     public void safetyDisplacementCanDigBackAfterLegacyReturnLimit(TestContext context) {
         BlockPos start = context.getAbsolutePos(new BlockPos(3, 24, 3));
         List<BlockPos> trail = new java.util.ArrayList<>();
@@ -843,7 +843,7 @@ public final class DigDownReturnGameTests {
                         + rawPausedCheckpoint);
 
         for (int step = 1; step <= displacement; step++) {
-            require(context, io.github.zoyluo.aibot.mode.FakePlayerMotion.stepToStandable(
+            require(context, io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                             bot, tail.south(step), "gametest_dig_down_restart_displacement"),
                     "fixture could not apply safety displacement step " + step);
         }

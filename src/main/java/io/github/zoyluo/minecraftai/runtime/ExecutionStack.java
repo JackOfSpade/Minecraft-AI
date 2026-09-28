@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.runtime;
+package io.github.zoyluo.minecraftai.runtime;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

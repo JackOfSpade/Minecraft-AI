@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.memory;
+package io.github.zoyluo.minecraftai.memory;
 
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;

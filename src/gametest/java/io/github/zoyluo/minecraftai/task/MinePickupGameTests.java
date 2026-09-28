@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.mode.CapabilityRuntime;
-import io.github.zoyluo.aibot.mode.OperatingProfile;
-import io.github.zoyluo.aibot.mode.PrivilegedCapability;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
+import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * incidental block-physics timing.</p>
  */
 public final class MinePickupGameTests {
-    @GameTest(environment = "aibot-gametest:mine_pickup_game_tests_paused_task_resumes_after_natural_pickup_nudge", maxTicks = 400)
+    @GameTest(environment = "minecraftai-gametest:mine_pickup_game_tests_paused_task_resumes_after_natural_pickup_nudge", maxTicks = 400)
     public void pausedTaskResumesAfterNaturalPickupNudge(TestContext context) {
         Fixture fixture = spawnMiner(context, "MinePickupDeadlockGT");
         AIPlayerEntity bot = fixture.bot();
@@ -67,7 +67,7 @@ public final class MinePickupGameTests {
         // hand a new task the active slot. See DangerWatcherLowHealthGameTests
         // #pausedMiningOwnerResuppliesInPlaceWithoutBaseTravel for the established pattern this
         // mirrors (there DigDownTask is the paused owner; HoldTask is used the same way as a bare
-        // paused-task fixture elsewhere in this codebase, e.g. AIBotVerifySubcommand).
+        // paused-task fixture elsewhere in this codebase, e.g. MinecraftAiVerifySubcommand).
         HoldTask pausedOwner = new HoldTask();
         TaskManager.INSTANCE.assign(bot, pausedOwner,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_mine_pickup_paused_owner"));
@@ -163,8 +163,8 @@ public final class MinePickupGameTests {
     }
 
     private static void assertStrictCapabilities(TestContext context, AIPlayerEntity bot) {
-        require(context, AIBotConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
-                "GameTest must run under strict_survival, got " + AIBotConfig.get().profile());
+        require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
+                "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         for (PrivilegedCapability capability : PrivilegedCapability.values()) {
             require(context, !CapabilityRuntime.decide(
                             bot, capability, "mine_pickup_gametest").allowed(),

@@ -3,7 +3,7 @@ MINECRAFT-AI MODPACK MANIFEST
 Target Minecraft version: 1.21.11 (Fabric)
 Purpose: record of every mod/datapack to install when a game profile is
 created (launcher instance, server pack, etc.). This file is a plan/reference,
-not something the "aibot" mod reads at runtime.
+not something the "minecraftai" mod reads at runtime.
 
 --------------------------------------------------------------------------
 REQUIRED RUNTIME
@@ -21,10 +21,10 @@ THIS PROJECT'S OWN MODS (install into the profile's "mods" folder)
 1. Fabric API
    Version: 0.141.6+1.21.11
    https://modrinth.com/mod/fabric-api
-   Required by the aibot mod (see fabric.mod.json "depends"), and by nearly
+   Required by the minecraftai mod (see fabric.mod.json "depends"), and by nearly
    every mod below.
 
-2. AIBot / Minecraft-AI (this project)
+2. MinecraftAi / Minecraft-AI (this project)
    File: Minecraft-AI-<mod_version>.jar, built from this repo
    (gradlew build, then build/libs/Minecraft-AI-*.jar; bash scripts/deploy_profile.sh
    builds it and installs it into a profile, see docs/DEPLOY_LOCAL.md). In-game the
@@ -184,6 +184,18 @@ INVENTORY / UI / QOL
 | Inventory Sorting  | 2.1.4+fabric-1.21.11           |
 | Shulker Box Tooltip| 5.2.16+1.21.11-fabric          |
 | YetAnotherConfigLib (YACL) | 3.8.2+1.21.11-fabric  |
+| Stackable Potions  | 1.0.0+1.21.11-fabric           |
+| Stackable          | 2.0.5 (fabric-1.21.11)         |
+
+Stackable Potions (by CursedFlames) makes potions of every type stack to 16.
+Requires only Fabric API (already installed). Added 2026-09-28.
+https://modrinth.com/mod/stackablepotions
+
+Stackable (by LinkachuGaming, project slug "stackable127") raises general block/item
+stack limits (configurable, up to 2.147B on this version range); it does not
+touch potions itself, complementary to Stackable Potions above rather than
+overlapping with it. Requires only Fabric API (already installed).
+Added 2026-09-28. https://modrinth.com/mod/stackable127
 
 --------------------------------------------------------------------------
 REQUIRED LIBRARIES / DEPENDENCIES
@@ -207,8 +219,8 @@ REQUIRED LIBRARIES / DEPENDENCIES
 
 HeroBot is a required dependency of PvP BOT (and, transitively, of this
 project's own PvP BOT Inhabitants addon above) -- it is a third-party
-library, unrelated to and does not conflict with this repo's own "AIBot"
-mod (io.github.zoyluo.aibot).
+library, unrelated to and does not conflict with this repo's own "MinecraftAi"
+mod (io.github.zoyluo.minecraftai).
 
 --------------------------------------------------------------------------
 DATAPACKS

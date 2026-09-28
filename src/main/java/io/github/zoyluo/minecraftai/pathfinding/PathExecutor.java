@@ -1,19 +1,19 @@
-package io.github.zoyluo.aibot.pathfinding;
+package io.github.zoyluo.minecraftai.pathfinding;
 
-import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.action.ActionPack;
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.BuildAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.action.LookAction;
-import io.github.zoyluo.aibot.action.MaterialPalette;
-import io.github.zoyluo.aibot.action.MiningController;
-import io.github.zoyluo.aibot.action.WalkToController;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.log.LogFields;
-import io.github.zoyluo.aibot.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.MiningController;
+import io.github.zoyluo.minecraftai.action.WalkToController;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -277,7 +277,7 @@ public final class PathExecutor {
         }
         int fallBlocks = dropOriginY - target.getY();
         if (fallBlocks <= 0
-                || fallBlocks > AIBotConfig.get().nav().maxSafeFall()
+                || fallBlocks > MinecraftAiConfig.get().nav().maxSafeFall()
                 || Math.abs(current.getX() - target.getX()) > 1
                 || Math.abs(current.getZ() - target.getZ()) > 1) {
             return handleStuck(pack, "drop_pose_drift");
@@ -337,8 +337,12 @@ public final class PathExecutor {
             if (hazard != null) {
                 return hazard;
             }
-            // 穿山双格挖:脚位挖完后头位仍有碰撞(实心山体内部每步如此)→ 再挖头位,人才进得去。
-            // 配合 NeighborEnumerator.hasHeadroom 的"头位可挖即可"放宽,挖掘寻路从贴地刨坑升级为穿山打洞。
+            // Two-cell tunnel dig: after the feet position is dug out, the head position may still
+            // have collision (this happens on every step inside solid mountain terrain) -- dig the
+            // head position too so the bot can actually fit through.
+            // Combined with NeighborEnumerator.hasHeadroom's relaxed rule that the head position
+            // only needs to be diggable, this upgrades dig-pathfinding from ground-level pit-digging
+            // to full mountain tunneling.
             BlockPos headPos = next.pos().up();
             if (!pack.player().getEntityWorld().getBlockState(headPos)
                     .getCollisionShape(pack.player().getEntityWorld(), headPos).isEmpty()) {
@@ -369,7 +373,9 @@ public final class PathExecutor {
         return ActionResult.IN_PROGRESS;
     }
 
-    // NAV-9:垫方块上升一格。看向脚下→起跳→升空瞬间在原脚位放支撑方块→落到其上。
+    // NAV-9: Rise one block by placing a support block underneath. Look down at the feet position
+    // -> jump -> the instant airborne, place a support block at the original feet position -> land
+    // on it.
     /**
      * Real vanilla jump input first (matching {@link #tickJumpUp}'s pattern for the same 1-block
      * vertical rise), spread over the genuine ~6-10 tick jump arc a real player's jump takes,
@@ -383,7 +389,7 @@ public final class PathExecutor {
      */
     private ActionResult tickPillar(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
-        BlockPos placeSlot = next.pos().down(); // 当前脚位,支撑方块放这里
+        BlockPos placeSlot = next.pos().down(); // current feet position; the support block goes here
         if (player.getBlockY() >= next.pos().getY() && player.isOnGround()) {
             return commitAdvance(pack, index + 1);
         }
@@ -535,7 +541,7 @@ public final class PathExecutor {
     private int chooseWalkTargetIndex(ActionPack pack) {
         int best = index;
         BlockPos from = pack.player().getBlockPos();
-        int max = Math.min(path.size() - 1, index + AIBotConfig.get().nav().lookahead());
+        int max = Math.min(path.size() - 1, index + MinecraftAiConfig.get().nav().lookahead());
         for (int candidate = index + 1; candidate <= max; candidate++) {
             if (!canStringPullTo(pack, from, candidate)) {
                 break;
@@ -601,7 +607,7 @@ public final class PathExecutor {
     }
 
     private ActionResult handleWalkFailure(ActionPack pack, String reason) {
-        if (reason.contains("stuck_blocked") && nodeRetry < AIBotConfig.get().nav().nodeRetry()) {
+        if (reason.contains("stuck_blocked") && nodeRetry < MinecraftAiConfig.get().nav().nodeRetry()) {
             nodeRetry++;
             int previous = index;
             index = Math.max(1, index - 1);
@@ -961,8 +967,8 @@ public final class PathExecutor {
     }
 
     private static boolean hasObservedHazardFluid(AIPlayerEntity bot, BlockPos pos) {
-        return io.github.zoyluo.aibot.mining.OreScan.observeDangerFluid(bot, pos)
-                == io.github.zoyluo.aibot.mining.OreScan.Observation.OBSERVED_PRESENT;
+        return io.github.zoyluo.minecraftai.mining.OreScan.observeDangerFluid(bot, pos)
+                == io.github.zoyluo.minecraftai.mining.OreScan.Observation.OBSERVED_PRESENT;
     }
 
     private static Direction faceFromPlayer(ActionPack pack, BlockPos pos) {

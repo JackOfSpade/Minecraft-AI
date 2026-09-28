@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.ContainerAction;
-import io.github.zoyluo.aibot.action.InventoryAction;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.log.LogCategory;
-import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.ContainerAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
@@ -151,9 +151,13 @@ public final class ResupplyTask extends AbstractTask {
                 .placeIn(bot.getEntityWorld(), "base")
                 .orElse(null);
         if (basePos == null) {
-            // 没有基地(深处挖矿/野外远征):别死在 no_base——直接用背包料就地合(stone_pickaxe=圆石+棍+随身工作台;
-            // iron_pickaxe=备用铁锭+棍)。深处磨穿镐时背包常有充足圆石/备料,合不出(缺料)CraftTask 自会 no_supply
-            // 诚实失败。治 real_armor:挖26铁石镐磨穿→resupply→FIND_BASE→no_base 死锁(bot有78圆石+表却去找基地)。
+            // No base (deep-underground mining / wilderness expedition): don't stall out on no_base -- craft
+            // in place directly from carried materials instead (stone_pickaxe = cobblestone + stick + carried
+            // crafting table; iron_pickaxe = spare iron ingot + stick). When a pickaxe wears out deep
+            // underground the inventory usually has plenty of cobblestone/materials on hand; if crafting still
+            // can't produce it (materials missing), CraftTask will honestly fail with no_supply on its own.
+            // Fixes real_armor: mining 26 iron with a stone pickaxe wears it out -> resupply -> FIND_BASE ->
+            // no_base deadlock (bot has 78 cobblestone + a crafting table but goes off looking for a base instead).
             // No remembered base at all is a real decision point: it silently reroutes to crafting
             // from carried materials instead, many ticks before any eventual craft success/failure,
             // and would otherwise leave no trace if that craft later fails generically.
@@ -168,7 +172,7 @@ public final class ResupplyTask extends AbstractTask {
         containers.clear();
         BlockPos.stream(basePos.add(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.add(BASE_RADIUS, 4, BASE_RADIUS))
                 .map(BlockPos::toImmutable)
-                .filter(pos -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(containers::add);
         containers.sort(Comparator
@@ -257,7 +261,7 @@ public final class ResupplyTask extends AbstractTask {
     private void withdraw(AIPlayerEntity bot) {
         if (containerPos == null
                 || bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) > REACH_SQUARED
-                || !io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
+                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
             phase = Phase.FIND_CONTAINER;
             return;
         }

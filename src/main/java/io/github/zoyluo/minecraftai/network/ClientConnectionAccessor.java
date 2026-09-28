@@ -1,7 +1,7 @@
-package io.github.zoyluo.aibot.network;
+package io.github.zoyluo.minecraftai.network;
 
 import io.netty.channel.Channel;
 
 public interface ClientConnectionAccessor {
-    void aibot$setChannel(Channel channel);
+    void minecraftai$setChannel(Channel channel);
 }

@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.brain;
+package io.github.zoyluo.minecraftai.brain;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;

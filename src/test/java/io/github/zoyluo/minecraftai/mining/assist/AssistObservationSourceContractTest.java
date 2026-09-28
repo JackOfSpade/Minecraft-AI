@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import org.junit.jupiter.api.Test;
 
@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * hide a call from the scan). A new world read fails this test until it is reviewed and listed here.</p>
  */
 class AssistObservationSourceContractTest {
-    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/aibot");
+    private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
     private static final Path ASSIST = MAIN.resolve("mining/assist");
     private static final Path COORDINATOR = MAIN.resolve("coordination/MiningAssistCoordinator.java");
 
@@ -153,7 +153,7 @@ class AssistObservationSourceContractTest {
     void castViewRayClampsToPerceptionRadiusAndReadsStateOnlyAfterTheBlockTypeCheck() throws IOException {
         String body = castViewRayBody();
         assertTrue(body.contains("perception().radius()"), "range must be clamped to the live perception radius");
-        assertTrue(body.contains("Math.min(range, Math.max(1, AIBotConfig.get().perception().radius()))"),
+        assertTrue(body.contains("Math.min(range, Math.max(1, MinecraftAiConfig.get().perception().radius()))"),
                 "range is min(range, max(1, radius))");
         assertFalse(body.contains("CapabilityRuntime.decide"), "no privileged read exists here");
         assertFalse(body.contains("CapabilityRuntime"), "not even a mention");
@@ -422,7 +422,7 @@ class AssistObservationSourceContractTest {
     @Test
     void theWorldTouchingAdaptersUseTheObservableBoundaryForRealNotJustByImport() throws IOException {
         String boundary = read(Path.of(
-                "src/test/java/io/github/zoyluo/aibot/mode/PrivilegedBoundarySourceTest.java"));
+                "src/test/java/io/github/zoyluo/minecraftai/mode/PrivilegedBoundarySourceTest.java"));
         for (String adapter : List.of("mining/assist/ViewSweeper.java", "mining/assist/PoiDetector.java")) {
             assertTrue(boundary.contains("\"" + adapter + "\""), adapter + " must be in the must-contain set");
         }

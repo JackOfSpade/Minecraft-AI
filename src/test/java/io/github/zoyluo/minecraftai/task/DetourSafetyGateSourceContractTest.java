@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tests.
  */
 class DetourSafetyGateSourceContractTest {
-    private static final Path FILE = Path.of("src/main/java/io/github/zoyluo/aibot/task/DetourSafetyGate.java");
+    private static final Path FILE = Path.of("src/main/java/io/github/zoyluo/minecraftai/task/DetourSafetyGate.java");
 
     private static String source() throws IOException {
         return Files.readString(FILE);
@@ -84,7 +84,7 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("MiningAssistRuntime.headroom().canStart(tpsDegraded)"));
         assertTrue(body.contains("MiningAssistRuntime.headroom().shouldAbort(tpsDegraded)"));
         assertTrue(body.contains("stage.isStart()"));
-        // Item 3: bot vitals and the two AIBotConfig sections.
+        // Item 3: bot vitals and the two MinecraftAiConfig sections.
         for (String token : List.of("bot.getHealth()", "combat.retreatHp()", "cfg.detour().startHpMargin()",
                 "bot.hurtTime", "bot.isOnFire()", "bot.isInLava()", "bot.isSubmergedInWater()",
                 "bot.isTouchingWater()", "bot.getHungerManager().getFoodLevel()", "survival.hungerCriticalThreshold()")) {

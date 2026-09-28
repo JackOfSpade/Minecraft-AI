@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.mining.assist;
+package io.github.zoyluo.minecraftai.mining.assist;
 
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;

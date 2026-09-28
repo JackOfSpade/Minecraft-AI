@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.action;
+package io.github.zoyluo.minecraftai.action;
 
 public record ActionResult(Status status, String reason) {
     public enum Status {

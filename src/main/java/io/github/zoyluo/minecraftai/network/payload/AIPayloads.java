@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.network.payload;
+package io.github.zoyluo.minecraftai.network.payload;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 

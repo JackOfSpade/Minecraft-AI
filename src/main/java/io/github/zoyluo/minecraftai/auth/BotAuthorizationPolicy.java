@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.auth;
+package io.github.zoyluo.minecraftai.auth;
 
 import java.util.Objects;
 import java.util.UUID;

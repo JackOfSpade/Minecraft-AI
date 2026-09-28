@@ -1,4 +1,4 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Locks down cursor identity and saved-face return without bootstrapping a Minecraft registry. */
 class OreDigCheckpointSourceContractTest {
     private static final Path SOURCE = Path.of(
-            "src/main/java/io/github/zoyluo/aibot/task/OreDigTask.java");
+            "src/main/java/io/github/zoyluo/minecraftai/task/OreDigTask.java");
 
     @Test
     void checkpointMatchesOreFamilyAndReturnsToSavedFaceBeforeMining() throws IOException {
@@ -352,9 +352,9 @@ class OreDigCheckpointSourceContractTest {
     void oreDigOptsIntoChannelToolPolicyWithoutChangingOtherMiners() throws IOException {
         String oreDig = Files.readString(SOURCE);
         String miner = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/action/BlockMiner.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/action/BlockMiner.java"));
         String selector = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/action/ToolSelector.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/action/ToolSelector.java"));
 
         assertTrue(oreDig.contains("miner.begin(bot, pos, true)"),
                 "OreDig must explicitly opt into mining-channel tool conservation");
@@ -474,7 +474,7 @@ class OreDigCheckpointSourceContractTest {
     @Test
     void exhaustedPickupDebtKeepsItsOriginalMissionFailure() throws IOException {
         String executor = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
         int handler = executor.indexOf("private void handleStepFailure");
         int terminal = executor.indexOf(
                 "reason.startsWith(\"ore_dig_drop_unrecovered\")", handler);
@@ -486,7 +486,7 @@ class OreDigCheckpointSourceContractTest {
     @Test
     void trappedBlindBranchFailsMissionBeforeReplayingItsCheckpoint() throws IOException {
         String executor = Files.readString(Path.of(
-                "src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java"));
+                "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
         int handler = executor.indexOf("private void handleStepFailure");
         int terminal = executor.indexOf(
                 "reason.startsWith(\"ore_dig_branch_boundary_trapped:\")", handler);

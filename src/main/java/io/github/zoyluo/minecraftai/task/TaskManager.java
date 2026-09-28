@@ -1,13 +1,13 @@
-package io.github.zoyluo.aibot.task;
+package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.aibot.brain.BotReporter;
-import io.github.zoyluo.aibot.entity.AIPlayerEntity;
-import io.github.zoyluo.aibot.log.BotLog;
-import io.github.zoyluo.aibot.manager.AIPlayerManager;
-import io.github.zoyluo.aibot.observe.BotProfiler;
-import io.github.zoyluo.aibot.observe.TpsGuard;
-import io.github.zoyluo.aibot.runtime.ExecutionStack;
-import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.brain.BotReporter;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.observe.BotProfiler;
+import io.github.zoyluo.minecraftai.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.runtime.ExecutionStack;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Map;
@@ -129,9 +129,12 @@ public final class TaskManager {
     }
 
     /**
-     * 把 bot 彻底复位到干净的空闲:停掉活跃/暂停任务、清失败记录与状态缓存,使 status() 返回 idle。
-     * 供大脑在"反复失败已放弃"(max_turns)等场景善后调用——否则遗留任务 FAILED 后 lastStatus 会长期
-     * 缓存 FAILED(面板/诊断一直显示卡死),pendingFailure 滞留也会让 idle-watcher 空转(实测发呆 13 分钟根因)。
+     * Fully resets the bot to a clean idle state: stops active/paused tasks, clears the failure record and
+     * status cache, so status() returns idle.
+     * Intended for the brain to call as cleanup in scenarios like giving up after repeated failures
+     * (max_turns) — otherwise, once a task is left in FAILED state, lastStatus keeps caching FAILED
+     * indefinitely (the panel/diagnostics keep showing it as stuck), and a lingering pendingFailure also
+     * causes the idle-watcher to spin with nothing to do (root cause of an observed 13-minute stall).
      */
     public void resetToIdle(AIPlayerEntity bot) {
         UUID uuid = bot.getUuid();
@@ -347,8 +350,10 @@ public final class TaskManager {
                 BotProfiler.INSTANCE.record(player, "task_tick_skipped", 0L);
                 continue;
             }
-            // V1 统一生存层:任务 tick 前熔断检查——溺水/岩浆/着火/垂死作业一律叫停,
-            // 失败原因透传给 goal 层 replan。任务私有熔断可以更早更聪明,但漏配时这里兜底。
+            // V1 unified survival layer: circuit-breaker check before each task tick — drowning/lava/on
+            // fire/near-death conditions unconditionally halt the task, and the failure reason is passed
+            // through to the goal layer's replan. A task's own private circuit breaker can react earlier
+            // and more intelligently, but this serves as the fallback when one isn't configured.
             String breaker = SurvivalGuard.INSTANCE.check(player, task);
             if (breaker != null && task.state() == TaskState.RUNNING) {
                 if ((origin == null || !origin.safety()) && breaker.startsWith("guard_")) {
@@ -362,7 +367,7 @@ public final class TaskManager {
                 }
                 task.abort(player);
                 if (task instanceof AbstractTask at) {
-                    at.failureReason = breaker; // abort 默认 "aborted",改成可诊断的熔断理由
+                    at.failureReason = breaker; // abort defaults to "aborted"; replace with a diagnosable circuit-breaker reason
                 }
                 BotLog.danger(player, "survival_guard_abort", "task", task.name(), "why", breaker);
             }
@@ -385,7 +390,7 @@ public final class TaskManager {
                 active.remove(uuid);
                 activeOrigins.remove(uuid);
                 recordFailure(player, task.name(), task.failureReason(), server.getTicks());
-                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, player, "task_failed",
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.TASK, player, "task_failed",
                         "name", task.name(), "reason", task.failureReason(), "elapsed_ticks", task.elapsedTicks());
             } else if (task.state() == TaskState.CANCELLED) {
                 active.remove(uuid);

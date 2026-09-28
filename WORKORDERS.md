@@ -32,7 +32,7 @@
 【技术栈锁死,不要升级】
 Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16.2、Gradle 9.4.0、Java 21。
 ⚠️VERIFY 的 API 以编译通过为准,签名不确定对照 fabric-example-mod 的 1.21.3 分支。
-复用现有类(BrainCoordinator / ToolRegistry / TaskManager / AbstractTask / ActionPack / PerceptionCollector / DangerWatcher / AIPlayerManager / BotMemory / AIBotConfig),不要重造。
+复用现有类(BrainCoordinator / ToolRegistry / TaskManager / AbstractTask / ActionPack / PerceptionCollector / DangerWatcher / AIPlayerManager / BotMemory / MinecraftAiConfig),不要重造。
 
 【全部做完后的总汇报】
 逐张列出:RL-N 做了什么、改了哪些文件、编译/验收结果、是否 blocked(原因)、有没有偏离 PLAN 之处;并贴最终 WORKORDERS.md 勾选状态。
@@ -49,7 +49,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 > 2. **一张工单一个独立 commit**;做完自测 `./gradlew compileJava compileClientJava` 通过 + 跑该工单的验收,再进入下一张。
 > 3. **铁律(不可破)**:G1 复合行为自包含状态机、任务内**绝不** `TaskManager.INSTANCE.assign`(编排只在 Brain/Watcher 层);G2 世界/实体/库存只在主线程、IO 回 `server.execute`;G3 容器/合成直接操作 `Inventory`/`BlockEntity` 不走 ScreenHandler;G4 物品 NBT 用 1.20.5+ 编解码。
 > 4. **`⚠️VERIFY` 的 1.21.3 API** 以 fabric-example-mod 1.21.3 分支为基准核对签名。
-> 5. **不破坏既有功能**;复用现有锚点(BrainCoordinator/ToolRegistry/TaskManager/AbstractTask/ActionPack/PerceptionCollector/DangerWatcher/AIPlayerManager/BotMemory/AIBotConfig),勿重造。
+> 5. **不破坏既有功能**;复用现有锚点(BrainCoordinator/ToolRegistry/TaskManager/AbstractTask/ActionPack/PerceptionCollector/DangerWatcher/AIPlayerManager/BotMemory/MinecraftAiConfig),勿重造。
 > 6. 每张做完把改动交回审查(五查:G1 grep / G2 线程 / ⚠️VERIFY 编译 / 超时与失败兜底 / 不破坏既有)。
 
 ---
@@ -57,11 +57,11 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 # W1 · 编排可靠性 + 验证 + 反馈(地基,先做透)
 
 ## WO-RL-1 · 失败自诊断与恢复  (PLAN §RL-1) ✅ done: TaskManager 失败记录/消费与 BrainCoordinator 失败诊断续跑已实现, compileJava/compileClientJava 通过。
-**文件**:`task/TaskManager`、`brain/BrainCoordinator`、`AIBotConfig.Brain`
+**文件**:`task/TaskManager`、`brain/BrainCoordinator`、`MinecraftAiConfig.Brain`
 **改动**:
 - TaskManager:加 `record FailureRecord(name, reason, count, tick)` + `Map<UUID,FailureRecord> lastFailure`;`tickAll` 中任务转 `FAILED` → 同 `name+reason` 累加 count,否则新建;`COMPLETED` 清除。提供 `consumeFailure(bot)`(取出并清)。
 - BrainCoordinator:`maybeInjectFailure(bot,conv)` —— 任务结束/idle 且会话不 busy 时 `consumeFailure`,注入中文诊断 user 消息("上一个任务失败:X,原因:Y(第 n 次)。请:补齐前置后重试 / 换方法 / say 放弃" + count≥max 时加放弃倾向)→ submit。触发点:`scheduleContinuation` 任务结束分支 + idle-watcher。
-- `AIBotConfig.Brain.maxTaskRetries`=3。
+- `MinecraftAiConfig.Brain.maxTaskRetries`=3。
 **约束**:恢复在 Brain 层(G1);consume 式注入,幂等不重复。
 **验收**:缺料 craft 失败 → LLM 自动补料重试成功;同失败 3 次 → 改方案/放弃,无无限重试。
 
@@ -74,22 +74,22 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **验收**:空背包 `plan_craft minecraft:stone_pickaxe` → 列出缺料 + 来源;LLM 补齐后造成功。
 
 ## WO-RL-3 · 卡死检测与自救  (PLAN §RL-3) ✅ done: StuckWatcher、Task.isWaiting 豁免和卡死失败记录已实现, compileJava/compileClientJava 通过。
-**文件**:新 `task/StuckWatcher`、`task/Task`(加 `default boolean isWaiting()`)、`SmeltTask`/`SleepTask`(等待阶段 true)、`AIBotMod`、`AIBotConfig`
+**文件**:新 `task/StuckWatcher`、`task/Task`(加 `default boolean isWaiting()`)、`SmeltTask`/`SleepTask`(等待阶段 true)、`MinecraftAiMod`、`MinecraftAiConfig`
 **改动**:采样 `(blockPos, taskProgress, 库存总数)`;`stuckWindow`(默认 200tick)内三者不变且任务 `RUNNING` 且 `!isWaiting()` → `abort` + 写 `lastFailure(reason="stuck:"+name)`(RL-1 接管)。pos 变/库存涨即重置。
 **验收**:让 bot mine 够不到的方块 → ~10s 自救 abort + 重规划;冶炼/睡觉**不误杀**。
 
 ## WO-RL-4 · 感知精炼(省 token)  (PLAN §RL-4) ✅ done: 感知 highlights、距离排序截断和 includeRawLists 开关已实现, compileJava/compileClientJava 通过。
-**文件**:`perception/PerceptionSnapshot`、`perception/PerceptionCollector`、`AIBotConfig.Perception`
+**文件**:`perception/PerceptionSnapshot`、`perception/PerceptionCollector`、`MinecraftAiConfig.Perception`
 **改动**:加 `Highlights`(nearest_tree/stone/ore/water/furnace/chest/bed/hostile,各最近 1–2 个带坐标距离);blocks 按距离排序截断;`includeRawLists`(默认 false)关原始全列表省 token;`toJson` highlights 在前。
 **验收**:`api_request` tokens_in 下降;LLM 直接引用最近资源坐标;开 `includeRawLists` 原始列表回归。
 
-## WO-RL-5 · M8–M17 端到端验证矩阵 + 清账  (PLAN §RL-5) ✅ done: /aibot verify 验证矩阵骨架与场景断言已实现, compileJava/compileClientJava 通过。
-**文件**:新 `command/AIBotVerifySubcommand`(挂 `/aibot verify`)、PLAN 验证矩阵附表
+## WO-RL-5 · M8–M17 端到端验证矩阵 + 清账  (PLAN §RL-5) ✅ done: /minecraftai verify 验证矩阵骨架与场景断言已实现, compileJava/compileClientJava 通过。
+**文件**:新 `command/MinecraftAiVerifySubcommand`(挂 `/minecraftai verify`)、PLAN 验证矩阵附表
 **改动**:每能力一个场景(setup→assign→poll 超时→assert→PASS/FAIL):覆盖 `persist/container/combat/sleep/farm/strip_mine/build(autosite)/memory/job/craft_chain`。FAIL 逐个修(含已知:溺水规避无效 / CraftTask 不自动造工作台 / 睡觉多人强制跳夜)。
-**验收**:`/aibot verify all` 全 PASS 或对豁免项明确标注。
+**验收**:`/minecraftai verify all` 全 PASS 或对豁免项明确标注。
 
 ## WO-RL-6 · 异常与超时统一治理  (PLAN §RL-6) ✅ done: 工具/网络异常捕获、失败分类和任务超时边界已补齐, compileJava/compileClientJava 通过。
-**文件**:`brain/ActionDispatcher`、`network/AIBotServerNetworking.handleCommand`、各 `Task`、`brain/OpenAiCompatibleApiClient`、容器/世界访问点
+**文件**:`brain/ActionDispatcher`、`network/MinecraftAiServerNetworking.handleCommand`、各 `Task`、`brain/OpenAiCompatibleApiClient`、容器/世界访问点
 **改动**:dispatch/C2S handler catch 范围扩到 `RuntimeException`(修 `Identifier.of(乱码)` 抛 `InvalidIdentifierException` 逃逸的坑)且必 `BotLog.error` 留痕;审计补齐所有任务超时(`*_timeout`);API 429/超时/空响应分类;BlockEntity/世界访问前置判空。
 **验收**:坏 id / 卸载 chunk / 断网 → 捕获给 reason 不崩;无超时任务消除。
 
@@ -106,10 +106,10 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 ## WO-RL-9 · 性能实测调优  (PLAN §RL-9) ✅ done: 单遍历 tick 协调器、A* 缓存/节流、degraded 分级扫描已实现, compileJava/compileClientJava 通过。
 **文件**:新 `task/BotTickCoordinator`(合并 DangerWatcher/StuckWatcher/IdleCoordinator/唤起为**单 all-bots 遍历**)、`pathfinding`、`observe/TpsGuard`
 **改动**:单遍历分发 危险/卡死/空闲/目标 四类检查(读 `TpsGuard.scanInterval()`);A* 失败短路 + 结果缓存/节流;`TpsGuard` degraded **分级降级**(先降感知/续转/非关键任务,危险响应最后降),阈值实测调参。
-**验收**:10 bot 同时干活 TPS≥19;`/aibot profile` 无单段失控;制造卡顿能 degraded 并恢复。
+**验收**:10 bot 同时干活 TPS≥19;`/minecraftai profile` 无单段失控;制造卡顿能 degraded 并恢复。
 
 ## WO-RL-10 · 对话反馈:错误友好化 + 主动汇报  (PLAN §RL-10) ✅ done: BotReporter/ReasonText/verboseReports 已实现, 任务节点中文系统播报与失败友好文案已接入, compileJava/compileClientJava 通过。
-**文件**:新 `brain/BotReporter`、`brain/ReasonText`、`AIBotConfig.Brain.verboseReports`
+**文件**:新 `brain/BotReporter`、`brain/ReasonText`、`MinecraftAiConfig.Brain.verboseReports`
 **改动**:任务 `assigned/关键phase/completed/failed` 节点经 `sendBotChat`(面板通道,OPT-7)播中文摘要(**只播节点+限频+去重**);长任务 25/50/75/100% 各播一次;失败 reason → 中文友好(`need:x`→缺少X、`pickup_timeout`→没捡到掉落物、`stuck`→卡住换办法)。给 LLM 的仍是原始 reason(RL-1)。
 **验收**:`gather 石头` → 面板"开始挖石头 → 已挖 5/10 → 完成"中文播报;失败给人话。
 
@@ -178,7 +178,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 ---
 
 ## 进度勾选(Codex 做完一张勾一张)
-- [x] RL-1 done: 失败记录、消费式诊断注入和 maxTaskRetries 配置已实现,编译通过。  [x] RL-2 done: plan_craft 只读预检与 missing source 提示已实现,编译通过。  [x] RL-3 done: StuckWatcher、isWaiting 豁免和 stuck 失败回灌已实现,编译通过。  [x] RL-4 done: perception highlights 与 includeRawLists=false 默认裁剪已实现,编译通过。  [x] RL-5 done: /aibot verify 矩阵、跨 tick 轮询和 craft_chain 自动工作台清账已实现,编译通过。  [x] RL-6 done: RuntimeException 边界、API 错误分类、BuildTask 空安全和统一 timeout reason 已实现,编译通过。  [x] RL-7 done: 持久化原子写/异步单飞、owner 恢复和维度兜底已实现,编译通过。  [x] RL-8 done: 目标记忆摘要、任务完成续推和 idle 目标唤起已实现,编译通过。  [ ] RL-9  [ ] RL-10
+- [x] RL-1 done: 失败记录、消费式诊断注入和 maxTaskRetries 配置已实现,编译通过。  [x] RL-2 done: plan_craft 只读预检与 missing source 提示已实现,编译通过。  [x] RL-3 done: StuckWatcher、isWaiting 豁免和 stuck 失败回灌已实现,编译通过。  [x] RL-4 done: perception highlights 与 includeRawLists=false 默认裁剪已实现,编译通过。  [x] RL-5 done: /minecraftai verify 矩阵、跨 tick 轮询和 craft_chain 自动工作台清账已实现,编译通过。  [x] RL-6 done: RuntimeException 边界、API 错误分类、BuildTask 空安全和统一 timeout reason 已实现,编译通过。  [x] RL-7 done: 持久化原子写/异步单飞、owner 恢复和维度兜底已实现,编译通过。  [x] RL-8 done: 目标记忆摘要、任务完成续推和 idle 目标唤起已实现,编译通过。  [ ] RL-9  [ ] RL-10
 - [ ] RL-11 [ ] RL-12 [ ] RL-13 [ ] RL-14 [ ] RL-15 [ ] RL-16 [ ] RL-17 [ ] RL-18 [ ] RL-19 [ ] RL-20
 
 ---
@@ -190,14 +190,14 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 - **完成度**:无 blocked、代码无 `BLOCKED` TODO。
 - **编译**:`./gradlew clean compileJava compileClientJava` 全过 → 20 步所有 ⚠️VERIFY 的 1.21.3 API 解析正确。
 - **铁律 G1**:`TaskManager.assign` 仅在 `DangerWatcher`/`IdleCoordinator` 两个编排器;新任务类(Gather/Resupply/Guard/Follow/Hold/Combat/Fish/Trade…)内部零 assign;`CombatCore` 抽取给 Guard/Combat 共用。
-- **RL-9 watcher 合并**:`BotTickCoordinator` 单次 all-bots 遍历;三 watcher 重构为 `scanBot/tickBot`;`tickAll` 在 AIBotMod 只调一次(无双 tick);danger 用更高频 `dangerScanInterval`,危险响应未退化。
+- **RL-9 watcher 合并**:`BotTickCoordinator` 单次 all-bots 遍历;三 watcher 重构为 `scanBot/tickBot`;`tickAll` 在 MinecraftAiMod 只调一次(无双 tick);danger 用更高频 `dangerScanInterval`,危险响应未退化。
 - **新文件**:HarvestCore / AcquisitionHints / BotReporter / ReasonText / SetOptionC2S / TaskCard / GoalCard / SettingsCard 全部就位。
 - **抽查 TradeTask**:直接结算不开 MerchantScreen(G3);显式只选单输入 offer;canFit→扣款→给货 顺序安全。
 
 > **未覆盖:运行期行为**(编译过 ≠ 行为对)。需在 dev server 实测,见下。
 
 ## 运行期核验清单(用户在游戏里跑,结果回填)
-- [ ] `/aibot verify all` → 记录各 feature 的 PASS / FAIL
+- [ ] `/minecraftai verify all` → 记录各 feature 的 PASS / FAIL
 - [ ] 端到端「帮我从原料造一把铁镐」:全程走高层任务(不再 `mine_block` 空转)、缺料自动补齐、背包真增长、中文反馈只在面板(RL-1/2/4/10)
 - [ ] 停服 → 重启:bot 原位/背包/维度/owner 全恢复(RL-7)
 - [ ] `gather cobblestone 64`:持续采集到量,满仓存箱续采(RL-12)
@@ -237,4 +237,4 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
     (a) `AIPlayerManager.spawn`:固定 `GameMode.SURVIVAL`(不再读 executor 的模式)。可加配置 `survival.forceSurvival`(默认 true)留开关。
     (b) `respawnFromRecord` / 持久化:恢复时也强制 survival(忽略 `BotRecord` 里存的 creative);或持久化只存/恢复 survival。
   - **验收**:玩家处于创造模式时 spawn Bob → Bob 仍是 survival;砍木正常掉落、`pickup_collected>0`、`gather/mine` 产物进背包。
-  - **注意(现有存档)**:当前 Bob 已被存成 creative —— 改完后需 `/aibot despawn Bob` 再 `spawn`(或删 `run/saves/*/aibot/bots.json`),让它以 survival 重新回来。
+  - **注意(现有存档)**:当前 Bob 已被存成 creative —— 改完后需 `/minecraftai despawn Bob` 再 `spawn`(或删 `run/saves/*/minecraftai/bots.json`),让它以 survival 重新回来。
