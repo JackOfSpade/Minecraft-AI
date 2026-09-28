@@ -15,6 +15,7 @@ import org.stepan1411.testdouble.Settings;
 
 import java.util.List;
 
+import static dev.spawnbotswrapper.inhabitants.adapter.AdapterFixture.anyContains;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,10 +46,6 @@ class StatusAssemblerTest {
 
     private static Assembly assemble(UpstreamContract c, CommandTree tree, SpawnBackend backend) {
         return StatusAssembler.assemble(input(c, tree), backend);
-    }
-
-    private static boolean anyContains(List<String> lines, String text) {
-        return lines.stream().anyMatch(l -> l.contains(text));
     }
 
     // ---------------------------------------------------------------- available

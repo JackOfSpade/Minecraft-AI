@@ -4,6 +4,8 @@ import org.stepan1411.pvp_bot.bot.BotPath;
 import org.stepan1411.pvp_bot.bot.BotSettings;
 import org.stepan1411.testdouble.Recorder;
 
+import java.util.List;
+
 /** Shared setup of the adapter tests: a fresh fake upstream, a probed adapter, the captured log. */
 final class AdapterFixture {
 
@@ -44,5 +46,10 @@ final class AdapterFixture {
         AdapterFixture f = healthy();
         f.adapter.probeWith(FULL_TREE);
         return f;
+    }
+
+    /** True as soon as some line of a {@code Status.warnings()}/{@code .details()}-style list contains {@code text}. */
+    static boolean anyContains(List<String> lines, String text) {
+        return lines.stream().anyMatch(l -> l.contains(text));
     }
 }

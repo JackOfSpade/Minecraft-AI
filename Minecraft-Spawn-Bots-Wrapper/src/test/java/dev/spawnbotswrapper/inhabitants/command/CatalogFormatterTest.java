@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static dev.spawnbotswrapper.inhabitants.command.Fixtures.containsStripped;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,9 +37,6 @@ class CatalogFormatterTest {
                 other("saveInterval", Category.ADMIN_OPERATIONAL, ValueType.INT));
     }
 
-    private static boolean has(List<String> lines, String fragment) {
-        return Markup.strip(lines).stream().anyMatch(l -> l.contains(fragment));
-    }
 
     // ---------------------------------------------------------------- summary
 
@@ -48,18 +46,18 @@ class CatalogFormatterTest {
                 new AuditReport(List.of(), List.of()), null));
 
         assertEquals("Setting catalog: 6 PvP BOT settings, audited against PvP BOT 0.0.15", t.get(0));
-        assertTrue(has(t, "  PER_BOT_RANDOMIZABLE: 4  randomized per bot  (LOADOUT 1, ATTRIBUTE 2, PATH 1)"), t.toString());
-        assertTrue(has(t, "  GLOBAL_ONLY: 1  global in PvP BOT, not randomized"), t.toString());
-        assertTrue(has(t, "  ADMIN_OPERATIONAL: 1  admin / performance / debug, never touched"), t.toString());
-        assertTrue(has(t, "  UNSUPPORTED: 0  cannot be handled"), t.toString());
-        assertTrue(has(t, "List one category: /inhabitants catalog <per_bot_randomizable|global_only|admin_operational|unsupported>"),
+        assertTrue(containsStripped(t, "  PER_BOT_RANDOMIZABLE: 4  randomized per bot  (LOADOUT 1, ATTRIBUTE 2, PATH 1)"), t.toString());
+        assertTrue(containsStripped(t, "  GLOBAL_ONLY: 1  global in PvP BOT, not randomized"), t.toString());
+        assertTrue(containsStripped(t, "  ADMIN_OPERATIONAL: 1  admin / performance / debug, never touched"), t.toString());
+        assertTrue(containsStripped(t, "  UNSUPPORTED: 0  cannot be handled"), t.toString());
+        assertTrue(containsStripped(t, "List one category: /inhabitants catalog <per_bot_randomizable|global_only|admin_operational|unsupported>"),
                 t.toString());
     }
 
     @Test
     void aCleanAuditIsGreen() {
         List<String> raw = CatalogFormatter.summary("0.0.15", sample(), "0.0.15", new AuditReport(List.of(), List.of()), null);
-        assertTrue(has(raw, "Audit against the running PvP BOT 0.0.15: clean - every upstream setting is classified (6)"),
+        assertTrue(containsStripped(raw, "Audit against the running PvP BOT 0.0.15: clean - every upstream setting is classified (6)"),
                 Markup.strip(raw).toString());
         assertTrue(raw.stream().anyMatch(l -> l.contains("§aclean")));
     }
@@ -70,10 +68,10 @@ class CatalogFormatterTest {
         List<String> raw = CatalogFormatter.summary("0.0.15", sample(), "0.0.16", drift, null);
         List<String> t = Markup.strip(raw);
 
-        assertTrue(has(t, "Audit against the running PvP BOT 0.0.16: DRIFT"), t.toString());
-        assertTrue(has(t, "  2 settings unknown to the catalog (new upstream? they are not randomized): newFeature, otherNew"),
+        assertTrue(containsStripped(t, "Audit against the running PvP BOT 0.0.16: DRIFT"), t.toString());
+        assertTrue(containsStripped(t, "  2 settings unknown to the catalog (new upstream? they are not randomized): newFeature, otherNew"),
                 t.toString());
-        assertTrue(has(t, "  1 catalog setting missing upstream (renamed or removed?): removedThing"), t.toString());
+        assertTrue(containsStripped(t, "  1 catalog setting missing upstream (renamed or removed?): removedThing"), t.toString());
         assertTrue(raw.stream().anyMatch(l -> l.contains("§cDRIFT")));
     }
 
@@ -92,18 +90,18 @@ class CatalogFormatterTest {
     @Test
     void aSkippedAuditSaysWhy() {
         List<String> t = Markup.strip(CatalogFormatter.summary("0.0.15", sample(), null, null, "PvP BOT is unavailable"));
-        assertTrue(has(t, "Audit: skipped - PvP BOT is unavailable"), t.toString());
-        assertFalse(has(t, "DRIFT"), t.toString());
+        assertTrue(containsStripped(t, "Audit: skipped - PvP BOT is unavailable"), t.toString());
+        assertFalse(containsStripped(t, "DRIFT"), t.toString());
 
         List<String> generic = Markup.strip(CatalogFormatter.summary("0.0.15", sample(), null, null, null));
-        assertTrue(has(generic, "Audit: skipped - PvP BOT's settings could not be read"), generic.toString());
+        assertTrue(containsStripped(generic, "Audit: skipped - PvP BOT's settings could not be read"), generic.toString());
     }
 
     @Test
     void anEmptyCatalogStillProducesAReadableSummary() {
         List<String> t = Markup.strip(CatalogFormatter.summary(null, List.of(), null, null, "no data"));
         assertEquals("Setting catalog: 0 PvP BOT settings, audited against PvP BOT -", t.get(0));
-        assertTrue(has(t, "  PER_BOT_RANDOMIZABLE: 0  randomized per bot"), t.toString());
+        assertTrue(containsStripped(t, "  PER_BOT_RANDOMIZABLE: 0  randomized per bot"), t.toString());
     }
 
     // ---------------------------------------------------------------- category
@@ -114,8 +112,8 @@ class CatalogFormatterTest {
 
         assertEquals("PER_BOT_RANDOMIZABLE: 4 settings  randomized per bot", t.get(0));
         assertEquals("  moveSpeed [ATTRIBUTE]  double 0.1..2, default 1.0  -> vitals.attributes", t.get(1));
-        assertTrue(has(t, "  autoTotem [LOADOUT]"), t.toString());
-        assertTrue(has(t, "  patrolRadius [PATH]  double 0.1..2, default 1.0  -> behavior.patrolRadius"), t.toString());
+        assertTrue(containsStripped(t, "  autoTotem [LOADOUT]"), t.toString());
+        assertTrue(containsStripped(t, "  patrolRadius [PATH]  double 0.1..2, default 1.0  -> behavior.patrolRadius"), t.toString());
         assertEquals(5, t.size());
     }
 

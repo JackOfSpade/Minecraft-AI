@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static dev.spawnbotswrapper.inhabitants.command.Fixtures.containsStripped;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -19,10 +20,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AdminFormatterTest {
     private static final StructureKey KEY = Fixtures.key("minecraft:pillager_outpost", 4, -7);
-
-    private static boolean has(List<String> lines, String fragment) {
-        return Markup.strip(lines).stream().anyMatch(l -> l.contains(fragment));
-    }
 
     // ---------------------------------------------------------------- process
 
@@ -33,14 +30,14 @@ class AdminFormatterTest {
         List<String> queued = AdminFormatter.processed(snapshot, ForceMode.OCCUPIED,
                 new ProcessOutcome(ProcessOutcome.Kind.OCCUPIED_QUEUED, "3 bots planned"));
         assertEquals("Processing minecraft:pillager_outpost at chunk 4,-7 (mode occupied)", Markup.strip(queued.get(0)));
-        assertTrue(has(queued, "  rolled OCCUPIED - population queued; bots appear over the next ticks - 3 bots planned"),
+        assertTrue(containsStripped(queued, "  rolled OCCUPIED - population queued; bots appear over the next ticks - 3 bots planned"),
                 Markup.strip(queued).toString());
 
-        assertTrue(has(AdminFormatter.processed(snapshot, ForceMode.ABANDONED,
+        assertTrue(containsStripped(AdminFormatter.processed(snapshot, ForceMode.ABANDONED,
                 new ProcessOutcome(ProcessOutcome.Kind.ABANDONED, null)), "rolled ABANDONED (permanent: no bots here)"));
-        assertTrue(has(AdminFormatter.processed(snapshot, ForceMode.ROLL,
+        assertTrue(containsStripped(AdminFormatter.processed(snapshot, ForceMode.ROLL,
                 new ProcessOutcome(ProcessOutcome.Kind.ALREADY_PROCESSED, "")), "already processed - nothing changed"));
-        assertTrue(has(AdminFormatter.processed(snapshot, ForceMode.ROLL,
+        assertTrue(containsStripped(AdminFormatter.processed(snapshot, ForceMode.ROLL,
                 new ProcessOutcome(ProcessOutcome.Kind.REJECTED, "excluded by config")), "REJECTED - excluded by config"));
     }
 
@@ -57,22 +54,22 @@ class AdminFormatterTest {
         var snapshot = Fixtures.snapshot("minecraft:x", 0, 0, true);
         ProcessOutcome odd = new ProcessOutcome(null, "??");
         assertFalse(AdminFormatter.processSucceeded(odd));
-        assertTrue(has(AdminFormatter.processed(snapshot, null, odd), "no outcome reported"));
-        assertTrue(has(AdminFormatter.processed(snapshot, null, odd), "(mode roll)"));
+        assertTrue(containsStripped(AdminFormatter.processed(snapshot, null, odd), "no outcome reported"));
+        assertTrue(containsStripped(AdminFormatter.processed(snapshot, null, odd), "(mode roll)"));
     }
 
     @Test
     void noProcessCandidateDistinguishesNothingFoundFromAllAlreadyProcessed() {
         List<String> none = AdminFormatter.noProcessCandidate(16, 0);
-        assertTrue(has(none, "No structure found within 16 chunks."));
-        assertTrue(has(none, "Only structures in loaded chunks are searched"));
+        assertTrue(containsStripped(none, "No structure found within 16 chunks."));
+        assertTrue(containsStripped(none, "Only structures in loaded chunks are searched"));
 
         List<String> one = AdminFormatter.noProcessCandidate(16, 1);
-        assertTrue(has(one, "All 1 structure within 16 chunks already has a record."));
+        assertTrue(containsStripped(one, "All 1 structure within 16 chunks already has a record."));
 
         List<String> many = AdminFormatter.noProcessCandidate(16, 4);
-        assertTrue(has(many, "All 4 structures within 16 chunks already have a record."));
-        assertTrue(has(many, "/inhabitants reset nearest"));
+        assertTrue(containsStripped(many, "All 4 structures within 16 chunks already have a record."));
+        assertTrue(containsStripped(many, "/inhabitants reset nearest"));
     }
 
     // ---------------------------------------------------------------- reset
@@ -109,42 +106,42 @@ class AdminFormatterTest {
         List<String> out = AdminFormatter.resetDone(KEY, before, true, false);
 
         assertEquals("Reset minecraft:pillager_outpost at chunk 4,-7 in minecraft:overworld", Markup.strip(out.get(0)));
-        assertTrue(has(out, "it was POPULATED, 2/2 bots spawned"), Markup.strip(out).toString());
-        assertTrue(has(out, "removal of 2 inhabitants was requested through PvP BOT: Inh_A, Inh_B"),
+        assertTrue(containsStripped(out, "it was POPULATED, 2/2 bots spawned"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "removal of 2 inhabitants was requested through PvP BOT: Inh_A, Inh_B"),
                 Markup.strip(out).toString());
-        assertFalse(has(out, "stay in the world"), Markup.strip(out).toString());
-        assertTrue(has(out, "the record is gone"), Markup.strip(out).toString());
+        assertFalse(containsStripped(out, "stay in the world"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "the record is gone"), Markup.strip(out).toString());
     }
 
     @Test
     void resetWithoutRemoveBotsWarnsThatInhabitantsStayAndMayBeDuplicated() {
         Before before = Before.of(Fixtures.populated(Fixtures.bot(0, "Inh_A", BotState.SPAWNED)));
         List<String> out = AdminFormatter.resetDone(KEY, before, false, false);
-        assertTrue(has(out, "1 inhabitant stays in the world untracked: Inh_A"), Markup.strip(out).toString());
-        assertTrue(has(out, "add removeBots to remove them"), Markup.strip(out).toString());
-        assertFalse(has(out, "removal of"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "1 inhabitant stays in the world untracked: Inh_A"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "add removeBots to remove them"), Markup.strip(out).toString());
+        assertFalse(containsStripped(out, "removal of"), Markup.strip(out).toString());
     }
 
     @Test
     void resetOfAnAbandonedStructureMentionsNoBots() {
         Before before = Before.of(StructureRecord.abandoned());
         List<String> out = AdminFormatter.resetDone(KEY, before, false, false);
-        assertTrue(has(out, "it was ABANDONED"), Markup.strip(out).toString());
-        assertFalse(has(out, "bots spawned"), Markup.strip(out).toString());
-        assertFalse(has(out, "removal of"), Markup.strip(out).toString());
-        assertFalse(has(out, "in the world untracked"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "it was ABANDONED"), Markup.strip(out).toString());
+        assertFalse(containsStripped(out, "bots spawned"), Markup.strip(out).toString());
+        assertFalse(containsStripped(out, "removal of"), Markup.strip(out).toString());
+        assertFalse(containsStripped(out, "in the world untracked"), Markup.strip(out).toString());
     }
 
     @Test
     void deterministicModeExplainsThatTheSameRollReproduces() {
         List<String> on = AdminFormatter.resetDone(KEY, null, false, true);
-        assertTrue(has(on, "Deterministic mode is ON"), Markup.strip(on).toString());
-        assertTrue(has(on, "the same roll reproduces"), Markup.strip(on).toString());
+        assertTrue(containsStripped(on, "Deterministic mode is ON"), Markup.strip(on).toString());
+        assertTrue(containsStripped(on, "the same roll reproduces"), Markup.strip(on).toString());
 
         List<String> off = AdminFormatter.resetDone(KEY, null, false, false);
-        assertTrue(has(off, "Deterministic mode is off: the next roll is random and may differ."),
+        assertTrue(containsStripped(off, "Deterministic mode is off: the next roll is random and may differ."),
                 Markup.strip(off).toString());
-        assertFalse(has(off, "reproduces"));
+        assertFalse(containsStripped(off, "reproduces"));
     }
 
     @Test
@@ -163,8 +160,8 @@ class AdminFormatterTest {
     @Test
     void resetNothingExplainsHowToFindTheRightIdentity() {
         List<String> out = AdminFormatter.resetNothing(KEY);
-        assertTrue(has(out, "Nothing to reset: minecraft:pillager_outpost at chunk 4,-7 in minecraft:overworld has no record."));
-        assertTrue(has(out, "/inhabitants nearby"));
+        assertTrue(containsStripped(out, "Nothing to reset: minecraft:pillager_outpost at chunk 4,-7 in minecraft:overworld has no record."));
+        assertTrue(containsStripped(out, "/inhabitants nearby"));
     }
 
     // ---------------------------------------------------------------- reload / help

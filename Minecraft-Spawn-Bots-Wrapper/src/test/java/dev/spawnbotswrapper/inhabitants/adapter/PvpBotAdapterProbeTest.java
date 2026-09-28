@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static dev.spawnbotswrapper.inhabitants.adapter.AdapterFixture.anyContains;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,10 +21,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** probe() end to end against fake upstream classes: classification, the single log report, fail-soft. */
 class PvpBotAdapterProbeTest {
-
-    private static boolean anyContains(java.util.List<String> lines, String text) {
-        return lines.stream().anyMatch(l -> l.contains(text));
-    }
 
     // ---------------------------------------------------------------- before any probe
 

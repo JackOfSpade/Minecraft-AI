@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.spawnbotswrapper.inhabitants.command.Fixtures.containsStripped;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,10 +27,6 @@ class ProfileReportTest {
         b.profileVersion = 1;
         b.spawnAttempts = 1;
         return b;
-    }
-
-    private static boolean has(List<String> lines, String fragment) {
-        return Markup.strip(lines).stream().anyMatch(l -> l.contains(fragment));
     }
 
     @Test
@@ -58,10 +55,10 @@ class ProfileReportTest {
             return List.of("should not appear");
         });
 
-        assertTrue(has(out, "No profile yet: it is generated when the bot spawns (state PLANNED)."),
+        assertTrue(containsStripped(out, "No profile yet: it is generated when the bot spawns (state PLANNED)."),
                 Markup.strip(out).toString());
-        assertTrue(has(out, "position: not chosen yet"), Markup.strip(out).toString());
-        assertTrue(has(out, "uuid: not seen yet"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "position: not chosen yet"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "uuid: not seen yet"), Markup.strip(out).toString());
         assertEquals(0, calls.get());
     }
 
@@ -71,8 +68,8 @@ class ProfileReportTest {
         b.spawnAttempts = 3;
         b.failure = "no valid position in the structure";
         List<String> out = ProfileReport.format(location(b), () -> List.of());
-        assertTrue(has(out, "state: FAILED  |  index 0  |  spawn attempts 3"), Markup.strip(out).toString());
-        assertTrue(has(out, "last failure: no valid position in the structure"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "state: FAILED  |  index 0  |  spawn attempts 3"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "last failure: no valid position in the structure"), Markup.strip(out).toString());
         assertTrue(Markup.strip(out).stream().noneMatch(l -> l.contains("position: 0")), "no bogus position for a failed bot");
     }
 
@@ -81,7 +78,7 @@ class ProfileReportTest {
         BotRecord b = spawnedWithProfile();
         b.profileApplied = false;
         b.profileVersion = 3;
-        assertTrue(has(ProfileReport.format(location(b), () -> List.of()),
+        assertTrue(containsStripped(ProfileReport.format(location(b), () -> List.of()),
                 "profile: generated, not applied yet (format v3)"));
     }
 
@@ -92,7 +89,7 @@ class ProfileReportTest {
         });
         List<String> t = Markup.strip(out);
         assertEquals("Inhabitant Inh_Steve", t.get(0));
-        assertTrue(has(out, "The profile could not be rendered: UnsupportedOperationException: skeleton (see the server log)"),
+        assertTrue(containsStripped(out, "The profile could not be rendered: UnsupportedOperationException: skeleton (see the server log)"),
                 t.toString());
     }
 
@@ -101,7 +98,7 @@ class ProfileReportTest {
         List<String> out = ProfileReport.format(location(spawnedWithProfile()), () -> {
             throw new NoClassDefFoundError("gone");
         });
-        assertTrue(has(out, "The profile could not be rendered: NoClassDefFoundError: gone"), Markup.strip(out).toString());
+        assertTrue(containsStripped(out, "The profile could not be rendered: NoClassDefFoundError: gone"), Markup.strip(out).toString());
     }
 
     @Test
