@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 
 public final class OpenAiCompatibleApiClient {
     private final MinecraftAiConfig.Llm config;
@@ -95,10 +96,11 @@ public final class OpenAiCompatibleApiClient {
         body.addProperty("max_tokens", config.maxTokens());
         body.addProperty("temperature", config.temperature());
         body.addProperty("stream", false);
-        // Google's OpenAI-compatible endpoint does not accept DeepSeek's proprietary
-        // thinking block.  Keep the block for DeepSeek-compatible endpoints, where it
-        // controls an important token-budget behavior.
-        if (!usesGoogleOpenAiEndpoint()) {
+        // The thinking block is DeepSeek's proprietary top-level parameter.  OpenAI's own
+        // API (and other strict OpenAI-compatible servers) reject unrecognized top-level
+        // parameters with HTTP 400, so only send it when we know we are talking to a
+        // DeepSeek-compatible endpoint, where it controls an important token-budget behavior.
+        if (usesDeepSeekEndpoint()) {
             body.add("thinking", serializeThinking(config));
         }
         BotLog.api(null, "api_request",
@@ -202,21 +204,28 @@ public final class OpenAiCompatibleApiClient {
         return normalizedBaseUrl().contains("generativelanguage.googleapis.com/");
     }
 
+    private boolean usesDeepSeekEndpoint() {
+        return isDeepSeekHost(hostOf(normalizedBaseUrl()));
+    }
+
+    private static String hostOf(String baseUrl) {
+        try {
+            return URI.create(baseUrl).getHost();
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * True when {@code host} identifies DeepSeek's API. Package-private so it can be
+     * unit-tested without constructing a client or reaching the network.
+     */
+    static boolean isDeepSeekHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains("deepseek");
+    }
+
     private static String classifyStatus(int status, String body) {
-        String excerpt = body == null ? "" : body.substring(0, Math.min(200, body.length()));
-        if (status == 429) {
-            return "rate_limited: status=429 body=" + excerpt;
-        }
-        if (status == 408) {
-            return "api_timeout: status=408 body=" + excerpt;
-        }
-        if (status >= 500) {
-            return "server_error: status=" + status + " body=" + excerpt;
-        }
-        if (status == 401 || status == 403) {
-            return "auth_error: status=" + status + " body=" + excerpt;
-        }
-        return "http_error: status=" + status + " body=" + excerpt;
+        return LlmHttpStatus.classify(status, body, 200);
     }
 
     /**
