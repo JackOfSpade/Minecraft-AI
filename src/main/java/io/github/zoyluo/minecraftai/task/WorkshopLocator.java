@@ -54,17 +54,8 @@ public final class WorkshopLocator {
         return nearestBlock(bot, FURNACE_RADIUS, state -> state.isOf(Blocks.FURNACE));
     }
 
-    /** Returns the nearest visible furnace, smoker, or blast furnace. */
-    public static Optional<BlockPos> nearestFurnaceFamily(AIPlayerEntity bot) {
-        return nearestBlock(bot, FURNACE_RADIUS, WorkshopLocator::isFurnaceFamily);
-    }
-
     public static boolean hasNearbyFurnace(AIPlayerEntity bot) {
         return nearestFurnace(bot).isPresent();
-    }
-
-    public static boolean hasNearbyFurnaceFamily(AIPlayerEntity bot) {
-        return nearestFurnaceFamily(bot).isPresent();
     }
 
     /**
@@ -109,12 +100,6 @@ public final class WorkshopLocator {
 
     public static boolean hasNearbyCompatibleFurnace(AIPlayerEntity bot, Item input, Item output) {
         return nearestCompatibleFurnace(bot, input, output).isPresent();
-    }
-
-    public static boolean isFurnaceFamily(BlockState state) {
-        return state.isOf(Blocks.FURNACE)
-                || state.isOf(Blocks.SMOKER)
-                || state.isOf(Blocks.BLAST_FURNACE);
     }
 
     public static boolean isCompatibleFurnace(
