@@ -61,7 +61,13 @@ class OreDigAssistSourceContractTest {
         assertEquals(4, count(source, "startDigPathTo("));
         assertEquals(9, count(source, "digTowardStep"));
         assertEquals(2, count(source, "if (restoringFace)"), "no new if (restoringFace) may be added");
-        assertEquals(3, count(source, "restored.rememberedHighWorkPoses()"));
+        // The three duplicated 23-field checkpoint rebuilds that used to read
+        // "restored.rememberedHighWorkPoses()" directly were folded into OreDigCheckpoint's
+        // withResourceEpoch/withTorchPlacements/withInventoryServiceUsed derivation helpers; each
+        // still preserves the field once, ending its own constructor call with the bare
+        // "rememberedHighWorkPoses)" (single close-paren -- decode's own
+        // "Optional.of(new OreDigCheckpoint(...))" ends with a double close-paren and is excluded).
+        assertEquals(3, count(source, "rememberedHighWorkPoses);"));
         assertEquals(1, count(source, "|| !veinQueue.isEmpty() || bonusOre != null"),
                 "the pinned boolean-or literal must stay on one line, unduplicated");
         assertEquals(4, count(source, "NO_PROGRESS_LIMIT"), "the NO_PROGRESS_LIMIT condition must not be touched");

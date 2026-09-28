@@ -2388,30 +2388,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                 && restored.resourceEpoch() + 1
                                 < rareMissionResourceEpochCapacity(
                                 restored.rareMissionTarget()))
-                        .map(restored -> new OreDigCheckpoint(
-                                CHECKPOINT_SCHEMA,
-                                restored.targetCount(),
-                                true,
-                                restored.delivered(),
-                                restored.rareMissionTarget(),
-                                restored.inventoryServiceUsed(),
-                                MiningBudget.RARE_BATCH_TORCH_LIMIT,
-                                0,
-                                restored.resourceEpoch() + 1,
-                                restored.cursor(),
-                                restored.oreFingerprint(),
-                                restored.budgetUsed(),
-                                restored.lastProgressBudget(),
-                                restored.controlledStripRear(),
-                                restored.boundaryRerouteOrigin(),
-                                restored.pendingPickupPos(),
-                                restored.pendingPickupLastSeenPos(),
-                                restored.pendingPickupInventory(),
-                                restored.pendingPickupStartedBudget(),
-                                restored.pendingPickupGainBudget(),
-                                restored.activeBreakPos(),
-                                restored.activeBreakInventory(),
-                                restored.rememberedHighWorkPoses()).encode()));
+                        .map(restored -> restored.withTorchPlacements(0)
+                                .withResourceEpoch(restored.resourceEpoch() + 1)
+                                .encode()));
     }
 
     /** Debits the one per-batch sealed inventory service without changing any OreDig cursor. */
@@ -2422,30 +2401,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         .filter(restored -> restored.batchOpen()
                                 && isRareExpeditionBatch(ores, restored.rareMissionTarget())
                                 && !restored.inventoryServiceUsed())
-                        .map(restored -> new OreDigCheckpoint(
-                                CHECKPOINT_SCHEMA,
-                                restored.targetCount(),
-                                true,
-                                restored.delivered(),
-                                restored.rareMissionTarget(),
-                                true,
-                                restored.torchLimit(),
-                                restored.torchPlacements(),
-                                restored.resourceEpoch(),
-                                restored.cursor(),
-                                restored.oreFingerprint(),
-                                restored.budgetUsed(),
-                                restored.lastProgressBudget(),
-                                restored.controlledStripRear(),
-                                restored.boundaryRerouteOrigin(),
-                                restored.pendingPickupPos(),
-                                restored.pendingPickupLastSeenPos(),
-                                restored.pendingPickupInventory(),
-                                restored.pendingPickupStartedBudget(),
-                                restored.pendingPickupGainBudget(),
-                                restored.activeBreakPos(),
-                                restored.activeBreakInventory(),
-                                restored.rememberedHighWorkPoses()).encode()));
+                        .map(restored -> restored.withInventoryServiceUsed(true).encode()));
     }
 
     /** Debits the first ordinary/small-rare capacity hand-off owned by this exact open batch. */
@@ -2532,30 +2488,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         .filter(restored -> restored.batchOpen()
                                 && restored.rareMissionTarget() == 0
                                 && !restored.inventoryServiceUsed())
-                        .map(restored -> new OreDigCheckpoint(
-                                CHECKPOINT_SCHEMA,
-                                restored.targetCount(),
-                                true,
-                                restored.delivered(),
-                                0,
-                                true,
-                                restored.torchLimit(),
-                                restored.torchPlacements(),
-                                restored.resourceEpoch(),
-                                restored.cursor(),
-                                restored.oreFingerprint(),
-                                restored.budgetUsed(),
-                                restored.lastProgressBudget(),
-                                restored.controlledStripRear(),
-                                restored.boundaryRerouteOrigin(),
-                                restored.pendingPickupPos(),
-                                restored.pendingPickupLastSeenPos(),
-                                restored.pendingPickupInventory(),
-                                restored.pendingPickupStartedBudget(),
-                                restored.pendingPickupGainBudget(),
-                                restored.activeBreakPos(),
-                                restored.activeBreakInventory(),
-                                restored.rememberedHighWorkPoses()).encode()));
+                        .map(restored -> restored.withInventoryServiceUsed(true).encode()));
     }
 
     public static String resourceEpochFailureReason(int placements, int epoch) {
@@ -2770,6 +2703,42 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     boundaryRerouteOrigin, pendingPickupPos, pendingPickupLastSeenPos,
                     pendingPickupInventory, pendingPickupStartedBudget, pendingPickupGainBudget,
                     activeBreakPos, activeBreakInventory, Map.of());
+        }
+
+        /** Derives a copy with only {@link #resourceEpoch} replaced; every other field is kept. */
+        private OreDigCheckpoint withResourceEpoch(int resourceEpoch) {
+            return new OreDigCheckpoint(taskSchema, targetCount, batchOpen, delivered,
+                    rareMissionTarget, inventoryServiceUsed, torchLimit, torchPlacements,
+                    resourceEpoch, cursor, oreFingerprint, budgetUsed, lastProgressBudget,
+                    controlledStripRear, boundaryRerouteOrigin, pendingPickupPos,
+                    pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
+                    pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
+                    rememberedHighWorkPoses);
+        }
+
+        /** Derives a copy with only {@link #torchPlacements} replaced; every other field is kept. */
+        private OreDigCheckpoint withTorchPlacements(int torchPlacements) {
+            return new OreDigCheckpoint(taskSchema, targetCount, batchOpen, delivered,
+                    rareMissionTarget, inventoryServiceUsed, torchLimit, torchPlacements,
+                    resourceEpoch, cursor, oreFingerprint, budgetUsed, lastProgressBudget,
+                    controlledStripRear, boundaryRerouteOrigin, pendingPickupPos,
+                    pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
+                    pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
+                    rememberedHighWorkPoses);
+        }
+
+        /**
+         * Derives a copy with only {@link #inventoryServiceUsed} replaced; every other field is
+         * kept.
+         */
+        private OreDigCheckpoint withInventoryServiceUsed(boolean inventoryServiceUsed) {
+            return new OreDigCheckpoint(taskSchema, targetCount, batchOpen, delivered,
+                    rareMissionTarget, inventoryServiceUsed, torchLimit, torchPlacements,
+                    resourceEpoch, cursor, oreFingerprint, budgetUsed, lastProgressBudget,
+                    controlledStripRear, boundaryRerouteOrigin, pendingPickupPos,
+                    pendingPickupLastSeenPos, pendingPickupInventory, pendingPickupStartedBudget,
+                    pendingPickupGainBudget, activeBreakPos, activeBreakInventory,
+                    rememberedHighWorkPoses);
         }
 
         Map<String, String> encode() {
