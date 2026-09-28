@@ -219,8 +219,8 @@ public final class MiningAssistConfig {
     }
 
     /** R2 exploration layers (both ship off). */
-    public record Explore(boolean legChooser, boolean frontier, int frontierMaxRadius) {
-        public static final Explore DEFAULTS = new Explore(false, false, 28);
+    public record Explore(boolean legChooser, boolean frontier, int frontierMaxRadius, double frontierMinUtility) {
+        public static final Explore DEFAULTS = new Explore(false, false, 28, 1.0D);
     }
 
     private final AssistMode mode;
@@ -391,7 +391,8 @@ public final class MiningAssistConfig {
         Explore explore = new Explore(
                 exploreSection.bool("legChooser", Explore.DEFAULTS.legChooser()),
                 exploreSection.bool("frontier", Explore.DEFAULTS.frontier()),
-                exploreSection.integer("frontierMaxRadius", Explore.DEFAULTS.frontierMaxRadius(), 8, 64));
+                exploreSection.integer("frontierMaxRadius", Explore.DEFAULTS.frontierMaxRadius(), 8, 64),
+                exploreSection.decimal("frontierMinUtility", Explore.DEFAULTS.frontierMinUtility(), 0.0D, 5.0D));
 
         return new MiningAssistConfig(
                 mode, source, harnessOff, envDeterministic,

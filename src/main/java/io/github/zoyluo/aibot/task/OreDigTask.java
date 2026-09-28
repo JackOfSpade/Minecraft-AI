@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.task;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.BlockMiner;
 import io.github.zoyluo.aibot.action.BuildAction;
@@ -32,13 +33,18 @@ import io.github.zoyluo.aibot.mining.assist.MiningAssistRegistry;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistRuntime;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistState;
 import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
+import io.github.zoyluo.aibot.mining.assist.ObservedGraphSearch;
+import io.github.zoyluo.aibot.mining.assist.ObservedOccupancy;
 import io.github.zoyluo.aibot.mining.assist.ObservedReach;
 import io.github.zoyluo.aibot.mining.assist.OreClaims;
+import io.github.zoyluo.aibot.mining.assist.FrontierPlanner;
 import io.github.zoyluo.aibot.mining.assist.PoiRegistry;
 import io.github.zoyluo.aibot.mining.assist.RouteBudget;
 import io.github.zoyluo.aibot.mining.assist.SafeGate;
 import io.github.zoyluo.aibot.mining.assist.SafeReason;
+import io.github.zoyluo.aibot.mining.assist.SenseBudget;
 import io.github.zoyluo.aibot.mining.assist.SightingLedger;
+import io.github.zoyluo.aibot.mining.assist.SweepEngine;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
 import io.github.zoyluo.aibot.memory.EpisodeLog;
 import io.github.zoyluo.aibot.log.LogCategory;
@@ -1489,6 +1495,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
                 return;
             }
+        }
+        // P5 (design 5.4, off by default): cave-frontier excursion trigger, checked once the scan ladder
+        // has exhausted nearestOre, prospect and the rich zone -- exactly where a spiral strip leg would
+        // otherwise start (design 8.2 hook 14). explorationTick starts a detour of kind FRONTIER through
+        // the SAME engine as the P1 opportunistic detour (tickOpportunistic, hook 9, already ticks it on
+        // every later tick); this call only ever fires the START.
+        if (explorationTick(bot, world)) {
+            return;
         }
         // P4 (design 5.3, off by default): note the ground under the bot as covered before the strip
         // itself runs, so LegChooser's freshFraction sees the trail this exact tick leaves behind.
@@ -5239,6 +5253,264 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     // ---------------------------------------------------------------------------------------------------------
+    // Mining assist P5 (design 5.4, off by default: explore.frontier): the cave-frontier excursion trigger.
+    // ObservedGraphSearch and FrontierPlanner are pure kernels (mining/assist/); everything here just measures
+    // the world into their inputs and, on acceptance, starts a detour of kind FRONTIER through the SAME engine
+    // instance the P1 opportunistic detour uses (design 5.4: "Kind FRONTIER runs in the same engine").
+    // ---------------------------------------------------------------------------------------------------------
+
+    private static final int FRONTIER_UNPRODUCTIVE_COOLDOWN_TICKS = 600;
+    private static final double FRONTIER_MIN_OPEN_VOLUME = 1200.0D;
+    private static final int FRONTIER_MIN_HP = 16;
+    private static final int FRONTIER_CANDIDATE_GRID_SPACING = 6;   // design 5.4's "6x12 grid", horizontal only (contract §1.5)
+    private static final int FRONTIER_MIN_FREE_RUN = 9;             // design 5.4's "free length >= 9"
+    private static final double FRONTIER_Y_BAND_HALF_WIDTH = 16.0D; // contract §1.6
+
+    /**
+     * P5 trigger (design 5.4). Returns true when a frontier excursion was just STARTED this tick (caller must
+     * return without running stripMine). False leaves stripMine to run exactly as today.
+     */
+    private boolean explorationTick(AIPlayerEntity bot, ServerWorld world) {
+        if (!MiningAssistRuntime.senseConfigured() || !MiningAssistRuntime.config().explore().frontier()) {
+            return false;
+        }
+        if (assistDetourActive()) {
+            return false; // defensive: hook 9 already owns any active detour before control reaches here
+        }
+        int now = bot.getEntityWorld().getServer().getTicks();
+        if (now < frontierCooldownUntilServerTick) {
+            return false;
+        }
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        if (state == null) {
+            return false;
+        }
+        ObservedOccupancy occ = state.occupancyIfPresent();
+        if (occ == null) {
+            return false;
+        }
+        double radius = SenseBudget.sweepRadius(AIBotConfig.get().perception().radius());
+        Vec3d eye = bot.getEyePos();
+        double openVolume = state.ring().volume(now, SweepEngine.eyeCell(eye.x, eye.y, eye.z), radius);
+        if (openVolume < FRONTIER_MIN_OPEN_VOLUME) {
+            return false;
+        }
+        if (bot.getHealth() < FRONTIER_MIN_HP) {
+            return false;
+        }
+        if (io.github.zoyluo.aibot.coordination.PoiCoordinator.INSTANCE.awaitingContinue(bot)) {
+            return false;
+        }
+        if (detourHost == null) {
+            detourHost = new DetourHostImpl();
+        }
+        detourHost.bind(bot, world, state);
+        if (detourHost.safety(SafeGate.Stage.START, null, null) != SafeReason.OK) {
+            return false;
+        }
+
+        FrontierEnvironment env = new FrontierEnvironment(occ, state.hazards());
+        BlockPos feet = bot.getBlockPos();
+        List<BlockPos> candidateStands = frontierCandidateStands(occ, feet, env);
+        if (candidateStands.isEmpty()) {
+            return false;
+        }
+        java.util.Map<BlockPos, Double> costs = ObservedGraphSearch.search(feet, env);
+        int bestY = io.github.zoyluo.aibot.mining.MiningChain.bestY(targetOres);
+        List<FrontierPlanner.Candidate> scored = new ArrayList<>();
+        // Keyed by the Candidate record itself (field-equality hashCode/equals, verified): recovers the
+        // winning BlockPos in O(1) with no risk of two candidates colliding on cost+distance alone (a
+        // real bug in an earlier draft's cost/distance rescan, since two stands CAN share
+        // (observedPathCost, distanceFromBot) while differing in unknownFrac/sightings/yBand -- exactly
+        // the fields that made one of them the actual winner).
+        java.util.Map<FrontierPlanner.Candidate, BlockPos> standByCandidate = new java.util.LinkedHashMap<>();
+        for (BlockPos stand : candidateStands) {
+            Double cost = costs.get(stand);
+            if (cost == null) {
+                continue; // not reached by the observed graph -- excluded, never a ranking input
+            }
+            double dist = Math.sqrt(feet.getSquaredDistance(stand));
+            double unknownFrac = frontierUnknownFraction(occ, stand);
+            int sightings6 = frontierSightingsWithin(state, stand, 6);
+            double yBand = Math.max(0.0D, 1.0D - Math.abs(stand.getY() - bestY) / FRONTIER_Y_BAND_HALF_WIDTH);
+            FrontierPlanner.Candidate c = new FrontierPlanner.Candidate(unknownFrac, sightings6, yBand, cost, dist);
+            scored.add(c);
+            standByCandidate.put(c, stand);
+        }
+        double minUtility = MiningAssistRuntime.config().explore().frontierMinUtility();
+        FrontierPlanner.Candidate best = FrontierPlanner.bestAccepted(scored, minUtility);
+        if (best == null) {
+            return false;
+        }
+        BlockPos target = standByCandidate.get(best);
+        if (target == null) {
+            return false; // defensive; cannot happen given best came from scored
+        }
+        List<BlockPos> route = ObservedGraphSearch.path(feet, target, env);
+        if (route == null) {
+            return false;
+        }
+        List<BlockPos> waypointList = cutIntoWaypoints(route, FRONTIER_CANDIDATE_GRID_SPACING);
+        if (waypointList.size() > OreDigDetourEngine.FRONTIER_MAX_WAYPOINTS) {
+            // Contract §1.1: this candidate's real observed-path length exceeds the hop budget even
+            // though it passed on straight-line distance alone. Reject rather than partially execute,
+            // but log it -- see §1.1 for why this is expected to happen often near the far end of the
+            // accepted band, and why the bench must measure the resulting accept rate directly.
+            detourHost.log("ore_dig_frontier_rejected_hop_cap", "waypoints", waypointList.size(),
+                    "route_len", route.size() - 1, "distance", (int) best.distanceFromBot());
+            return false;
+        }
+
+        if (detour == null) {
+            detour = new OreDigDetourEngine();
+        }
+        detourState = state;
+        detour.startFrontier(detourHost, new OreDigDetourEngine.FrontierSelection(waypointList));
+        MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        if (fresh != null) {
+            fresh.publishDetour(this, detour.phase(), detourHost.serverTick(), detourHost);
+        }
+        return true;
+    }
+
+    /** Design 5.4's stand test, in the same order as approachGoalFor: solid floor, air feet+head, standable,
+     *  no adjacent hazard -- using this file's OWN hazard-clearance convention (contract §1.7), the same one
+     *  DetourHostImpl.poseFor already uses for detour poses, not ObservedGraphSearch's narrower internal
+     *  constants. */
+    private static boolean frontierStandable(ObservedOccupancy occ, BlockPos pos, HazardField hazards) {
+        if (occ.get(pos.down()) != ObservedOccupancy.SOLID) return false;
+        if (occ.get(pos) != ObservedOccupancy.AIR) return false;
+        if (occ.get(pos.up()) != ObservedOccupancy.AIR) return false;
+        int lavaClearRadius = MiningAssistRuntime.config().detour().lavaClearRadius();
+        if (hazards.anyLavaWithin(pos, lavaClearRadius)) return false;
+        if (hazards.anyTrapWithin(pos, 3)) return false;
+        return true;
+    }
+
+    /**
+     * Candidate stands (contract §1.5 -- occupancy-grid substitute for design 5.4's raw ray clustering):
+     * scan a horizontal grid at FRONTIER_CANDIDATE_GRID_SPACING around the bot, within the accepted
+     * [MIN_DISTANCE, MAX_DISTANCE] band, at a handful of Y offsets around the bot's own Y; keep a grid
+     * point only if there is a standable cell in that column AND the true line-of-sight run of
+     * observed-AIR cells from the bot toward it is at least FRONTIER_MIN_FREE_RUN blocks (the "free
+     * length >= 9" substitute), walked with RayGrid's DDA rather than an ad hoc interpolation so a
+     * diagonal grid point is never skipped or double-visited.
+     */
+    private static List<BlockPos> frontierCandidateStands(ObservedOccupancy occ, BlockPos feet, FrontierEnvironment env) {
+        List<BlockPos> result = new ArrayList<>();
+        int maxDist = (int) FrontierPlanner.MAX_DISTANCE;
+        for (int dx = -maxDist; dx <= maxDist; dx += FRONTIER_CANDIDATE_GRID_SPACING) {
+            for (int dz = -maxDist; dz <= maxDist; dz += FRONTIER_CANDIDATE_GRID_SPACING) {
+                double horiz = Math.sqrt((double) dx * dx + (double) dz * dz);
+                if (horiz < FrontierPlanner.MIN_DISTANCE || horiz > FrontierPlanner.MAX_DISTANCE) continue;
+                if (!frontierFreeRunOk(occ, feet, dx, dz)) continue;
+                for (int dy = -8; dy <= 8; dy += 4) {
+                    BlockPos candidate = feet.add(dx, dy, dz);
+                    if (frontierStandable(occ, candidate, env.hazards)) {
+                        result.add(candidate);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * True line-of-sight free-run check using {@link io.github.zoyluo.aibot.mining.assist.RayGrid#traverse}
+     * (Amanatides-Woo DDA, already used elsewhere in this package for exactly this "walk cells along a
+     * line" job) instead of a rounding-based interpolation -- a prior draft's ad hoc
+     * {@code Math.round(dx * (i / (float) steps))} loop can skip or double-visit a cell near a diagonal
+     * line; this cannot.
+     */
+    private static boolean frontierFreeRunOk(ObservedOccupancy occ, BlockPos feet, int dx, int dz) {
+        double horiz = Math.sqrt((double) dx * dx + (double) dz * dz);
+        if (horiz < 1.0e-6) {
+            return false;
+        }
+        int[] openRun = {0};
+        boolean[] blocked = {false};
+        io.github.zoyluo.aibot.mining.assist.RayGrid.traverse(
+                feet.getX() + 0.5D, feet.getY() + 0.5D, feet.getZ() + 0.5D,
+                dx / horiz, 0.0D, dz / horiz, horiz,
+                (x, y, z) -> {
+                    if (x == feet.getX() && z == feet.getZ()) {
+                        return true; // origin cell itself isn't part of the run away from the bot
+                    }
+                    if (occ.get(x, feet.getY(), z) == ObservedOccupancy.AIR) {
+                        openRun[0]++;
+                        return true;
+                    }
+                    blocked[0] = true;
+                    return false;
+                });
+        return !blocked[0] && openRun[0] >= FRONTIER_MIN_FREE_RUN;
+    }
+
+    /** UNKNOWN fraction of the 7x7x7 window around {@code stand} (design 5.4). */
+    private static double frontierUnknownFraction(ObservedOccupancy occ, BlockPos stand) {
+        int unknown = 0;
+        int total = 0;
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dy = -3; dy <= 3; dy++) {
+                for (int dz = -3; dz <= 3; dz++) {
+                    total++;
+                    if (occ.get(stand.getX() + dx, stand.getY() + dy, stand.getZ() + dz) == ObservedOccupancy.UNKNOWN) {
+                        unknown++;
+                    }
+                }
+            }
+        }
+        return total == 0 ? 0.0D : (double) unknown / total;
+    }
+
+    private static int frontierSightingsWithin(MiningAssistState state, BlockPos stand, int radius) {
+        int count = 0;
+        for (SightingLedger.Sighting s : state.sightings().snapshotSortedByValueDesc()) {
+            if (Math.sqrt(stand.getSquaredDistance(s.pos())) <= radius) count++;
+        }
+        return count;
+    }
+
+    /** Cuts an observed route into waypoints at most {@code spacing} cells apart, always including the final cell. */
+    private static List<BlockPos> cutIntoWaypoints(List<BlockPos> route, int spacing) {
+        List<BlockPos> waypoints = new ArrayList<>();
+        for (int i = spacing; i < route.size(); i += spacing) {
+            waypoints.add(route.get(i));
+        }
+        BlockPos last = route.get(route.size() - 1);
+        if (waypoints.isEmpty() || !waypoints.get(waypoints.size() - 1).equals(last)) {
+            waypoints.add(last);
+        }
+        return waypoints;
+    }
+
+    /** ObservedGraphSearch.Environment adapter over already-observed P0 state (design 5.4; no new sensing). */
+    private static final class FrontierEnvironment implements ObservedGraphSearch.Environment {
+        final ObservedOccupancy occ;
+        final HazardField hazards;
+
+        FrontierEnvironment(ObservedOccupancy occ, HazardField hazards) {
+            this.occ = occ;
+            this.hazards = hazards;
+        }
+
+        @Override public boolean isStandable(BlockPos pos) {
+            return frontierStandable(occ, pos, hazards);
+        }
+
+        @Override public boolean isForbidden(BlockPos pos) {
+            return hazards.anyLavaWithin(pos, ObservedGraphSearch.LAVA_CLEARANCE) || hazards.anyTrapWithin(pos, 0);
+        }
+
+        @Override public boolean isAdjacentToWater(BlockPos pos) {
+            for (Direction d : Direction.values()) {
+                if (hazards.anyWithin(HazardField.Kind.WATER, pos.offset(d), 0)) return true;
+            }
+            return false;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
     // Mining assist R1 (design 4.14): the opportunistic valuables detour. Everything below is additive (P1
     // contract section E). The engine and its host never dig, never teleport and never bypass the exact-once
     // re-proof discipline the rest of this file already follows (I1-I3); see task/DetourHost.java for the
@@ -5251,6 +5523,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private int detourResumeStart = -1;
     private int detourResumeAttempts;
     private int detourResumeLastAttempt = -1_000_000;
+    private int frontierCooldownUntilServerTick = -1;   // design 5.4: 600 after an unproductive excursion
 
     /** Whether the detour engine currently owns any part of this task's behaviour. */
     private boolean assistDetourActive() {
@@ -5299,6 +5572,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     return false;
                 }
                 case FINISHED -> {
+                    if (detour.wasFrontierUnproductive()) {
+                        frontierCooldownUntilServerTick = detourHost.serverTick() + FRONTIER_UNPRODUCTIVE_COOLDOWN_TICKS;
+                    }
                     MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
                     if (fresh != null) {
                         fresh.clearDetour();
@@ -6191,6 +6467,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             EpisodeLog.INSTANCE.record(bot, EpisodeLog.Type.RESOURCE_FOUND, pos,
                     Registries.BLOCK.getId(block).toString());
+        }
+
+        @Override
+        public void panoramaBurst() {
+            state.requestBreakthrough(serverTick());
         }
     }
 

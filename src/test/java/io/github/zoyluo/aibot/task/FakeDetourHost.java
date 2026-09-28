@@ -152,6 +152,10 @@ class FakeDetourHost implements DetourHost {
     final List<String> found = new ArrayList<>();
     final List<SafeGate.Stage> stagesAsked = new ArrayList<>();
 
+    // ---- P5 cave-frontier excursion (design 5.4) -------------------------------------------------------------
+    /** Times {@link #panoramaBurst()} was called; the frontier engine test asserts it fires exactly once per arrival. */
+    int panoramaBursts;
+
     // ===========================================================================================================
     // Simulation
     // ===========================================================================================================
@@ -678,5 +682,20 @@ class FakeDetourHost implements DetourHost {
     @Override
     public void recordFind(BlockPos pos, String blockId) {
         found.add(blockId + "@" + fmt(pos));
+    }
+
+    // ===========================================================================================================
+    // P5 cave-frontier excursion (design 5.4)
+    // ===========================================================================================================
+
+    /**
+     * Kind FRONTIER's arrival action: increments {@link #panoramaBursts} and records the call, exactly as much
+     * as a test needs to assert it fired (and fired once) without modelling {@code requestBreakthrough}'s own
+     * cooldown -- that mechanism is {@code BreakPeek}'s territory, already covered elsewhere.
+     */
+    @Override
+    public void panoramaBurst() {
+        panoramaBursts++;
+        calls.add("panoramaBurst");
     }
 }

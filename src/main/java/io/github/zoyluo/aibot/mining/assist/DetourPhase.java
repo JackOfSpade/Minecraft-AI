@@ -19,6 +19,8 @@ public enum DetourPhase {
     POSTBREAK,
     /** Waiting for the drop of the last break to be picked up, chasing it under a contract-bound route. */
     SETTLE_DROP,
+    /** Walking a cave-frontier excursion's waypoints toward the accepted candidate (design 5.4, kind FRONTIER). */
+    FRONTIER_WALK,
     /** Choosing the next vein member or deciding to return. */
     NEXT,
     /** Walking back to the anchor face (walk-only); on failure the cursor is rebased in place. */
@@ -37,6 +39,7 @@ public enum DetourPhase {
      * nothing to abort. POSTBREAK is included, which the design text does not list (see the P1 contract).
      */
     public boolean netAbortable() {
-        return this == APPROACH || this == MINE || this == POSTBREAK || this == SETTLE_DROP || this == NEXT;
+        return this == APPROACH || this == MINE || this == POSTBREAK || this == SETTLE_DROP || this == NEXT
+                || this == FRONTIER_WALK;
     }
 }

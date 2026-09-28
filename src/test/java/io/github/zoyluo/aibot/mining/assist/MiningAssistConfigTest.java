@@ -81,7 +81,7 @@ class MiningAssistConfigTest {
         assertEquals(new Safety(true), c.safety());
         assertEquals(new Advisor(true, "", 8, 512, 6, 400, 3, 6000), c.advisor());
         assertEquals(new Edits(true), c.edits());
-        assertEquals(new Explore(false, false, 28), c.explore());
+        assertEquals(new Explore(false, false, 28, 1.0D), c.explore());
 
         Poi poi = c.poi();
         assertTrue(poi.enabled());
@@ -418,7 +418,8 @@ class MiningAssistConfigTest {
                 + "\"advisor\":{\"enabled\":false,\"model\":\"m\",\"timeoutSeconds\":5,\"maxTokens\":1024,"
                 + "\"maxConsultsPerMission\":3,\"minIntervalTicks\":800,\"breakerFailures\":5,\"breakerOpenTicks\":1200},"
                 + "\"edits\":{\"sidecar\":false},"
-                + "\"explore\":{\"legChooser\":true,\"frontier\":true,\"frontierMaxRadius\":40}}");
+                + "\"explore\":{\"legChooser\":true,\"frontier\":true,\"frontierMaxRadius\":40,"
+                + "\"frontierMinUtility\":2.5}}");
 
         assertEquals(AssistMode.DETOUR, c.mode());
         assertEquals(new Sense(20, 320, false, true), c.sense());
@@ -431,7 +432,7 @@ class MiningAssistConfigTest {
                 List.of("minecraft:the_nether")), c.poi());
         assertEquals(new Advisor(false, "m", 5, 1024, 3, 800, 5, 1200), c.advisor());
         assertEquals(new Edits(false), c.edits());
-        assertEquals(new Explore(true, true, 40), c.explore());
+        assertEquals(new Explore(true, true, 40, 2.5D), c.explore());
         assertTrue(c.warnings().isEmpty());
     }
 
@@ -458,7 +459,7 @@ class MiningAssistConfigTest {
                 + "\"noticeRecipients\":5,\"unavailablePolicy\":true,\"cavernKeylessPolicy\":{}},"
                 + "\"advisor\":{\"model\":42,\"maxTokens\":\"512\",\"enabled\":1},"
                 + "\"edits\":{\"sidecar\":\"true\"},"
-                + "\"explore\":{\"frontier\":\"true\",\"frontierMaxRadius\":\"28\"}}");
+                + "\"explore\":{\"frontier\":\"true\",\"frontierMaxRadius\":\"28\",\"frontierMinUtility\":\"1.0\"}}");
 
         MiningAssistConfig d = defaults();
         assertEquals(d.sense(), c.sense());
@@ -646,6 +647,11 @@ class MiningAssistConfigTest {
     @Test
     void exploreRadiusIsClamped() {
         assertIntBounds("explore", "frontierMaxRadius", 8, 64, c -> c.explore().frontierMaxRadius());
+    }
+
+    @Test
+    void exploreFrontierMinUtilityIsClamped() {
+        assertDoubleBounds("explore", "frontierMinUtility", 0.0D, 5.0D, c -> c.explore().frontierMinUtility());
     }
 
     @Test

@@ -487,4 +487,13 @@ interface DetourHost {
 
     /** Feeds the knowledge base: {@code EpisodeLog.record(bot, RESOURCE_FOUND, pos, registryId)}. Called once per detour for the seed. */
     void recordFind(BlockPos pos, String blockId);
+
+    /**
+     * Kind FRONTIER's arrival action (design 5.4): {@code MiningAssistState.requestBreakthrough(serverTick())},
+     * the same "opened a wall into unobserved space" mechanism {@code BreakPeek} already triggers -- P5 adds
+     * no new sensing, only this one extra trigger of the existing breakthrough sweep. A no-op return value
+     * (the request can be deferred by the {@code MIN_BREAKTHROUGH_GAP_TICKS} cooldown) is not surfaced; the
+     * excursion does not wait on it.
+     */
+    void panoramaBurst();
 }

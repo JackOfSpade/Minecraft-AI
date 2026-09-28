@@ -5,6 +5,7 @@ import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -209,5 +210,35 @@ class ObservedGraphSearchTest {
             assertTrue(ordered.get(i - 1).cost() <= ordered.get(i).cost());
         }
         assertEquals(source, ordered.get(0).pos());
+    }
+
+    // ---- path (waypoint execution needs the actual route, not just its cost) ------------------------
+
+    @Test
+    void pathReturnsTheCheapestRouteInOrderFromSourceToTarget() {
+        FakeEnv env = new FakeEnv(64);
+        // Same fixture as theCheaperOfTwoRoutesToTheSameCellWins: the direct route through the
+        // water-adjacent cell is more expensive than the one-cell detour, so the reconstructed route
+        // must take the cheap detour through (0,64,1), not the expensive direct neighbour (1,64,0).
+        env.waterAdjacent.add(at(1, 64, 0));
+        BlockPos source = at(0, 64, 0);
+        BlockPos target = at(1, 64, 1);
+
+        List<BlockPos> route = ObservedGraphSearch.path(source, target, env);
+
+        assertEquals(List.of(source, at(0, 64, 1), at(1, 64, 1)), route);
+    }
+
+    @Test
+    void pathReturnsNullWhenTargetIsUnreachable() {
+        FakeEnv env = new FakeEnv(64);
+        // Same fixture as forbiddenCellsAreNeverEntered: the target itself is forbidden, so no route
+        // (direct or otherwise) may ever enter it.
+        env.forbidden.add(at(1, 64, 0));
+        BlockPos source = at(0, 64, 0);
+
+        List<BlockPos> route = ObservedGraphSearch.path(source, at(1, 64, 0), env);
+
+        assertNull(route);
     }
 }

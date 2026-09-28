@@ -134,6 +134,81 @@ public final class ObservedGraphSearch {
         return ordered;
     }
 
+    /**
+     * Like {@link #search}, but also returns the cheapest observed route to {@code target} as an ordered
+     * list of cells from {@code source} (inclusive) to {@code target} (inclusive) -- the geometry the
+     * cave-frontier waypoint execution needs (design 5.4), which {@link #search}'s cost-only result cannot
+     * give. Runs its own Dijkstra with predecessor tracking rather than reusing {@link #search}, so the
+     * hot path used to score every candidate ({@link FrontierPlanner}) never pays for predecessor
+     * bookkeeping it does not need.
+     *
+     * @return the route, or {@code null} when {@code target} is unreached within {@link #NODE_CAP}
+     *         expansions (unstandable, forbidden, UNKNOWN, or simply too far)
+     * @throws NullPointerException if any argument is null
+     */
+    public static List<BlockPos> path(BlockPos source, BlockPos target, Environment env) {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(env, "env");
+        BlockPos start = source.toImmutable();
+        BlockPos goal = target.toImmutable();
+        Map<BlockPos, Double> best = new HashMap<>();
+        Map<BlockPos, BlockPos> predecessor = new HashMap<>();
+        PriorityQueue<Reached> frontier = new PriorityQueue<>(Comparator.comparingDouble(Reached::cost));
+        best.put(start, 0.0D);
+        frontier.add(new Reached(start, 0.0D));
+        int expansions = 0;
+        while (!frontier.isEmpty() && expansions < NODE_CAP) {
+            Reached current = frontier.poll();
+            Double known = best.get(current.pos());
+            if (known == null || current.cost() > known) {
+                continue;
+            }
+            if (current.pos().equals(goal)) {
+                return reconstruct(start, goal, predecessor);
+            }
+            expansions++;
+            int cx = current.pos().getX();
+            int cy = current.pos().getY();
+            int cz = current.pos().getZ();
+            for (int[] horizontal : HORIZONTAL) {
+                for (int[] vertical : VERTICAL_MOVES) {
+                    BlockPos next = new BlockPos(cx + horizontal[0], cy + vertical[0], cz + horizontal[1]);
+                    if (env.isForbidden(next) || !env.isStandable(next)) {
+                        continue;
+                    }
+                    double moveCost = BASE_MOVE_COST + FALL_COST_PER_BLOCK * vertical[1];
+                    if (env.isAdjacentToWater(next)) {
+                        moveCost += WATER_ADJACENCY_PENALTY;
+                    }
+                    double candidateCost = current.cost() + moveCost;
+                    Double existing = best.get(next);
+                    if (existing == null || candidateCost < existing) {
+                        best.put(next, candidateCost);
+                        predecessor.put(next, current.pos());
+                        frontier.add(new Reached(next, candidateCost));
+                    }
+                }
+            }
+        }
+        return best.containsKey(goal) ? reconstruct(start, goal, predecessor) : null;
+    }
+
+    private static List<BlockPos> reconstruct(BlockPos start, BlockPos goal, Map<BlockPos, BlockPos> predecessor) {
+        List<BlockPos> route = new ArrayList<>();
+        BlockPos at = goal;
+        route.add(at);
+        while (!at.equals(start)) {
+            at = predecessor.get(at);
+            if (at == null) {
+                return null; // defensive; unreachable given the caller only reaches here with a known route
+            }
+            route.add(at);
+        }
+        java.util.Collections.reverse(route);
+        return route;
+    }
+
     // (dx, dz) for the four cardinal horizontal moves; the same four are used for walk, step-up and every drop depth.
     private static final int[][] HORIZONTAL = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     // (dy, fallBlocks): walk (dy=0), step up 1 (dy=+1), and drop 1..MAX_DROP (dy=-1..-MAX_DROP, fall = -dy).

@@ -265,7 +265,8 @@ public final class BuildActionEdgeVisibilityGameTests {
                 config.mining(),
                 config.goal(),
                 config.nav(),
-                config.pickup());
+                config.pickup(),
+                config.conversation());
     }
 
     private static void setConfig(AIBotConfig config) {

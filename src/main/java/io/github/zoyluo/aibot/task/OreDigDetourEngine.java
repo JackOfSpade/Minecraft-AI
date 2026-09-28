@@ -5,6 +5,7 @@ import io.github.zoyluo.aibot.mining.assist.DetourPolicy;
 import io.github.zoyluo.aibot.mining.assist.MissionAssistLedger;
 import io.github.zoyluo.aibot.mining.assist.SafeGate;
 import io.github.zoyluo.aibot.mining.assist.SafeReason;
+import io.github.zoyluo.aibot.mining.assist.SightingLedger;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -97,6 +99,17 @@ final class OreDigDetourEngine {
      */
     static final int TICK_GAP_ABORT_TICKS = 3;
 
+    // ---- kind FRONTIER (design 5.4) -------------------------------------------------------------------------
+    /** Fixed lease for a cave-frontier excursion (design 5.4); unlike ORE it does not scale with breaks. */
+    static final int FRONTIER_LEASE_TICKS = 900;
+    /** Hard cap on waypoint hops per excursion (design 5.4, "at most 3 hops"; see contract §1.1). */
+    static final int FRONTIER_MAX_WAYPOINTS = 3;
+    /** New sightings recorded during the excursion at or above which it counts as "productive" (design 5.4). */
+    static final int FRONTIER_PRODUCTIVE_SIGHTINGS = 2;
+    /** Per-leg stall/total caps, same numbers as APPROACH (design 5.4 gives no separate figures). */
+    static final int FRONTIER_LEG_STALL_TICKS = APPROACH_STALL_TICKS;
+    static final int FRONTIER_LEG_TOTAL_TICKS = APPROACH_TOTAL_TICKS;
+
     // ---- per detour caps -------------------------------------------------------------------------------------
     /**
      * Members (seed included) started per detour, fluid seals, claims taken at the start. There is no separate
@@ -137,6 +150,19 @@ final class OreDigDetourEngine {
         }
     }
 
+    /** Which detour this instance is currently running (design 5.4): distinguishes finish/abort bookkeeping only -- phase dispatch alone already separates ORE and FRONTIER execution. */
+    private enum ExcursionKind { ORE, FRONTIER }
+
+    /** A cave-frontier excursion to start (design 5.4): the observed route to the accepted candidate, already cut into waypoints by the caller. Package-private so OreDigTask.explorationTick can build one directly; no separate "FrontierStartSelector" exists because the candidate search is not a per-tick IDLE check like DetourStartSelector -- it runs once, when OreDigTask decides to try. */
+    record FrontierSelection(List<BlockPos> waypoints) {
+        FrontierSelection {
+            Objects.requireNonNull(waypoints, "waypoints");
+            if (waypoints.isEmpty() || waypoints.size() > FRONTIER_MAX_WAYPOINTS) {
+                throw new IllegalArgumentException("waypoints must be 1.." + FRONTIER_MAX_WAYPOINTS + ", got " + waypoints.size());
+            }
+        }
+    }
+
     /** The one open drop debt of the running detour (design 4.9): the break cell, the inventory baseline it is measured against, and when it started. */
     private static final class DropDebt {
         final BlockPos cell;
@@ -162,6 +188,13 @@ final class OreDigDetourEngine {
     private final Set<BlockPos> done = new HashSet<>();
     private final Set<BlockPos> noStep = new HashSet<>();
 
+    private ExcursionKind kind = ExcursionKind.ORE;
+    private List<BlockPos> waypoints = List.of();
+    private int waypointIndex;
+    private Set<BlockPos> sightingPositionsAtStart = Set.of();
+    /** Whether a route to the current waypoint has ever started OK this leg; see {@link #tickFrontierWalk}. */
+    private boolean frontierRouteStarted;
+
     private int startNow;
     private int leaseDeadline;
     private int lastBeat;
@@ -178,6 +211,8 @@ final class OreDigDetourEngine {
     private int membersStarted;
     private int seals;
     private int dropsLost;
+    /** Whether the last FINISHED excursion was of kind FRONTIER and ended unproductive (design 5.4's cooldown gate). Deliberately NOT reset in resetToIdle() -- tickOpportunistic reads it one statement after tick() returns FINISHED, exactly like breaks/membersStarted/seals/dropsLost above. Meaningless before any frontier excursion has run. */
+    private boolean lastFrontierProductive;
 
     private String abortReason;
     private String pendingAbort;
@@ -278,6 +313,9 @@ final class OreDigDetourEngine {
         if (phase == DetourPhase.SETTLE_DROP) {
             return tickSettle(host);
         }
+        if (phase == DetourPhase.FRONTIER_WALK) {
+            return tickFrontierWalk(host);
+        }
         if (phase == DetourPhase.RETURN) {
             return tickReturn(host);
         }
@@ -295,6 +333,7 @@ final class OreDigDetourEngine {
      * hand built selection. The engine must be IDLE.
      */
     void start(DetourHost host, DetourStartSelector.Selection selection) {
+        kind = ExcursionKind.ORE;
         anchor = host.captureAnchor();
         host.clearStripOwnership();
         host.stopAll();
@@ -368,6 +407,57 @@ final class OreDigDetourEngine {
         } else {
             enterApproach(host);
         }
+    }
+
+    /**
+     * Starts a cave-frontier excursion (design 5.4): capture the anchor exactly like {@link #start}, clear
+     * strip ownership, stop, one beat, take and cache the mission ledger entry, snapshot the bot's current
+     * sighting positions (the productive-cave check at arrival counts NEW ones against this snapshot), fix
+     * the lease at {@link #FRONTIER_LEASE_TICKS} (not {@code DetourPolicy.leaseTicks}, which is ORE-only),
+     * and enter {@link DetourPhase#FRONTIER_WALK} toward the first waypoint. The engine must be IDLE.
+     */
+    void startFrontier(DetourHost host, FrontierSelection selection) {
+        kind = ExcursionKind.FRONTIER;
+        lastFrontierProductive = false; // an aborted-before-arrival excursion also reads as unproductive
+        anchor = host.captureAnchor();
+        host.clearStripOwnership();
+        host.stopAll();
+        beat(host);
+
+        int now = host.now();
+        startNow = now;
+        lastTickNow = now;
+        breaks = 0;
+        membersStarted = 0;
+        seals = 0;
+        dropsLost = 0;
+        pendingAbort = null;
+        abortReason = null;
+        returnWhy = null;
+
+        leaseDeadline = now + FRONTIER_LEASE_TICKS;
+        ledger = host.ledger();
+        ledger.noteStart(host.serverTick());
+        lastClaimRenew = host.serverTick();
+
+        seed = null;
+        curId = null;
+        clusterCells = List.of();
+        cur = null;
+        pending.clear();
+        done.clear();
+        noStep.clear();
+
+        sightingPositionsAtStart = new HashSet<>();
+        for (SightingLedger.Sighting s : host.sightings()) {
+            sightingPositionsAtStart.add(s.pos());
+        }
+
+        waypoints = List.copyOf(selection.waypoints());
+        waypointIndex = 0;
+        host.log("ore_dig_frontier_start", "waypoints", waypoints.size(), "final", waypoints.get(waypoints.size() - 1));
+
+        enterFrontierLeg(host, waypoints.get(0));
     }
 
     /**
@@ -472,6 +562,11 @@ final class OreDigDetourEngine {
 
     int dropsLost() {
         return dropsLost;
+    }
+
+    /** Whether the last FINISHED excursion was of kind FRONTIER and ended unproductive (design 5.4's cooldown gate). Meaningless before any frontier excursion has run. */
+    boolean wasFrontierUnproductive() {
+        return kind == ExcursionKind.FRONTIER && !lastFrontierProductive;
     }
 
     // ===========================================================================================================
@@ -812,6 +907,120 @@ final class OreDigDetourEngine {
         debt = null;
     }
 
+    private void enterFrontierLeg(DetourHost host, BlockPos waypoint) {
+        phase = DetourPhase.FRONTIER_WALK;
+        BlockPos feet = host.feet();
+        pose = new DetourHost.Pose(waypoint, waypoint.equals(feet));
+        phaseEnter = host.now();
+        routeAttempts = 0;
+        waitSince = -1;
+        frontierRouteStarted = false;
+        beat(host);
+    }
+
+    /**
+     * Walks the current waypoint leg (design 5.4): structurally {@link #tickApproach} with a waypoint instead
+     * of an ore's pose, no mining at the end. On arrival at a non-final waypoint, advances to the next leg
+     * (next tick, unlike {@link #toNext}'s same-tick continuation -- at most {@link #FRONTIER_MAX_WAYPOINTS}
+     * legs, so the one-tick-per-hop cost is negligible). On arrival at the FINAL waypoint: panorama burst,
+     * then either {@link #rebaseCursorHere} in place (productive) or the ordinary {@link #beginReturn}
+     * (design 5.4's "same... return").
+     */
+    private Result tickFrontierWalk(DetourHost host) {
+        int now = host.now();
+        BlockPos feet = host.feet();
+        // Bug fix vs the contract's literal text: tickApproach's own "path went idle short of the exact stand"
+        // fallback is guarded by inBreakEnvelope(cur), which has no equivalent for a waypoint (there is no ore).
+        // Guarding on routeAttempts > 0 alone is not enough either: a FAILED startRoute leaves pathIdle() and
+        // walkIdle() both true without the bot moving at all, so the fallback would still fire (falsely) after
+        // just one failed attempt instead of letting all ROUTE_ATTEMPTS play out and abort with "route" (caught
+        // by OreDigDetourEngineTest's route-failure case). Tracking whether a route actually started this leg
+        // (frontierRouteStarted, set only on RouteResult.OK) means the fallback can only ever fire once a route
+        // was genuinely dispatched -- for a leg that never gets a successful route, only the exact-position
+        // check below or the stall/attempt caps can end it.
+        boolean arrived = feet.equals(pose.stand())
+                || (frontierRouteStarted && host.pathIdle() && host.walkIdle());
+        if (arrived) {
+            boolean isFinal = waypointIndex == waypoints.size() - 1;
+            if (!isFinal) {
+                waypointIndex++;
+                enterFrontierLeg(host, waypoints.get(waypointIndex));
+                return Result.CONSUMED;
+            }
+            return arriveAtFrontier(host);
+        }
+        double d = euclid(feet, pose.stand());
+        if (d <= beatDist - PROGRESS_BLOCKS) {
+            beat(host);
+        }
+        if (now - lastBeat > FRONTIER_LEG_STALL_TICKS || now - phaseEnter > FRONTIER_LEG_TOTAL_TICKS) {
+            return abort(host, "approach_stall");
+        }
+        if (host.pathIdle()) {
+            if (routeAttempts >= ROUTE_ATTEMPTS) {
+                return abort(host, "route");
+            }
+            if (routeAttempts == 0 || now - lastRouteAttempt >= ROUTE_ATTEMPT_GAP_TICKS) {
+                SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, pose.stand(), null);
+                if (r != SafeReason.OK) {
+                    return abort(host, r.abortReason());
+                }
+                DetourHost.RouteResult rr = host.startRoute(pose.stand(), routeMinY(feet, pose.stand(), host), anchor.face());
+                if (rr == DetourHost.RouteResult.OK) {
+                    routeAttempts++;
+                    lastRouteAttempt = now;
+                    waitSince = -1;
+                    frontierRouteStarted = true;
+                    beat(host);
+                } else if (rr == DetourHost.RouteResult.FAILED) {
+                    routeAttempts++;
+                    lastRouteAttempt = now;
+                    waitSince = -1;
+                    host.log("ore_dig_frontier_route", "leg", waypointIndex, "result", rr, "reason", host.routeFailureReason());
+                } else {
+                    if (waitSince < 0) {
+                        waitSince = now;
+                    } else if (now - waitSince > ROUTE_WAIT_MAX_TICKS) {
+                        return abort(host, "budget");
+                    }
+                }
+            }
+        }
+        return Result.CONSUMED;
+    }
+
+    /**
+     * Arrival at the final waypoint (design 5.4). Fixed vs the prior draft of this contract: sets
+     * {@link #lastFrontierProductive} in BOTH branches -- the prior draft only ever left it at the
+     * {@code false} that {@link #startFrontier} set, so a genuinely productive excursion would still read
+     * as "unproductive" afterward and wrongly arm the 600-tick cooldown after every single excursion. That
+     * would have silently defeated the design's own "cooldown 600 after an *unproductive* excursion" and
+     * throttled the feature far below its intended rate. There is a dedicated unit test for this
+     * (Writer 2, §9): assert {@code wasFrontierUnproductive()} reads {@code false} on the tick immediately
+     * after a productive `tick()` returns FINISHED.
+     */
+    private Result arriveAtFrontier(DetourHost host) {
+        host.panoramaBurst();
+        int newSightings = 0;
+        for (SightingLedger.Sighting s : host.sightings()) {
+            if (!sightingPositionsAtStart.contains(s.pos())) {
+                newSightings++;
+            }
+        }
+        boolean productive = newSightings >= FRONTIER_PRODUCTIVE_SIGHTINGS;
+        lastFrontierProductive = productive;
+        host.log("ore_dig_frontier_arrive", "new_sightings", newSightings, "productive", productive);
+        if (productive) {
+            if (!host.pathIdle()) {
+                host.stopAll();
+            }
+            host.rebaseCursorHere();
+            returnWhy = "productive";
+            return finish(host, false);
+        }
+        return beginReturn(host, "done");
+    }
+
     private Result toNext(DetourHost host) {
         phase = DetourPhase.NEXT;
         beat(host);
@@ -886,7 +1095,7 @@ final class OreDigDetourEngine {
         int now = host.now();
         BlockPos here = host.feet();
         if (here.equals(anchor.face())) {
-            return finish(host);
+            return finish(host, true);
         }
         double d = euclid(here, anchor.face());
         if (d <= beatDist - PROGRESS_BLOCKS) {
@@ -930,10 +1139,12 @@ final class OreDigDetourEngine {
         return Result.CONSUMED;
     }
 
-    private Result finish(DetourHost host) {
-        boolean drift = host.restoreAnchorNumbers(anchor);
-        if (drift) {
-            host.log("ore_dig_detour_cursor_drift", "face", anchor.face());
+    private Result finish(DetourHost host, boolean restoreAnchor) {
+        if (restoreAnchor) {
+            boolean drift = host.restoreAnchorNumbers(anchor);
+            if (drift) {
+                host.log("ore_dig_detour_cursor_drift", "face", anchor.face());
+            }
         }
         host.rebaseTargetMonitors();
         host.noteProgress();
@@ -1033,14 +1244,17 @@ final class OreDigDetourEngine {
     }
 
     /**
-     * {@code lastBeat = now}, {@code beatDist} refreshed to the distance to the current phase goal (APPROACH: the
-     * pose stand; RETURN: the anchor face; any other phase has no such goal and keeps whatever it holds, which is
-     * only ever read again once APPROACH or RETURN is (re)entered, and both re-beat on entry), then
-     * {@code host.noteProgress()}.
+     * {@code lastBeat = now}, {@code beatDist} refreshed to the distance to the current phase goal (APPROACH and
+     * FRONTIER_WALK: the pose stand -- a waypoint leg is walked exactly like an approach, design 5.4; RETURN: the
+     * anchor face; any other phase has no such goal and keeps whatever it holds, which is only ever read again
+     * once one of those phases is (re)entered, and all three re-beat on entry), then {@code host.noteProgress()}.
+     * Without the FRONTIER_WALK case, {@code beatDist} would keep whatever a previous phase left it at and the
+     * progress re-beat in {@link #tickFrontierWalk} ({@code d <= beatDist - PROGRESS_BLOCKS}) could never fire,
+     * risking a spurious {@code approach_stall} on any leg slower than {@link #FRONTIER_LEG_STALL_TICKS}.
      */
     private void beat(DetourHost host) {
         lastBeat = host.now();
-        if (phase == DetourPhase.APPROACH && pose != null) {
+        if ((phase == DetourPhase.APPROACH || phase == DetourPhase.FRONTIER_WALK) && pose != null) {
             beatDist = euclid(host.feet(), pose.stand());
         } else if (phase == DetourPhase.RETURN && anchor != null) {
             beatDist = euclid(host.feet(), anchor.face());
@@ -1064,7 +1278,12 @@ final class OreDigDetourEngine {
         clusterCells = List.of();
         debt = null;
         lastBreak = null;
+        waypoints = List.of();
+        waypointIndex = 0;
+        sightingPositionsAtStart = Set.of();
+        frontierRouteStarted = false;
         // breaks, membersStarted, seals, dropsLost are deliberately NOT reset here: start() resets them.
+        // kind and lastFrontierProductive are deliberately NOT reset here either -- see their field javadoc.
     }
 
     private static int routeMinY(BlockPos a, BlockPos b, DetourHost host) {

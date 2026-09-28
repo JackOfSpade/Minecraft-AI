@@ -3,16 +3,19 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.mining.assist.DetourPhase;
 import io.github.zoyluo.aibot.mining.assist.MiningAssistConfig;
 import io.github.zoyluo.aibot.mining.assist.SafeReason;
+import io.github.zoyluo.aibot.mining.assist.SightingLedger;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -642,5 +645,162 @@ class OreDigDetourEngineTest {
     @Test
     void memberCapIsTwelve() {
         assertEquals(12, OreDigDetourEngine.MEMBER_CAP);
+    }
+
+    // ===========================================================================================================
+    // Kind FRONTIER (mining-assist design 5.4, P5 R2b cave frontier)
+    // ===========================================================================================================
+
+    @Test
+    void frontierSelectionRejectsEmptyOrTooManyWaypointsButAcceptsOneToThree() {
+        BlockPos a = new BlockPos(1, 40, 0);
+        BlockPos b = new BlockPos(2, 40, 0);
+        BlockPos c = new BlockPos(3, 40, 0);
+        BlockPos d = new BlockPos(4, 40, 0);
+
+        assertThrows(IllegalArgumentException.class, () -> new OreDigDetourEngine.FrontierSelection(List.of()));
+        assertThrows(IllegalArgumentException.class,
+                () -> new OreDigDetourEngine.FrontierSelection(List.of(a, b, c, d)));
+        assertDoesNotThrow(() -> new OreDigDetourEngine.FrontierSelection(List.of(a)));
+        assertDoesNotThrow(() -> new OreDigDetourEngine.FrontierSelection(List.of(a, b)));
+        assertDoesNotThrow(() -> new OreDigDetourEngine.FrontierSelection(List.of(a, b, c)));
+        assertEquals(3, OreDigDetourEngine.FRONTIER_MAX_WAYPOINTS);
+    }
+
+    @Test
+    void startFrontierCapturesAnchorClearsStripOwnershipAndEntersFrontierWalk() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(6, 40, 0);
+        BlockPos wp2 = new BlockPos(12, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1, wp2));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+
+        engine.startFrontier(host, sel);
+
+        assertEquals(DetourPhase.FRONTIER_WALK, engine.phase());
+        assertEquals(new BlockPos(0, 40, 0), engine.anchor().face());
+        assertTrue(host.called("clearStripOwnership"));
+        assertTrue(host.called("stopAll"));
+        assertTrue(host.called("beat"));
+        assertEquals(1, host.ledger.detoursStarted());
+        assertTrue(host.logs.contains("ore_dig_frontier_start"));
+    }
+
+    @Test
+    void multiWaypointFrontierWalkAdvancesThroughEachLegInOrderThenPanoramaBurstsOnce() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(3, 40, 0);
+        BlockPos wp2 = new BlockPos(6, 40, 0);
+        BlockPos wp3 = new BlockPos(9, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1, wp2, wp3));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+        assertEquals(DetourPhase.FRONTIER_WALK, engine.phase());
+
+        boolean sawWp1 = false;
+        boolean sawWp2 = false;
+        int guard = 0;
+        while (host.panoramaBursts == 0 && guard < 500) {
+            host.tickClock();
+            engine.tick(host);
+            sawWp1 |= host.feet.equals(wp1);
+            sawWp2 |= host.feet.equals(wp2);
+            guard++;
+        }
+        assertTrue(sawWp1, "the bot must physically pass through the first waypoint");
+        assertTrue(sawWp2, "the bot must physically pass through the second waypoint");
+        assertEquals(1, host.panoramaBursts, "panorama burst fires once, at the final waypoint");
+        assertEquals(wp3, host.feet, "arrival is processed exactly at the final waypoint");
+
+        // Zero new sightings: unproductive, so the excursion still finishes normally (via RETURN) and the
+        // burst count from the walk above must not grow during it.
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+        assertEquals("done", r.reason());
+        assertEquals(1, host.panoramaBursts, "no extra panorama burst is fired during the return leg");
+    }
+
+    @Test
+    void frontierExcursionWithFewerThanTwoNewSightingsReturnsToAnchorLikeAnOreDetour() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(6, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+        // Exactly one new sighting, recorded only after the snapshot startFrontier already took: below
+        // FRONTIER_PRODUCTIVE_SIGHTINGS (2), so the excursion must count as unproductive.
+        host.sightings.add(new SightingLedger.Sighting(new BlockPos(20, 40, 0), "coal_ore", 12, 0, 0));
+
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("done", r.reason());
+        assertEquals(1, host.panoramaBursts);
+        assertTrue(engine.wasFrontierUnproductive(), "fewer than 2 new sightings must read as unproductive");
+        assertTrue(host.called("return:"), "an unproductive excursion walks the ordinary RETURN leg");
+        assertFalse(host.called("rebaseCursorHere"));
+        assertTrue(host.called("restoreAnchorNumbers"));
+        assertEquals(new BlockPos(0, 40, 0), host.feet, "the bot walks all the way back to the anchor face");
+    }
+
+    /** Regression test for the bug the final P5 R2b contract revision fixes (contract section 5.7): a prior
+     *  draft only ever set {@code lastFrontierProductive} in the unproductive branch, so a genuinely productive
+     *  excursion still read as unproductive afterward and wrongly armed the cooldown after every excursion. */
+    @Test
+    void frontierExcursionThatGainsEnoughSightingsRebasesTheCursorAndSkipsReturn() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(6, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+        // Two new sightings, at FRONTIER_PRODUCTIVE_SIGHTINGS (2): the excursion counts as productive.
+        host.sightings.add(new SightingLedger.Sighting(new BlockPos(20, 40, 0), "diamond_ore", 100, 0, 0));
+        host.sightings.add(new SightingLedger.Sighting(new BlockPos(21, 40, 0), "diamond_ore", 100, 0, 0));
+
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("productive", r.reason());
+        assertEquals(1, host.panoramaBursts);
+        assertFalse(engine.wasFrontierUnproductive(),
+                "wasFrontierUnproductive() must read false immediately after a productive FINISHED");
+        assertTrue(host.called("rebaseCursorHere"));
+        assertFalse(host.called("return:"), "a productive excursion must skip RETURN entirely");
+        assertFalse(host.called("restoreAnchorNumbers"), "finish(host, false): the anchor numbers are not restored");
+        assertEquals(wp1, host.feet, "the bot stays at the frontier; the strip cursor rebases there, not at the anchor");
+    }
+
+    @Test
+    void routeFailsThreeTimesDuringFrontierWalkAbortsAndReturnsLikeApproach() {
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos wp1 = new BlockPos(20, 40, 0);
+        host.routeScript.add(DetourHost.RouteResult.FAILED);
+        host.routeScript.add(DetourHost.RouteResult.FAILED);
+        host.routeScript.add(DetourHost.RouteResult.FAILED);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("route", r.reason());
+        assertTrue(engine.wasFrontierUnproductive(), "an aborted-before-arrival excursion reads as unproductive");
+        assertEquals(0, host.panoramaBursts, "the excursion never reached the frontier to trigger a burst");
+    }
+
+    /** Section 11.5's named risk: no GameTest exercises a SafeGate trip mid-excursion for kind FRONTIER, so this
+     *  unit test (mirroring {@link #safetyFailureMidApproachAbortsAndReturns}) covers it at the engine level. */
+    @Test
+    void safetyTripMidFrontierWalkAbortsAndReturns() {
+        FakeDetourHost host = new FakeDetourHost();
+        host.ticksPerBlock = 20; // slow enough that the safety flip lands mid-leg
+        BlockPos wp1 = new BlockPos(20, 40, 0);
+        OreDigDetourEngine.FrontierSelection sel = new OreDigDetourEngine.FrontierSelection(List.of(wp1));
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.startFrontier(host, sel);
+
+        host.safetyFn = stage -> SafeReason.HOSTILE_PRESSURE;
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("safety_hostile_pressure", r.reason());
+        assertTrue(engine.wasFrontierUnproductive());
+        assertEquals(0, host.panoramaBursts, "the excursion never reached the frontier to trigger a burst");
     }
 }
