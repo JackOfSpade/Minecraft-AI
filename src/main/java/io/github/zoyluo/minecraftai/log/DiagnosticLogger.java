@@ -40,10 +40,6 @@ public final class DiagnosticLogger {
     private DiagnosticLogger() {
     }
 
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
     public void clear(AIPlayerEntity bot) {
         last.remove(bot.getUuid());
     }
