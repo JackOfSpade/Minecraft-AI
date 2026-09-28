@@ -3,12 +3,16 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
+import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
 import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import net.minecraft.block.BlockState;
+import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -591,7 +595,16 @@ public final class ActionPack {
         }
 
         if (result.isSuccess()) {
-            BotLog.action(player, "mine_complete");
+            // Auditable break record (see docs/LOGGING.md "Auditing a gather"): block is captured
+            // BEFORE the break by MiningController, so this reports what was actually destroyed
+            // even though the world cell is air by now.
+            BlockState brokenState = mining.brokenBlockState();
+            ItemStack tool = player.getMainHandStack();
+            BotLog.action(player, "mine_complete",
+                    "block", brokenState == null ? "unknown" : Registries.BLOCK.getId(brokenState.getBlock()).toString(),
+                    "pos", LogFields.pos(mining.pos()),
+                    "tool", tool.isEmpty() ? "empty" : Registries.ITEM.getId(tool.getItem()).toString(),
+                    "ticks", mining.elapsedTicks());
         } else {
             BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
         }

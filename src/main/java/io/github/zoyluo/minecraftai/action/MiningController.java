@@ -33,6 +33,20 @@ public final class MiningController {
         return pos;
     }
 
+    /**
+     * The block state captured when mining started, i.e. before the break. Stays set after a
+     * successful break (the world cell is air by then), so a caller can log what was actually
+     * destroyed. Returns null if mining never actually started (e.g. it failed out of reach).
+     */
+    public BlockState brokenBlockState() {
+        return targetState;
+    }
+
+    /** Ticks spent actively breaking this cell. Valid once {@link #tick} has returned success. */
+    public int elapsedTicks() {
+        return elapsed;
+    }
+
     public ActionResult tick(ActionPack pack) {
         AIPlayerEntity player = pack.player();
         var world = player.getEntityWorld();
