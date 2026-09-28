@@ -23,7 +23,7 @@ class GoalExecutorHuntCursorPersistenceTest {
     @Test
     void missingNamespaceIsTheOnlyLegacyFreshRepresentation() {
         Optional<HuntSearchCursor> decoded =
-                GoalExecutor.decodeHuntSearchCursorNamespace(Map.of("revision", "4"));
+                GoalCheckpointCodec.decodeHuntSearchCursorNamespace(Map.of("revision", "4"));
 
         assertTrue(decoded.isPresent());
         assertEquals(HuntSearchCursor.initial().encode(), decoded.orElseThrow().encode());
@@ -33,7 +33,7 @@ class GoalExecutorHuntCursorPersistenceTest {
     void modernHuntWatermarkCannotLoseItsCursorNamespace() {
         Map<String, String> checkpoint = completeSnapshot();
 
-        assertTrue(GoalExecutor.decodeHuntSearchCursorNamespace(checkpoint).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(checkpoint).isEmpty());
         assertEquals("mission_restore_invalid_hunt_search_cursor",
                 GoalExecutor.restoreCheckpointValidationFailure(checkpoint).orElseThrow());
     }
@@ -46,9 +46,9 @@ class GoalExecutorHuntCursorPersistenceTest {
         assertEquals(0L, cursor.claimNextOrdinal());
 
         Map<String, String> namespaced =
-                GoalExecutor.encodeHuntSearchCursorNamespace(cursor);
+                GoalCheckpointCodec.encodeHuntSearchCursorNamespace(cursor);
         Optional<HuntSearchCursor> restored =
-                GoalExecutor.decodeHuntSearchCursorNamespace(namespaced);
+                GoalCheckpointCodec.decodeHuntSearchCursorNamespace(namespaced);
 
         assertTrue(namespaced.keySet().stream().allMatch(key -> key.startsWith("hunt.")));
         assertTrue(restored.isPresent());
@@ -63,11 +63,11 @@ class GoalExecutorHuntCursorPersistenceTest {
         assertEquals(0L, cursor.claimNextOrdinal());
 
         Map<String, String> checkpoint = completeSnapshot();
-        checkpoint.putAll(GoalExecutor.encodeHuntSearchCursorNamespace(cursor));
+        checkpoint.putAll(GoalCheckpointCodec.encodeHuntSearchCursorNamespace(cursor));
 
         Optional<?> snapshot = decodeReplanSnapshot(checkpoint);
         Optional<HuntSearchCursor> restored =
-                GoalExecutor.decodeHuntSearchCursorNamespace(checkpoint);
+                GoalCheckpointCodec.decodeHuntSearchCursorNamespace(checkpoint);
 
         assertTrue(snapshot.isPresent());
         assertEquals(7, snapshotInt(snapshot.orElseThrow(), "steps"));
@@ -87,18 +87,18 @@ class GoalExecutorHuntCursorPersistenceTest {
         assertTrue(cursor.markVisited("minecraft:overworld", 64, -64));
         Map<String, String> checkpoint = legacySnapshot();
         checkpoint.put("snap_hunt_raw_meat", "12");
-        checkpoint.putAll(GoalExecutor.encodeHuntSearchCursorNamespace(cursor));
+        checkpoint.putAll(GoalCheckpointCodec.encodeHuntSearchCursorNamespace(cursor));
 
         assertTrue(decodeReplanSnapshot(checkpoint).isEmpty());
         Optional<HuntSearchCursor> restored =
-                GoalExecutor.decodeHuntSearchCursorNamespace(checkpoint);
+                GoalCheckpointCodec.decodeHuntSearchCursorNamespace(checkpoint);
         assertTrue(restored.isPresent());
         assertEquals(cursor.encode(), restored.orElseThrow().encode());
 
         checkpoint.remove("snap_hunt_raw_meat");
         checkpoint.put("snap_hunt_visited_sectors", "1");
         assertTrue(decodeReplanSnapshot(checkpoint).isEmpty());
-        assertTrue(GoalExecutor.decodeHuntSearchCursorNamespace(checkpoint).isPresent());
+        assertTrue(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(checkpoint).isPresent());
     }
 
     @Test
@@ -132,13 +132,13 @@ class GoalExecutorHuntCursorPersistenceTest {
         HuntSearchCursor cursor = HuntSearchCursor.initial();
         Map<String, String> partialHunt = legacySnapshot();
         partialHunt.put("snap_hunt_raw_meat", "12");
-        partialHunt.putAll(GoalExecutor.encodeHuntSearchCursorNamespace(cursor));
+        partialHunt.putAll(GoalCheckpointCodec.encodeHuntSearchCursorNamespace(cursor));
         assertEquals("mission_restore_invalid_replan_snapshot",
                 GoalExecutor.restoreCheckpointValidationFailure(partialHunt).orElseThrow());
 
         Map<String, String> malformedHunt = completeSnapshot();
         malformedHunt.put("snap_hunt_visited_sectors", "1.0");
-        malformedHunt.putAll(GoalExecutor.encodeHuntSearchCursorNamespace(cursor));
+        malformedHunt.putAll(GoalCheckpointCodec.encodeHuntSearchCursorNamespace(cursor));
         assertEquals("mission_restore_invalid_replan_snapshot",
                 GoalExecutor.restoreCheckpointValidationFailure(malformedHunt).orElseThrow());
     }
@@ -146,13 +146,13 @@ class GoalExecutorHuntCursorPersistenceTest {
     @Test
     void persistedMissionCountersAllowOnlyMissingOrNonNegativeIntegers() {
         for (String key : new String[]{"revision", "lifetime_replans", "replan_count"}) {
-            assertEquals(0, GoalExecutor.decodePersistedMissionCounter(
+            assertEquals(0, GoalCheckpointCodec.decodePersistedMissionCounter(
                     Map.of(), key).orElseThrow());
-            assertEquals(17, GoalExecutor.decodePersistedMissionCounter(
+            assertEquals(17, GoalCheckpointCodec.decodePersistedMissionCounter(
                     Map.of(key, "17"), key).orElseThrow());
             for (String invalid : new String[]{
                     "-1", "1.0", "2147483648", "01", "+1"}) {
-                OptionalInt decoded = GoalExecutor.decodePersistedMissionCounter(
+                OptionalInt decoded = GoalCheckpointCodec.decodePersistedMissionCounter(
                         Map.of(key, invalid), key);
                 assertTrue(decoded.isEmpty(), () -> key + " accepted " + invalid);
             }
@@ -175,7 +175,7 @@ class GoalExecutorHuntCursorPersistenceTest {
         checkpoint.put("hunt.schema", "1");
 
         assertTrue(decodeReplanSnapshot(checkpoint).isPresent());
-        assertTrue(GoalExecutor.decodeHuntSearchCursorNamespace(checkpoint).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(checkpoint).isEmpty());
     }
 
     @Test
@@ -187,7 +187,7 @@ class GoalExecutorHuntCursorPersistenceTest {
         Map<String, String> unknown = completeSnapshot();
         unknown.put("snap_future", "1");
         assertTrue(decodeReplanSnapshot(unknown).isEmpty());
-        unknown.putAll(GoalExecutor.encodeHuntSearchCursorNamespace(
+        unknown.putAll(GoalCheckpointCodec.encodeHuntSearchCursorNamespace(
                 HuntSearchCursor.initial()));
         assertEquals("mission_restore_invalid_replan_snapshot",
                 GoalExecutor.restoreCheckpointValidationFailure(unknown)
@@ -216,8 +216,8 @@ class GoalExecutorHuntCursorPersistenceTest {
         assertEquals(0L, original.claimNextOrdinal());
         assertEquals(1L, original.claimNextOrdinal());
 
-        HuntSearchCursor restored = GoalExecutor.decodeHuntSearchCursorNamespace(
-                GoalExecutor.encodeHuntSearchCursorNamespace(original)).orElseThrow();
+        HuntSearchCursor restored = GoalCheckpointCodec.decodeHuntSearchCursorNamespace(
+                GoalCheckpointCodec.encodeHuntSearchCursorNamespace(original)).orElseThrow();
         int restoredVisited = restored.visitedCount();
         assertEquals(2L, restored.nextOrdinal());
         assertEquals(2L, restored.claimNextOrdinal());
@@ -226,8 +226,8 @@ class GoalExecutorHuntCursorPersistenceTest {
         assertEquals(restoredVisited + 1, restored.visitedCount());
         assertTrue(restored.contains("minecraft:overworld", -18, 33));
 
-        HuntSearchCursor restoredAgain = GoalExecutor.decodeHuntSearchCursorNamespace(
-                GoalExecutor.encodeHuntSearchCursorNamespace(restored)).orElseThrow();
+        HuntSearchCursor restoredAgain = GoalCheckpointCodec.decodeHuntSearchCursorNamespace(
+                GoalCheckpointCodec.encodeHuntSearchCursorNamespace(restored)).orElseThrow();
         assertEquals(restored.nextOrdinal(), restoredAgain.nextOrdinal());
         assertEquals(restored.visitedCount(), restoredAgain.visitedCount());
         assertEquals(restored.encode(), restoredAgain.encode());
@@ -235,18 +235,18 @@ class GoalExecutorHuntCursorPersistenceTest {
 
     @Test
     void partialOrMalformedNamespaceFailsClosed() {
-        assertFalse(GoalExecutor.decodeHuntSearchCursorNamespace(
+        assertFalse(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(
                 Map.of("hunt.schema", "1")).isPresent());
-        assertFalse(GoalExecutor.decodeHuntSearchCursorNamespace(
+        assertFalse(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(
                 Map.of("hunt", "present")).isPresent());
-        assertFalse(GoalExecutor.decodeHuntSearchCursorNamespace(
+        assertFalse(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(
                 Map.of("hunt.", "present")).isPresent());
 
         HuntSearchCursor cursor = HuntSearchCursor.initial();
         Map<String, String> malformed = new LinkedHashMap<>(
-                GoalExecutor.encodeHuntSearchCursorNamespace(cursor));
+                GoalCheckpointCodec.encodeHuntSearchCursorNamespace(cursor));
         malformed.put("hunt.unknown", "field");
-        assertFalse(GoalExecutor.decodeHuntSearchCursorNamespace(malformed).isPresent());
+        assertFalse(GoalCheckpointCodec.decodeHuntSearchCursorNamespace(malformed).isPresent());
     }
 
     @Test
@@ -379,7 +379,7 @@ class GoalExecutorHuntCursorPersistenceTest {
 
     private static Optional<?> decodeReplanSnapshot(Map<String, String> checkpoint) {
         try {
-            Method method = GoalExecutor.class.getDeclaredMethod(
+            Method method = GoalCheckpointCodec.class.getDeclaredMethod(
                     "decodeReplanSnapshot", Map.class);
             method.setAccessible(true);
             return (Optional<?>) method.invoke(null, checkpoint);

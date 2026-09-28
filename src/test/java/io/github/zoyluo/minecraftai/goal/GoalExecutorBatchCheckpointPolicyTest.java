@@ -27,26 +27,26 @@ class GoalExecutorBatchCheckpointPolicyTest {
 
     @Test
     void batchCheckpointCodecIsStrictAndLegacySafe() {
-        assertFalse(GoalExecutor.decodeBatchCheckpoint(Map.of()).orElseThrow().persisted());
+        assertFalse(GoalCheckpointCodec.decodeBatchCheckpoint(Map.of()).orElseThrow().persisted());
 
         Map<String, String> valid = Map.of(
                 "batch_checkpoint.schema", "1",
                 "batch_checkpoint.awaiting_player", "true",
                 "batch_checkpoint.completed_at_checkpoint", "10",
                 "batch_checkpoint.step_limit", "10");
-        GoalExecutor.GoalBatchCheckpoint decoded = GoalExecutor.decodeBatchCheckpoint(valid)
+        GoalExecutor.GoalBatchCheckpoint decoded = GoalCheckpointCodec.decodeBatchCheckpoint(valid)
                 .orElseThrow();
         assertTrue(decoded.persisted());
         assertEquals(10, decoded.completedAtCheckpoint());
         assertEquals(GoalExecutor.DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT,
                 decoded.stepLimit());
 
-        assertTrue(GoalExecutor.decodeBatchCheckpoint(Map.of(
+        assertTrue(GoalCheckpointCodec.decodeBatchCheckpoint(Map.of(
                 "batch_checkpoint.schema", "1",
                 "batch_checkpoint.awaiting_player", "true",
                 "batch_checkpoint.completed_at_checkpoint", "10",
                 "batch_checkpoint.step_limit", "9")).isEmpty());
-        assertTrue(GoalExecutor.decodeBatchCheckpoint(Map.of(
+        assertTrue(GoalCheckpointCodec.decodeBatchCheckpoint(Map.of(
                 "batch_checkpoint.schema", "1",
                 "batch_checkpoint.awaiting_player", "true",
                 "batch_checkpoint.completed_at_checkpoint", "10",

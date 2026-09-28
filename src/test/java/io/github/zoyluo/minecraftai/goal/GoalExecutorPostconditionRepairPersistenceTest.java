@@ -15,16 +15,16 @@ class GoalExecutorPostconditionRepairPersistenceTest {
     @Test
     void missingNamespaceIsLegacyAndCanonicalStatesRoundTrip() {
         GoalExecutor.PostconditionRepairCheckpoint legacy =
-                GoalExecutor.decodePostconditionRepairCheckpoint(Map.of()).orElseThrow();
+                GoalCheckpointCodec.decodePostconditionRepairCheckpoint(Map.of()).orElseThrow();
         assertFalse(legacy.persisted());
         assertEquals(0, legacy.replans());
         assertEquals(0, legacy.lastMatched());
         assertEquals("", legacy.fingerprint());
 
         Map<String, String> untouched =
-                GoalExecutor.encodePostconditionRepairCheckpoint(0, 7, "");
+                GoalCheckpointCodec.encodePostconditionRepairCheckpoint(0, 7, "");
         GoalExecutor.PostconditionRepairCheckpoint decodedUntouched =
-                GoalExecutor.decodePostconditionRepairCheckpoint(untouched).orElseThrow();
+                GoalCheckpointCodec.decodePostconditionRepairCheckpoint(untouched).orElseThrow();
         assertTrue(decodedUntouched.persisted());
         assertEquals(0, decodedUntouched.replans());
         assertEquals(7, decodedUntouched.lastMatched());
@@ -32,9 +32,9 @@ class GoalExecutorPostconditionRepairPersistenceTest {
 
         String fingerprint = "[HUNT x4, COOK_FOOD x4]";
         Map<String, String> exhausted =
-                GoalExecutor.encodePostconditionRepairCheckpoint(3, 11, fingerprint);
+                GoalCheckpointCodec.encodePostconditionRepairCheckpoint(3, 11, fingerprint);
         GoalExecutor.PostconditionRepairCheckpoint decodedExhausted =
-                GoalExecutor.decodePostconditionRepairCheckpoint(exhausted).orElseThrow();
+                GoalCheckpointCodec.decodePostconditionRepairCheckpoint(exhausted).orElseThrow();
         assertTrue(decodedExhausted.persisted());
         assertEquals(3, decodedExhausted.replans());
         assertEquals(11, decodedExhausted.lastMatched());
@@ -47,7 +47,7 @@ class GoalExecutorPostconditionRepairPersistenceTest {
         assertInvalid(Map.of("postcondition_unknown", "value"));
 
         Map<String, String> canonical =
-                GoalExecutor.encodePostconditionRepairCheckpoint(
+                GoalCheckpointCodec.encodePostconditionRepairCheckpoint(
                         1, 2, "[HUNT x4]");
         for (Map.Entry<String, String> mutation : Map.of(
                 "postcondition_replans", "01",
@@ -62,33 +62,33 @@ class GoalExecutorPostconditionRepairPersistenceTest {
     @Test
     void countAndFingerprintCombinationMustDescribeOneFactualHistory() {
         Map<String, String> zeroWithFingerprint =
-                new LinkedHashMap<>(GoalExecutor.encodePostconditionRepairCheckpoint(
+                new LinkedHashMap<>(GoalCheckpointCodec.encodePostconditionRepairCheckpoint(
                         1, 2, "[HUNT x4]"));
         zeroWithFingerprint.put("postcondition_replans", "0");
         assertInvalid(zeroWithFingerprint);
 
         Map<String, String> repairWithoutFingerprint =
-                new LinkedHashMap<>(GoalExecutor.encodePostconditionRepairCheckpoint(
+                new LinkedHashMap<>(GoalCheckpointCodec.encodePostconditionRepairCheckpoint(
                         0, 2, ""));
         repairWithoutFingerprint.put("postcondition_replans", "1");
         assertInvalid(repairWithoutFingerprint);
 
         Map<String, String> tooMany =
-                new LinkedHashMap<>(GoalExecutor.encodePostconditionRepairCheckpoint(
+                new LinkedHashMap<>(GoalCheckpointCodec.encodePostconditionRepairCheckpoint(
                         3, 2, "[HUNT x4]"));
         tooMany.put("postcondition_replans", "4");
         assertInvalid(tooMany);
 
         Map<String, String> negativeMatched =
-                new LinkedHashMap<>(GoalExecutor.encodePostconditionRepairCheckpoint(
+                new LinkedHashMap<>(GoalCheckpointCodec.encodePostconditionRepairCheckpoint(
                         1, 2, "[HUNT x4]"));
         negativeMatched.put("postcondition_last_matched", "-1");
         assertInvalid(negativeMatched);
 
         assertThrows(IllegalArgumentException.class,
-                () -> GoalExecutor.encodePostconditionRepairCheckpoint(0, 2, "stale"));
+                () -> GoalCheckpointCodec.encodePostconditionRepairCheckpoint(0, 2, "stale"));
         assertThrows(IllegalArgumentException.class,
-                () -> GoalExecutor.encodePostconditionRepairCheckpoint(1, 2, ""));
+                () -> GoalCheckpointCodec.encodePostconditionRepairCheckpoint(1, 2, ""));
     }
 
     @Test
@@ -109,7 +109,7 @@ class GoalExecutorPostconditionRepairPersistenceTest {
 
     private static void assertInvalid(Map<String, String> checkpoint) {
         Optional<GoalExecutor.PostconditionRepairCheckpoint> decoded =
-                GoalExecutor.decodePostconditionRepairCheckpoint(checkpoint);
+                GoalCheckpointCodec.decodePostconditionRepairCheckpoint(checkpoint);
         assertTrue(decoded.isEmpty(), () -> "accepted malformed checkpoint " + checkpoint);
         assertEquals("mission_restore_invalid_postcondition_repair_checkpoint",
                 GoalExecutor.restoreCheckpointValidationFailure(checkpoint).orElseThrow());

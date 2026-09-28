@@ -101,8 +101,8 @@ class GoalExecutorSkippedTargetReceiptTest {
                         detailed, "best-effort failure"));
 
         Map<String, String> encoded =
-                GoalExecutor.encodeSkippedTargetReceipts(receipts);
-        var decoded = GoalExecutor.decodeSkippedTargetReceipts(encoded);
+                GoalCheckpointCodec.encodeSkippedTargetReceipts(receipts);
+        var decoded = GoalCheckpointCodec.decodeSkippedTargetReceipts(encoded);
 
         assertTrue(decoded.isPresent());
         assertEquals(receipts, decoded.orElseThrow());
@@ -111,34 +111,34 @@ class GoalExecutorSkippedTargetReceiptTest {
     @Test
     void missingIsLegacyButPartialUnknownCapAndNonCanonicalFailClosed() {
         assertEquals(List.of(),
-                GoalExecutor.decodeSkippedTargetReceipts(Map.of()).orElseThrow());
+                GoalCheckpointCodec.decodeSkippedTargetReceipts(Map.of()).orElseThrow());
 
         Map<String, String> partial = new LinkedHashMap<>();
         partial.put("skipped_target.schema", "1");
-        assertTrue(GoalExecutor.decodeSkippedTargetReceipts(partial).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeSkippedTargetReceipts(partial).isEmpty());
 
         Map<String, String> unknown = new LinkedHashMap<>(
-                GoalExecutor.encodeSkippedTargetReceipts(
+                GoalCheckpointCodec.encodeSkippedTargetReceipts(
                         List.of(receipt(GoalStep.hunt(1)))));
         unknown.put("skipped_target.00.unknown", "x");
-        assertTrue(GoalExecutor.decodeSkippedTargetReceipts(unknown).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeSkippedTargetReceipts(unknown).isEmpty());
 
         Map<String, String> overCap = new LinkedHashMap<>();
         overCap.put("skipped_target.schema", "1");
         overCap.put("skipped_target.count", "33");
-        assertTrue(GoalExecutor.decodeSkippedTargetReceipts(overCap).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeSkippedTargetReceipts(overCap).isEmpty());
 
         Map<String, String> nonCanonical = new LinkedHashMap<>(
-                GoalExecutor.encodeSkippedTargetReceipts(
+                GoalCheckpointCodec.encodeSkippedTargetReceipts(
                         List.of(receipt(GoalStep.hunt(1)))));
         nonCanonical.put("skipped_target.count", "01");
-        assertTrue(GoalExecutor.decodeSkippedTargetReceipts(nonCanonical).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeSkippedTargetReceipts(nonCanonical).isEmpty());
 
         Map<String, String> nonCanonicalEntry = new LinkedHashMap<>(
-                GoalExecutor.encodeSkippedTargetReceipts(
+                GoalCheckpointCodec.encodeSkippedTargetReceipts(
                         List.of(receipt(GoalStep.hunt(1)))));
         nonCanonicalEntry.put("skipped_target.00.count", "+1");
-        assertTrue(GoalExecutor.decodeSkippedTargetReceipts(nonCanonicalEntry).isEmpty());
+        assertTrue(GoalCheckpointCodec.decodeSkippedTargetReceipts(nonCanonicalEntry).isEmpty());
     }
 
     @Test
@@ -149,12 +149,12 @@ class GoalExecutorSkippedTargetReceiptTest {
                     GoalStep.Kind.HUNT, null, index + 1, null, Set.of(),
                     null, null, null, "batch:" + index, true)));
         }
-        assertEquals(32, GoalExecutor.decodeSkippedTargetReceipts(
-                GoalExecutor.encodeSkippedTargetReceipts(receipts))
+        assertEquals(32, GoalCheckpointCodec.decodeSkippedTargetReceipts(
+                GoalCheckpointCodec.encodeSkippedTargetReceipts(receipts))
                 .orElseThrow().size());
 
         Map<String, String> damaged = new LinkedHashMap<>(
-                GoalExecutor.encodeSkippedTargetReceipts(List.of(
+                GoalCheckpointCodec.encodeSkippedTargetReceipts(List.of(
                         receipt(GoalStep.hunt(1)))));
         damaged.remove("skipped_target.00.reason");
         assertEquals("mission_restore_invalid_skipped_target_receipts",

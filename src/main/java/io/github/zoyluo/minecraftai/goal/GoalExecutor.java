@@ -1,5 +1,26 @@
 package io.github.zoyluo.minecraftai.goal;
 
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.activeTaskCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.canonicalNonNegativeInt;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeBatchCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeHuntSearchCursorNamespace;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodePersistedMissionCounter;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodePos;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodePostconditionRepairCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeReplanSnapshot;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeSettledServiceTombstones;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeSkippedTargetReceipts;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.decodeStepKind;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodeBatchCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodeHuntSearchCursorNamespace;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodePos;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodePostconditionRepairCheckpoint;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.encodeSkippedTargetReceipts;
+import static io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.nonNegativeInt;
+
+import io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.SettledServiceAuthority;
+import io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.SettledServiceDescriptor;
+import io.github.zoyluo.minecraftai.goal.GoalCheckpointCodec.SettledServiceTombstone;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.brain.BotReporter;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -75,36 +96,14 @@ public final class GoalExecutor {
      * pickaxe from scratch.
      */
     public static final int DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT = 10;
-    private static final String BATCH_CHECKPOINT_PREFIX = "batch_checkpoint.";
-    private static final Set<String> BATCH_CHECKPOINT_KEYS = Set.of(
-            "schema", "awaiting_player", "completed_at_checkpoint", "step_limit");
-    private static final int BATCH_CHECKPOINT_SCHEMA = 1;
     private static final int BASE_LIFETIME_REPLAN_LIMIT = 12;
     private static final int MAX_CONSECUTIVE_REPLANS = 3;
-    private static final int MAX_POSTCONDITION_REPLANS = 3;
-    private static final int MAX_POSTCONDITION_FINGERPRINT_BYTES = 32_768;
-    private static final String POSTCONDITION_REPLANS_KEY =
-            "postcondition_replans";
-    private static final String POSTCONDITION_LAST_MATCHED_KEY =
-            "postcondition_last_matched";
-    private static final String POSTCONDITION_FINGERPRINT_KEY =
-            "postcondition_fingerprint";
-    private static final String POSTCONDITION_PREFIX = "postcondition_";
-    private static final Set<String> POSTCONDITION_REPAIR_KEYS = Set.of(
-            POSTCONDITION_REPLANS_KEY,
-            POSTCONDITION_LAST_MATCHED_KEY,
-            POSTCONDITION_FINGERPRINT_KEY);
-    private static final String SKIPPED_TARGET_PREFIX = "skipped_target.";
-    private static final int MAX_SKIPPED_TARGET_RECEIPTS = 32;
-    private static final int MAX_SKIPPED_TARGET_TEXT_BYTES = 8_192;
-    private static final Set<String> SKIPPED_TARGET_ENTRY_KEYS = Set.of(
-            "kind", "item", "count", "block", "ores", "input", "output",
-            "pos", "tag_present", "tag", "best_effort", "reason");
-    private static final Set<String> LEGACY_REPLAN_SNAPSHOT_KEYS = Set.of(
-            "snap_steps", "snap_target", "snap_x", "snap_y", "snap_z");
-    private static final Set<String> MODERN_REPLAN_SNAPSHOT_KEYS = Set.of(
-            "snap_steps", "snap_target", "snap_x", "snap_y", "snap_z",
-            "snap_dimension", "snap_hunt_raw_meat", "snap_hunt_visited_sectors");
+    // Package-private: also read by GoalCheckpointCodec's postcondition-repair codec.
+    static final int MAX_POSTCONDITION_REPLANS = 3;
+    // Package-private: also read by GoalCheckpointCodec's skipped-target-receipt codec.
+    static final int MAX_SKIPPED_TARGET_RECEIPTS = 32;
+    // Package-private: also read by GoalCheckpointCodec's canonical-text codec.
+    static final int MAX_SKIPPED_TARGET_TEXT_BYTES = 8_192;
     private static final String AUXILIARY_MINING_CONTINUATION_KEY =
             "aux_mining_continuation";
     private static final String CAPACITY_PARENT_DELIVERED_KEY =
@@ -114,11 +113,8 @@ public final class GoalExecutor {
     private static final String CAPACITY_PARENT_SERVICES_USED_KEY =
             "capacity_parent_services_used";
     private static final String SETTLED_SERVICE_PREFIX = "settled_service.";
-    private static final String HUNT_CURSOR_PREFIX = "hunt.";
-    private static final int MAX_SETTLED_SERVICE_TOMBSTONES = 16;
-    private static final Set<String> SETTLED_SERVICE_ENTRY_KEYS = Set.of(
-            "schema", "descriptor", "dimension", "work_face", "pocket_axis",
-            "pocket_a", "pocket_b", "failure");
+    // Package-private: also read by GoalCheckpointCodec's settled-service-tombstone codec.
+    static final int MAX_SETTLED_SERVICE_TOMBSTONES = 16;
     private static final Set<String> ACTIVE_SERVICE_POCKET_PHASES = Set.of(
             "OPEN_DISPOSAL_POCKET",
             "CAPTURE_DISPOSAL_BASELINE",
@@ -1933,16 +1929,6 @@ public final class GoalExecutor {
         return clearQueue(bot) > 0 || changed;
     }
 
-    /** Death is a factual failure, not a user cancellation. Queue promotion waits for recovery to finish. */
-    public boolean failCurrent(AIPlayerEntity bot, String reason) {
-        ActivePlan active = activePlans.get(bot.getUuid());
-        if (active == null) {
-            return false;
-        }
-        finishActive(bot, active, evaluate(bot, active), reason, false, false, GoalResult.Status.FAILED);
-        return true;
-    }
-
     /** Detach a Mission without publishing a terminal result while corpse recovery runs. */
     public boolean suspendForDeath(AIPlayerEntity bot) {
         UUID uuid = bot.getUuid();
@@ -2284,21 +2270,6 @@ public final class GoalExecutor {
         markDirty(bot);
     }
 
-    private static Map<String, String> activeTaskCheckpoint(
-            MissionRuntimeRecord runtime) {
-        MissionRecord active = runtime == null ? null : runtime.active();
-        if (active == null || active.checkpoint() == null) {
-            return Map.of();
-        }
-        Map<String, String> task = new java.util.LinkedHashMap<>();
-        active.checkpoint().forEach((key, value) -> {
-            if (key.startsWith("task.") && key.length() > "task.".length()) {
-                task.put(key.substring("task.".length()), value);
-            }
-        });
-        return Map.copyOf(task);
-    }
-
     private static Optional<String> activePocketServiceDimension(
             MissionRuntimeRecord runtime) {
         Map<String, String> task = activeTaskCheckpoint(runtime);
@@ -2331,7 +2302,7 @@ public final class GoalExecutor {
             checkpoint.put("build_skipped", String.valueOf(active.buildSkipped));
         }
         if (!active.boundContainers.isEmpty()) {
-            checkpoint.put("containers", active.boundContainers.stream().map(GoalExecutor::encodePos).sorted()
+            checkpoint.put("containers", active.boundContainers.stream().map(GoalCheckpointCodec::encodePos).sorted()
                     .collect(java.util.stream.Collectors.joining(";")));
         }
         checkpoint.put("revision", String.valueOf(active.completedSteps));
@@ -2413,194 +2384,6 @@ public final class GoalExecutor {
         return Map.copyOf(checkpoint);
     }
 
-    private static Map<String, String> encodeBatchCheckpoint(
-            GoalBatchCheckpoint checkpoint) {
-        if (checkpoint == null || !checkpoint.persisted()) {
-            return Map.of();
-        }
-        if (checkpoint.completedAtCheckpoint() < checkpoint.stepLimit()
-                || checkpoint.stepLimit() != DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT) {
-            throw new IllegalArgumentException("invalid_goal_batch_checkpoint");
-        }
-        return Map.of(
-                BATCH_CHECKPOINT_PREFIX + "schema", String.valueOf(BATCH_CHECKPOINT_SCHEMA),
-                BATCH_CHECKPOINT_PREFIX + "awaiting_player", "true",
-                BATCH_CHECKPOINT_PREFIX + "completed_at_checkpoint",
-                String.valueOf(checkpoint.completedAtCheckpoint()),
-                BATCH_CHECKPOINT_PREFIX + "step_limit", String.valueOf(checkpoint.stepLimit()));
-    }
-
-    /**
-     * A batch checkpoint is deliberately small: at a safe boundary the durable goal, inventory,
-     * world state, and ordinary task cursor are the source of truth.  Storing a stale symbolic
-     * task list would make a restart craft or gather things the player has already supplied.
-     */
-    static Optional<GoalBatchCheckpoint> decodeBatchCheckpoint(
-            Map<String, String> checkpoint) {
-        Map<String, String> source = checkpoint == null ? Map.of() : checkpoint;
-        java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
-        boolean present = false;
-        for (Map.Entry<String, String> entry : source.entrySet()) {
-            String key = entry.getKey();
-            if ("batch_checkpoint".equals(key) || BATCH_CHECKPOINT_PREFIX.equals(key)) {
-                return Optional.empty();
-            }
-            if (key != null && key.startsWith(BATCH_CHECKPOINT_PREFIX)) {
-                present = true;
-                String nested = key.substring(BATCH_CHECKPOINT_PREFIX.length());
-                if (nested.isBlank() || entry.getValue() == null
-                        || values.put(nested, entry.getValue()) != null) {
-                    return Optional.empty();
-                }
-            }
-        }
-        if (!present) {
-            return Optional.of(GoalBatchCheckpoint.legacy());
-        }
-        if (!values.keySet().equals(BATCH_CHECKPOINT_KEYS)
-                || !String.valueOf(BATCH_CHECKPOINT_SCHEMA).equals(values.get("schema"))) {
-            return Optional.empty();
-        }
-        Optional<Boolean> awaiting = decodeCanonicalBoolean(values.get("awaiting_player"));
-        OptionalInt completed = canonicalNonNegativeInt(values.get("completed_at_checkpoint"));
-        OptionalInt limit = canonicalNonNegativeInt(values.get("step_limit"));
-        if (awaiting.isEmpty() || !awaiting.orElseThrow()
-                || completed.isEmpty() || limit.isEmpty()
-                || limit.getAsInt() != DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT
-                || completed.getAsInt() < limit.getAsInt()) {
-            return Optional.empty();
-        }
-        GoalBatchCheckpoint decoded = new GoalBatchCheckpoint(
-                true, completed.getAsInt(), limit.getAsInt());
-        return encodeBatchCheckpoint(decoded).entrySet().stream().allMatch(entry ->
-                entry.getValue().equals(source.get(entry.getKey())))
-                ? Optional.of(decoded) : Optional.empty();
-    }
-
-    static Map<String, String> encodeHuntSearchCursorNamespace(HuntSearchCursor cursor) {
-        java.util.LinkedHashMap<String, String> encoded = new java.util.LinkedHashMap<>();
-        cursor.encode().entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> encoded.put(
-                        HUNT_CURSOR_PREFIX + entry.getKey(), entry.getValue()));
-        return Map.copyOf(encoded);
-    }
-
-    /**
-     * A missing namespace is legacy only when no hunt watermark exists. Any modern watermark
-     * without its cursor, or any present but partial, unknown, or malformed namespace, fails closed
-     * so a restart cannot erase factual search history.
-     */
-    static Optional<HuntSearchCursor> decodeHuntSearchCursorNamespace(
-            Map<String, String> checkpoint) {
-        if (checkpoint == null || checkpoint.isEmpty()) {
-            return Optional.of(HuntSearchCursor.initial());
-        }
-        java.util.LinkedHashMap<String, String> encoded = new java.util.LinkedHashMap<>();
-        boolean present = false;
-        for (Map.Entry<String, String> entry : checkpoint.entrySet()) {
-            String key = entry.getKey();
-            if ("hunt".equals(key) || "hunt.".equals(key)) {
-                return Optional.empty();
-            }
-            if (key != null && key.startsWith(HUNT_CURSOR_PREFIX)) {
-                present = true;
-                String nested = key.substring(HUNT_CURSOR_PREFIX.length());
-                if (nested.isBlank() || entry.getValue() == null
-                        || encoded.put(nested, entry.getValue()) != null) {
-                    return Optional.empty();
-                }
-            }
-        }
-        return present
-                ? HuntSearchCursor.decode(encoded)
-                : hasAnyHuntReplanWatermark(checkpoint)
-                ? Optional.empty()
-                : Optional.of(HuntSearchCursor.initial());
-    }
-
-    static Map<String, String> encodeSkippedTargetReceipts(
-            List<SkippedTargetReceipt> receipts) {
-        List<SkippedTargetReceipt> values =
-                receipts == null ? List.of() : List.copyOf(receipts);
-        if (values.size() > MAX_SKIPPED_TARGET_RECEIPTS) {
-            throw new IllegalArgumentException("too many skipped target receipts");
-        }
-        java.util.LinkedHashMap<String, String> encoded = new java.util.LinkedHashMap<>();
-        encoded.put(SKIPPED_TARGET_PREFIX + "schema", "1");
-        encoded.put(SKIPPED_TARGET_PREFIX + "count", String.valueOf(values.size()));
-        for (int index = 0; index < values.size(); index++) {
-            String prefix = SKIPPED_TARGET_PREFIX + String.format("%02d.", index);
-            encodeSkippedTargetReceipt(values.get(index)).forEach(
-                    (key, value) -> encoded.put(prefix + key, value));
-        }
-        return Map.copyOf(encoded);
-    }
-
-    /**
-     * Missing is the sole legacy representation. Once present, the bounded collection and every
-     * target field are exact-key and canonical so a damaged receipt cannot suppress another step.
-     */
-    static Optional<List<SkippedTargetReceipt>> decodeSkippedTargetReceipts(
-            Map<String, String> checkpoint) {
-        Map<String, String> source = checkpoint == null ? Map.of() : checkpoint;
-        java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
-        boolean present = false;
-        for (Map.Entry<String, String> entry : source.entrySet()) {
-            String key = entry.getKey();
-            if ("skipped_target".equals(key) || SKIPPED_TARGET_PREFIX.equals(key)) {
-                return Optional.empty();
-            }
-            if (key != null && key.startsWith(SKIPPED_TARGET_PREFIX)) {
-                present = true;
-                String nested = key.substring(SKIPPED_TARGET_PREFIX.length());
-                if (nested.isBlank() || entry.getValue() == null
-                        || values.put(nested, entry.getValue()) != null) {
-                    return Optional.empty();
-                }
-            }
-        }
-        if (!present) {
-            return Optional.of(List.of());
-        }
-        try {
-            if (!"1".equals(values.get("schema"))) {
-                return Optional.empty();
-            }
-            OptionalInt decodedCount = canonicalNonNegativeInt(values.get("count"));
-            if (decodedCount.isEmpty()
-                    || decodedCount.getAsInt() > MAX_SKIPPED_TARGET_RECEIPTS) {
-                return Optional.empty();
-            }
-            int count = decodedCount.getAsInt();
-            Set<String> expected = new HashSet<>();
-            expected.add("schema");
-            expected.add("count");
-            for (int index = 0; index < count; index++) {
-                String prefix = String.format("%02d.", index);
-                for (String key : SKIPPED_TARGET_ENTRY_KEYS) {
-                    expected.add(prefix + key);
-                }
-            }
-            if (!values.keySet().equals(expected)) {
-                return Optional.empty();
-            }
-            List<SkippedTargetReceipt> decoded = new ArrayList<>(count);
-            for (int index = 0; index < count; index++) {
-                String prefix = String.format("%02d.", index);
-                java.util.LinkedHashMap<String, String> entry =
-                        new java.util.LinkedHashMap<>();
-                for (String key : SKIPPED_TARGET_ENTRY_KEYS) {
-                    entry.put(key, values.get(prefix + key));
-                }
-                decoded.add(decodeSkippedTargetReceipt(entry).orElseThrow());
-            }
-            return Optional.of(List.copyOf(decoded));
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
     /**
      * Applies durable skip receipts only to ordinary fresh Planner output. Each receipt removes the
      * earliest still-present same target at most once; count is intentionally ignored by
@@ -2628,174 +2411,6 @@ public final class GoalExecutor {
                 && receipts.stream().allMatch(receipt ->
                 receipt != null && shouldSkipFailedStep(
                         goal, receipt.step(), receipt.reason()));
-    }
-
-    private static Map<String, String> encodeSkippedTargetReceipt(
-            SkippedTargetReceipt receipt) {
-        GoalStep step = java.util.Objects.requireNonNull(receipt, "receipt").step();
-        String tag = step.tag();
-        return Map.ofEntries(
-                Map.entry("kind", step.kind().name()),
-                Map.entry("item", encodeRegistryItem(step.item())),
-                Map.entry("count", String.valueOf(step.count())),
-                Map.entry("block", encodeRegistryBlock(step.block())),
-                Map.entry("ores", encodeRegistryBlocks(step.ores())),
-                Map.entry("input", encodeRegistryItem(step.input())),
-                Map.entry("output", encodeRegistryItem(step.output())),
-                Map.entry("pos", step.pos() == null ? "" : encodePos(step.pos())),
-                Map.entry("tag_present", String.valueOf(tag != null)),
-                Map.entry("tag", tag == null ? "" : encodeCanonicalText(tag)),
-                Map.entry("best_effort", String.valueOf(step.bestEffort())),
-                Map.entry("reason", encodeCanonicalText(receipt.reason())));
-    }
-
-    private static Optional<SkippedTargetReceipt> decodeSkippedTargetReceipt(
-            Map<String, String> values) {
-        if (values == null || !values.keySet().equals(SKIPPED_TARGET_ENTRY_KEYS)) {
-            return Optional.empty();
-        }
-        try {
-            GoalStep.Kind kind = GoalStep.Kind.valueOf(values.get("kind"));
-            OptionalInt count = canonicalNonNegativeInt(values.get("count"));
-            if (count.isEmpty()) {
-                return Optional.empty();
-            }
-            Item item = decodeRegistryItem(values.get("item"));
-            Block block = decodeRegistryBlock(values.get("block"));
-            Set<Block> ores = decodeRegistryBlocks(values.get("ores"));
-            Item input = decodeRegistryItem(values.get("input"));
-            Item output = decodeRegistryItem(values.get("output"));
-            BlockPos pos = values.get("pos").isEmpty()
-                    ? null : decodePos(values.get("pos")).orElseThrow();
-            if (pos != null && !encodePos(pos).equals(values.get("pos"))) {
-                return Optional.empty();
-            }
-            boolean tagPresent = decodeCanonicalBoolean(
-                    values.get("tag_present")).orElseThrow();
-            String decodedTag = decodeCanonicalText(values.get("tag")).orElseThrow();
-            if (!tagPresent && !decodedTag.isEmpty()) {
-                return Optional.empty();
-            }
-            String tag = tagPresent ? decodedTag : null;
-            boolean bestEffort = decodeCanonicalBoolean(
-                    values.get("best_effort")).orElseThrow();
-            String reason = decodeCanonicalText(values.get("reason")).orElseThrow();
-            GoalStep step = new GoalStep(
-                    kind, item, count.getAsInt(), block, ores,
-                    input, output, pos, tag, bestEffort);
-            if (step.count() != count.getAsInt()) {
-                return Optional.empty();
-            }
-            SkippedTargetReceipt receipt = new SkippedTargetReceipt(step, reason);
-            return encodeSkippedTargetReceipt(receipt).equals(values)
-                    ? Optional.of(receipt) : Optional.empty();
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private static String encodeRegistryItem(Item item) {
-        return item == null ? "" : Registries.ITEM.getId(item).toString();
-    }
-
-    private static Item decodeRegistryItem(String encoded) {
-        if (encoded == null) {
-            throw new IllegalArgumentException("missing item id");
-        }
-        if (encoded.isEmpty()) {
-            return null;
-        }
-        Identifier id = Identifier.tryParse(encoded);
-        Item item = id == null ? null : Registries.ITEM.getOptionalValue(id).orElse(null);
-        if (item == null || !id.toString().equals(encoded)
-                || !Registries.ITEM.getId(item).toString().equals(encoded)) {
-            throw new IllegalArgumentException("invalid item id");
-        }
-        return item;
-    }
-
-    private static String encodeRegistryBlock(Block block) {
-        return block == null ? "" : Registries.BLOCK.getId(block).toString();
-    }
-
-    private static Block decodeRegistryBlock(String encoded) {
-        if (encoded == null) {
-            throw new IllegalArgumentException("missing block id");
-        }
-        if (encoded.isEmpty()) {
-            return null;
-        }
-        Identifier id = Identifier.tryParse(encoded);
-        Block block = id == null ? null : Registries.BLOCK.getOptionalValue(id).orElse(null);
-        if (block == null || !id.toString().equals(encoded)
-                || !Registries.BLOCK.getId(block).toString().equals(encoded)) {
-            throw new IllegalArgumentException("invalid block id");
-        }
-        return block;
-    }
-
-    private static String encodeRegistryBlocks(Set<Block> blocks) {
-        return (blocks == null ? Set.<Block>of() : blocks).stream()
-                .map(GoalExecutor::encodeRegistryBlock)
-                .sorted()
-                .collect(java.util.stream.Collectors.joining(","));
-    }
-
-    private static Set<Block> decodeRegistryBlocks(String encoded) {
-        if (encoded == null) {
-            throw new IllegalArgumentException("missing block set");
-        }
-        if (encoded.isEmpty()) {
-            return Set.of();
-        }
-        java.util.LinkedHashSet<Block> blocks = new java.util.LinkedHashSet<>();
-        for (String value : encoded.split(",", -1)) {
-            Block block = decodeRegistryBlock(value);
-            if (block == null || !blocks.add(block)) {
-                throw new IllegalArgumentException("invalid block set");
-            }
-        }
-        Set<Block> decoded = Set.copyOf(blocks);
-        if (!encodeRegistryBlocks(decoded).equals(encoded)) {
-            throw new IllegalArgumentException("non-canonical block set");
-        }
-        return decoded;
-    }
-
-    private static String encodeCanonicalText(String value) {
-        String text = value == null ? "" : value;
-        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAX_SKIPPED_TARGET_TEXT_BYTES) {
-            throw new IllegalArgumentException("skipped target text too large");
-        }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private static Optional<String> decodeCanonicalText(String encoded) {
-        if (encoded == null) {
-            return Optional.empty();
-        }
-        try {
-            byte[] bytes = Base64.getUrlDecoder().decode(encoded);
-            if (bytes.length > MAX_SKIPPED_TARGET_TEXT_BYTES) {
-                return Optional.empty();
-            }
-            String decoded = new String(bytes, StandardCharsets.UTF_8);
-            return encodeCanonicalText(decoded).equals(encoded)
-                    ? Optional.of(decoded) : Optional.empty();
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private static Optional<Boolean> decodeCanonicalBoolean(String value) {
-        if ("true".equals(value)) {
-            return Optional.of(true);
-        }
-        if ("false".equals(value)) {
-            return Optional.of(false);
-        }
-        return Optional.empty();
     }
 
     private static RestoreSeed restoreSeed(AIPlayerEntity bot, Goal goal, MissionRecord record) {
@@ -2977,111 +2592,6 @@ public final class GoalExecutor {
         return Optional.empty();
     }
 
-    /**
-     * Missing is a legacy zero. Once persisted, mission budget counters must remain non-negative
-     * integers; malformed values must not refresh a retry budget on restart.
-     */
-    static OptionalInt decodePersistedMissionCounter(
-            Map<String, String> checkpoint, String key) {
-        if (checkpoint == null || !checkpoint.containsKey(key)) {
-            return OptionalInt.of(0);
-        }
-        return canonicalNonNegativeInt(checkpoint.get(key));
-    }
-
-    static Map<String, String> encodePostconditionRepairCheckpoint(
-            int replans, int lastMatched, String fingerprint) {
-        if (!validPostconditionRepairState(replans, lastMatched, fingerprint)) {
-            throw new IllegalArgumentException("invalid postcondition repair state");
-        }
-        String encodedFingerprint = fingerprint.isEmpty() ? ""
-                : Base64.getUrlEncoder().withoutPadding().encodeToString(
-                fingerprint.getBytes(StandardCharsets.UTF_8));
-        return Map.of(
-                POSTCONDITION_REPLANS_KEY, String.valueOf(replans),
-                POSTCONDITION_LAST_MATCHED_KEY, String.valueOf(lastMatched),
-                POSTCONDITION_FINGERPRINT_KEY, encodedFingerprint);
-    }
-
-    /**
-     * Missing is the legacy representation. Once any namespaced field exists, the complete
-     * canonical triple is required so a restart cannot reset the repair count or forget the last
-     * rejected plan fingerprint.
-     */
-    static Optional<PostconditionRepairCheckpoint> decodePostconditionRepairCheckpoint(
-            Map<String, String> checkpoint) {
-        Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
-        Set<String> presentKeys = values.keySet().stream()
-                .filter(key -> key != null && key.startsWith(POSTCONDITION_PREFIX))
-                .collect(java.util.stream.Collectors.toSet());
-        if (presentKeys.isEmpty()) {
-            return Optional.of(PostconditionRepairCheckpoint.legacy());
-        }
-        if (!presentKeys.equals(POSTCONDITION_REPAIR_KEYS)) {
-            return Optional.empty();
-        }
-
-        OptionalInt replans = canonicalNonNegativeInt(
-                values.get(POSTCONDITION_REPLANS_KEY));
-        OptionalInt lastMatched = canonicalNonNegativeInt(
-                values.get(POSTCONDITION_LAST_MATCHED_KEY));
-        if (replans.isEmpty() || lastMatched.isEmpty()) {
-            return Optional.empty();
-        }
-        String fingerprint = decodeCanonicalPostconditionFingerprint(
-                values.get(POSTCONDITION_FINGERPRINT_KEY)).orElse(null);
-        if (fingerprint == null || !validPostconditionRepairState(
-                replans.getAsInt(), lastMatched.getAsInt(), fingerprint)) {
-            return Optional.empty();
-        }
-        return Optional.of(new PostconditionRepairCheckpoint(
-                true, replans.getAsInt(), lastMatched.getAsInt(), fingerprint));
-    }
-
-    private static OptionalInt canonicalNonNegativeInt(String value) {
-        try {
-            int parsed = Integer.parseInt(value);
-            return parsed >= 0 && String.valueOf(parsed).equals(value)
-                    ? OptionalInt.of(parsed) : OptionalInt.empty();
-        } catch (RuntimeException exception) {
-            return OptionalInt.empty();
-        }
-    }
-
-    private static Optional<String> decodeCanonicalPostconditionFingerprint(
-            String encoded) {
-        if (encoded == null) {
-            return Optional.empty();
-        }
-        if (encoded.isEmpty()) {
-            return Optional.of("");
-        }
-        try {
-            byte[] decoded = Base64.getUrlDecoder().decode(encoded);
-            if (decoded.length > MAX_POSTCONDITION_FINGERPRINT_BYTES) {
-                return Optional.empty();
-            }
-            String fingerprint = new String(decoded, StandardCharsets.UTF_8);
-            String canonical = Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString(fingerprint.getBytes(StandardCharsets.UTF_8));
-            return canonical.equals(encoded)
-                    ? Optional.of(fingerprint) : Optional.empty();
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private static boolean validPostconditionRepairState(
-            int replans, int lastMatched, String fingerprint) {
-        if (replans < 0 || replans > MAX_POSTCONDITION_REPLANS
-                || lastMatched < 0 || fingerprint == null
-                || fingerprint.getBytes(StandardCharsets.UTF_8).length
-                > MAX_POSTCONDITION_FINGERPRINT_BYTES) {
-            return false;
-        }
-        return replans == 0 ? fingerprint.isEmpty() : !fingerprint.isBlank();
-    }
-
     /** Missing is the only legacy value; every persisted value must be a non-negative watermark. */
     static OptionalInt decodePersistedCapacityParentDelivered(
             Map<String, String> checkpoint) {
@@ -3158,107 +2668,9 @@ public final class GoalExecutor {
                 <= marginUsed;
     }
 
-    private static Optional<ReplanSnapshot> decodeReplanSnapshot(Map<String, String> checkpoint) {
-        Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
-        Set<String> snapshotKeys = values.keySet().stream()
-                .filter(key -> key != null && key.startsWith("snap_"))
-                .collect(java.util.stream.Collectors.toSet());
-        boolean legacy = snapshotKeys.equals(LEGACY_REPLAN_SNAPSHOT_KEYS);
-        boolean modern = snapshotKeys.equals(MODERN_REPLAN_SNAPSHOT_KEYS);
-        if (!legacy && !modern) {
-            return Optional.empty();
-        }
-        OptionalInt steps = canonicalNonNegativeInt(values.get("snap_steps"));
-        OptionalInt target = canonicalNonNegativeInt(values.get("snap_target"));
-        Optional<Integer> x = canonicalSignedInt(values.get("snap_x"));
-        Optional<Integer> y = canonicalSignedInt(values.get("snap_y"));
-        Optional<Integer> z = canonicalSignedInt(values.get("snap_z"));
-        if (steps.isEmpty() || target.isEmpty()
-                || x.isEmpty() || y.isEmpty() || z.isEmpty()) {
-            return Optional.empty();
-        }
-        if (legacy) {
-            return Optional.of(new ReplanSnapshot(
-                    steps.getAsInt(), target.getAsInt(),
-                    x.orElseThrow(), y.orElseThrow(), z.orElseThrow(),
-                    "", -1, -1));
-        }
-        OptionalInt huntRaw = canonicalNonNegativeInt(
-                values.get("snap_hunt_raw_meat"));
-        OptionalInt huntSectors = canonicalNonNegativeInt(
-                values.get("snap_hunt_visited_sectors"));
-        String dimension = values.get("snap_dimension");
-        Identifier dimensionId = dimension == null
-                ? null : Identifier.tryParse(dimension);
-        if (huntRaw.isEmpty() || huntSectors.isEmpty()
-                || dimensionId == null || !dimensionId.toString().equals(dimension)) {
-            return Optional.empty();
-        }
-        return Optional.of(new ReplanSnapshot(
-                steps.getAsInt(), target.getAsInt(),
-                x.orElseThrow(), y.orElseThrow(), z.orElseThrow(),
-                dimension, huntRaw.getAsInt(), huntSectors.getAsInt()));
-    }
-
     static boolean hasAnyReplanSnapshotField(Map<String, String> checkpoint) {
         return checkpoint != null && checkpoint.keySet().stream()
                 .anyMatch(key -> key != null && key.startsWith("snap_"));
-    }
-
-    private static boolean hasAnyHuntReplanWatermark(
-            Map<String, String> checkpoint) {
-        return checkpoint != null
-                && (checkpoint.containsKey("snap_hunt_raw_meat")
-                || checkpoint.containsKey("snap_hunt_visited_sectors"));
-    }
-
-    private static Optional<Integer> canonicalSignedInt(String value) {
-        try {
-            int parsed = Integer.parseInt(value);
-            return String.valueOf(parsed).equals(value)
-                    ? Optional.of(parsed) : Optional.empty();
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private static Optional<GoalStep.Kind> decodeStepKind(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.of(GoalStep.Kind.valueOf(value));
-        } catch (IllegalArgumentException ignored) {
-            return Optional.empty();
-        }
-    }
-
-    private static int nonNegativeInt(String value) {
-        try {
-            return Math.max(0, Integer.parseInt(value));
-        } catch (RuntimeException exception) {
-            return 0;
-        }
-    }
-
-    private static String encodePos(net.minecraft.util.math.BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private static Optional<net.minecraft.util.math.BlockPos> decodePos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            String[] parts = value.split(",");
-            if (parts.length != 3) {
-                return Optional.empty();
-            }
-            return Optional.of(new net.minecraft.util.math.BlockPos(
-                    Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
-        } catch (RuntimeException ignored) {
-            return Optional.empty();
-        }
     }
 
     public boolean startNextQueuedIfIdle(AIPlayerEntity bot) {
@@ -4531,19 +3943,7 @@ public final class GoalExecutor {
                 : GoalStep.rareOreService(
                 ore.ores(), serviceBoundary, originalLongRareOreTargetCount(plan.goal));
         GoalStep mining = continuation.get(miningIndex);
-        if (serviceIndex >= 0) {
-            if (serviceIndex > miningIndex) {
-                continuation.remove(serviceIndex);
-                continuation.remove(miningIndex);
-            } else {
-                continuation.remove(miningIndex);
-                continuation.remove(serviceIndex);
-            }
-        } else {
-            continuation.remove(miningIndex);
-        }
-        continuation.add(0, mining);
-        continuation.add(0, service);
+        reorderServiceThenMining(continuation, serviceIndex, miningIndex, service, mining);
 
         // Commit only after the complete successor schedule has been proven. A crash can therefore
         // observe either the failed epoch plus its task, or the advanced epoch plus the
@@ -4627,15 +4027,7 @@ public final class GoalExecutor {
         }
         GoalStep service = continuation.get(serviceIndex);
         GoalStep mining = continuation.get(miningIndex);
-        if (serviceIndex > miningIndex) {
-            continuation.remove(serviceIndex);
-            continuation.remove(miningIndex);
-        } else {
-            continuation.remove(miningIndex);
-            continuation.remove(serviceIndex);
-        }
-        continuation.add(0, mining);
-        continuation.add(0, service);
+        reorderServiceThenMining(continuation, serviceIndex, miningIndex, service, mining);
 
         plan.taskCheckpoint.clear();
         plan.taskCheckpoint.putAll(debited.orElseThrow());
@@ -4653,6 +4045,29 @@ public final class GoalExecutor {
                 "service_boundary", service.count());
         captureTransitionAndAssignNext(bot, plan);
         return true;
+    }
+
+    /**
+     * Pulls the service+mining step pair to the front of {@code steps}, service before mining.
+     * {@code serviceIndex} may be -1 (no existing service step to remove; only mining is dropped
+     * before both are reinserted at the head). Removing the larger index first keeps the smaller
+     * index valid for the second removal.
+     */
+    private static void reorderServiceThenMining(List<GoalStep> steps, int serviceIndex, int miningIndex,
+                                                  GoalStep service, GoalStep mining) {
+        if (serviceIndex >= 0) {
+            if (serviceIndex > miningIndex) {
+                steps.remove(serviceIndex);
+                steps.remove(miningIndex);
+            } else {
+                steps.remove(miningIndex);
+                steps.remove(serviceIndex);
+            }
+        } else {
+            steps.remove(miningIndex);
+        }
+        steps.add(0, mining);
+        steps.add(0, service);
     }
 
     /**
@@ -5713,26 +5128,6 @@ public final class GoalExecutor {
                 || reason.contains("no_reachable");
     }
 
-    // P1: when the goal fails, give the player actionable English guidance, to prevent the brain from wandering around exploring with move after receiving the raw reason and getting into danger.
-    private static String humanGoalFailure(String reason) {
-        String r = reason == null ? "" : reason;
-        if (r.contains("no_resource_after_explore")) {
-            // EXPLORE has already headed out and searched several areas (not just "didn't find it right where it stood") -- distinguish this honestly, so the brain doesn't have it retry by wandering around with move again.
-            return "I searched several areas and still could not find the needed resource, so I cannot continue yet. I will stay put rather than wander or mine bare-handed.";
-        }
-        if (r.contains("no_resource_nearby") || r.contains("no_reachable") || r.contains("no_ore_found")) {
-            return "I could not find usable wood, stone, or ore in a broad area, so I cannot continue yet. I will stay put rather than wander or mine bare-handed.";
-        }
-        if (r.startsWith("need_better_tool") || r.startsWith("need_pickaxe")) {
-            return "I still need a suitable pickaxe and am preparing one automatically. If I cannot make it, I will stop instead of mining bare-handed.";
-        }
-        if (r.startsWith("descend_overshoot_unrecoverable")
-                || r.startsWith("descend_landing_pose_drift")) {
-            return "The mining descent drifted away from the verified landing step. I stopped immediately and will not keep mining at the wrong depth.";
-        }
-        return "Goal failed: " + (r.isBlank() ? "step failed" : r);
-    }
-
     private static final class ActivePlan {
         private UUID missionId;
         private final int startedTick;
@@ -5941,254 +5336,6 @@ public final class GoalExecutor {
                                            int boundary) {
     }
 
-    private record SettledServiceDescriptor(
-            String oreFingerprint,
-            MiningServiceTask.ServicePolicy policy,
-            String missionId,
-            int target,
-            int boundary) {
-        private static final String CODEC_VERSION = "1";
-
-        private SettledServiceDescriptor {
-            if (!validOreFingerprint(oreFingerprint) || policy == null
-                    || missionId == null || missionId.isBlank()
-                    || missionId.indexOf('|') >= 0
-                    || missionId.chars().anyMatch(Character::isISOControl)
-                    || !MiningServiceTask.validServiceDescriptor(
-                    policy, target, boundary)) {
-                throw new IllegalArgumentException("invalid_settled_service_descriptor");
-            }
-        }
-
-        private static SettledServiceDescriptor fromMetadata(
-                MiningServiceTask.RestoreMetadata metadata) {
-            return new SettledServiceDescriptor(
-                    OreDigTask.oreFingerprint(metadata.ores()), metadata.policy(),
-                    metadata.serviceMissionId(), metadata.serviceTargetCount(),
-                    metadata.serviceBoundary());
-        }
-
-        private String encode() {
-            return String.join("|",
-                    CODEC_VERSION,
-                    policy.profile().name(),
-                    missionId,
-                    String.valueOf(target),
-                    String.valueOf(boundary),
-                    String.valueOf(policy.targetToolUsableDurability()),
-                    String.valueOf(policy.channelToolUsableDurability()),
-                    String.valueOf(policy.foodMinUnits()),
-                    String.valueOf(policy.torchMinCount()),
-                    String.valueOf(policy.freeSlotsMin()),
-                    String.valueOf(policy.emergencyBlocksReserved()),
-                    String.valueOf(policy.futureStickReserve()),
-                    String.valueOf(policy.craftingTableRequired()),
-                    oreFingerprint);
-        }
-
-        private static Optional<SettledServiceDescriptor> decode(String encoded) {
-            if (encoded == null || encoded.isBlank()) {
-                return Optional.empty();
-            }
-            try {
-                String[] parts = encoded.split("\\|", -1);
-                if (parts.length != 14 || !CODEC_VERSION.equals(parts[0])
-                        || !"true".equals(parts[12]) && !"false".equals(parts[12])) {
-                    return Optional.empty();
-                }
-                MiningServiceTask.ServicePolicy policy =
-                        new MiningServiceTask.ServicePolicy(
-                                MiningServiceTask.ServiceProfile.valueOf(parts[1]),
-                                Integer.parseInt(parts[5]),
-                                Integer.parseInt(parts[6]),
-                                Integer.parseInt(parts[7]),
-                                Integer.parseInt(parts[8]),
-                                Integer.parseInt(parts[9]),
-                                Integer.parseInt(parts[10]),
-                                Integer.parseInt(parts[11]),
-                                Boolean.parseBoolean(parts[12]));
-                SettledServiceDescriptor descriptor = new SettledServiceDescriptor(
-                        parts[13], policy, parts[2], Integer.parseInt(parts[3]),
-                        Integer.parseInt(parts[4]));
-                return descriptor.encode().equals(encoded)
-                        ? Optional.of(descriptor) : Optional.empty();
-            } catch (RuntimeException exception) {
-                return Optional.empty();
-            }
-        }
-
-        private static boolean validOreFingerprint(String fingerprint) {
-            if (fingerprint == null || fingerprint.isBlank()) {
-                return false;
-            }
-            Set<Block> blocks = new HashSet<>();
-            for (String encoded : fingerprint.split(",", -1)) {
-                Identifier id = Identifier.tryParse(encoded);
-                Block block = id == null
-                        ? null : Registries.BLOCK.getOptionalValue(id).orElse(null);
-                if (block == null || block == Blocks.AIR || !blocks.add(block)) {
-                    return false;
-                }
-            }
-            return OreDigTask.oreFingerprint(blocks).equals(fingerprint);
-        }
-    }
-
-    private record SettledServiceAuthority(
-            SettledServiceDescriptor descriptor,
-            String dimension,
-            MiningServiceTask.DisposalGeometry geometry) {
-        private SettledServiceAuthority {
-            Identifier dimensionId = dimension == null
-                    ? null : Identifier.tryParse(dimension);
-            if (descriptor == null || dimensionId == null
-                    || !dimensionId.toString().equals(dimension) || geometry == null) {
-                throw new IllegalArgumentException("invalid_settled_service_authority");
-            }
-        }
-
-        private String key() {
-            return descriptor.encode() + "@" + dimension + "@"
-                    + encodePos(geometry.workFace()) + "@"
-                    + geometry.pocketAxis().name();
-        }
-    }
-
-    private record SettledServiceTombstone(
-            SettledServiceAuthority authority,
-            String failureReason) {
-        private SettledServiceTombstone {
-            if (authority == null
-                    || !MiningServiceTask.validTerminalFailureReason(failureReason)) {
-                throw new IllegalArgumentException("invalid_settled_service_tombstone");
-            }
-        }
-
-        private String key() {
-            return authority.key();
-        }
-
-        private MiningServiceTask.DisposalGeometry geometry() {
-            return authority.geometry();
-        }
-
-        private boolean sameGeometry(SettledServiceAuthority other) {
-            return other != null
-                    && authority.dimension().equals(other.dimension())
-                    && authority.geometry().equals(other.geometry());
-        }
-
-        private boolean sameGeometry(SettledServiceTombstone other) {
-            return other != null && sameGeometry(other.authority());
-        }
-
-        private MiningServiceTask.DisposalReplayGuard replayGuard() {
-            return new MiningServiceTask.DisposalReplayGuard(
-                    authority.dimension(), authority.geometry(), failureReason);
-        }
-
-        private Map<String, String> encode() {
-            MiningServiceTask.DisposalGeometry geometry = authority.geometry();
-            return Map.of(
-                    "schema", "1",
-                    "descriptor", authority.descriptor().encode(),
-                    "dimension", authority.dimension(),
-                    "work_face", encodePos(geometry.workFace()),
-                    "pocket_axis", geometry.pocketAxis().name(),
-                    "pocket_a", encodePos(geometry.firstEntry()),
-                    "pocket_b", encodePos(geometry.secondEntry()),
-                    "failure", failureReason);
-        }
-
-        private static Optional<SettledServiceTombstone> decode(
-                Map<String, String> values) {
-            if (values == null || !values.keySet().equals(
-                    SETTLED_SERVICE_ENTRY_KEYS)
-                    || !"1".equals(values.get("schema"))) {
-                return Optional.empty();
-            }
-            try {
-                Optional<SettledServiceDescriptor> descriptor =
-                        SettledServiceDescriptor.decode(values.get("descriptor"));
-                Optional<BlockPos> workFace = decodePos(values.get("work_face"));
-                Optional<BlockPos> pocketA = decodePos(values.get("pocket_a"));
-                Optional<BlockPos> pocketB = decodePos(values.get("pocket_b"));
-                Direction.Axis axis = Direction.Axis.valueOf(values.get("pocket_axis"));
-                if (descriptor.isEmpty() || workFace.isEmpty()
-                        || pocketA.isEmpty() || pocketB.isEmpty()
-                        || !encodePos(workFace.orElseThrow()).equals(
-                        values.get("work_face"))
-                        || !encodePos(pocketA.orElseThrow()).equals(
-                        values.get("pocket_a"))
-                        || !encodePos(pocketB.orElseThrow()).equals(
-                        values.get("pocket_b"))) {
-                    return Optional.empty();
-                }
-                MiningServiceTask.DisposalGeometry geometry =
-                        new MiningServiceTask.DisposalGeometry(
-                                workFace.orElseThrow(), axis,
-                                pocketA.orElseThrow(), pocketB.orElseThrow());
-                SettledServiceAuthority authority = new SettledServiceAuthority(
-                        descriptor.orElseThrow(), values.get("dimension"), geometry);
-                return Optional.of(new SettledServiceTombstone(
-                        authority, values.get("failure")));
-            } catch (RuntimeException exception) {
-                return Optional.empty();
-            }
-        }
-    }
-
-    private static Optional<List<SettledServiceTombstone>>
-    decodeSettledServiceTombstones(Map<String, String> values) {
-        if (values == null || values.isEmpty()) {
-            return Optional.of(List.of());
-        }
-        try {
-            String rawCount = values.getOrDefault("count", "");
-            int count = Integer.parseInt(rawCount);
-            if (count < 1 || count > MAX_SETTLED_SERVICE_TOMBSTONES
-                    || !String.valueOf(count).equals(rawCount)) {
-                return Optional.empty();
-            }
-            Set<String> expected = new HashSet<>();
-            expected.add("count");
-            for (int index = 0; index < count; index++) {
-                for (String key : SETTLED_SERVICE_ENTRY_KEYS) {
-                    expected.add(index + "." + key);
-                }
-            }
-            if (!values.keySet().equals(expected)) {
-                return Optional.empty();
-            }
-            List<SettledServiceTombstone> decoded = new ArrayList<>();
-            Set<String> identities = new HashSet<>();
-            Set<String> geometries = new HashSet<>();
-            String previousIdentity = null;
-            for (int index = 0; index < count; index++) {
-                Map<String, String> entry = new java.util.LinkedHashMap<>();
-                String prefix = index + ".";
-                for (String key : SETTLED_SERVICE_ENTRY_KEYS) {
-                    entry.put(key, values.get(prefix + key));
-                }
-                SettledServiceTombstone tombstone =
-                        SettledServiceTombstone.decode(entry).orElseThrow();
-                String geometryKey = tombstone.authority().dimension() + "@"
-                        + encodePos(tombstone.geometry().workFace()) + "@"
-                        + tombstone.geometry().pocketAxis().name();
-                if (!identities.add(tombstone.key()) || !geometries.add(geometryKey)
-                        || previousIdentity != null
-                        && previousIdentity.compareTo(tombstone.key()) >= 0) {
-                    return Optional.empty();
-                }
-                previousIdentity = tombstone.key();
-                decoded.add(tombstone);
-            }
-            return Optional.of(List.copyOf(decoded));
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
     private static Optional<SettledServiceAuthority> persistedServiceAuthority(
             MiningServiceTask.RestoreMetadata metadata) {
         Identifier dimension = metadata == null ? null
@@ -6235,7 +5382,8 @@ public final class GoalExecutor {
                 .findFirst());
     }
 
-    private record ReplanSnapshot(int steps,
+    // Package-private: also constructed by GoalCheckpointCodec's decodeReplanSnapshot.
+    record ReplanSnapshot(int steps,
                                   int targetCount,
                                   int x,
                                   int y,
@@ -6266,7 +5414,8 @@ public final class GoalExecutor {
                                          int replans,
                                          int lastMatched,
                                          String fingerprint) {
-        private static PostconditionRepairCheckpoint legacy() {
+        // Package-private: also read by GoalCheckpointCodec's decodePostconditionRepairCheckpoint.
+        static PostconditionRepairCheckpoint legacy() {
             return new PostconditionRepairCheckpoint(false, 0, 0, "");
         }
     }
@@ -6275,7 +5424,8 @@ public final class GoalExecutor {
     record GoalBatchCheckpoint(boolean persisted,
                                int completedAtCheckpoint,
                                int stepLimit) {
-        private static GoalBatchCheckpoint legacy() {
+        // Package-private: also read by GoalCheckpointCodec's decodeBatchCheckpoint.
+        static GoalBatchCheckpoint legacy() {
             return new GoalBatchCheckpoint(false, 0,
                     DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT);
         }
