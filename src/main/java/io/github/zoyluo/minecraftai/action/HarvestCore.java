@@ -3,6 +3,8 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.CapabilityTally;
+import io.github.zoyluo.minecraftai.mode.CapabilityDecision;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
@@ -40,7 +42,8 @@ public final class HarvestCore {
     }
 
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Block targetBlock, int horizontalRadius, int down, int up) {
-        CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_block");
+        CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_block");
+        CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
         BlockPos origin = bot.getBlockPos();
         return firstWalkReachable(bot, origin,
                 BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
@@ -78,7 +81,8 @@ public final class HarvestCore {
                                                      int horizontalRadius, int down, int up,
                                                      Predicate<BlockPos> posFilter,
                                                      boolean allowObservableCellFallback) {
-        CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_blocks");
+        CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_blocks");
+        CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
         BlockPos origin = bot.getBlockPos();
         return firstWalkReachable(bot, origin,
                 BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
@@ -114,7 +118,9 @@ public final class HarvestCore {
     }
 
     public static boolean forcePickupNearbyAnyOf(AIPlayerEntity bot, Set<Item> items, double maxH, double maxV) {
-        if (!CapabilityRuntime.decide(bot, PrivilegedCapability.FORCED_PICKUP, "harvest_force_pickup").allowed()) {
+        CapabilityDecision pickupDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.FORCED_PICKUP, "harvest_force_pickup");
+        CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.FORCED_PICKUP, pickupDecision.allowed());
+        if (!pickupDecision.allowed()) {
             return false;
         }
         Box box = bot.getBoundingBox().expand(maxH, maxV, maxH);
