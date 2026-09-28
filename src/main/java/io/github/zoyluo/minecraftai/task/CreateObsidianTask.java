@@ -49,10 +49,7 @@ import java.util.function.Predicate;
  * fluid/block state or edits bucket inventory directly.</p>
  */
 public final class CreateObsidianTask extends AbstractTask implements CheckpointableTask {
-    private static final int CHECKPOINT_SCHEMA = 3;
-    private static final int PREVIOUS_CHECKPOINT_SCHEMA = 2;
-    private static final int LEGACY_CHECKPOINT_SCHEMA = 1;
-    private static final int SERVICE_INTERVAL = 8;
+    static final int SERVICE_INTERVAL = 8;
     private static final int BASE_MAX_ELAPSED = 24000;
     private static final int TICKS_PER_TARGET = 2400;
     private static final int NO_PROGRESS_LIMIT = 800;
@@ -64,7 +61,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private static final int PROTECTION_SPREAD_TICKS = 20;
     private static final int FLOW_DRAIN_TICKS = 60;
     private static final int PICKUP_LIMIT = 600;
-    private static final int PICKUP_GRACE_TICKS = 30;
+    static final int PICKUP_GRACE_TICKS = 30;
     private static final int PICKUP_MICROSTEP_RANGE = 3;
     private static final int SEARCH_BASE_LEG = 12;
     private static final int SEARCH_SCAN_STRIDE = 4;
@@ -2255,28 +2252,6 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         Map<String, String> encoded = live.encode();
         return ObsidianCheckpoint.decode(encoded, targetCount, maxElapsed).isPresent()
                 ? encoded : Map.of();
-    }
-
-    private static String encodeCheckpointPos(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private static Optional<BlockPos> decodeCheckpointPos(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            String[] parts = value.split(",");
-            if (parts.length != 3) {
-                return Optional.empty();
-            }
-            return Optional.of(new BlockPos(
-                    Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]),
-                    Integer.parseInt(parts[2])));
-        } catch (NumberFormatException ignored) {
-            return Optional.empty();
-        }
     }
 
     static boolean needsMorePools(int target, int collected) {

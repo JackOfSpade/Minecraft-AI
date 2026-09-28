@@ -51,16 +51,13 @@ record ObsidianCheckpoint(int targetCount,
                           BlockPos activeBreakPos,
                           int activeBreakInventoryBaseline,
                           UUID auditSessionToken) {
-    // Mirrors CreateObsidianTask's own CHECKPOINT_SCHEMA/PREVIOUS_CHECKPOINT_SCHEMA/
-    // LEGACY_CHECKPOINT_SCHEMA/SERVICE_INTERVAL/PICKUP_GRACE_TICKS. Duplicated rather than shared
-    // because CreateObsidianTask still needs its own copies outside this checkpoint (e.g. the live
-    // pickup-grace and service-boundary bookkeeping); a later package consolidates this
-    // duplication (obsidianwater-refactor-004 orchestrator note).
     private static final int CHECKPOINT_SCHEMA = 3;
     private static final int PREVIOUS_CHECKPOINT_SCHEMA = 2;
     private static final int LEGACY_CHECKPOINT_SCHEMA = 1;
-    private static final int SERVICE_INTERVAL = 8;
-    private static final int PICKUP_GRACE_TICKS = 30;
+    // The live mission's own pacing, shared with CreateObsidianTask so the decoder's shape checks can
+    // never drift from what a running task actually produces.
+    private static final int SERVICE_INTERVAL = CreateObsidianTask.SERVICE_INTERVAL;
+    private static final int PICKUP_GRACE_TICKS = CreateObsidianTask.PICKUP_GRACE_TICKS;
 
     ObsidianCheckpoint {
         scanResumeFace = immutable(scanResumeFace);
@@ -347,8 +344,6 @@ record ObsidianCheckpoint(int targetCount,
         return pos == null ? null : pos.toImmutable();
     }
 
-    // Duplicated from CreateObsidianTask (encodeCheckpointPos/decodeCheckpointPos): see the
-    // schema-constant duplication note above; a later package consolidates this too.
     private static String encodeCheckpointPos(BlockPos pos) {
         return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
