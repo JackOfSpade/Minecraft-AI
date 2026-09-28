@@ -6,18 +6,27 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.log.CapabilityTally;
+import io.github.zoyluo.minecraftai.log.GatherConsistency;
+import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.stat.Stats;
 import net.minecraft.util.math.BlockPos;
+import org.slf4j.event.Level;
 
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 public final class GatherQuotaTask extends AbstractTask {
@@ -143,6 +152,19 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos gotoStuckPos; // R1: last coordinate recorded by GOTO (used to detect an airborne/deadlocked bot that hasn't moved in a long time)
     private int gotoStuckTick;
 
+    // Auditable gather logging (docs/LOGGING.md "Auditing a gather"): observation-only counters
+    // and state feeding gather_unit/gather_summary, so a player's "did the bot really gather
+    // that?" question can be answered from the log instead of taken on faith. None of these
+    // influence phase/progress/counting semantics above.
+    private final Map<Item, Integer> lastLoggedItemCounts = new HashMap<>();
+    private int breaksCount;          // Blocks of the gathered family this task itself broke
+    private int pickupsCount;         // Successful confirmPickup() calls (physical pickups confirmed)
+    private int pickupMissesTotal;    // Cumulative count of gather_pickup_miss events (pickupMisses above resets on success)
+    private int unattributedGains;    // Sum of gather_unit deltas not attributable to this task's own break
+    private int gainedTotal;          // Sum of every gather_unit delta (pickup + unattributed)
+    private boolean summaryLogged;    // Guards gather_summary to exactly one line per task run
+    private AIPlayerEntity currentTickBot; // Set at the top of onTick; lets complete()/fail() (which take no bot) still log
+
     public GatherQuotaTask(Item targetItem, int targetCount) {
         this(targetItem, targetCount, false, null, "", "", false);
     }
@@ -228,6 +250,17 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupOrigin = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
+        breaksCount = 0;
+        pickupsCount = 0;
+        pickupMissesTotal = 0;
+        unattributedGains = 0;
+        gainedTotal = 0;
+        summaryLogged = false;
+        lastLoggedItemCounts.clear();
+        if (!countBrokenBlocks) {
+            lastLoggedItemCounts.putAll(currentAcceptedCounts(bot));
+        }
+        CapabilityTally.INSTANCE.reset(bot.getUuid());
     }
 
     @Override
@@ -274,11 +307,15 @@ public final class GatherQuotaTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
+        currentTickBot = bot; // complete()/fail() take no bot param; see the field's javadoc
         // Working memory: record the path traveled (4-block debounce); roam waypoint selection
         // avoids already-searched areas (no more blindly circling).
         EpisodeMemory.INSTANCE.recordTrail(bot.getUuid(), countBrokenBlocks ? name() : "gather", bot.getBlockPos());
         if (!countBrokenBlocks) {
             refreshCountSoFar(bot);
+            // Any gain not claimed by confirmPickup's own "pickup" detection (below, later this
+            // same tick or a previous one) is unattributed -- e.g. a player handed the bot an item.
+            logGatherUnitGains(bot, "unattributed", null);
         }
         if (countSoFar >= targetCount) {
             bot.getActionPack().stopAll();
@@ -1014,6 +1051,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 recordBrokenBlock(bot);
                 return;
             }
+            breaksCount++; // Auditable gather logging: this task's own break (see gather_summary)
             invalidateConsumedResource(bot);
             bot.getActionPack().stopAll(); // Stop and stand still after felling it — don't let movement momentum carry the bot away from the drop (observed drifting away from the tree's position after chopping and then failing to pick up the drop)
             pickupTicks = probabilisticDrop ? 30 : 120; // Probabilistic-drop resources (seeds/berries) drop right at the bot's feet and are picked up quickly, so wait less
@@ -1055,6 +1093,7 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         countSoFar++;
+        breaksCount++; // Auditable gather logging: exact-break mode counts breaks 1:1 with countSoFar (see gather_summary)
         BotLog.action(bot, "exact_block_broken",
                 "task", name(), "block", exactBreakTargetLabel,
                 "count", countSoFar + "/" + targetCount,
@@ -1147,6 +1186,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 // "countSoFar>0" restriction — observed that in a sparse-tree area, failing to
                 // pick up the very first tree's drop → countSoFar=0 → immediate fail → the brain
                 // replans the same plan → a 19-minute infinite loop that got the bot killed.
+                pickupMissesTotal++; // Auditable gather logging: cumulative tally for gather_summary
                 BotLog.action(bot, "gather_pickup_miss",
                         "have", countSoFar + "/" + targetCount,
                         "miss", pickupMisses,
@@ -1184,6 +1224,8 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         bot.getActionPack().stopAll();
         pickupMisses = 0;
+        pickupsCount++; // Auditable gather logging: one confirmed physical pickup (see gather_summary)
+        logGatherUnitGains(bot, "pickup", pickupOrigin);
         clearPickupLedger();
         if (countSoFar >= targetCount) {
             phase = Phase.DONE;
@@ -1383,5 +1425,135 @@ public final class GatherQuotaTask extends AbstractTask {
             return blockItem.getBlock();
         }
         return null;
+    }
+
+    // ---- Auditable gather logging (docs/LOGGING.md "Auditing a gather") ----------------------
+    // Everything below is observation only: it reads state already needed for progress tracking
+    // and never feeds back into phase/countSoFar/targetPos decisions.
+
+    /**
+     * Emits one gather_unit line per accepted item whose inventory count increased since the
+     * last time this task looked, then rebases the baseline to the new count. {@code source} is
+     * "pickup" when this call follows a confirmed physical pickup of a block this task broke
+     * ({@code attributedPos} is that block's position, included in the line), or "unattributed"
+     * otherwise (e.g. a player handed the bot an item mid-task). Does nothing beyond one
+     * enabled() check when the ACTION log category is off, so a quiet run pays for no extra
+     * inventory scanning.
+     */
+    private void logGatherUnitGains(AIPlayerEntity bot, String source, BlockPos attributedPos) {
+        if (!BotLogWriter.INSTANCE.enabled(LogCategory.ACTION, Level.INFO)) {
+            return;
+        }
+        boolean pickup = "pickup".equals(source);
+        Map<Item, Integer> current = currentAcceptedCounts(bot);
+        for (Item item : acceptItems) {
+            int now = current.getOrDefault(item, 0);
+            int previous = lastLoggedItemCounts.getOrDefault(item, 0);
+            lastLoggedItemCounts.put(item, now);
+            if (now <= previous) {
+                continue;
+            }
+            int delta = now - previous;
+            gainedTotal += delta;
+            if (pickup) {
+                BotLog.action(bot, "gather_unit",
+                        "item", Registries.ITEM.getId(item).toString(),
+                        "delta", delta,
+                        "total", countSoFar,
+                        "target", targetCount,
+                        "source", source,
+                        "pos", attributedPos == null ? "unknown" : attributedPos.toShortString());
+            } else {
+                unattributedGains += delta;
+                BotLog.action(bot, "gather_unit",
+                        "item", Registries.ITEM.getId(item).toString(),
+                        "delta", delta,
+                        "total", countSoFar,
+                        "target", targetCount,
+                        "source", source);
+            }
+        }
+    }
+
+    /** One inventory pass (main stacks + offhand), grouped by item, restricted to {@link #acceptItems}. */
+    private Map<Item, Integer> currentAcceptedCounts(AIPlayerEntity bot) {
+        Map<Item, Integer> counts = new HashMap<>();
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+            if (!stack.isEmpty() && acceptItems.contains(stack.getItem())) {
+                counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
+            }
+        }
+        ItemStack offhand = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offhand.isEmpty() && acceptItems.contains(offhand.getItem())) {
+            counts.merge(offhand.getItem(), offhand.getCount(), Integer::sum);
+        }
+        return counts;
+    }
+
+    /**
+     * The most this task's target family can drop from a single broken block without Fortune
+     * (strict_survival never grants it): 1 for ordinary 1:1 drops (logs, seeds-from-grass,
+     * cobblestone-from-stone), a conservative upper bound for melon/berry-bush multi-drops.
+     */
+    private int maxDropsPerBrokenBlock() {
+        if (harvestBlocks.contains(Blocks.MELON) || harvestBlocks.contains(Blocks.SWEET_BERRY_BUSH)) {
+            return 9;
+        }
+        return 1;
+    }
+
+    /**
+     * Exactly one gather_summary line whenever this task ends, for any reason (complete, fail,
+     * abort, cancel) -- see the {@link #complete()}/{@link #fail(String)}/{@link
+     * #onAbort(AIPlayerEntity)} overrides below. {@code bot} may be null in principle (those
+     * overrides run before any tick in no known path); logging is simply skipped rather than
+     * risking a null-bot inventory read.
+     */
+    private void logGatherSummary(AIPlayerEntity bot, String outcome) {
+        if (summaryLogged || bot == null) {
+            return;
+        }
+        summaryLogged = true;
+        String itemLabel = countBrokenBlocks ? exactBreakTargetLabel : Registries.ITEM.getId(targetItem).toString();
+        int baseline = countBrokenBlocks ? 0 : acceptedInventoryAtStart;
+        int finalCount = countBrokenBlocks ? countSoFar : countAccepted(bot);
+        CapabilityTally.Snapshot decisions = CapabilityTally.INSTANCE.snapshot(bot.getUuid());
+        boolean consistent = GatherConsistency.isConsistent(gainedTotal, breaksCount, maxDropsPerBrokenBlock(),
+                unattributedGains, decisions.forcedPickupsAllowed());
+        BotLog.action(bot, "gather_summary",
+                "item", itemLabel,
+                "target", targetCount,
+                "baseline", baseline,
+                "final", finalCount,
+                "gained", gainedTotal,
+                "breaks", breaksCount,
+                "pickups", pickupsCount,
+                "pickup_misses", pickupMissesTotal,
+                "unattributed_gains", unattributedGains,
+                "forced_pickups", decisions.forcedPickupsAllowed(),
+                "capability_denials", decisions.denied(),
+                "elapsed_ticks", elapsed,
+                "outcome", outcome,
+                "consistent", consistent);
+    }
+
+    @Override
+    protected void complete() {
+        logGatherSummary(currentTickBot, "complete");
+        super.complete();
+    }
+
+    @Override
+    protected void fail(String reason) {
+        logGatherSummary(currentTickBot, reason);
+        super.fail(reason);
+    }
+
+    @Override
+    protected void onAbort(AIPlayerEntity bot) {
+        // abort()/cancel() have already set state+failureReason by the time this runs: "aborted"
+        // for abort(), the given reason (or "") for cancel(reason).
+        logGatherSummary(bot, failureReason.isBlank() ? "cancelled" : failureReason);
+        super.onAbort(bot);
     }
 }
