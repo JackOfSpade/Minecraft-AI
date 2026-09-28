@@ -78,14 +78,7 @@ public final class GoalSnapshotCollector {
 
     private static Map<String, Integer> inventoryCounts(AIPlayerEntity bot) {
         Map<String, Integer> counts = new HashMap<>();
-        List<ItemStack> stacks = new ArrayList<>();
-        stacks.addAll(bot.getInventory().getMainStacks());
-        stacks.add(bot.getEquippedStack(EquipmentSlot.OFFHAND));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.HEAD));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.CHEST));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.LEGS));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.FEET));
-        for (ItemStack stack : stacks) {
+        for (ItemStack stack : allStacks(bot)) {
             if (!stack.isEmpty() && !nearlyBroken(stack)) {
                 counts.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
             }

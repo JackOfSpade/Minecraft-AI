@@ -10,6 +10,26 @@ import java.util.Optional;
 
 public final class RecipeRegistry {
     public record Ingredient(List<Item> anyOf, int count) {
+        /**
+         * Consumes up to {@code count} units of this ingredient from {@code counts} (mutated in
+         * place), taking greedily from each candidate item in {@link #anyOf()} order. Shared by
+         * CraftingHelper's atomic material planner and GoalPlanner's backward-chaining planner, so
+         * the ingredient-consumption primitive only has to be gotten right once.
+         */
+        public void consumeFrom(Map<Item, Integer> counts, int count) {
+            int remaining = count;
+            for (Item item : anyOf) {
+                if (remaining <= 0) {
+                    return;
+                }
+                int available = counts.getOrDefault(item, 0);
+                int take = Math.min(available, remaining);
+                if (take > 0) {
+                    counts.put(item, available - take);
+                    remaining -= take;
+                }
+            }
+        }
     }
 
     public record Recipe(Item output, int outputCount, List<Ingredient> ingredients, boolean needsCraftingTable) {

@@ -59,7 +59,6 @@ public final class GoalPlanner {
     // meat is only an intermediate item awaiting processing.
     private static final List<Item> RAW_MEAT_ITEMS = List.of(
             Items.BEEF, Items.PORKCHOP, Items.MUTTON, Items.CHICKEN, Items.RABBIT);
-    private static final int FOOD_TARGET = 4;
     /** Matches DescendToYTask's dark-shaft placement cadence. */
     private static final int DESCEND_TORCH_EVERY = 6;
     // Obsidian expedition provisioning is a hard gate before entering the water-acquisition/diamond
@@ -319,10 +318,6 @@ public final class GoalPlanner {
             result.add(step);
         }
         return result;
-    }
-
-    public static List<GoalStep> planSteps(AIPlayerEntity bot, Goal goal) {
-        return plan(bot, goal).steps();
     }
 
     private static Map<Item, Integer> inventoryCounts(AIPlayerEntity bot) {
@@ -1340,11 +1335,6 @@ public final class GoalPlanner {
             return Items.OAK_PLANKS;
         }
 
-        // Tier 4 food provisioning (best-effort): provision food alongside mining preparation, up to the default FOOD_TARGET cooked-food count.
-        private boolean ensureFood(int depth, Set<String> visiting) {
-            return ensureFoodTo(FOOD_TARGET, depth, visiting);
-        }
-
         private boolean ensureMiningFoodReserveTo(int surfaceTarget,
                                                   int depth,
                                                   Set<String> visiting) {
@@ -1390,8 +1380,8 @@ public final class GoalPlanner {
         }
 
         // Hunt-to-cook loop: gather target cooked food/bread items (high saturation, safe). Mining
-        // provisioning uses FOOD_TARGET; the casual "go hunting / go get something to eat" entry
-        // point (Goal.Food) uses a specified amount.
+        // provisioning uses per-mission targets derived from MiningBudget; the casual "go hunting /
+        // go get something to eat" entry point (Goal.Food) uses a specified amount.
         // When there are no animals/no furnace/no fuel, GoalExecutor skips the corresponding
         // best-effort step (see handleStepFailure) without blocking the main goal.
         /** Cooked units this plan already provisioned via hunt+cook (species unknown until the kill). */
@@ -2295,18 +2285,7 @@ public final class GoalPlanner {
         }
 
         private void consume(RecipeRegistry.Ingredient ingredient, int count) {
-            int remaining = count;
-            for (Item item : ingredient.anyOf()) {
-                if (remaining <= 0) {
-                    return;
-                }
-                int available = counts.getOrDefault(item, 0);
-                int take = Math.min(available, remaining);
-                if (take > 0) {
-                    counts.put(item, available - take);
-                    remaining -= take;
-                }
-            }
+            ingredient.consumeFrom(counts, count);
         }
 
         private void consumeItem(Item item, int count) {

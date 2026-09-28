@@ -262,18 +262,7 @@ public final class CraftingHelper {
         }
 
         private void consume(RecipeRegistry.Ingredient ingredient, int count) {
-            int remaining = count;
-            for (Item item : ingredient.anyOf()) {
-                if (remaining <= 0) {
-                    return;
-                }
-                int available = counts.getOrDefault(item, 0);
-                int take = Math.min(available, remaining);
-                if (take > 0) {
-                    counts.put(item, available - take);
-                    remaining -= take;
-                }
-            }
+            ingredient.consumeFrom(counts, count);
         }
 
         private int total(List<Item> items) {
