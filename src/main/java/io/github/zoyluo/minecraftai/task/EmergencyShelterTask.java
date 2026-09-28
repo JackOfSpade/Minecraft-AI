@@ -11,7 +11,6 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.Hand;
@@ -33,7 +32,6 @@ import java.util.OptionalInt;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public final class EmergencyShelterTask extends AbstractTask {
     /** Four optional foundations, eight side cells, one roof support and one center roof. */
@@ -58,43 +56,10 @@ public final class EmergencyShelterTask extends AbstractTask {
     private static final Direction[] HORIZONTAL = {
             Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST
     };
-    /**
-     * A new player instruction is allowed to cancel a shelter, but must not strand the bot inside
-     * a shell it just built.  The next follow task consumes this narrowly-scoped debt; it can only
-     * remove blocks whose exact state was placed by this shelter in the same dimension.
-     */
-    private static final Map<UUID, ExitDebt> ABANDONED_EXIT_DEBTS = new ConcurrentHashMap<>();
-    /**
-     * A completed shelter leaves a short-lived world artifact.  This registry is deliberately
-     * exact-state ownership rather than a geometric "tear down anything near the anchor" rule:
-     * cleanup may mine only a block state actually placed by one of our shelters.
-     */
-    private static final Map<UUID, ShelterCleanupDebt> PENDING_CLEANUPS = new ConcurrentHashMap<>();
-    private static final int CLEANUP_CLAIM_LEASE_TICKS = 100;
-    /**
-     * A cleanup debt is world-global (any idle bot in the same dimension may eventually claim it),
-     * but with no distance bound a bot on the far side of a large world would be scheduled a
-     * background chore for a shelter it has no practical reason to travel to. Bounding this also
-     * keeps unrelated, far-apart concurrent test fixtures from cross-contaminating each other.
-     */
-    private static final double CLEANUP_MAX_DISTANCE = 128.0D;
-    /**
-     * The largest @GameTest(maxTicks=...) value anywhere in src/gametest bounds how long a single
-     * GameTest structure can remain alive. registerCleanupDebt() is only ever called once per
-     * shelter, inside that structure's own lifetime, using the JVM-global server tick counter that
-     * every concurrently-scheduled GameTest batch shares. So while the registering test is still
-     * running, the age of its debt can never exceed that test's own maxTicks. A debt older than
-     * this, regardless of distance, is therefore unambiguously left behind by an already-finished,
-     * unrelated test and must be pruned outright -- this closes the one case that slips through
-     * CLEANUP_MAX_DISTANCE alone (two unrelated fixtures placed within 128 blocks of each other in
-     * a dense batch). This reasoning is specific to the GameTest harness (many short-lived
-     * structures sharing one world); a real server has no such "unrelated fixture" to leak from, so
-     * pruning by this age is gated to the gametest-only mod id below and never applies in production
-     * -- a legitimate shelter debt on a long-running server must stay claimable indefinitely.
-     */
-    private static final int CLEANUP_MAX_AGE_TICKS = 20_000;
-    private static final boolean AGE_PRUNING_ENABLED =
-            FabricLoader.getInstance().isModLoaded("minecraftai-gametest");
+    // The world-global exit-debt/cleanup-claim registry (maps, related constants, and the pure
+    // claim/registry static methods) lives in ShelterCleanupRegistry (shelterdig-refactor-1); this
+    // class keeps only ExitDebt/ShelterCleanupDebt themselves (their construction needs private
+    // access to this class's own state below) plus thin delegator methods for outside callers.
 
     private enum Phase {
         RETREAT_TO_SAFE_ANCHOR,
@@ -1615,200 +1580,55 @@ public final class EmergencyShelterTask extends AbstractTask {
         return null;
     }
 
+    // The following are thin delegators to ShelterCleanupRegistry (shelterdig-refactor-1): kept
+    // here, with identical signatures, purely so FollowTask/ShelterCleanupTask/DangerWatcher/
+    // RuntimeLifecycleCoordinator callers need no change.
     static Optional<ExitDebt> pendingExitDebt(AIPlayerEntity bot) {
-        return Optional.ofNullable(ABANDONED_EXIT_DEBTS.get(bot.getUuid()));
+        return ShelterCleanupRegistry.pendingExitDebt(bot);
     }
 
     static void clearExitDebt(AIPlayerEntity bot, ExitDebt debt) {
-        if (debt != null) {
-            ABANDONED_EXIT_DEBTS.remove(bot.getUuid(), debt);
-        }
+        ShelterCleanupRegistry.clearExitDebt(bot, debt);
     }
 
-    /**
-     * Called only after FollowTask has physically stepped through a cancelled shelter's owned
-     * doorway.  Before that point a cleanup worker could legally prove the blocks were ours yet
-     * still leave the cancelled bot boxed in, so an ExitDebt is intentionally not cleanup work.
-     */
     static void promoteExitDebtForCleanup(AIPlayerEntity bot, ExitDebt debt) {
-        if (debt == null || !debt.matchesDimension(bot)) {
-            return;
-        }
-        registerCleanupDebt(bot, debt.anchor(), debt.ownedPlacements);
+        ShelterCleanupRegistry.promoteExitDebtForCleanup(bot, debt);
     }
 
-    /** True when this world has at least one exact-state bot-owned shelter artifact to remove
-     *  within a reasonable travel distance of this bot, that this bot could actually claim right
-     *  now. This must mirror {@link #claimPendingCleanup}'s own eligibility exactly (including the
-     *  claim-lease check): a debt already leased to a different bot is not "pending" for this one.
-     *  Reporting true for a debt this bot cannot claim used to make DangerWatcher dispatch a
-     *  {@code ShelterCleanupTask} that immediately discovered nothing claimable and completed as a
-     *  no-op -- burning that bot's one scan-priority slot on housekeeping instead of falling through
-     *  to resume its own paused mission work in the same scan. */
     static boolean hasPendingCleanup(AIPlayerEntity bot) {
-        synchronized (PENDING_CLEANUPS) {
-            pruneInvalidCleanupDebts(bot);
-            int now = bot.getEntityWorld().getServer().getTicks();
-            return PENDING_CLEANUPS.values().stream()
-                    .anyMatch(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot)
-                            && debt.claimAvailableTo(bot.getUuid(), now));
-        }
+        return ShelterCleanupRegistry.hasPendingCleanup(bot);
     }
 
-    /**
-     * Claims the nearest eligible artifact in this dimension, within a reasonable travel distance.
-     * Claims are leased, not permanent, so an interrupted owner does not prevent a nearby idle bot
-     * from helping later.
-     */
     static Optional<ShelterCleanupDebt> claimPendingCleanup(AIPlayerEntity bot) {
-        synchronized (PENDING_CLEANUPS) {
-            pruneInvalidCleanupDebts(bot);
-            int now = bot.getEntityWorld().getServer().getTicks();
-            ShelterCleanupDebt selected = PENDING_CLEANUPS.values().stream()
-                    .filter(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot))
-                    .filter(debt -> debt.claimAvailableTo(bot.getUuid(), now))
-                    .min(Comparator.comparingDouble(debt ->
-                            debt.anchor().getSquaredDistance(bot.getBlockPos())))
-                    .orElse(null);
-            if (selected == null) {
-                return Optional.empty();
-            }
-            selected.claim(bot.getUuid(), now);
-            return Optional.of(selected);
-        }
+        return ShelterCleanupRegistry.claimPendingCleanup(bot);
     }
 
     static boolean renewCleanupClaim(AIPlayerEntity bot, ShelterCleanupDebt debt) {
-        if (debt == null) {
-            return false;
-        }
-        synchronized (PENDING_CLEANUPS) {
-            ShelterCleanupDebt current = PENDING_CLEANUPS.get(debt.id());
-            if (current != debt || !debt.matchesDimension(bot)
-                    || !debt.claimedBy(bot.getUuid())) {
-                return false;
-            }
-            debt.claim(bot.getUuid(), bot.getEntityWorld().getServer().getTicks());
-            return true;
-        }
+        return ShelterCleanupRegistry.renewCleanupClaim(bot, debt);
     }
 
-    /** Returns a still-owned block; mismatched/replaced blocks are discarded without mining. */
     static Optional<BlockPos> nextCleanupBlock(AIPlayerEntity bot,
                                                ShelterCleanupDebt debt,
                                                Set<BlockPos> excluded) {
-        if (debt == null) {
-            return Optional.empty();
-        }
-        synchronized (PENDING_CLEANUPS) {
-            ShelterCleanupDebt current = PENDING_CLEANUPS.get(debt.id());
-            if (current != debt || !debt.matchesDimension(bot)
-                    || !debt.claimedBy(bot.getUuid())) {
-                return Optional.empty();
-            }
-            debt.discardChangedBlocks(bot);
-            if (debt.remaining.isEmpty()) {
-                PENDING_CLEANUPS.remove(debt.id(), debt);
-                return Optional.empty();
-            }
-            return debt.remaining.keySet().stream()
-                    .filter(position -> excluded == null || !excluded.contains(position))
-                    .min(Comparator.comparingDouble(position ->
-                            bot.getEyePos().squaredDistanceTo(position.toCenterPos())))
-                    .map(BlockPos::toImmutable);
-        }
+        return ShelterCleanupRegistry.nextCleanupBlock(bot, debt, excluded);
     }
 
     static boolean ownsCleanupBlock(AIPlayerEntity bot,
                                     ShelterCleanupDebt debt,
                                     BlockPos position) {
-        if (debt == null || position == null) {
-            return false;
-        }
-        synchronized (PENDING_CLEANUPS) {
-            return ObservableWorldQuery.canObserveBlock(bot, position)
-                    && PENDING_CLEANUPS.get(debt.id()) == debt
-                    && debt.matchesDimension(bot)
-                    && debt.claimedBy(bot.getUuid())
-                    && debt.ownsCurrentPlacement(bot, position);
-        }
+        return ShelterCleanupRegistry.ownsCleanupBlock(bot, debt, position);
     }
 
-    /** Marks a block settled only after the world no longer equals its recorded owned state. */
     static void settleCleanupBlock(AIPlayerEntity bot, ShelterCleanupDebt debt, BlockPos position) {
-        if (debt == null || position == null) {
-            return;
-        }
-        synchronized (PENDING_CLEANUPS) {
-            ShelterCleanupDebt current = PENDING_CLEANUPS.get(debt.id());
-            if (current != debt || !debt.claimedBy(bot.getUuid())) {
-                return;
-            }
-            BlockState expected = debt.remaining.get(position);
-            if (expected != null
-                    && ObservableWorldQuery.canObserveBlock(bot, position)
-                    && !expected.equals(bot.getEntityWorld().getBlockState(position))) {
-                debt.remaining.remove(position);
-            }
-            debt.discardChangedBlocks(bot);
-            if (debt.remaining.isEmpty()) {
-                PENDING_CLEANUPS.remove(debt.id(), debt);
-            }
-        }
+        ShelterCleanupRegistry.settleCleanupBlock(bot, debt, position);
     }
 
     static void releaseCleanupClaim(AIPlayerEntity bot, ShelterCleanupDebt debt) {
-        if (debt == null) {
-            return;
-        }
-        synchronized (PENDING_CLEANUPS) {
-            if (PENDING_CLEANUPS.get(debt.id()) == debt && debt.claimedBy(bot.getUuid())) {
-                debt.release(bot.getUuid());
-            }
-        }
+        ShelterCleanupRegistry.releaseCleanupClaim(bot, debt);
     }
 
-    /**
-     * Explicit despawn (GameTest's end-of-test teardown, and the equivalent production command)
-     * permanently removes this bot: it will never return to finish or hand off its own shelter
-     * debt. In production the placed blocks are still real and worth leaving for another bot to
-     * claim, so this only runs under the GameTest harness ({@link #AGE_PRUNING_ENABLED}).
-     * There it closes a gap {@link #CLEANUP_MAX_AGE_TICKS} cannot: two unrelated fixtures placed
-     * close together in the same batch, tested back-to-back, produce a debt only moments old --
-     * far too young to be pruned by age -- yet within {@link #CLEANUP_MAX_DISTANCE} of the very
-     * next bot spawned. Forgetting it at despawn removes the leak at its source instead of relying
-     * on distance/age to reject it downstream, which is what let it slip into some other test's
-     * DangerWatcher scan as a phantom "shelter_cleanup" task.
-     */
     public static void forgetCleanupDebtsOwnedBy(AIPlayerEntity bot) {
-        if (!AGE_PRUNING_ENABLED) {
-            return;
-        }
-        UUID uuid = bot.getUuid();
-        synchronized (PENDING_CLEANUPS) {
-            PENDING_CLEANUPS.values().removeIf(debt -> debt.owner.equals(uuid));
-        }
-    }
-
-    private static void pruneInvalidCleanupDebts(AIPlayerEntity bot) {
-        int now = bot.getEntityWorld().getServer().getTicks();
-        for (Map.Entry<UUID, ShelterCleanupDebt> entry : PENDING_CLEANUPS.entrySet()) {
-            ShelterCleanupDebt debt = entry.getValue();
-            if (debt.isStale(now)) {
-                // Older than any single GameTest's own maxTicks budget: definitely a leaked
-                // artifact from an already-finished, unrelated test. Prune regardless of distance
-                // or dimension -- this is what the 128-block gate alone could not catch.
-                PENDING_CLEANUPS.remove(entry.getKey(), debt);
-                continue;
-            }
-            if (!debt.matchesDimension(bot)) {
-                continue;
-            }
-            debt.discardChangedBlocks(bot);
-            if (debt.remaining.isEmpty()) {
-                PENDING_CLEANUPS.remove(entry.getKey(), debt);
-            }
-        }
+        ShelterCleanupRegistry.forgetCleanupDebtsOwnedBy(bot);
     }
 
     private void registerOwnedCleanupDebt(AIPlayerEntity bot) {
@@ -1816,39 +1636,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             return;
         }
         cleanupDebtRegistered = true;
-        registerCleanupDebt(bot, shelterFeet, ownedPlacements);
-    }
-
-    private static void registerCleanupDebt(AIPlayerEntity bot,
-                                            BlockPos anchor,
-                                            Map<BlockPos, BlockState> placements) {
-        if (anchor == null || placements == null || placements.isEmpty()) {
-            return;
-        }
-        Map<BlockPos, BlockState> exactOwned = new LinkedHashMap<>();
-        for (Map.Entry<BlockPos, BlockState> entry : placements.entrySet()) {
-            BlockPos position = entry.getKey();
-            BlockState expected = entry.getValue();
-            if (position != null && expected != null
-                    && expected.equals(bot.getEntityWorld().getBlockState(position))) {
-                exactOwned.put(position.toImmutable(), expected);
-            }
-        }
-        if (exactOwned.isEmpty()) {
-            return;
-        }
-        ShelterCleanupDebt debt = new ShelterCleanupDebt(
-                UUID.randomUUID(),
-                bot.getUuid(),
-                bot.getEntityWorld().getRegistryKey().getValue().toString(),
-                anchor,
-                exactOwned,
-                bot.getEntityWorld().getServer().getTicks());
-        PENDING_CLEANUPS.put(debt.id(), debt);
-        BotLog.action(bot, "shelter_cleanup_registered",
-                "anchor", anchor,
-                "owned", exactOwned.size(),
-                "owner", bot.getGameProfile().name());
+        ShelterCleanupRegistry.registerCleanupDebt(bot, shelterFeet, ownedPlacements);
     }
 
     /**
@@ -1885,7 +1673,7 @@ public final class EmergencyShelterTask extends AbstractTask {
                 shelterFeet,
                 candidates,
                 currentOwned);
-        ABANDONED_EXIT_DEBTS.put(bot.getUuid(), debt);
+        ShelterCleanupRegistry.recordExitDebt(bot, debt);
         BotLog.action(bot, "shelter_exit_debt_handed_off",
                 "anchor", shelterFeet,
                 "owned", currentOwned.size(),
@@ -1992,9 +1780,14 @@ public final class EmergencyShelterTask extends AbstractTask {
         private final String dimension;
         private final BlockPos anchor;
         private final List<BlockPos> egressCandidates;
-        private final Map<BlockPos, BlockState> ownedPlacements;
+        // Package-private (not private): ShelterCleanupRegistry.promoteExitDebtForCleanup reads
+        // this directly to hand the exact-state placements off to a cleanup debt.
+        final Map<BlockPos, BlockState> ownedPlacements;
 
-        private ExitDebt(String dimension,
+        // Package-private (not private): only ShelterCleanupRegistry.recordExitDebt stores an
+        // ExitDebt now, but EmergencyShelterTask.preserveOwnedExitDebt still builds it here since
+        // constructing it needs no state beyond these plain arguments.
+        ExitDebt(String dimension,
                          BlockPos anchor,
                          List<BlockPos> egressCandidates,
                          Map<BlockPos, BlockState> ownedPlacements) {
@@ -2026,21 +1819,27 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     /**
-     * Mutable only while held under {@link #PENDING_CLEANUPS}; every entry is a recorded block
-     * state from a real placement.  `owner` is audit metadata, while any bot may hold a short
-     * cleanup lease once no hostile pressure remains.
+     * Mutable only while held under ShelterCleanupRegistry's PENDING_CLEANUPS; every entry is a
+     * recorded block state from a real placement.  `owner` is audit metadata, while any bot may
+     * hold a short cleanup lease once no hostile pressure remains.
      */
     static final class ShelterCleanupDebt {
         private final UUID id;
-        private final UUID owner;
+        // Package-private (not private): ShelterCleanupRegistry.forgetCleanupDebtsOwnedBy reads
+        // this directly to prune every debt a despawning bot owns.
+        final UUID owner;
         private final String dimension;
         private final BlockPos anchor;
-        private final Map<BlockPos, BlockState> remaining;
+        // Package-private (not private): ShelterCleanupRegistry's claim/prune/settle methods read
+        // and mutate this directly, the same way they already call discardChangedBlocks() etc.
+        final Map<BlockPos, BlockState> remaining;
         private final int registrationTick;
         private UUID claimant;
         private int claimTick;
 
-        private ShelterCleanupDebt(UUID id,
+        // Package-private (not private): only ShelterCleanupRegistry.registerCleanupDebt
+        // constructs a ShelterCleanupDebt now.
+        ShelterCleanupDebt(UUID id,
                                    UUID owner,
                                    String dimension,
                                    BlockPos anchor,
@@ -2068,19 +1867,21 @@ public final class EmergencyShelterTask extends AbstractTask {
 
         boolean isWithinReasonableRange(AIPlayerEntity bot) {
             return anchor.getSquaredDistance(bot.getBlockPos())
-                    <= CLEANUP_MAX_DISTANCE * CLEANUP_MAX_DISTANCE;
+                    <= ShelterCleanupRegistry.CLEANUP_MAX_DISTANCE
+                    * ShelterCleanupRegistry.CLEANUP_MAX_DISTANCE;
         }
 
         /** True once this debt is definitely older than any single GameTest can run, meaning the
          *  test that created it has already ended and this is a leaked cross-test artifact. Never
-         *  true outside the GameTest harness -- see {@link #AGE_PRUNING_ENABLED}. */
+         *  true outside the GameTest harness -- see {@link ShelterCleanupRegistry#AGE_PRUNING_ENABLED}. */
         boolean isStale(int now) {
-            return AGE_PRUNING_ENABLED && now - registrationTick > CLEANUP_MAX_AGE_TICKS;
+            return ShelterCleanupRegistry.AGE_PRUNING_ENABLED
+                    && now - registrationTick > ShelterCleanupRegistry.CLEANUP_MAX_AGE_TICKS;
         }
 
         boolean claimAvailableTo(UUID botId, int now) {
             return claimant == null || claimant.equals(botId)
-                    || now - claimTick > CLEANUP_CLAIM_LEASE_TICKS;
+                    || now - claimTick > ShelterCleanupRegistry.CLEANUP_CLAIM_LEASE_TICKS;
         }
 
         boolean claimedBy(UUID botId) {
