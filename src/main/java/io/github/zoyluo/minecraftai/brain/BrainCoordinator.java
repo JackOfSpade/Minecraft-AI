@@ -971,7 +971,10 @@ public final class BrainCoordinator {
                                 : conversation.lastToolRoundMissingRequiredAction
                                 ? "You did not start an in-world action. If the player asked only a question, call say "
                                 + "with purpose=answer. Otherwise call an appropriate action or goal tool now; a plan or "
-                                + "status say alone is not enough. For grass, call clear_grass with the requested count.\n\n"
+                                + "status say alone is not enough. For grass, call clear_grass with the requested count. "
+                                + "If part of the request cannot be done with your available tools, start the part(s) "
+                                + "that can be done now with an action or goal tool, and call say with purpose=answer "
+                                + "to plainly tell the player which part cannot be done and why.\n\n"
                                 : conversation.lastToolRoundFailureCount > 0
                                         ? "One or more tool calls just failed. Read every function result, correct the bad or "
                                         + "missing argument (or choose a valid alternative), and do not repeat the same invalid call. "
