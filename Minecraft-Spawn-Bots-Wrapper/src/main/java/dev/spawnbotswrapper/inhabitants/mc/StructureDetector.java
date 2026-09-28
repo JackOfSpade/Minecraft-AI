@@ -8,6 +8,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructureStart;
 import net.minecraft.world.chunk.WorldChunk;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.function.Consumer;
 
@@ -32,6 +34,10 @@ public final class StructureDetector {
     public static final int QUEUE_CAPACITY = 16384;
     /** How many recently handed-over structures are remembered to skip start chunks that reload. */
     public static final int RECENT_CAPACITY = 4096;
+    /** A callback body is a map lookup and a field read; anything above this is worth knowing about. */
+    private static final long SLOW_CALLBACK_WARN_NANOS = 5_000_000L;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(StructureDetector.class);
 
     private final SnapshotSource source;
     private final StepGuard guard;
@@ -56,14 +62,36 @@ public final class StructureDetector {
     }
 
     void onChunkLoad(ServerWorld world, WorldChunk chunk) {
-        if (!chunk.getStructureStarts().isEmpty()) {
-            queue.loaded(new ChunkRef(world, chunk));
-        }
+        long start = System.nanoTime();
+        guard.run("chunk load callback", () -> {
+            if (!chunk.getStructureStarts().isEmpty()) {
+                queue.loaded(new ChunkRef(world, chunk));
+            }
+        });
+        warnIfSlow("onChunkLoad", chunk, start);
     }
 
     void onChunkGenerate(ServerWorld world, WorldChunk chunk) {
-        if (!chunk.getStructureStarts().isEmpty()) {
-            queue.generated(new ChunkRef(world, chunk));
+        long start = System.nanoTime();
+        guard.run("chunk generate callback", () -> {
+            if (!chunk.getStructureStarts().isEmpty()) {
+                queue.generated(new ChunkRef(world, chunk));
+            }
+        });
+        warnIfSlow("onChunkGenerate", chunk, start);
+    }
+
+    /**
+     * These callbacks run inline in Mojang's own chunk-completion chain (see class doc), so a slow one
+     * doesn't just cost us time, it holds up whichever worker thread is finishing that chunk. Logged
+     * directly (not through {@link #guard}, which is for failures) so a stall shows up even though it
+     * isn't an exception.
+     */
+    private void warnIfSlow(String step, WorldChunk chunk, long startNanos) {
+        long elapsedNanos = System.nanoTime() - startNanos;
+        if (elapsedNanos > SLOW_CALLBACK_WARN_NANOS) {
+            LOGGER.warn("PvP BOT Inhabitants: {} took {} ms for chunk {}", step,
+                    elapsedNanos / 1_000_000.0, chunk.getPos());
         }
     }
 

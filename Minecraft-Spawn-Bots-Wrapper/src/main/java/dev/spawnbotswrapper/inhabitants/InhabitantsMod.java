@@ -5,8 +5,6 @@ import dev.spawnbotswrapper.inhabitants.command.InhabitantsCommand;
 import dev.spawnbotswrapper.inhabitants.config.ConfigIO;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
-import dev.spawnbotswrapper.inhabitants.mc.JoinHoldGate;
-import dev.spawnbotswrapper.inhabitants.mc.McClock;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
 import dev.spawnbotswrapper.inhabitants.mc.McTpsGateway;
 import dev.spawnbotswrapper.inhabitants.mc.ServerSession;
@@ -47,7 +45,6 @@ public final class InhabitantsMod implements ModInitializer {
 
     private ServerSession.Shared shared;
     private volatile ServerSession session;
-    private final JoinHoldGate joinHoldGate = new JoinHoldGate();
     private final McTpsGateway tps = new McTpsGateway();
 
     @Override
@@ -68,7 +65,6 @@ public final class InhabitantsMod implements ModInitializer {
             ServerSession current = session;
             return current == null ? null : current.services();
         });
-        joinHoldGate.register();
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
@@ -110,7 +106,6 @@ public final class InhabitantsMod implements ModInitializer {
 
     private void onServerStarted(MinecraftServer server) {
         session = new ServerSession(server, shared);
-        joinHoldGate.onServerStarted(McClock.of(server), shared.config().get().connection.joinHoldTicks);
         if (shared.config().get().hideLocatorBar) {
             shared.guard().run("hide locator bar", () ->
                     server.getOverworld().getGameRules().setValue(GameRules.LOCATOR_BAR, false, server));
@@ -126,7 +121,6 @@ public final class InhabitantsMod implements ModInitializer {
         if (current != null && current.server() == server) {
             shared.guard().run("server tick", current::tick);
         }
-        shared.guard().run("join hold gate tick", () -> joinHoldGate.onEndServerTick(shared.config().get().connection.joinHoldTicks));
     }
 
     private void onServerStopping(MinecraftServer server) {
@@ -141,7 +135,6 @@ public final class InhabitantsMod implements ModInitializer {
         if (current != null && current.server() == server) {
             session = null;
         }
-        joinHoldGate.onServerStopped();
         shared.detector().reset();
     }
 
