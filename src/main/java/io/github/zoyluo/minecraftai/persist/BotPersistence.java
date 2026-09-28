@@ -40,6 +40,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -52,6 +53,10 @@ public final class BotPersistence {
     private static final String RUNTIME_FILE = "runtime.json";
     private static final String LEGACY_BOTS_FILE = "bots.json";
     private static final String LEGACY_JOBS_FILE = "jobs.json";
+    /** Bound on {@link #saveAll} waiting for the single writer thread, so a slow/stuck disk cannot
+     *  hang the caller (the server thread, on the manual-save command, shutdown, and the legacy
+     *  migration path during server startup) indefinitely. */
+    private static final long SAVE_TIMEOUT_SECONDS = 30;
 
     private final ScheduledExecutorService writer = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "MinecraftAiPersistenceWriter");
@@ -88,7 +93,7 @@ public final class BotPersistence {
                 drainPendingWrites();
                 return writeSnapshot(runtimeFile(server), snapshot);
             });
-            lastSaveSucceeded = future.get();
+            lastSaveSucceeded = future.get(SAVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return lastSaveSucceeded ? snapshot.bots().size() : 0;
         } catch (InterruptedException exception) {
             lastSaveSucceeded = false;
@@ -98,6 +103,15 @@ public final class BotPersistence {
         } catch (ExecutionException | RejectedExecutionException exception) {
             lastSaveSucceeded = false;
             BotLog.error("runtime_persist_sync_failed", exception, "path", runtimeFile(server));
+            return 0;
+        } catch (TimeoutException exception) {
+            // Do not cancel the in-flight future: the writer thread keeps running in the background
+            // so the eventual on-disk state stays consistent; only the caller's wait is bounded, so a
+            // slow/stuck filesystem (network-mounted save dir, AV scan) cannot hang the server thread
+            // (this is the same class of startup hang this project has hit before with world-gen and
+            // login timeouts).
+            lastSaveSucceeded = false;
+            BotLog.error("runtime_persist_sync_timeout", exception, "path", runtimeFile(server));
             return 0;
         }
     }
