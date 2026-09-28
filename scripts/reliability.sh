@@ -5,13 +5,13 @@
 # Usage: nohup bash scripts/reliability.sh [feature] [runs_per_seed] [timeout_s] </dev/null >/tmp/reliability.out 2>&1 &
 set -u
 cd "$(dirname "$0")/.." || exit 1
+source scripts/lib/devloop.sh
 FEATURE="${1:-real_diamond3}"; RUNS="${2:-2}"; TIMEOUT="${3:-2200}"
 # SEEDS_OVERRIDE="s1 s2 ..." swaps the seed set (default is three seeds); STATE_FILE swaps the state file (use a separate file for random batch tests so it doesn't mix with existing data).
 if [ -n "${SEEDS_OVERRIDE:-}" ]; then read -r -a SEEDS <<< "$SEEDS_OVERRIDE"; else SEEDS=(20260610 3000 777); fi
 LOCK=/tmp/reliability.lock; STATE="${STATE_FILE:-reports/reliability_state.tsv}"
 mkdir -p reports
-mkdir "$LOCK" 2>/dev/null || { echo "[reliability] another instance running, exit."; exit 0; }
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+devloop_acquire_lock "$LOCK" reliability
 [ -f "$STATE" ] || printf "feature\tseed\trun\tresult\treason\tstage\tsummary\n" > "$STATE"
 classify_stage() {
   case "$1" in
@@ -43,7 +43,7 @@ run_one() {
   printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$FEATURE" "$seed" "$run" "$result" "$reason" "$stage" "$summary" >> "$STATE"
   echo "[reliability] $FEATURE#$seed#$run -> $result [$stage]: $reason"
 }
-command -v caffeinate >/dev/null && caffeinate -is -w $$ &
+devloop_keep_awake
 # Batch run of the same code across multiple seeds: do one clean compile first, then each run reuses it via SKIP_COMPILE (code is frozen, saving N-1 full recompiles).
 echo "[reliability] compiling once (clean) before batch ..."
 ./gradlew --stop >/dev/null 2>&1

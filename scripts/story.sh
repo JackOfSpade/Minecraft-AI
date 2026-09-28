@@ -10,6 +10,7 @@
 #   Detached run: nohup bash scripts/story.sh >/tmp/story.out 2>&1 &     (chat side only reads state)
 set -u
 cd "$(dirname "$0")/.." || exit 1
+source scripts/lib/devloop.sh
 
 if [ -z "${MINECRAFTAI_LLM_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
   echo "[story] requires MINECRAFTAI_LLM_API_KEY (or the old name DEEPSEEK_API_KEY; the real conversation layer goes through the API and incurs cost). See the script header for usage."
@@ -20,12 +21,15 @@ export WITH_LLM=1
 LOCK=/tmp/story.lock
 STATE=reports/story_state.tsv
 mkdir -p reports
-mkdir "$LOCK" 2>/dev/null || { echo "[story] another instance running, exit."; exit 0; }
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+devloop_acquire_lock "$LOCK" story
 [ -f "$STATE" ] || printf "story\tseed\tresult\tsummary\n" > "$STATE"
 
 # Story set: covers the four facets of the vision (movement/foraging/mining/deep-ore mining). Pass an argument to run only specific stories.
-STORIES=("${@:-llm_move llm_food llm_iron llm_diamond}")
+if [ $# -eq 0 ]; then
+  STORIES=(llm_move llm_food llm_iron llm_diamond)
+else
+  STORIES=("$@")
+fi
 # Multiple seeds on real terrain (nether-like terrain / plains) -- the same story must complete alive across terrains to count as truly robust.
 SEEDS=(20260610 3000)
 
@@ -45,8 +49,8 @@ run_story() {
   echo "[story] $story@$seed -> $result"
 }
 
-command -v caffeinate >/dev/null && caffeinate -is -w $$ &
-for story in ${STORIES[@]}; do
+devloop_keep_awake
+for story in "${STORIES[@]}"; do
   for seed in "${SEEDS[@]}"; do
     run_story "$story" "$seed"
   done

@@ -7,16 +7,12 @@
 # Usage: nohup bash scripts/auto30.sh </dev/null >/tmp/auto30.out 2>&1 &   (the chat side only reads the state file)
 set -u
 cd "$(dirname "$0")/.." || exit 1
+source scripts/lib/devloop.sh
 
 LOCK=/tmp/auto30.lock
 STATE=reports/auto30_state.tsv
 mkdir -p reports
-# Atomic lock: mkdir failure = another instance is already running, exit immediately (idempotent, a duplicate launch is harmless, no mutual killing)
-if ! mkdir "$LOCK" 2>/dev/null; then
-  echo "[auto30] another instance running (lock $LOCK), exit."
-  exit 0
-fi
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+devloop_acquire_lock "$LOCK" auto30
 [ -f "$STATE" ] || printf "round\tfeature\tresult\tsummary\n" > "$STATE"
 
 # Round table: label | feature param | timeout seconds | seed (empty = current world)
@@ -69,7 +65,7 @@ run_one() {
 }
 
 # caffeinate prevents sleep (built-in, harmless if it fails); the whole run is serial
-command -v caffeinate >/dev/null && caffeinate -is -w $$ &
+devloop_keep_awake
 for entry in "${ROUNDS[@]}"; do
   IFS='|' read -r label feature timeout seed <<< "$entry"
   run_one "$label" "$feature" "$timeout" "$seed"
