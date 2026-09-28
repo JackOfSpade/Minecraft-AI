@@ -106,6 +106,50 @@ class PoiNoticeTest {
         assertTrue(rendered.length() <= PoiNotice.MAX_LENGTH);
     }
 
+    // ---- renderStop: descending > mandatory > standard, plus the restart prefix -----------------------
+
+    @Test
+    void renderStopPicksDigDownDescendWheneverDescendingRegardlessOfMandatory() {
+        assertEquals(PoiNotice.renderDigDownDescend("mineshaft", SITE_EAST, BOT_POS),
+                PoiNotice.renderStop(true, true, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
+        assertEquals(PoiNotice.renderDigDownDescend("mineshaft", SITE_EAST, BOT_POS),
+                PoiNotice.renderStop(true, false, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
+    }
+
+    @Test
+    void renderStopPicksMandatoryWhenNotDescendingAndMandatory() {
+        assertEquals(PoiNotice.renderMandatory(SITE_EAST, BOT_POS),
+                PoiNotice.renderStop(false, true, "mineshaft", SITE_EAST, BOT_POS, null, null));
+    }
+
+    @Test
+    void renderStopPicksStandardWhenNeitherDescendingNorMandatory() {
+        assertEquals(PoiNotice.renderStandard("mineshaft", SITE_EAST, BOT_POS, "(auto-detected)"),
+                PoiNotice.renderStop(false, false, "mineshaft", SITE_EAST, BOT_POS, "(auto-detected)", null));
+    }
+
+    @Test
+    void renderStopPrependsANonNullRestartPrefixToWhicheverTemplateWasChosen() {
+        String base = PoiNotice.renderStandard("mineshaft", SITE_EAST, BOT_POS, null);
+        assertEquals("Still paused: " + base,
+                PoiNotice.renderStop(false, false, "mineshaft", SITE_EAST, BOT_POS, null, "Still paused: "));
+    }
+
+    // ---- renderLateCheck ------------------------------------------------------------------------------
+
+    @Test
+    void renderLateCheckProducesTheExactTemplate() {
+        assertEquals("Late check: that looked like mineshaft at 10 70 0; I kept mining, say pause if you want to look",
+                PoiNotice.renderLateCheck("mineshaft", SITE_EAST));
+    }
+
+    // ---- anchorStr --------------------------------------------------------------------------------------
+
+    @Test
+    void anchorStrJoinsCoordinatesWithCommas() {
+        assertEquals("10,70,0", PoiNotice.anchorStr(SITE_EAST));
+    }
+
     // ---- compassDirection: all 8 sectors, Minecraft axes (north = -z, east = +x) -----------------------
 
     @Test

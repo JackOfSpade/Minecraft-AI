@@ -17,7 +17,6 @@ import io.github.zoyluo.minecraftai.mining.assist.PoiCache;
 import io.github.zoyluo.minecraftai.mining.assist.PoiConsultBudget;
 import io.github.zoyluo.minecraftai.mining.assist.PoiDecisionPolicy;
 import io.github.zoyluo.minecraftai.mining.assist.PoiDetector;
-import io.github.zoyluo.minecraftai.mining.assist.PoiEvidenceWindow;
 import io.github.zoyluo.minecraftai.mining.assist.PoiNotice;
 import io.github.zoyluo.minecraftai.mining.assist.PoiPrompt;
 import io.github.zoyluo.minecraftai.mining.assist.PoiRegistry;
@@ -27,18 +26,14 @@ import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.DetourSafetyGate;
 import io.github.zoyluo.minecraftai.task.DigDownTask;
-import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -92,10 +87,12 @@ public final class PoiCoordinator {
     private static final int MAX_CERTAIN_NOTIFY_AFTER_CAP = 3;
     /** Design 6.5's "else deadline = now + 300" (no hold: DigDown descent, or a hold that could not start). */
     private static final int NO_HOLD_DEADLINE_TICKS = 300;
-    /** Design 6.6: at most this many nearest same-dimension prior sites go into the LLM payload. */
-    private static final int MAX_PRIOR_POIS_IN_PAYLOAD = 3;
-    /** Design 6.6: at most this many evidence lines go into the LLM payload. */
-    private static final int MAX_EVIDENCE_ITEMS_IN_PAYLOAD = 8;
+    /** Design 6.6: at most this many nearest same-dimension prior sites go into the LLM payload.
+     * Package-private: also read by {@link PoiPayloadBuilder#priorPoisFor}. */
+    static final int MAX_PRIOR_POIS_IN_PAYLOAD = 3;
+    /** Design 6.6: at most this many evidence lines go into the LLM payload.
+     * Package-private: also read by {@link PoiPayloadBuilder#buildPayloadInput}. */
+    static final int MAX_EVIDENCE_ITEMS_IN_PAYLOAD = 8;
 
     // This coordinator is ONE shared instance across every bot on the server, unlike OreDigTask's
     // DetourHostImpl (a private inner instance per bot/task) whose single `lastLedgerKey` field
@@ -171,9 +168,9 @@ public final class PoiCoordinator {
                 return;
             }
             String label = marker.get().getKey().substring(HOLD_PLACE_PREFIX.length());
-            // No BotMemory fact records which Source produced the hold (design 2.4/6.4). noticeText only
-            // branches on MANDATORY vs not, and WARDEN_RISK_LABEL is the one label PoiDetector ever hands a
-            // MANDATORY candidate (never any other band), so it alone is enough to pick the right template;
+            // No BotMemory fact records which Source produced the hold (design 2.4/6.4). PoiNotice.renderStop
+            // only branches on MANDATORY vs not, and WARDEN_RISK_LABEL is the one label PoiDetector ever hands
+            // a MANDATORY candidate (never any other band), so it alone is enough to pick the right template;
             // any non-mandatory guess is equivalent to any other for that branch.
             String source = label.equals(WARDEN_RISK_LABEL) ? Source.MANDATORY.name() : Source.FALLBACK.name();
             BotMemory.Place place = marker.get().getValue();
@@ -188,8 +185,8 @@ public final class PoiCoordinator {
                 boolean descending = TaskManager.INSTANCE.peekPaused(bot)
                         .map(task -> task instanceof DigDownTask digDownTask && digDownTask.isDescending())
                         .orElse(false);
-                String text = noticeText(descending, Source.valueOf(open.source()), open.label(), open.anchor(),
-                        bot.getBlockPos(), null, "Still paused: ");
+                String text = PoiNotice.renderStop(descending, Source.valueOf(open.source()) == Source.MANDATORY,
+                        open.label(), open.anchor(), bot.getBlockPos(), null, "Still paused: ");
                 sendNotice(bot, bot.getEntityWorld(), text);
                 BotLog.task(bot, "poi_restart_rehydrated", "label", label, "source", source);
             }
@@ -261,7 +258,7 @@ public final class PoiCoordinator {
             return;
         }
 
-        List<String> topIds = evidenceIdsFor(state, MAX_EVIDENCE_ITEMS_IN_PAYLOAD);
+        List<String> topIds = PoiPayloadBuilder.evidenceIdsFor(state, MAX_EVIDENCE_ITEMS_IN_PAYLOAD);
         String cacheKey = PoiCache.keyFor(candidate.dim(), candidate.anchor().getX(), candidate.anchor().getY(),
                 candidate.anchor().getZ(), topIds);
         PoiCache.Entry cached = PoiCache.get(cacheKey, serverTick);
@@ -291,7 +288,7 @@ public final class PoiCoordinator {
                     PoiRegistry.State.DECLINED, candidate.structureScore(), serverTick);
             ledger.notePoiFyi();
             sendNotice(bot, world, PoiNotice.renderFyi(candidate.label(), candidate.anchor(), bot.getBlockPos()));
-            BotLog.task(bot, "poi_fyi", "label", candidate.label(), "pos", anchorStr(candidate.anchor()));
+            BotLog.task(bot, "poi_fyi", "label", candidate.label(), "pos", PoiNotice.anchorStr(candidate.anchor()));
         }
     }
 
@@ -381,7 +378,8 @@ public final class PoiCoordinator {
                 "cavern_only", cavernOnly, "deadline_tick", deadlineTick);
 
         String systemPromptText = PoiPrompt.systemPrompt();
-        String payload = PoiPrompt.userPayload(buildPayloadInput(bot, state, result, candidate, cavernOnly));
+        String payload = PoiPrompt.userPayload(
+                PoiPayloadBuilder.buildPayloadInput(bot, state, result, candidate.dim(), candidate.anchor(), cavernOnly));
         PoiAdvisor.INSTANCE.consult(bot, systemPromptText, payload,
                 verdict -> onAdvisorVerdict(bot, caseId, verdict),
                 reason -> onAdvisorFailure(bot, caseId, reason));
@@ -509,7 +507,7 @@ public final class PoiCoordinator {
             if (stop) {
                 PoiRegistry.record(id, candidate.dim(), candidate.anchor(), label, PoiRegistry.State.STOPPED,
                         candidate.structureScore(), serverTick);
-                sendNotice(bot, world, lateCheckText(label, candidate.anchor()));
+                sendNotice(bot, world, PoiNotice.renderLateCheck(label, candidate.anchor()));
                 BotLog.task(bot, "poi_late_check", "label", label, "decision", "stop", "trigger", trigger);
             } else {
                 PoiRegistry.record(id, candidate.dim(), candidate.anchor(), label, PoiRegistry.State.DECLINED,
@@ -538,97 +536,6 @@ public final class PoiCoordinator {
         TaskManager.INSTANCE.resumeUserIntent(bot, why);
         BotMemory mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
         mem.forgetPlace(HOLD_PLACE_PREFIX + label);
-    }
-
-    /** Design 6.6's "Late check" line, for a verdict (real, cached, or fallback) that arrives after the
-     * player already acted during the hold. Not a {@code PoiNotice} template (P3 does not modify that P2
-     * file; see design 8.1's file table for this phase): short enough that its own truncation is unneeded. */
-    private static String lateCheckText(String label, BlockPos anchor) {
-        return "Late check: that looked like " + label + " at " + anchor.getX() + " " + anchor.getY() + " "
-                + anchor.getZ() + "; I kept mining, say pause if you want to look";
-    }
-
-    /** Design 6.6's user payload input, gathered from {@code result}/{@code state}/{@code PoiRegistry} --
-     * see {@code mining.assist.PoiPrompt}'s class javadoc for the one documented adaptation (bucket names in
-     * place of raw block ids; a single aggregate entity line; {@code max_free_up} unavailable). */
-    private static PoiPrompt.PayloadInput buildPayloadInput(AIPlayerEntity bot, MiningAssistState state,
-                                                             PoiDetector.Result result, Candidate candidate,
-                                                             boolean cavernOnly) {
-        PoiScorer.PoiScore score = result.score();
-        String activity = TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse("unknown");
-        String candidateClass = score.habitationLike() ? "habitation_like" : cavernOnly ? "cavern_only" : "structure";
-        List<PoiPrompt.EvidenceItem> evidence = evidenceItemsFor(state, MAX_EVIDENCE_ITEMS_IN_PAYLOAD);
-        List<PoiPrompt.EntityItem> entities = result.entitiesCounted() > 0
-                ? List.of(new PoiPrompt.EntityItem("observed_entity", result.entitiesCounted()))
-                : List.of();
-        return new PoiPrompt.PayloadInput(
-                candidate.dim(), candidate.anchor().getY(), activity,
-                MiningAssistRuntime.config().poi().useOwnBiome() && result.biome() != null && !result.biome().isEmpty()
-                        ? result.biome() : null,
-                score.t(), score.s(), score.c(), candidateClass,
-                evidence, entities,
-                score.c(), -1.0D, score.c(),
-                nearestEvidenceDistance(bot, state),
-                priorPoisFor(bot.getUuid(), candidate.dim(), candidate.anchor()));
-    }
-
-    /** Evidence lines for the payload: {@link PoiEvidenceWindow}'s structural (non-natural) cells grouped by
-     * {@link io.github.zoyluo.minecraftai.mining.assist.PoiBucket} name, most-populous first. */
-    private static List<PoiPrompt.EvidenceItem> evidenceItemsFor(MiningAssistState state, int limit) {
-        Map<String, Integer> counts = new HashMap<>();
-        for (PoiEvidenceWindow.Entry entry : state.poiWindow().structuralEntries()) {
-            counts.merge(entry.bucket().name().toLowerCase(Locale.ROOT), 1, Integer::sum);
-        }
-        List<PoiPrompt.EvidenceItem> items = new ArrayList<>();
-        counts.forEach((block, n) -> items.add(new PoiPrompt.EvidenceItem(block, n)));
-        items.sort((a, b) -> Integer.compare(b.cells(), a.cells()));
-        return items.size() <= limit ? items : items.subList(0, limit);
-    }
-
-    /** Just the ids of {@link #evidenceItemsFor}, for {@link PoiCache#keyFor}. */
-    private static List<String> evidenceIdsFor(MiningAssistState state, int limit) {
-        List<String> ids = new ArrayList<>();
-        for (PoiPrompt.EvidenceItem item : evidenceItemsFor(state, limit)) {
-            ids.add(item.block());
-        }
-        return ids;
-    }
-
-    /** Euclidean distance from the bot's eyes to the nearest evidence cell in {@code state}'s POI window,
-     * cell-centre to eye-position; 0 when the window is empty. */
-    private static double nearestEvidenceDistance(AIPlayerEntity bot, MiningAssistState state) {
-        Vec3d eye = bot.getEyePos();
-        double best = Double.POSITIVE_INFINITY;
-        for (PoiEvidenceWindow.Entry entry : state.poiWindow().structuralEntries()) {
-            BlockPos pos = entry.pos();
-            double dx = pos.getX() + 0.5D - eye.x;
-            double dy = pos.getY() + 0.5D - eye.y;
-            double dz = pos.getZ() + 0.5D - eye.z;
-            double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            if (d < best) {
-                best = d;
-            }
-        }
-        return Double.isInfinite(best) ? 0.0D : best;
-    }
-
-    /** Up to {@link #MAX_PRIOR_POIS_IN_PAYLOAD} nearest same-dimension prior sites (newest-recorded first,
-     * per {@link PoiRegistry#snapshot}), skipping a still-open CONSULTING entry (design's example only shows
-     * a resolved decision). */
-    private static List<PoiPrompt.PriorPoi> priorPoisFor(UUID botId, String dim, BlockPos anchor) {
-        List<PoiPrompt.PriorPoi> result = new ArrayList<>();
-        for (PoiRegistry.Entry entry : PoiRegistry.snapshot(botId)) {
-            if (result.size() >= MAX_PRIOR_POIS_IN_PAYLOAD) {
-                break;
-            }
-            if (entry.state() == PoiRegistry.State.CONSULTING || !entry.dimensionKey().equals(dim)) {
-                continue;
-            }
-            double dist = Math.sqrt(entry.anchor().getSquaredDistance(anchor));
-            String decision = entry.state() == PoiRegistry.State.STOPPED ? "stop" : "decline";
-            result.add(new PoiPrompt.PriorPoi(entry.label(), dist, decision));
-        }
-        return result;
     }
 
     /** Design 6.8 "Multi-bot routing": true while a POI stop is open for this bot and the player has not yet resumed. */
@@ -694,9 +601,10 @@ public final class PoiCoordinator {
         mem.markPlace("poi_" + slot + "_" + label, world, anchor);
         mem.markPlace(HOLD_PLACE_PREFIX + label, world, anchor);
         PoiRegistry.openCase(id, new PoiRegistry.OpenCase(label, source.name(), dim, anchor));
-        String text = noticeText(descending, source, label, anchor, bot.getBlockPos(), autoDetectedNote, null);
+        String text = PoiNotice.renderStop(descending, source == Source.MANDATORY, label, anchor,
+                bot.getBlockPos(), autoDetectedNote, null);
         sendNotice(bot, world, text);
-        BotLog.task(bot, "poi_stop", "label", label, "source", source, "pos", anchorStr(anchor),
+        BotLog.task(bot, "poi_stop", "label", label, "source", source, "pos", PoiNotice.anchorStr(anchor),
                 "ledger_key", ledgerKeyFor(bot));
     }
 
@@ -718,22 +626,6 @@ public final class PoiCoordinator {
         PoiRegistry.record(bot.getUuid(), dim, anchor, label, PoiRegistry.State.DECLINED, structureScore, serverTick);
         sendNotice(bot, world, PoiNotice.renderFyi(label, anchor, bot.getBlockPos()));
         BotLog.task(bot, "poi_certain_notify_after_cap", "label", label);
-    }
-
-    /**
-     * Design 6.1's per-task-class notice variant, pure text selection: when {@code descending} (the task's
-     * DigDown DESCEND phase at whatever moment the caller captured it — see {@code stopNow}'s and
-     * {@code tick}'s own comments on why that moment matters), every stop (mandatory, certain, or fallback)
-     * uses the climb-out wording instead of the standard/mandatory template, regardless of source.
-     */
-    private static String noticeText(boolean descending, Source source, String label, BlockPos anchor,
-                                     BlockPos botPos, String autoDetectedNote, String restartPrefix) {
-        String base = descending
-                ? PoiNotice.renderDigDownDescend(label, anchor, botPos)
-                : source == Source.MANDATORY
-                        ? PoiNotice.renderMandatory(anchor, botPos)
-                        : PoiNotice.renderStandard(label, anchor, botPos, autoDetectedNote);
-        return restartPrefix == null ? base : restartPrefix + base;
     }
 
     /** Panel chat plus, per {@code poi.noticeRecipients}, either every online player or only an authorized one. */
@@ -764,10 +656,6 @@ public final class PoiCoordinator {
             return key;
         }
         return lastLedgerKeyByBot.getOrDefault(id, MissionAssistLedger.keyFor(id, null, null));
-    }
-
-    private static String anchorStr(BlockPos pos) {
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     /**

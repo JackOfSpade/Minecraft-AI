@@ -81,7 +81,7 @@ public final class PoiNotice {
      * (ancient city / deep dark) at <x> <y> <z> (~<n> blocks <dir>). I will not go further on my own.
      * Say "continue" to override or "cancel" to redirect me.} Used only off a descending DigDown; every
      * other task class routes a mandatory stop through {@link #renderStandard} territory via the
-     * caller's own template choice (see {@code PoiCoordinator.noticeText}).
+     * caller's own template choice (see {@link #renderStop}).
      */
     public static String renderMandatory(BlockPos site, BlockPos botPos) {
         Objects.requireNonNull(site, "site");
@@ -89,6 +89,37 @@ public final class PoiNotice {
         return "Stopped: warden risk (ancient city / deep dark) at " + coords(site) + " (~"
                 + horizontalDistance(botPos, site) + " blocks " + compassDirection(botPos, site) + "). "
                 + "I will not go further on my own. Say \"continue\" to override or \"cancel\" to redirect me.";
+    }
+
+    /**
+     * Design 6.1's per-task-class notice variant, pure text selection: when {@code descending} (the task's
+     * DigDown DESCEND phase at whatever moment the caller captured it — see {@code PoiCoordinator.stopNow}'s
+     * and {@code PoiCoordinator.tick}'s own comments on why that moment matters), every stop (mandatory,
+     * certain, or fallback) uses the climb-out wording instead of the standard/mandatory template, regardless
+     * of source.
+     */
+    public static String renderStop(boolean descending, boolean mandatory, String label, BlockPos anchor,
+                                     BlockPos botPos, String autoDetectedNote, String restartPrefix) {
+        String base = descending
+                ? renderDigDownDescend(label, anchor, botPos)
+                : mandatory
+                        ? renderMandatory(anchor, botPos)
+                        : renderStandard(label, anchor, botPos, autoDetectedNote);
+        return restartPrefix == null ? base : restartPrefix + base;
+    }
+
+    /**
+     * Design 6.6's "Late check" line, for a verdict (real, cached, or fallback) that arrives after the
+     * player already acted during the hold: short enough that its own truncation is unneeded.
+     */
+    public static String renderLateCheck(String label, BlockPos anchor) {
+        return "Late check: that looked like " + label + " at " + anchor.getX() + " " + anchor.getY() + " "
+                + anchor.getZ() + "; I kept mining, say pause if you want to look";
+    }
+
+    /** Comma-separated coordinate triple for a structured log field (e.g. {@code BotLog.task}'s {@code pos}). */
+    public static String anchorStr(BlockPos pos) {
+        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     /**
