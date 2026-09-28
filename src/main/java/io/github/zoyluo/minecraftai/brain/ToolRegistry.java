@@ -92,10 +92,6 @@ public final class ToolRegistry {
         return Optional.ofNullable(tools.get(name));
     }
 
-    public List<ToolDefinition> allTools() {
-        return List.copyOf(tools.values());
-    }
-
     public List<ToolDefinition> tools(MinecraftAiConfig.Brain config) {
         return tools(config, config.exposesLowLevelTools());
     }
@@ -121,6 +117,17 @@ public final class ToolRegistry {
     }
 
     private void registerDefaults() {
+        registerMovementAndCraftingTools();
+        registerGoalTools();
+        registerContainerAndCombatTools();
+        registerControlTools();
+        registerCoordinationTools();
+        registerMemoryAndGoalManagementTools();
+        registerTaskLifecycleTools();
+    }
+
+    /** Movement and low-level actions plus crafting: say, look/move/mine/place, hotbar, inventory, tool equip, craft/eat/smelt. */
+    private void registerMovementAndCraftingTools() {
         register("say", "Reply to the human in concise English. The reply is shown in ordinary Minecraft chat and in the MinecraftAi panel. purpose=answer is only for a question that needs no in-world work; purpose=plan must be paired with an action or goal tool in the same response; purpose=status is for progress or completion after work has started.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .property("purpose", enumStringSchema("answer for a pure question, plan before starting work, or status after work", "answer", "plan", "status"))
@@ -267,7 +274,10 @@ public final class ToolRegistry {
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
         });
+    }
 
+    /** Goal-driven high-level actions: gather/break/fish/trade plus every deterministic-goal task. */
+    private void registerGoalTools() {
         register("set_base", "Remember the bot's current position as the base for stockpiling and resupply tasks.", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace("base", bot.getEntityWorld(), bot.getBlockPos());
             return ok("marked_base: " + bot.getBlockPos().toShortString());
@@ -428,6 +438,10 @@ public final class ToolRegistry {
             return started ? ok("goal_assigned: stockpile") : fail("goal_plan_failed");
         });
 
+    }
+
+    /** Container/deposit work plus combat and the remaining action tools (boats, farming, guard). */
+    private void registerContainerAndCombatTools() {
         register("find_container", "Find the nearest reachable inventory container such as a chest", objectSchema()
                 .property("radius", integerSchema("search radius"))
                 .build(), (bot, args) -> ContainerTask.nearestContainer(bot, optionalInt(args, "radius", 8))
@@ -622,7 +636,10 @@ public final class ToolRegistry {
             }
             return result(InteractAction.attackEntity(bot, target.get()));
         });
+    }
 
+    /** Terminal/mission-control commands: stop, pause, resume, cancel_all. */
+    private void registerControlTools() {
         register("stop", "Cancel the current mission/task but preserve explicitly queued missions. Use immediately before a replacement goal.", objectSchema().build(), (bot, args) -> {
             IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelCurrent(
                     bot, IntentController.ControlOrigin.LLM_TOOL, "tool_stop");
@@ -647,7 +664,10 @@ public final class ToolRegistry {
                     bot, IntentController.ControlOrigin.LLM_TOOL, "tool_cancel_all");
             return ok(outcome.changed() ? "cancelled_all" : "already_idle");
         });
+    }
 
+    /** Multi-bot task board and inter-bot messaging. */
+    private void registerCoordinationTools() {
         register("post_job", "Post a shared job to the multi-bot task board. Any idle bot can claim and execute it.", objectSchema()
                 .property("kind", stringSchema("job kind, for example mine, build, craft, smelt, move, eat, or light_area"))
                 .property("params", objectSchema().build())
@@ -707,7 +727,10 @@ public final class ToolRegistry {
             boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), bot.getGameProfile().name(), requiredString(args, "message"));
             return queued ? ok("message_sent") : fail("target_busy");
         });
+    }
 
+    /** Persistent per-bot facts/places and the long-term goal tools. */
+    private void registerMemoryAndGoalManagementTools() {
         register("remember", "Store a persistent per-bot fact by key. Use for user preferences, named facts, or long-lived notes.", objectSchema()
                 .property("key", stringSchema("memory key"))
                 .property("value", stringSchema("memory value"))
@@ -838,7 +861,10 @@ public final class ToolRegistry {
 
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
+    }
 
+    /** assign_task and the task lifecycle tools it shares status/cancellation with. */
+    private void registerTaskLifecycleTools() {
         register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, water travel, and container work. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly. Legacy strip_mine and mine_vein routes are operator-only and are rejected in strict_survival. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
                 .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw; legacy operator-only: strip_mine, mine_vein"))
                 .property("params", objectSchema().build())
@@ -850,6 +876,9 @@ public final class ToolRegistry {
             Optional<String> legacyMiningRejection = legacyMiningTaskRejection(taskType);
             if (legacyMiningRejection.isPresent()) {
                 return fail(legacyMiningRejection.orElseThrow());
+            }
+            if (params == null) {
+                return fail("missing_or_bad_arg: params");
             }
             if ("mine_ore".equals(taskType)) {
                 if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
