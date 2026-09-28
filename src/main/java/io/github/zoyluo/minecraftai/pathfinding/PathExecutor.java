@@ -340,9 +340,9 @@ public final class PathExecutor {
             // Two-cell tunnel dig: after the feet position is dug out, the head position may still
             // have collision (this happens on every step inside solid mountain terrain) -- dig the
             // head position too so the bot can actually fit through.
-            // Combined with NeighborEnumerator.hasHeadroom's relaxed rule that the head position
-            // only needs to be diggable, this upgrades dig-pathfinding from ground-level pit-digging
-            // to full mountain tunneling.
+            // Combined with NeighborEnumerator.digEnterable's relaxed rule that the head position
+            // only needs to be diggable (headOk = headOpen || isMineable(...)), this upgrades
+            // dig-pathfinding from ground-level pit-digging to full mountain tunneling.
             BlockPos headPos = next.pos().up();
             if (!pack.player().getEntityWorld().getBlockState(headPos)
                     .getCollisionShape(pack.player().getEntityWorld(), headPos).isEmpty()) {

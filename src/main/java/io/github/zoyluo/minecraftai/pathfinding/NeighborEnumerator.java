@@ -296,18 +296,6 @@ public final class NeighborEnumerator {
                 pos.toImmutable(), p -> OreScan.observeDangerFluid(bot, p));
     }
 
-    private static boolean hasHeadroom(ServerWorld world, BlockPos target) {
-        // Head position under digging semantics: already empty OR mineable (the executor
-        // tickDigThrough mines open both the foot and head cells). The original rule "the two cells
-        // above the head must already be empty" judged tunneling through a solid mountain as
-        // impassable — every step's head cell was stone, so not a single DIG neighbor could ever be
-        // generated, which is exactly the root cause behind geo_slope/wall/pocket all getting stuck
-        // on no_progress (dig-pathfinding could only scrape shallow pits along the ground, never
-        // tunnel through a mountain).
-        BlockPos head = target.up();
-        return collisionEmpty(world, head) || isMineable(world, head);
-    }
-
     private static boolean isMineable(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.getHardness(world, pos) < 0.0F || world.getBlockEntity(pos) != null) {
