@@ -61,6 +61,15 @@ public final class LavaEscapeTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
+        // MAX_ELAPSED is a bound on the whole task, not just the in-lava phase: check it first
+        // so a bot that leaves lava but never grounds (e.g. floating in adjacent water, or
+        // isOnGround() staying false on clipped terrain) still fails closed instead of waiting
+        // "one more tick" forever with only the generic, position-based StuckWatcher as backstop.
+        if (elapsed > MAX_ELAPSED) {
+            fail("lava_escape_timeout");
+            return;
+        }
+
         // Escaping lava means success: complete once out of lava and standing stably (if out
         // of lava but not yet grounded, wait one more tick, to avoid stepping wrong at the
         // bank edge and falling back in).
@@ -72,10 +81,6 @@ public final class LavaEscapeTask extends AbstractTask {
                 BotLog.action(bot, "lava_escape_done", "pos", bot.getBlockPos().toShortString());
                 complete();
             }
-            return;
-        }
-        if (elapsed > MAX_ELAPSED) {
-            fail("lava_escape_timeout");
             return;
         }
 
