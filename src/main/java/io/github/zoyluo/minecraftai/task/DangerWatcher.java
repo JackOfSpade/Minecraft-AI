@@ -1360,13 +1360,40 @@ public final class DangerWatcher {
     /**
      * P1 (mining-assist design 4.4 item 7): the first lava cell the bot can observe in the 5x3x5 threat box around
      * it. The same probe as the LAVA branch of collectTopThreat, duplicated so that method stays untouched.
+     *
+     * <p>{@code freshBreakOre}, when not null, is the detour's current mining target ({@code cur}/{@code ore}); a
+     * lava cell that is one of its six face neighbours is excluded from this scan while that exact block currently
+     * reads air. A block only reads air here because it was just broken (by this detour's own swing, one tick
+     * before the engine has processed the resulting {@code DONE} status, or by another bot taking the same member),
+     * and a fluid a break exposes is design 4.7's job: re-observe, seal with material, or abort
+     * {@code fluid_unsealable} cleanly. This generic ambient-hazard box is evaluated every tick, before the engine's
+     * phase dispatch reaches the code that runs 4.7 (mining-assist design 4.6/4.7; {@code task/OreDigDetourEngine}),
+     * so without this exclusion it would win that race and kill the whole detour with {@code LAVA_THREAT_BOX}
+     * before 4.7 ever ran, even with a sacrificial block on hand to seal safely. The exclusion is narrow by
+     * identity, not by area: a lava cell is only ever skipped when it is a face neighbour of THIS tick's own
+     * target and that target is air; any other lava cell -- one genuinely observable from the stand pose before
+     * the break, or anywhere else in the box -- still counts, so a real ambient threat still aborts (I7 unweakened).
+     * The filter runs inside the stream (not as a post-hoc check on the one result {@code findFirst} already
+     * picked) so a second, genuine hazard cell is still found even when the excluded one would otherwise have
+     * been first in iteration order.
      */
-    static Optional<BlockPos> observedLavaInThreatBox(AIPlayerEntity bot) {
+    static Optional<BlockPos> observedLavaInThreatBox(AIPlayerEntity bot, BlockPos freshBreakOre) {
+        boolean oreJustBroken = freshBreakOre != null
+                && bot.getEntityWorld().getBlockState(freshBreakOre).isAir();
         return BlockPos.stream(bot.getBlockPos().add(-2, -1, -2), bot.getBlockPos().add(2, 1, 2))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> bot.getEntityWorld().getBlockState(pos).getFluidState().isIn(FluidTags.LAVA))
+                .filter(pos -> !(oreJustBroken && isFaceNeighbour(freshBreakOre, pos)))
                 .map(BlockPos::toImmutable)
                 .findFirst();
+    }
+
+    /** Manhattan distance 1: the six face-adjacent cells of {@code a}, never a diagonal or {@code a} itself. */
+    private static boolean isFaceNeighbour(BlockPos a, BlockPos b) {
+        long dx = Math.abs((long) a.getX() - b.getX());
+        long dy = Math.abs((long) a.getY() - b.getY());
+        long dz = Math.abs((long) a.getZ() - b.getZ());
+        return dx + dy + dz == 1L;
     }
 
     /** P1 (design 4.4 item 5): whether the threat scheduler is still inside its assignment-time cooldown. */

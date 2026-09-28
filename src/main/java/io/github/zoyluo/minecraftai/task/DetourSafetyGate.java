@@ -45,9 +45,11 @@ import java.util.UUID;
  *       {@code isUserPaused}, origin SAFETY.</li>
  *   <li>Items 5 and 6: {@code DangerWatcher.INSTANCE.threatCooldownActive(bot, tick)},
  *       {@code shelterEpisodeActive(bot)}, {@code DangerWatcher.hasObservableHostilePressure(bot)}.</li>
- *   <li>Item 7: {@code DangerWatcher.observedLavaInThreatBox(bot)} (5x3x5, observation gated) and the bot's
- *       {@code HazardField} ({@code anyLavaWithin}) around the bot, {@code pose} and {@code ore} with
- *       {@code detour.lavaClearRadius}.</li>
+ *   <li>Item 7: {@code DangerWatcher.observedLavaInThreatBox(bot, ore)} (5x3x5, observation gated; excludes a lava
+ *       cell that is a face neighbour of {@code ore} while {@code ore} currently reads air, deferring a fluid the
+ *       detour's own just-completed break exposed to design 4.7's seal-or-abort instead of double-aborting it
+ *       here) and the bot's {@code HazardField} ({@code anyLavaWithin}) around the bot, {@code pose} and
+ *       {@code ore} with {@code detour.lavaClearRadius}.</li>
  *   <li>Item 8: the own-cell biome id is the deep dark ({@code state.deepDark()}) and {@code safety.deepDarkVeto}.
  *       The biome is refreshed here through {@code PoiDetector.refreshBiome} when
  *       {@code MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)} (never a bare {@code tick - biomeTick},
@@ -140,7 +142,7 @@ public final class DetourSafetyGate {
             b.hostilePressure(DangerWatcher.hasObservableHostilePressure(bot));
         }
         if (stage.reads(7)) {
-            b.lavaInThreatBox(DangerWatcher.observedLavaInThreatBox(bot).isPresent());
+            b.lavaInThreatBox(DangerWatcher.observedLavaInThreatBox(bot, ore).isPresent());
             int radius = cfg.detour().lavaClearRadius();
             boolean hazardLavaNear = state != null && (
                     state.hazards().anyLavaWithin(bot.getBlockPos(), radius)

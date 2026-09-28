@@ -99,8 +99,9 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("DangerWatcher.INSTANCE.threatCooldownActive(bot, tick)"));
         assertTrue(body.contains("DangerWatcher.INSTANCE.shelterEpisodeActive(bot)"));
         assertTrue(body.contains("DangerWatcher.hasObservableHostilePressure(bot)"));
-        // Item 7: the threat-box probe and the remembered hazard field around bot, pose and ore.
-        assertTrue(body.contains("DangerWatcher.observedLavaInThreatBox(bot).isPresent()"));
+        // Item 7: the threat-box probe (ore passed through so a break-fresh exposure can be excluded, design
+        // 4.7) and the remembered hazard field around bot, pose and ore.
+        assertTrue(body.contains("DangerWatcher.observedLavaInThreatBox(bot, ore).isPresent()"));
         assertTrue(body.contains("cfg.detour().lavaClearRadius()"));
         assertTrue(body.contains("state.hazards().anyLavaWithin("));
         // Item 8: the biome refresh is gated by staleOrNever, never a bare subtraction.
