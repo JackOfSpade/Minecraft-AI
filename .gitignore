@@ -44,9 +44,10 @@ replay_pid*.log
 bin/
 
 # Keep legacy planning and work logs local. Track the active roadmap and docs.
+# !README.md exists to keep Minecraft-Spawn-Bots-Wrapper/README.md tracked (no README.md/.zh-CN.md
+# exists at the repo root; !README.zh-CN.md was dropped as dead since no such file exists anywhere).
 *.md
 !README.md
-!README.zh-CN.md
 !ROADMAP.md
 !docs/
 !docs/*.md
