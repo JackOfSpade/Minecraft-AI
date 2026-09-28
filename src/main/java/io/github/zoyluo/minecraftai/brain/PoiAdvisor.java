@@ -121,13 +121,6 @@ public final class PoiAdvisor {
         }
     }
 
-    /** True once {@link #configure} has run and neither shut down; a test transport does not require this. */
-    public boolean isConfigured() {
-        synchronized (lifecycleLock) {
-            return apiClient != null && executor != null && !executor.isShutdown();
-        }
-    }
-
     /**
      * Resolves one consult. Exactly one of {@code onVerdict} or {@code onFailure} runs, always via
      * {@code server.execute} and only if this instance was not reconfigured/shut down since the call (the

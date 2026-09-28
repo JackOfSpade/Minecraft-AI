@@ -30,7 +30,7 @@ public final class BotReporter {
         if (!enabled(bot)) {
             return;
         }
-        ReportState state = new ReportState(status.name(), status.description(), 25);
+        ReportState state = new ReportState(status.name(), 25);
         states.put(bot.getUuid(), state);
         report(bot, state, "Starting " + summary(status) + ".", bot.getEntityWorld().getServer().getTicks(), true);
     }
@@ -44,10 +44,9 @@ public final class BotReporter {
             return;
         }
         ReportState state = states.computeIfAbsent(bot.getUuid(),
-                ignored -> new ReportState(status.name(), status.description(), 25));
+                ignored -> new ReportState(status.name(), 25));
         if (!state.taskName.equals(status.name())) {
             state.taskName = status.name();
-            state.taskDescription = status.description();
             state.nextMilestone = 25;
             report(bot, state, "Starting " + summary(status) + ".", server.getTicks(), true);
         }
@@ -172,14 +171,12 @@ public final class BotReporter {
 
     private static final class ReportState {
         private String taskName;
-        private String taskDescription;
         private int nextMilestone;
         private String lastText = "";
         private int lastTick = Integer.MIN_VALUE / 2;
 
-        private ReportState(String taskName, String taskDescription, int nextMilestone) {
+        private ReportState(String taskName, int nextMilestone) {
             this.taskName = taskName;
-            this.taskDescription = taskDescription;
             this.nextMilestone = nextMilestone;
         }
     }
