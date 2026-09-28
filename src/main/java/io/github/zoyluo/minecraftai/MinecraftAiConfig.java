@@ -258,9 +258,14 @@ public record MinecraftAiConfig(
             String baseUrl,
             String model,
             int maxTokens,
-            double temperature,
+            /** Boxed so an explicit {@code 0.0} (a legitimate, fully-deterministic setting) can be told
+             *  apart from a key omitted from the user's JSON, which falls back to the shipped default. */
+            Double temperature,
             int timeoutSeconds,
-            int retryCount,
+            /** Boxed so an explicit {@code 0} (no retries) can be told apart from a key omitted from the
+             *  user's JSON, which falls back to the shipped default. A negative value is still clamped
+             *  up to 0. */
+            Integer retryCount,
             int retryBackoffMs,
             Boolean thinking,
             String reasoningEffort
@@ -278,9 +283,9 @@ public record MinecraftAiConfig(
                     blankToDefault(baseUrl, defaults.baseUrl),
                     blankToDefault(model, defaults.model),
                     positiveOrDefault(maxTokens, defaults.maxTokens),
-                    temperature,
+                    doubleOrDefault(temperature, defaults.temperature),
                     positiveOrDefault(timeoutSeconds, defaults.timeoutSeconds),
-                    Math.max(0, retryCount),
+                    Math.max(0, intOrDefault(retryCount, defaults.retryCount)),
                     positiveOrDefault(retryBackoffMs, defaults.retryBackoffMs),
                     boolOrDefault(thinking, defaults.thinking),
                     reasoningEffort != null && REASONING_EFFORTS.contains(reasoningEffort)
@@ -354,18 +359,20 @@ public record MinecraftAiConfig(
         }
     }
 
-    public record Night(boolean autoSleep, int torchLightThreshold) {
+    public record Night(Boolean autoSleep, int torchLightThreshold) {
         Night withDefaults(Night defaults) {
-            return new Night(autoSleep, positiveOrDefault(torchLightThreshold, defaults.torchLightThreshold));
+            return new Night(
+                    boolOrDefault(autoSleep, defaults.autoSleep),
+                    positiveOrDefault(torchLightThreshold, defaults.torchLightThreshold));
         }
     }
 
-    public record Mining(int returnWhenFreeSlots, double toolDurabilityFloor, boolean placeTorches) {
+    public record Mining(int returnWhenFreeSlots, double toolDurabilityFloor, Boolean placeTorches) {
         Mining withDefaults(Mining defaults) {
             return new Mining(
                     positiveOrDefault(returnWhenFreeSlots, defaults.returnWhenFreeSlots),
                     toolDurabilityFloor > 0.0D ? toolDurabilityFloor : defaults.toolDurabilityFloor,
-                    placeTorches);
+                    boolOrDefault(placeTorches, defaults.placeTorches));
         }
     }
 
@@ -463,29 +470,32 @@ public record MinecraftAiConfig(
     }
 
     public record Logging(
-            boolean enabled,
+            Boolean enabled,
             String directory,
-            boolean perBotFile,
+            Boolean perBotFile,
             String rotation,
             int maxFileSizeMb,
+            /** Archived logs older than this many days are deleted outright on rotation cleanup,
+             *  regardless of how many archive files exist; it is a day-based age cutoff, not a count
+             *  of archive files to retain. See {@code BotLogWriter.cleanupArchives()}. */
             int maxBackups,
             /** How many play sessions' (one per server start) logs to keep under
              *  {@code <directory>/sessions/}; older sessions are deleted outright on the next
              *  start regardless of size, so history never grows past this many sessions. */
             int maxSessions,
-            boolean mirrorToSlf4j,
+            Boolean mirrorToSlf4j,
             Map<String, String> categories
     ) {
         Logging withDefaults(Logging defaults) {
             return new Logging(
-                    enabled,
+                    boolOrDefault(enabled, defaults.enabled),
                     blankToDefault(directory, defaults.directory),
-                    perBotFile,
+                    boolOrDefault(perBotFile, defaults.perBotFile),
                     blankToDefault(rotation, defaults.rotation),
                     positiveOrDefault(maxFileSizeMb, defaults.maxFileSizeMb),
                     positiveOrDefault(maxBackups, defaults.maxBackups),
                     positiveOrDefault(maxSessions, defaults.maxSessions),
-                    mirrorToSlf4j,
+                    boolOrDefault(mirrorToSlf4j, defaults.mirrorToSlf4j),
                     categories == null || categories.isEmpty() ? defaults.categories : categories);
         }
     }
@@ -503,6 +513,14 @@ public record MinecraftAiConfig(
     }
 
     private static Boolean boolOrDefault(Boolean value, Boolean defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private static Double doubleOrDefault(Double value, Double defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private static Integer intOrDefault(Integer value, Integer defaultValue) {
         return value == null ? defaultValue : value;
     }
 }

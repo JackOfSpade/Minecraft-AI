@@ -67,6 +67,37 @@ class MinecraftAiConfigLlmSectionTest {
     }
 
     @Test
+    void omittedTemperatureFallsBackToTheShippedDefaultRatherThanZero() {
+        MinecraftAiConfig.Llm llm = parse("{\"llm\":{\"apiKey\":\"k\"}}").llm();
+        assertEquals(MinecraftAiConfig.defaults().llm().temperature(), llm.temperature());
+    }
+
+    @Test
+    void anExplicitZeroTemperatureIsHonoured() {
+        // 0.0 is a legitimate, fully-deterministic temperature and must not be treated as "omitted".
+        MinecraftAiConfig.Llm llm = parse("{\"llm\":{\"apiKey\":\"k\",\"temperature\":0.0}}").llm();
+        assertEquals(0.0D, llm.temperature());
+    }
+
+    @Test
+    void omittedRetryCountFallsBackToTheShippedDefaultRatherThanZero() {
+        MinecraftAiConfig.Llm llm = parse("{\"llm\":{\"apiKey\":\"k\"}}").llm();
+        assertEquals(MinecraftAiConfig.defaults().llm().retryCount(), llm.retryCount());
+    }
+
+    @Test
+    void anExplicitZeroRetryCountMeansNoRetriesAndIsHonoured() {
+        MinecraftAiConfig.Llm llm = parse("{\"llm\":{\"apiKey\":\"k\",\"retryCount\":0}}").llm();
+        assertEquals(0, llm.retryCount());
+    }
+
+    @Test
+    void aNegativeRetryCountIsStillClampedToZero() {
+        MinecraftAiConfig.Llm llm = parse("{\"llm\":{\"apiKey\":\"k\",\"retryCount\":-5}}").llm();
+        assertEquals(0, llm.retryCount());
+    }
+
+    @Test
     void theWrittenTemplateUsesTheGenericSectionName() {
         String json = new Gson().toJson(MinecraftAiConfig.defaults());
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
