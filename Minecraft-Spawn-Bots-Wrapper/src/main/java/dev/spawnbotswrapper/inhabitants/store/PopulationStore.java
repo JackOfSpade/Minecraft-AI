@@ -7,9 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -130,7 +128,6 @@ public final class PopulationStore implements PopulationStorage {
     /** abandoned.keys must be rewritten (an append failed, or it holds a tail/conflicts) before appending again. */
     private boolean abandonedRewriteNeeded;
     private LoadSource loadSource = LoadSource.FRESH;
-    private LoadReport lastReport = new LoadReport(false, List.of("not loaded yet"));
     private String lastError;
     private boolean refusalLogged;
 
@@ -164,14 +161,8 @@ public final class PopulationStore implements PopulationStorage {
             // Whatever it was, an unreadable store must read as "refuse to run", never as an empty world.
             report = unusable(new ArrayList<>(), "loading failed unexpectedly (" + e + ")");
         }
-        lastReport = report;
         loaded = true;
         return report;
-    }
-
-    public synchronized LoadReport lastLoadReport() {
-        ensureLoaded();
-        return lastReport;
     }
 
     public synchronized LoadSource loadSource() {
@@ -216,153 +207,39 @@ public final class PopulationStore implements PopulationStorage {
 
     private LoadReport doLoad() {
         reset();
-        List<String> messages = new ArrayList<>();
         try {
             Files.createDirectories(directory);
         } catch (IOException | RuntimeException e) {
-            return unusable(messages, "the data directory " + directory + " cannot be created or opened (" + e + ")");
+            return unusable(new ArrayList<>(),
+                    "the data directory " + directory + " cannot be created or opened (" + e + ")");
         }
 
-        LoadSource source = LoadSource.FRESH;
-        PopulationFile.Parsed parsed = null;
-        boolean unreadableFound = false;
-
-        PopulationFile.ReadResult main = PopulationFile.read(mainFile);
-        switch (main.outcome()) {
-            case OK -> {
-                parsed = main.parsed();
-                source = LoadSource.MAIN;
-            }
-            case TOO_NEW -> {
-                return unusable(messages, newerVersion(POPULATIONS_FILE, main.detail()));
-            }
-            case INVALID -> {
-                unreadableFound = true;
-                messages.add(POPULATIONS_FILE + " is unreadable (" + main.detail() + ")");
-            }
-            case MISSING -> {
-            }
+        // wrapperB-6: reading populations.json (with its temp-file/backup fallbacks) and abandoned.keys is a
+        // self-contained cluster with no store state of its own; see PopulationStoreLoader's class doc.
+        PopulationStoreLoader.Result r = PopulationStoreLoader.load(directory, mainFile, backupFile, tempFile, abandonedFile);
+        List<String> messages = new ArrayList<>(r.messages());
+        if (!r.usable()) {
+            return unusable(messages, r.unusableWhy());
         }
 
-        if (parsed == null && main.outcome() == PopulationFile.Outcome.MISSING) {
-            // A save moves the old file to .bak before moving the new one in; a crash in that instant
-            // leaves no main file but a complete, fsynced temp file that is newer than the backup.
-            PopulationFile.ReadResult temp = PopulationFile.read(tempFile);
-            switch (temp.outcome()) {
-                case OK -> {
-                    parsed = temp.parsed();
-                    source = LoadSource.INTERRUPTED_SAVE;
-                    messages.add(POPULATIONS_FILE + " is missing; using the complete " + TEMP_FILE
-                            + " left by an interrupted save");
-                }
-                case TOO_NEW -> {
-                    return unusable(messages, newerVersion(TEMP_FILE, temp.detail()));
-                }
-                case INVALID -> messages.add("ignored an incomplete " + TEMP_FILE + " left by an interrupted save ("
-                        + temp.detail() + ")");
-                case MISSING -> {
-                }
-            }
-        } else if (parsed != null && Files.exists(tempFile)) {
-            messages.add("ignored a leftover " + TEMP_FILE + " (an interrupted save; " + POPULATIONS_FILE + " is intact)");
+        active.putAll(r.active());
+        for (StructureKey key : r.active().keySet()) {
+            activeGrid.add(key);
         }
-
-        if (parsed == null) {
-            PopulationFile.ReadResult backup = PopulationFile.read(backupFile);
-            switch (backup.outcome()) {
-                case OK -> {
-                    parsed = backup.parsed();
-                    source = LoadSource.BACKUP;
-                    messages.add("recovered from " + BACKUP_FILE + " (written " + modified(backupFile)
-                            + "); population changes made after that backup are lost");
-                }
-                case TOO_NEW -> {
-                    return unusable(messages, newerVersion(BACKUP_FILE, backup.detail()));
-                }
-                case INVALID -> {
-                    unreadableFound = true;
-                    messages.add(BACKUP_FILE + " is unreadable (" + backup.detail() + ")");
-                }
-                case MISSING -> {
-                }
-            }
+        for (StructureKey key : r.abandonedKeys()) {
+            abandonedGrid.add(key);
         }
-
-        if (parsed == null && unreadableFound) {
-            return unusable(messages, "persisted population data exists in " + directory + " but neither "
-                    + POPULATIONS_FILE + " nor " + BACKUP_FILE + " can be read");
-        }
-
-        boolean handEditedAbandoned = false;
-        if (parsed != null) {
-            for (Map.Entry<StructureKey, StructureRecord> e : parsed.structures().entrySet()) {
-                if (e.getValue().status == StructureStatus.ABANDONED) {
-                    abandonedGrid.add(e.getKey());
-                    handEditedAbandoned = true;
-                } else {
-                    active.put(e.getKey(), e.getValue());
-                    activeGrid.add(e.getKey());
-                }
-            }
-            decks.importSnapshots(parsed.decks());
-            messages.addAll(parsed.warnings());
-            messages.add("loaded " + active.size() + " structure record(s) and " + parsed.decks().size()
-                    + " deck(s) from " + sourceName(source));
-        } else {
-            messages.add("no " + POPULATIONS_FILE + " found in " + directory + "; starting a new store");
-        }
-
-        int[] conflicts = new int[1];
-        try {
-            AbandonedLog.Loaded log = AbandonedLog.read(abandonedFile, key -> {
-                if (active.containsKey(key)) {
-                    conflicts[0]++;
-                } else {
-                    abandonedGrid.add(key);
-                }
-            });
-            messages.add(ABANDONED_FILE + ": " + abandonedGrid.size() + " abandoned structure key(s)");
-            if (log.malformed() > 0) {
-                messages.add(ABANDONED_FILE + ": skipped " + log.malformed() + " malformed line(s)");
-            }
-            if (log.truncatedTail() > 0) {
-                if (AbandonedLog.truncate(abandonedFile, log.validLength())) {
-                    messages.add(ABANDONED_FILE + ": removed an unterminated final line (" + log.truncatedTail()
-                            + " byte(s)) left by a crash mid-append; it was not used");
-                } else {
-                    abandonedRewriteNeeded = true;
-                    messages.add(ABANDONED_FILE + ": ignored an unterminated final line (" + log.truncatedTail()
-                            + " byte(s)) left by a crash mid-append; it will be dropped at the next rewrite");
-                }
-            }
-        } catch (NoSuchFileException e) {
-            if (source != LoadSource.FRESH) {
-                messages.add("warning: " + ABANDONED_FILE + " is missing although " + POPULATIONS_FILE
-                        + " exists; structures that were abandoned may be rolled again");
-            }
-        } catch (IOException | RuntimeException e) {
-            return unusable(messages, ABANDONED_FILE + " in " + directory + " cannot be read (" + e + ")");
-        }
-        if (conflicts[0] > 0) {
-            abandonedRewriteNeeded = true;
-            messages.add(conflicts[0] + " structure(s) are both in " + ABANDONED_FILE + " and have a record; the record was kept");
-        }
-        if (handEditedAbandoned) {
-            abandonedRewriteNeeded = true;
-            dirty = true;
-            messages.add(POPULATIONS_FILE + " contained ABANDONED records; they were moved to " + ABANDONED_FILE);
-        }
+        decks.importSnapshots(r.decks());
+        abandonedRewriteNeeded = r.abandonedRewriteNeeded();
+        dirty = r.dirtyOnLoad();
 
         names.rebuild(active);
         if (names.clashes() > 0) {
             messages.add("warning: " + names.clashes() + " duplicate bot name(s), e.g. " + names.clashExamples());
         }
 
-        loadSource = source;
-        mainGood = source == LoadSource.MAIN;
-        if (source == LoadSource.BACKUP || source == LoadSource.INTERRUPTED_SAVE) {
-            dirty = true; // rewrite the main file from the recovered state at the next save
-        }
+        loadSource = r.source();
+        mainGood = r.source() == LoadSource.MAIN;
         usable = true;
         return new LoadReport(true, List.copyOf(messages));
     }
@@ -373,28 +250,6 @@ public final class PopulationStore implements PopulationStorage {
                 + "starting over with an empty store would re-roll them and duplicate existing populations. "
                 + "Nothing was modified; restore the files or, to knowingly start over, delete them.");
         return new LoadReport(false, List.copyOf(messages));
-    }
-
-    private static String newerVersion(String file, String detail) {
-        return file + " was written by a newer version of this addon (" + detail
-                + "); an older build must not read it and overwrite newer data";
-    }
-
-    private static String sourceName(LoadSource source) {
-        return switch (source) {
-            case MAIN -> POPULATIONS_FILE;
-            case BACKUP -> BACKUP_FILE;
-            case INTERRUPTED_SAVE -> TEMP_FILE;
-            case FRESH -> "nowhere";
-        };
-    }
-
-    private static String modified(Path file) {
-        try {
-            return Instant.ofEpochMilli(Files.getLastModifiedTime(file).toMillis()).toString();
-        } catch (IOException | RuntimeException e) {
-            return "at an unknown time";
-        }
     }
 
     @Override
