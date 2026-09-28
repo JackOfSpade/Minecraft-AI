@@ -28,7 +28,6 @@ import java.util.function.Predicate;
  * as a predicate. Comparison there must be case-insensitive because vanilla resolves player names that way.
  */
 public final class NameGenerator {
-    public static final int MIN_LENGTH = BotNameShape.MIN_NAME_LENGTH;
     public static final int MAX_LENGTH = BotNameShape.MAX_NAME_LENGTH;
     /** Longest prefix honoured; the same rule the config validator applies (see {@link BotNameShape}). */
     public static final int MAX_PREFIX_LENGTH = BotNameShape.MAX_PREFIX_LENGTH;

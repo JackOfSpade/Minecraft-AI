@@ -19,7 +19,6 @@ import java.util.function.Supplier;
 final class EngineContext {
     private static final Logger LOG = LoggerFactory.getLogger(PopulationEngine.class);
     private static final InhabitantsConfig.Processing FALLBACK_PROCESSING = new InhabitantsConfig.Processing();
-    private static final InhabitantsConfig.Profiles FALLBACK_PROFILES = new InhabitantsConfig.Profiles();
     private static final InhabitantsConfig.TpsThrottle FALLBACK_TPS_THROTTLE = new InhabitantsConfig.TpsThrottle();
     private static final InhabitantsConfig.Dormancy FALLBACK_DORMANCY = new InhabitantsConfig.Dormancy();
     private static final String FALLBACK_PREFIX = "Inh";
@@ -62,10 +61,6 @@ final class EngineContext {
 
     static InhabitantsConfig.Processing processing(InhabitantsConfig cfg) {
         return cfg.processing != null ? cfg.processing : FALLBACK_PROCESSING;
-    }
-
-    static InhabitantsConfig.Profiles profileOptions(InhabitantsConfig cfg) {
-        return cfg.profiles != null ? cfg.profiles : FALLBACK_PROFILES;
     }
 
     static InhabitantsConfig.TpsThrottle tpsThrottle(InhabitantsConfig cfg) {

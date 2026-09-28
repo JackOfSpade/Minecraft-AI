@@ -38,10 +38,6 @@ public record IntBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ)
         return (minX + maxX + 1) / 2.0;
     }
 
-    public double centerY() {
-        return (minY + maxY + 1) / 2.0;
-    }
-
     public double centerZ() {
         return (minZ + maxZ + 1) / 2.0;
     }
