@@ -33,16 +33,16 @@ class ConfigIOTest {
         Path f = dir.resolve("cfg.json");
         Files.writeString(f, """
                 {
-                  "default": { "occupiedChance": 0.65, "minBots": 1, "maxBots": 4 },
+                  "default": { "occupiedChance": 0.65, "minBots": 1 },
                   "structures": {
-                    "minecraft:pillager_outpost": { "occupiedChance": 0.85, "minBots": 2, "maxBots": 6 }
+                    "minecraft:pillager_outpost": { "occupiedChance": 0.85, "minBots": 2 }
                   }
                 }
                 """, StandardCharsets.UTF_8);
         ConfigIO.LoadResult r = ConfigIO.load(f);
         assertNull(r.fatalError());
         assertEquals(1, r.config().structures.size());
-        assertEquals(6, r.config().structures.get("minecraft:pillager_outpost").maxBots);
+        assertEquals(2, r.config().structures.get("minecraft:pillager_outpost").minBots);
         // sections not present keep their defaults
         assertTrue(r.config().enabled);
         assertEquals(8, r.config().profiles.coverageBuckets);
@@ -87,7 +87,7 @@ class ConfigIOTest {
         Path f = dir.resolve("cfg.json");
         Files.writeString(f, """
                 {
-                  "default": { "occupiedChance": 3.5, "minBots": 0, "maxBots": -4 },
+                  "default": { "occupiedChance": 3.5, "minBots": 0 },
                   "processing": { "maxStructuresPerTick": 0, "maxLiveBots": -5 },
                   "profiles": { "coverageBuckets": 1000 },
                   "spawning": { "backend": "nonsense", "namePrefix": "bad prefix!!" },
@@ -99,7 +99,6 @@ class ConfigIOTest {
         InhabitantsConfig c = r.config();
         assertEquals(1.0, c.defaults.occupiedChance);
         assertEquals(1, c.defaults.minBots);
-        assertTrue(c.defaults.maxBots >= c.defaults.minBots);
         assertEquals(1, c.processing.maxStructuresPerTick);
         assertEquals(0, c.processing.maxLiveBots);
         assertEquals(64, c.profiles.coverageBuckets);

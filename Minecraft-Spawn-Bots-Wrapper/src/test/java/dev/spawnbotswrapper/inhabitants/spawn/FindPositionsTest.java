@@ -171,6 +171,24 @@ class FindPositionsTest {
     }
 
     @Test
+    void fewerBotsThanStoreysStillSpreadAcrossDifferentStoreysInsteadOfClusteringOnOne() {
+        // Two separate columns, each independently offering the same 4 storeys: without the storey-
+        // diversity bias, each column's own random level pick is independent, so two bots have a real
+        // chance of both landing on (say) the ground floor purely by coincidence.
+        FakeProbe probe = new FakeProbe();
+        for (int x = 5; x <= 6; x++) {
+            probe.floor(x, 5, x, 5, 63).floor(x, 5, x, 5, 67).floor(x, 5, x, 5, 72).floor(x, 5, x, 5, 76);
+        }
+        StructureSnapshot house = single(box(5, 63, 5, 6, 90, 5));
+        for (long seed = 0; seed < 50; seed++) {
+            PositionResult r = find(planner(), house, probe, 2, seed);
+            assertEquals(2, r.positions().size());
+            assertNotEquals(r.positions().get(0).y(), r.positions().get(1).y(),
+                    "2 bots across 2 columns of a 4-storey house must not land on the same storey, seed " + seed);
+        }
+    }
+
+    @Test
     void separationIsMeasuredInThreeDimensions() {
         FakeProbe probe = new FakeProbe();
         probe.floor(5, 5, 5, 5, 63).floor(5, 5, 5, 5, 67);

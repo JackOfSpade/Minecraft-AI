@@ -34,4 +34,13 @@ public record StructureSnapshot(
     public List<IntBox> sampleBoxes() {
         return pieces.isEmpty() ? List.of(bounds) : pieces;
     }
+
+    /**
+     * Total structure volume the bot-count ceiling is scaled against: the sum of the pieces' own volumes
+     * (so a sprawling structure's empty gaps between buildings are not counted as inhabitable space), or
+     * the overall bounds when no piece data is known.
+     */
+    public long totalVolume() {
+        return pieces.isEmpty() ? bounds.volume() : pieces.stream().mapToLong(IntBox::volume).sum();
+    }
 }

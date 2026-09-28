@@ -128,7 +128,9 @@ final class StructureFormatter {
         if (!RuleResolver.isEligible(c, key.structureId(), s.tagIds())) {
             return bad("excluded by the config include/exclude lists") + label(" (a forced process still works)");
         }
-        String rule = ruleText(RuleResolver.resolve(c, key.structureId(), s.tagIds()));
+        double blocksPerBot = c.processing != null ? c.processing.blocksPerBot : new InhabitantsConfig.Processing().blocksPerBot;
+        int sizeCappedMax = EffectiveRule.sizeCappedMax(s.totalVolume(), blocksPerBot);
+        String rule = ruleText(RuleResolver.resolve(c, key.structureId(), s.tagIds()), sizeCappedMax);
         List<String> caveats = new ArrayList<>();
         if (!RuleResolver.isDimensionEligible(c, dimensionId)) {
             caveats.add("dimension excluded");
@@ -141,13 +143,13 @@ final class StructureFormatter {
         return base + label(" - would roll ") + plain(rule) + label("; /inhabitants process nearest rolls it now");
     }
 
-    static String ruleText(EffectiveRule r) {
-        String bots = r.minBots() == r.maxBots() ? String.valueOf(r.minBots()) : r.minBots() + "-" + r.maxBots();
+    static String ruleText(EffectiveRule r, int sizeCappedMax) {
+        String bots = r.minBots() == sizeCappedMax ? String.valueOf(r.minBots()) : r.minBots() + "-" + sizeCappedMax;
         if (r.singleSource()) {
             return Fmt.percent(r.occupiedChance()) + " occupied, " + bots + " bots (" + r.occupiedChanceFrom() + ")";
         }
         return Fmt.percent(r.occupiedChance()) + " occupied (" + r.occupiedChanceFrom() + "), " + bots
-                + " bots (" + r.minBotsFrom() + " / " + r.maxBotsFrom() + ")";
+                + " bots (" + r.minBotsFrom() + " / size-scaled)";
     }
 
     // ---------------------------------------------------------------- nearby

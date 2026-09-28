@@ -233,7 +233,9 @@ class PopulationEnginePopulateTest {
     @Test
     void requestsRespectMaxBotsPerTickAndTheSpawnInterval() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 6, 6);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 6);
+        // 80 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 6.
+        rig.cfg.processing.blocksPerBot = 80.0;
         rig.cfg.processing.maxBotsPerTick = 2;
         rig.cfg.processing.spawnIntervalTicks = 4;
         rig.engine.submit(Rig.village(0, 0));
@@ -318,7 +320,9 @@ class PopulationEnginePopulateTest {
     @Test
     void theLiveBotCapHoldsSpawnsWithoutRerollingAndResumesWhenABotDies() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.cfg.processing.maxLiveBots = 2;
         StructureSnapshot s = Rig.village(0, 0);
         rig.engine.submit(s);
@@ -350,7 +354,9 @@ class PopulationEnginePopulateTest {
     @Test
     void raisingTheCapInTheConfigTakesEffectImmediately() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.cfg.processing.maxLiveBots = 1;
         rig.engine.submit(Rig.village(0, 0));
         rig.run(100);
@@ -363,7 +369,9 @@ class PopulationEnginePopulateTest {
     @Test
     void theCapCountsBotsStillInFlight() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.cfg.processing.maxLiveBots = 2;
         rig.cfg.processing.appearTimeoutTicks = 1000;
         rig.bots.readyAfterPolls = MANY;
@@ -376,7 +384,7 @@ class PopulationEnginePopulateTest {
     @Test
     void positionsHeldBackByTheCapAreSearchedAgainOnceTheyAreStale() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3);
         rig.cfg.processing.maxLiveBots = 1;
         StructureSnapshot s = Rig.village(0, 0);
         rig.engine.submit(s);
@@ -487,7 +495,9 @@ class PopulationEnginePopulateTest {
     @Test
     void aStructureWithRoomForOnlySomeBotsIsPopulatedByThoseAndNotesTheRest() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.planner.mode = FakePlanner.Mode.LIMITED;
         rig.planner.capacity = 2;
         StructureSnapshot s = Rig.village(0, 0);
@@ -713,7 +723,7 @@ class PopulationEnginePopulateTest {
     @Test
     void manyStructuresPopulateIndependentlyAndCompletely() {
         Rig rig = new Rig(new InMemoryStorage(false), 9);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1, 5);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1);
         List<StructureKey> keys = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
             StructureSnapshot s = Rig.structure("minecraft:desert_pyramid", i, 2 * i);

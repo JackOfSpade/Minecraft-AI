@@ -20,21 +20,20 @@ class RuleResolverTest {
     @Test
     void defaultsApplyWhenNothingMatches() {
         InhabitantsConfig c = bare();
-        c.defaults = new InhabitantsConfig.Rule(0.65, 1, 4);
+        c.defaults = new InhabitantsConfig.Rule(0.65, 1);
         EffectiveRule r = RuleResolver.resolve(c, "minecraft:desert_pyramid", Set.of());
         assertEquals(0.65, r.occupiedChance());
         assertEquals(1, r.minBots());
-        assertEquals(4, r.maxBots());
         assertEquals("default", r.occupiedChanceFrom());
     }
 
     @Test
     void exactIdBeatsTagBeatsNamespaceBeatsDefault() {
         InhabitantsConfig c = bare();
-        c.defaults = new InhabitantsConfig.Rule(0.10, 1, 1);
-        c.structures.put("somemod:*", new InhabitantsConfig.RuleOverride(0.20, 2, 2));
-        c.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(0.30, 3, 3));
-        c.structures.put("minecraft:village_plains", new InhabitantsConfig.RuleOverride(0.40, 4, 4));
+        c.defaults = new InhabitantsConfig.Rule(0.10, 1);
+        c.structures.put("somemod:*", new InhabitantsConfig.RuleOverride(0.20, 2));
+        c.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(0.30, 3));
+        c.structures.put("minecraft:village_plains", new InhabitantsConfig.RuleOverride(0.40, 4));
 
         EffectiveRule exact = RuleResolver.resolve(c, "minecraft:village_plains", Set.of("minecraft:village"));
         assertEquals(0.40, exact.occupiedChance());
@@ -55,24 +54,22 @@ class RuleResolverTest {
     @Test
     void overridesInheritPerField() {
         InhabitantsConfig c = bare();
-        c.defaults = new InhabitantsConfig.Rule(0.50, 1, 4);
-        c.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(0.9, null, null));
-        c.structures.put("minecraft:village_plains", new InhabitantsConfig.RuleOverride(null, 2, null));
+        c.defaults = new InhabitantsConfig.Rule(0.50, 4);
+        c.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(0.9, null));
+        c.structures.put("minecraft:village_plains", new InhabitantsConfig.RuleOverride(null, 2));
 
         EffectiveRule r = RuleResolver.resolve(c, "minecraft:village_plains", Set.of("minecraft:village"));
         assertEquals(0.9, r.occupiedChance());        // from the tag
         assertEquals(2, r.minBots());                 // from the exact id
-        assertEquals(4, r.maxBots());                 // from default
         assertEquals("tag #minecraft:village", r.occupiedChanceFrom());
         assertEquals("structure minecraft:village_plains", r.minBotsFrom());
-        assertEquals("default", r.maxBotsFrom());
     }
 
     @Test
     void earlierTagWinsOverLaterTag() {
         InhabitantsConfig c = bare();
-        c.tags.put("#a:first", new InhabitantsConfig.RuleOverride(0.1, null, null));
-        c.tags.put("#a:second", new InhabitantsConfig.RuleOverride(0.9, null, null));
+        c.tags.put("#a:first", new InhabitantsConfig.RuleOverride(0.1, null));
+        c.tags.put("#a:second", new InhabitantsConfig.RuleOverride(0.9, null));
         EffectiveRule r = RuleResolver.resolve(c, "x:y", Set.of("a:first", "a:second"));
         assertEquals(0.1, r.occupiedChance());
     }
@@ -80,18 +77,13 @@ class RuleResolverTest {
     @Test
     void resultIsClampedAndOrdered() {
         InhabitantsConfig c = bare();
-        c.defaults = new InhabitantsConfig.Rule(7.0, 0, 0); // unvalidated on purpose
+        c.defaults = new InhabitantsConfig.Rule(7.0, 0); // unvalidated on purpose
         EffectiveRule r = RuleResolver.resolve(c, "a:b", Set.of());
         assertEquals(1.0, r.occupiedChance());
         assertEquals(1, r.minBots());
-        assertEquals(1, r.maxBots());
 
-        c.defaults = new InhabitantsConfig.Rule(0.5, 9, 3);
-        r = RuleResolver.resolve(c, "a:b", Set.of());
-        assertTrue(r.maxBots() >= r.minBots());
-
-        c.defaults = new InhabitantsConfig.Rule(0.5, 1, 9999);
-        assertEquals(EffectiveRule.MAX_BOTS_PER_STRUCTURE, RuleResolver.resolve(c, "a:b", Set.of()).maxBots());
+        c.defaults = new InhabitantsConfig.Rule(0.5, 9999);
+        assertEquals(EffectiveRule.MAX_BOTS_PER_STRUCTURE, RuleResolver.resolve(c, "a:b", Set.of()).minBots());
     }
 
     @Test

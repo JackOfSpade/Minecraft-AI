@@ -35,7 +35,7 @@ class PopulationEngineDeterminismTest {
         Rig rig = new Rig(new InMemoryStorage(false), entropySeed);
         rig.cfg.deterministic.enabled = true;
         rig.cfg.deterministic.salt = salt;
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.6, 1, 5);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.6, 1);
         rig.world.seed = worldSeed;
         return rig;
     }
@@ -68,8 +68,8 @@ class PopulationEngineDeterminismTest {
 
     @Test
     void twoFreshWorldsWithTheSameSeedMakeIdenticalDecisionsHoweverTheyAreFed() {
-        Rig a = deterministicRig(31337, "s", 1);
-        Rig b = deterministicRig(31337, "s", 2);
+        Rig a = deterministicRig(31338, "salt", 1);
+        Rig b = deterministicRig(31338, "salt", 2);
         List<StructureSnapshot> all = manyStructures(300);
         for (StructureSnapshot s : all) {
             a.engine.submit(s);
@@ -164,7 +164,9 @@ class PopulationEngineDeterminismTest {
     @Test
     void profilesAreIdenticalWhateverOrderTheBotsAppearInAndAfterACrashInTheMiddle() {
         Rig plain = deterministicRig(9, "x", 1);
-        plain.cfg.defaults = new InhabitantsConfig.Rule(1.0, 5, 5);
+        plain.cfg.defaults = new InhabitantsConfig.Rule(1.0, 5);
+        // 96 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 5.
+        plain.cfg.processing.blocksPerBot = 96.0;
         StructureSnapshot s = Rig.village(1, 1);
         plain.engine.submit(s);
         plain.run(60);
@@ -173,7 +175,8 @@ class PopulationEngineDeterminismTest {
 
         // bots appear in the reverse order
         Rig reversed = deterministicRig(9, "x", 2);
-        reversed.cfg.defaults = new InhabitantsConfig.Rule(1.0, 5, 5);
+        reversed.cfg.defaults = new InhabitantsConfig.Rule(1.0, 5);
+        reversed.cfg.processing.blocksPerBot = 96.0;
         reversed.cfg.processing.appearTimeoutTicks = 100_000;
         reversed.bots.readyAfterPolls = MANY;
         reversed.engine.submit(s);
@@ -191,7 +194,8 @@ class PopulationEngineDeterminismTest {
         Rig crashed = new Rig(new InMemoryStorage(), 3);
         crashed.cfg.deterministic.enabled = true;
         crashed.cfg.deterministic.salt = "x";
-        crashed.cfg.defaults = new InhabitantsConfig.Rule(1.0, 5, 5);
+        crashed.cfg.defaults = new InhabitantsConfig.Rule(1.0, 5);
+        crashed.cfg.processing.blocksPerBot = 96.0;
         crashed.cfg.processing.appearTimeoutTicks = 100_000;
         crashed.world.seed = 9;
         crashed.bots.readyAfterPolls = MANY;
@@ -235,7 +239,9 @@ class PopulationEngineDeterminismTest {
     @Test
     void eachDeterministicProfileUsesItsOwnFreshTransientDecksAndReplaysTheSiblingsBeforeIt() {
         Rig rig = deterministicRig(77, "", 1);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.cfg.processing.restoreSettleTicks = 3;
         StructureSnapshot s = Rig.village(0, 0);
         rig.engine.submit(s);
@@ -314,7 +320,7 @@ class PopulationEngineDeterminismTest {
         Rig a = deterministicRig(8, "", 1);
         Rig b = deterministicRig(8, "", 2);
         for (Rig r : List.of(a, b)) {
-            r.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+            r.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3);
             r.engine.submit(s);
             r.run(60);
         }

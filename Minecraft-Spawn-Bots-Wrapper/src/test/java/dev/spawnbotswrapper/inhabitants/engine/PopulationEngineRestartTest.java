@@ -27,7 +27,9 @@ class PopulationEngineRestartTest {
 
     /** A structure whose four bots have all been requested but none has appeared yet. */
     private static StructureSnapshot allRequestedNoneAppeared(Rig rig) {
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.cfg.processing.appearTimeoutTicks = 100_000;
         rig.bots.readyAfterPolls = MANY;
         StructureSnapshot s = Rig.village(0, 0);
@@ -420,7 +422,9 @@ class PopulationEngineRestartTest {
     @Test
     void theRosterScanIsSpreadOverTicksNotDoneAllAtOnce() {
         Rig rig = new Rig(new InMemoryStorage(), 3);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 150 blocks/bot makes a Rig.structure() (525 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 150.0;
         rig.cfg.processing.maxBotsPerTick = 64;
         for (int i = 0; i < 100; i++) {
             rig.engine.submit(Rig.structure("minecraft:igloo", i, 0));

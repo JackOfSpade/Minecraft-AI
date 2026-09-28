@@ -41,7 +41,7 @@ class InfoFormatterTest {
         assertEquals("PvP BOT Inhabitants 0.1.0", t.get(0));
         assertTrue(has(t, "PvP BOT 0.0.15", "HeroBot 1.4.0", "spawn tier CLASS(pos)"), t.toString());
         assertTrue(has(t, "Integration: AVAILABLE - PvP BOT 0.0.15 ok"), t.toString());
-        assertTrue(has(t, "Config: enabled", "deterministic off", "default 65% occupied, 1-4 bots",
+        assertTrue(has(t, "Config: enabled", "deterministic off", "default 65% occupied, 1-64 bots (sized by structure)",
                 "commands level 2 (gamemasters)"), t.toString());
         assertTrue(has(t, "Engine (this session): 120 structures seen, 118 rolled"), t.toString());
         assertTrue(has(t, "40 requested, 38 spawned, 2 failed", "3 queued, 1 in flight, 37 live"), t.toString());
@@ -120,12 +120,12 @@ class InfoFormatterTest {
     }
 
     @Test
-    void deterministicWithoutSaltAndSingleBotRule() {
+    void deterministicWithoutSaltShowsTheBotRange() {
         InhabitantsConfig c = new InhabitantsConfig();
         c.deterministic.enabled = true;
-        c.defaults = new InhabitantsConfig.Rule(0.5, 1, 1);
+        c.defaults = new InhabitantsConfig.Rule(0.5, 1);
         List<String> t = text(c);
-        assertTrue(has(t, "deterministic on", "default 50% occupied, 1 bot"), t.toString());
+        assertTrue(has(t, "deterministic on", "default 50% occupied, 1-64 bots (sized by structure)"), t.toString());
         assertFalse(has(t, "salt"));
     }
 

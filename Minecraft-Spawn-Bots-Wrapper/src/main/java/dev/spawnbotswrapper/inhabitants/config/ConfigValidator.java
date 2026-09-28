@@ -32,11 +32,6 @@ public final class ConfigValidator {
         }
         c.defaults.occupiedChance = clamp(w, "default.occupiedChance", c.defaults.occupiedChance, 0.0, 1.0);
         c.defaults.minBots = clamp(w, "default.minBots", c.defaults.minBots, 1, EffectiveRule.MAX_BOTS_PER_STRUCTURE);
-        c.defaults.maxBots = clamp(w, "default.maxBots", c.defaults.maxBots, 1, EffectiveRule.MAX_BOTS_PER_STRUCTURE);
-        if (c.defaults.maxBots < c.defaults.minBots) {
-            w.add("default.maxBots (" + c.defaults.maxBots + ") < minBots (" + c.defaults.minBots + "); raised maxBots");
-            c.defaults.maxBots = c.defaults.minBots;
-        }
 
         if (c.include == null) {
             c.include = new ArrayList<>(List.of("*"));
@@ -84,6 +79,7 @@ public final class ConfigValidator {
         p.maxStructuresPerTick = clamp(w, "processing.maxStructuresPerTick", p.maxStructuresPerTick, 1, 64);
         p.maxBotsPerTick = clamp(w, "processing.maxBotsPerTick", p.maxBotsPerTick, 1, 16);
         p.spawnIntervalTicks = clamp(w, "processing.spawnIntervalTicks", p.spawnIntervalTicks, 0, 200);
+        p.blocksPerBot = clamp(w, "processing.blocksPerBot", p.blocksPerBot, 1.0, 1_000_000.0);
         p.initialDelayTicks = clamp(w, "processing.initialDelayTicks", p.initialDelayTicks, 0, 1200);
         p.retryIntervalTicks = clamp(w, "processing.retryIntervalTicks", p.retryIntervalTicks, 10, 2400);
         p.maxAttemptsPerStructure = clamp(w, "processing.maxAttemptsPerStructure", p.maxAttemptsPerStructure, 1, 1000);
@@ -159,13 +155,6 @@ public final class ConfigValidator {
             }
             if (o.minBots != null) {
                 o.minBots = clamp(w, where + ".minBots", o.minBots, 1, EffectiveRule.MAX_BOTS_PER_STRUCTURE);
-            }
-            if (o.maxBots != null) {
-                o.maxBots = clamp(w, where + ".maxBots", o.maxBots, 1, EffectiveRule.MAX_BOTS_PER_STRUCTURE);
-            }
-            if (o.minBots != null && o.maxBots != null && o.maxBots < o.minBots) {
-                w.add(where + ": maxBots < minBots; raised maxBots");
-                o.maxBots = o.minBots;
             }
         }
     }

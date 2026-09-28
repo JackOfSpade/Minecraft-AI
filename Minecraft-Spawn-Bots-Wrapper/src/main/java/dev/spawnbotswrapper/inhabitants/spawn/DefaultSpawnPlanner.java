@@ -38,6 +38,14 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
      */
     private static final double SINGLE_BOX_SPREAD_FACTOR = 0.6;
 
+    /**
+     * How far apart two standing Ys must be to count as different storeys rather than the same uneven
+     * floor (a raised threshold, a stair step, a half-slab landing). Picked comfortably under a typical
+     * single-storey ceiling height so genuinely different floors of any structure -- vanilla or modded,
+     * whatever its actual floor-to-floor spacing -- are never mistaken for one wide, bumpy floor.
+     */
+    private static final int MIN_STOREY_GAP = 3;
+
     private final Supplier<InhabitantsConfig.Spawning> options;
 
     public DefaultSpawnPlanner(Supplier<InhabitantsConfig.Spawning> options) {
@@ -75,6 +83,11 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
         ColumnSampler sampler = new ColumnSampler(boxes);
         List<Position> found = new ArrayList<>();
         List<Spot> spare = new ArrayList<>();
+        // Storeys already given a bot, structure-wide (not just within one column/piece) -- mirrors
+        // ColumnSampler's own "prefer boxes without a bot yet" bias, one dimension down, so a handful of
+        // bots in a multi-storey building spread across its floors instead of each column's own random
+        // level pick defaulting to the ground floor by sheer chance.
+        List<Integer> usedLevels = new ArrayList<>();
         int tried = 0;
         boolean skippedUnloaded = false;
 
@@ -90,7 +103,8 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
             if (levels.isEmpty()) {
                 continue;
             }
-            int y = levels.remove(rng.nextInt(levels.size()));
+            int y = pickLevel(levels, usedLevels, rng);
+            usedLevels.add(y);
             found.add(new Position(column.x() + 0.5, y, column.z() + 0.5, yaw(rng)));
             sampler.markUsed(column.box()); // prefer the structure's other pieces before revisiting this one
             for (int other : levels) {
@@ -99,12 +113,60 @@ public final class DefaultSpawnPlanner implements SpawnPlanner {
         }
 
         while (found.size() < count && !spare.isEmpty()) {
-            Spot spot = spare.remove(rng.nextInt(spare.size()));
+            Spot spot = pickSpareSpot(spare, usedLevels, rng);
             if (!tooClose(spot.x() + 0.5, spot.y(), spot.z() + 0.5, separation, found, taken)) {
+                usedLevels.add(spot.y());
                 found.add(new Position(spot.x() + 0.5, spot.y(), spot.z() + 0.5, yaw(rng)));
             }
         }
         return new PositionResult(found, found.size() < count && skippedUnloaded, tried);
+    }
+
+    /**
+     * Removes and returns one level from {@code levels}, preferring one at least {@link #MIN_STOREY_GAP}
+     * blocks from every Y already in {@code usedLevels}; falls back to any of {@code levels} when every
+     * one of them is that close to an already-used storey (a genuinely short building, or every storey
+     * already covered).
+     */
+    private static int pickLevel(List<Integer> levels, List<Integer> usedLevels, SplitMix64 rng) {
+        List<Integer> fresh = unusedStoreys(levels, usedLevels);
+        List<Integer> pool = fresh.isEmpty() ? levels : fresh;
+        int chosen = pool.get(rng.nextInt(pool.size()));
+        levels.remove(Integer.valueOf(chosen));
+        return chosen;
+    }
+
+    /** Same preference as {@link #pickLevel}, over the cross-column leftover spots instead of one column. */
+    private static Spot pickSpareSpot(List<Spot> spare, List<Integer> usedLevels, SplitMix64 rng) {
+        List<Spot> fresh = new ArrayList<>(spare.size());
+        for (Spot spot : spare) {
+            if (!nearAnyLevel(spot.y(), usedLevels)) {
+                fresh.add(spot);
+            }
+        }
+        List<Spot> pool = fresh.isEmpty() ? spare : fresh;
+        Spot chosen = pool.get(rng.nextInt(pool.size()));
+        spare.remove(chosen);
+        return chosen;
+    }
+
+    private static List<Integer> unusedStoreys(List<Integer> levels, List<Integer> usedLevels) {
+        List<Integer> fresh = new ArrayList<>(levels.size());
+        for (int level : levels) {
+            if (!nearAnyLevel(level, usedLevels)) {
+                fresh.add(level);
+            }
+        }
+        return fresh;
+    }
+
+    private static boolean nearAnyLevel(int y, List<Integer> usedLevels) {
+        for (int used : usedLevels) {
+            if (Math.abs(y - used) < MIN_STOREY_GAP) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** A standing level of an already-read column that was not the one picked; no further probing needed. */

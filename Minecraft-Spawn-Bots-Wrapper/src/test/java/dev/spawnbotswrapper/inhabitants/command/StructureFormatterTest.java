@@ -48,7 +48,7 @@ class StructureFormatterTest {
         assertEquals("  box: (96,60,192) to (159,90,255)  64x31x64, 1 piece", t.get(3));
         assertEquals("  start chunk: 6,12  |  generated this session", t.get(4));
         assertEquals("  status: not processed yet", t.get(5));
-        assertTrue(t.get(6).startsWith("  eligible - would roll 65% occupied, 1-4 bots (default)"), t.get(6));
+        assertTrue(t.get(6).startsWith("  eligible - would roll 65% occupied, 1-64 bots (default)"), t.get(6));
         assertTrue(t.get(6).contains("/inhabitants process nearest rolls it now"), t.get(6));
     }
 
@@ -63,18 +63,18 @@ class StructureFormatterTest {
     @Test
     void theEffectiveRuleNamesWhereItCameFrom() {
         InhabitantsConfig c = Fixtures.bareConfig();
-        c.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(0.7, 1, 5));
+        c.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(0.7, 1));
         List<String> t = here(List.of(new Found(
                 Fixtures.snapshot("minecraft:village_plains", 0, 0, true, "minecraft:village"), null)), c);
-        assertTrue(has(t, "would roll 70% occupied, 1-5 bots (tag #minecraft:village)"), t.toString());
+        assertTrue(has(t, "would roll 70% occupied, 1-64 bots (tag #minecraft:village)"), t.toString());
     }
 
     @Test
     void ruleTextListsSeparateSourcesWhenTheyDiffer() {
         InhabitantsConfig c = Fixtures.bareConfig();
-        c.structures.put("minecraft:pillager_outpost", new InhabitantsConfig.RuleOverride(0.85, null, null));
+        c.structures.put("minecraft:pillager_outpost", new InhabitantsConfig.RuleOverride(0.85, null));
         List<String> t = here(List.of(new Found(Fixtures.snapshot("minecraft:pillager_outpost", 0, 0, true), null)), c);
-        assertTrue(has(t, "85% occupied (structure minecraft:pillager_outpost), 1-4 bots (default / default)"),
+        assertTrue(has(t, "85% occupied (structure minecraft:pillager_outpost), 1-64 bots (default / size-scaled)"),
                 t.toString());
     }
 

@@ -1,6 +1,7 @@
 package dev.spawnbotswrapper.inhabitants.command;
 
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
+import dev.spawnbotswrapper.inhabitants.config.EffectiveRule;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.engine.EngineControl.EngineStats;
 import dev.spawnbotswrapper.inhabitants.engine.PopulationView.PopulationCounts;
@@ -90,8 +91,7 @@ final class InfoFormatter {
             return "default rule missing";
         }
         return "default " + Fmt.percent(r.occupiedChance) + " occupied, "
-                + (r.minBots == r.maxBots ? String.valueOf(r.minBots) : r.minBots + "-" + r.maxBots)
-                + (r.maxBots == 1 ? " bot" : " bots");
+                + r.minBots + "-" + EffectiveRule.MAX_BOTS_PER_STRUCTURE + " bots (sized by structure)";
     }
 
     private static void engineLines(List<String> out, EngineStats s) {

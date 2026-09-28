@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.engine;
 
+import dev.spawnbotswrapper.inhabitants.config.EffectiveRule;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
@@ -91,7 +92,7 @@ class PopulationEngineRollTest {
     @Test
     void occupiedFractionOverTenThousandStructuresMatchesTheChance() {
         Rig rig = new Rig(new InMemoryStorage(false), 7);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.65, 1, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.65, 1);
         holdSpawns(rig);
         rig.feed(10_000, i -> Rig.structure("minecraft:desert_pyramid", i % 200, i / 200));
         assertEquals(10_000, rig.engine.stats().structuresRolled());
@@ -104,7 +105,7 @@ class PopulationEngineRollTest {
     @Test
     void occupiedFractionInDeterministicModeMatchesTheChanceToo() {
         Rig rig = new Rig(new InMemoryStorage(false), 7);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.30, 1, 2);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.30, 1);
         rig.cfg.deterministic.enabled = true;
         holdSpawns(rig);
         rig.feed(10_000, i -> Rig.structure("minecraft:igloo", i % 200 - 100, i / 200 - 25));
@@ -117,7 +118,7 @@ class PopulationEngineRollTest {
     void chanceZeroNeverAndChanceOneAlwaysAreExact() {
         for (double chance : new double[]{0.0, 1.0}) {
             Rig rig = new Rig(new InMemoryStorage(false), 3);
-            rig.cfg.defaults = new InhabitantsConfig.Rule(chance, 1, 3);
+            rig.cfg.defaults = new InhabitantsConfig.Rule(chance, 1);
             holdSpawns(rig);
             for (int i = 0; i < 3000; i++) {
                 rig.engine.submit(Rig.structure("minecraft:shipwreck", i, -i));
@@ -132,7 +133,10 @@ class PopulationEngineRollTest {
     @Test
     void botCountCoversTheFullInclusiveRange() {
         Rig rig = new Rig(new InMemoryStorage(false), 5);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 2, 6);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 2);
+        // Rig.structure() is a fixed 525 blocks of volume; 87.5 blocks/bot makes its size-capped ceiling
+        // exactly 6 (ceil(525 / 87.5) = 6), so minBots=2 draws the same [2,6] range the old maxBots=6 did.
+        rig.cfg.processing.blocksPerBot = 87.5;
         holdSpawns(rig);
         for (int i = 0; i < 3000; i++) {
             rig.engine.submit(Rig.structure("minecraft:desert_pyramid", i, 0));
@@ -150,23 +154,31 @@ class PopulationEngineRollTest {
     }
 
     @Test
-    void perStructureAndPerTagRulesDecideTheOddsAndTheCount() {
+    void perStructureAndPerTagRulesDecideTheOddsButSizeDecidesTheCount() {
+        // occupiedChance/minBots are still per-structure/tag; the bot-count CEILING no longer is -- it is
+        // always a pure function of the structure's own volume, so a small outpost and a much bigger
+        // structure sharing the same "always occupied, fold down to whatever fits" override still end up
+        // with very different counts, driven entirely by their geometry.
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1, 1);
-        rig.cfg.structures.put("minecraft:pillager_outpost", new InhabitantsConfig.RuleOverride(1.0, 5, 5));
-        rig.cfg.tags.put("#minecraft:village", new InhabitantsConfig.RuleOverride(1.0, 2, 2));
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1);
+        rig.cfg.structures.put("minecraft:pillager_outpost",
+                new InhabitantsConfig.RuleOverride(1.0, EffectiveRule.MAX_BOTS_PER_STRUCTURE));
+        rig.cfg.tags.put("#minecraft:village",
+                new InhabitantsConfig.RuleOverride(1.0, EffectiveRule.MAX_BOTS_PER_STRUCTURE));
         holdSpawns(rig);
 
         StructureSnapshot outpost = Rig.structure("minecraft:pillager_outpost", 0, 0);
-        StructureSnapshot village = Rig.village(5, 5);
+        // A deliberately huge structure (40 full-size pieces, 7000 blocks of volume) to actually exercise
+        // the size ceiling -- Rig.village() is intentionally NOT this: see its own doc comment.
+        StructureSnapshot village = Rig.snapshot(Rig.OVERWORLD, Rig.VILLAGE, 5, 5, Set.of("minecraft:village"), 40, true);
         StructureSnapshot other = Rig.structure("minecraft:igloo", 9, 9);
         rig.engine.submit(outpost);
         rig.engine.submit(village);
         rig.engine.submit(other);
         rig.run(1);
 
-        assertEquals(5, rig.record(outpost.key()).bots.size());
-        assertEquals(2, rig.record(village.key()).bots.size());
+        assertEquals(3, rig.record(outpost.key()).bots.size(), "a 3-piece structure's own size-capped max");
+        assertEquals(40, rig.record(village.key()).bots.size(), "a much bigger structure's own, higher size-capped max");
         assertEquals(StructureStatus.ABANDONED, rig.record(other.key()).status);
     }
 
@@ -175,7 +187,10 @@ class PopulationEngineRollTest {
     @Test
     void theRollRecordsItsInputsAndPlansEveryBotBeforeAnythingHappens() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4, distinct from
+        // its own natural default (3), to prove the count is not just hardcoded to that default.
+        rig.cfg.processing.blocksPerBot = 120.0;
         holdSpawns(rig);
         StructureSnapshot s = Rig.village(2, 3);
         rig.engine.submit(s);
@@ -244,7 +259,7 @@ class PopulationEngineRollTest {
     @Test
     void namesAreUniqueAcrossStructuresAndAlwaysValid() {
         Rig rig = new Rig(new InMemoryStorage(false), 11);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, EffectiveRule.MAX_BOTS_PER_STRUCTURE);
         rig.cfg.spawning.namePrefix = "Inh"; // this test's own "Inh_" check wants an explicit prefix, not the shipped default
         holdSpawns(rig);
         for (int i = 0; i < 1500; i++) {
@@ -264,7 +279,7 @@ class PopulationEngineRollTest {
     void aNameAlreadyInTheStoreIsSkippedCaseInsensitively() {
         Rig rig = new Rig();
         rig.cfg.deterministic.enabled = true;
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1, 1);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1);
         holdSpawns(rig);
         StructureSnapshot s = Rig.village(4, 4);
 
@@ -300,7 +315,7 @@ class PopulationEngineRollTest {
     @Test
     void abandonedStructuresArePersistedAndNeverRerolledByAFreshEngine() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1);
         List<StructureSnapshot> all = new ArrayList<>();
         for (int i = 0; i < 50; i++) {
             all.add(Rig.structure("minecraft:desert_pyramid", i, i));
@@ -315,7 +330,7 @@ class PopulationEngineRollTest {
         }
 
         // crash, restart, and the odds are now "always occupied": nothing may be rolled again
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3);
         rig.restart(false);
         for (StructureSnapshot s : all) {
             rig.engine.submit(s);
@@ -330,7 +345,7 @@ class PopulationEngineRollTest {
     @Test
     void abandonedRecordCarriesTheRollItWasDecidedBy() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1);
         StructureSnapshot s = Rig.structure("minecraft:igloo", 1, 1);
         rig.engine.submit(s);
         rig.run(1);
@@ -391,7 +406,7 @@ class PopulationEngineRollTest {
         Rig rig = new Rig();
         rig.bots.available = false;
         for (int i = 0; i < 20; i++) {
-            rig.engine.submit(Rig.village(i, 0));
+            rig.engine.submit(Rig.structure("minecraft:igloo", i, 0));
         }
         rig.run(200);
         assertEquals(0, rig.store.puts, "an unavailable integration must never mark structures processed");
@@ -403,7 +418,7 @@ class PopulationEngineRollTest {
 
         rig.bots.available = true;
         for (int i = 0; i < 20; i++) {
-            rig.engine.submit(Rig.village(i, 0));
+            rig.engine.submit(Rig.structure("minecraft:witch_hut", i, 0));
         }
         rig.run(100);
         assertEquals(20, rig.store.counts().populated());

@@ -56,7 +56,7 @@ class PopulationEngineControlTest {
     @Test
     void aForcedRollCanComeOutAbandoned() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1);
         StructureSnapshot s = Rig.village(0, 0);
         EngineControl.ProcessOutcome out = rig.engine.process(s, ForceMode.ROLL);
         assertEquals(Kind.ABANDONED, out.kind());
@@ -71,10 +71,10 @@ class PopulationEngineControlTest {
         rig.engine.submit(populated);
         rig.run(50);
         StructureSnapshot abandoned = Rig.structure("minecraft:igloo", 5, 5);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1, 1);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1);
         rig.engine.submit(abandoned);
         rig.run(5);
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 3);
 
         for (ForceMode mode : ForceMode.values()) {
             for (StructureSnapshot s : List.of(populated, abandoned)) {
@@ -135,7 +135,10 @@ class PopulationEngineControlTest {
     void forcedOutcomesIgnoreTheOddsButKeepTheBotCountRangeAndRecordTheRoll() {
         Rig rig = new Rig();
         rig.cfg.deterministic.enabled = true;
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 2, 5);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 2);
+        // 105 blocks/bot makes a Rig.structure() (525 blocks of volume) size-cap at exactly 5, matching
+        // the old maxBots=5 range.
+        rig.cfg.processing.blocksPerBot = 105.0;
         rig.cfg.processing.restoreSettleTicks = MANY / 2;
         StructureSnapshot occ = Rig.structure("minecraft:igloo", 1, 1);
         assertEquals(Kind.OCCUPIED_QUEUED, rig.engine.process(occ, ForceMode.OCCUPIED).kind());
@@ -146,7 +149,7 @@ class PopulationEngineControlTest {
         assertTrue(r.roll >= 0.0 && r.roll < 1.0);
         assertEquals(0.0, r.occupiedChance);
 
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 2, 5);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 2);
         StructureSnapshot abd = Rig.structure("minecraft:igloo", 2, 2);
         assertEquals(Kind.ABANDONED, rig.engine.process(abd, ForceMode.ABANDONED).kind());
         assertEquals("ADMIN_FORCED", rig.record(abd.key()).source);
@@ -197,7 +200,7 @@ class PopulationEngineControlTest {
     @Test
     void resetForgetsTheRecordSoTheStructureIsRolledAgain() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1, 1);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(0.0, 1);
         StructureSnapshot s = Rig.structure("minecraft:igloo", 4, 4);
         rig.engine.submit(s);
         rig.run(3);
@@ -207,7 +210,7 @@ class PopulationEngineControlTest {
         assertTrue(rig.store.find(s.key()).isEmpty());
         assertTrue(rig.store.persisted(s.key()).isEmpty(), "and durably so");
 
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1, 1);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1);
         rig.engine.submit(s);
         rig.run(30);
         assertEquals(StructureStatus.POPULATED, rig.record(s.key()).status);
@@ -217,7 +220,7 @@ class PopulationEngineControlTest {
     void inDeterministicModeAResetStructureIsRolledIdenticallyAgain() {
         Rig rig = new Rig();
         rig.cfg.deterministic.enabled = true;
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1, 5);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 1);
         rig.cfg.processing.restoreSettleTicks = MANY / 2;
         StructureSnapshot s = Rig.village(6, 7);
         rig.engine.submit(s);
@@ -362,7 +365,9 @@ class PopulationEngineControlTest {
     @Test
     void statsCountEverythingThatHappens() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 2, 2);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 2);
+        // 240 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 2.
+        rig.cfg.processing.blocksPerBot = 240.0;
         rig.cfg.processing.maxLiveBots = 3;
         assertEquals(new EngineControl.EngineStats(0, 0, 0, 0, 0, 0, 0, 0), rig.engine.stats());
 
@@ -441,7 +446,7 @@ class PopulationEngineControlTest {
         assertEquals(1, helper.store.counts().populated());
 
         InhabitantsConfig never = Rig.fastConfig();
-        never.defaults = new InhabitantsConfig.Rule(0.0, 1, 1);
+        never.defaults = new InhabitantsConfig.Rule(0.0, 1);
         ref.set(never);
         engine.onConfigReloaded();
         engine.submit(Rig.village(20, 20));
@@ -492,7 +497,9 @@ class PopulationEngineControlTest {
     @Test
     void tighteningTheProcessingLimitsAppliesToTheNextTick() {
         Rig rig = new Rig();
-        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4, 4);
+        rig.cfg.defaults = new InhabitantsConfig.Rule(1.0, 4);
+        // 120 blocks/bot makes a Rig.village() (480 blocks of volume) size-cap at exactly 4.
+        rig.cfg.processing.blocksPerBot = 120.0;
         rig.cfg.processing.maxBotsPerTick = 4;
         rig.cfg.processing.spawnIntervalTicks = 0;
         rig.engine.submit(Rig.village(0, 0));

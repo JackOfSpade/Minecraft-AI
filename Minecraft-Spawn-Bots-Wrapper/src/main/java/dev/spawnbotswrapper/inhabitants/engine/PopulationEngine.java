@@ -231,12 +231,20 @@ public final class PopulationEngine implements EngineControl {
         long structureSeed = deterministic
                 ? StableHash.of(ctx.world.worldSeed(), StableHash.ofString(EngineContext.salt(cfg)), key.stableHash())
                 : seedSource.getAsLong();
-        int pieceCount = snapshot.pieces().isEmpty() ? 1 : snapshot.pieces().size();
-        StructureRoll roll = StructureRoll.of(rule, structureSeed, pieceCount, mode,
+        long structureVolume = snapshot.totalVolume();
+        double blocksPerBot = EngineContext.processing(cfg).blocksPerBot;
+        // A brand-new structure found while the world is already at its live-bot ceiling is recorded
+        // abandoned outright rather than occupied-and-perpetually-waiting for a slot that may never free
+        // up: a full population cap should read as "this place happens to be empty," not as an invisible,
+        // ever-growing backlog. An explicit admin force (ROLL is the only "natural" mode) still works --
+        // asking for one specific structure is asking to cut the queue, not to respect it.
+        boolean capacityFull = mode == ForceMode.ROLL && driver.capacityLeft(cfg) <= 0;
+        StructureRoll roll = StructureRoll.of(rule, structureSeed, structureVolume, blocksPerBot,
+                capacityFull ? ForceMode.ABANDONED : mode,
                 deterministic ? "DETERMINISTIC" : "RANDOM");
 
         StructureRecord rec = roll.occupied() ? new StructureRecord() : StructureRecord.abandoned();
-        rec.source = roll.source();
+        rec.source = capacityFull ? StructureRoll.SOURCE_CAPACITY_FULL : roll.source();
         rec.occupiedChance = roll.chance();
         rec.roll = roll.roll();
         rec.structureSeed = roll.structureSeed();
@@ -253,10 +261,10 @@ public final class PopulationEngine implements EngineControl {
         if (roll.occupied()) {
             driver.enqueue(snapshot, immediate, ctx.now());
         }
-        ctx.debug(cfg, "Rolled {}: {} (roll {} vs chance {} [{}], {} bot(s) of a size-capped max {} from {} piece(s)"
-                        + " [{} per bot, {}], source {})", key, roll.occupied() ? "occupied" : "abandoned",
+        ctx.debug(cfg, "Rolled {}: {} (roll {} vs chance {} [{}], {} bot(s) of a size-capped max {} from {} blocks"
+                        + " of volume [{} blocks/bot], source {})", key, roll.occupied() ? "occupied" : "abandoned",
                 roll.roll(), roll.chance(), rule.occupiedChanceFrom(), roll.occupied() ? roll.botCount() : 0,
-                roll.sizeCappedMax(), roll.pieceCount(), rule.piecesPerBot(), rule.piecesPerBotFrom(), roll.source());
+                roll.sizeCappedMax(), roll.structureVolume(), blocksPerBot, rec.source);
         return rec;
     }
 

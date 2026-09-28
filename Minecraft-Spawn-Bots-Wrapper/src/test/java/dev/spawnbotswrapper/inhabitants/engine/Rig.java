@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.engine;
 
+import dev.spawnbotswrapper.inhabitants.config.EffectiveRule;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import dev.spawnbotswrapper.inhabitants.store.BotRecord;
 import dev.spawnbotswrapper.inhabitants.store.BotState;
@@ -49,13 +50,21 @@ final class Rig {
         this.engine = newEngine(store);
     }
 
+    /**
+     * minBots is set to the global ceiling on purpose: {@code effectiveMin = min(minBots, sizeCappedMax)}
+     * then always folds down to exactly {@code sizeCappedMax}, so every structure gets a bot count that is
+     * deterministic (no dice roll needed to pin it down in a test) AND equal to its own size -- {@link
+     * #structure} (3 pieces) always gets exactly 3, {@link #village} (40 pieces) always gets exactly 40,
+     * both computed from blocksPerBot=175 (one piece's own volume, see {@link #snapshot}).
+     */
     static InhabitantsConfig fastConfig() {
         InhabitantsConfig c = new InhabitantsConfig();
         c.structures.clear();
         c.tags.clear();
         c.exclude = new ArrayList<>();
-        c.defaults = new InhabitantsConfig.Rule(1.0, 3, 3);
+        c.defaults = new InhabitantsConfig.Rule(1.0, EffectiveRule.MAX_BOTS_PER_STRUCTURE);
         InhabitantsConfig.Processing p = c.processing;
+        p.blocksPerBot = 175.0;
         p.maxStructuresPerTick = 64;
         p.maxBotsPerTick = 4;
         p.spawnIntervalTicks = 0;
@@ -108,6 +117,13 @@ final class Rig {
 
     static StructureSnapshot snapshot(String dimension, String id, int chunkX, int chunkZ, Set<String> tags,
                                       int pieceCount, boolean newlyGenerated) {
+        return snapshot(dimension, id, chunkX, chunkZ, tags, pieceCount, newlyGenerated, 5, 7, 5);
+    }
+
+    /** As above, with an explicit per-piece size -- see {@link #village} for why that matters. */
+    static StructureSnapshot snapshot(String dimension, String id, int chunkX, int chunkZ, Set<String> tags,
+                                      int pieceCount, boolean newlyGenerated,
+                                      int pieceSizeX, int pieceSizeY, int pieceSizeZ) {
         int x = chunkX * 16;
         int z = chunkZ * 16;
         IntBox bounds = new IntBox(x, 60, z, x + 47, 80, z + 47);
@@ -115,13 +131,20 @@ final class Rig {
         for (int i = 0; i < pieceCount; i++) {
             int px = x + (i % 8) * 5;
             int pz = z + (i / 8) * 5;
-            pieces.add(new IntBox(px, 64, pz, px + 4, 70, pz + 4));
+            pieces.add(new IntBox(px, 64, pz, px + pieceSizeX - 1, 64 + pieceSizeY - 1, pz + pieceSizeZ - 1));
         }
         return new StructureSnapshot(new StructureKey(dimension, id, chunkX, chunkZ), tags, bounds, pieces, newlyGenerated);
     }
 
+    /**
+     * Small pieces on purpose (2x3x2 = 12 blocks each; 40 pieces = 480 total) so this fixture's own
+     * size-capped bot count still matches {@link #structure}'s (3, under the shared blocksPerBot=175
+     * default) despite having many more pieces. This fixture exists to test piece-count/placement-spread
+     * mechanics, not the size-scaling feature itself -- a test of that (PopulationEngineRollTest) builds
+     * its own deliberately huge snapshot instead.
+     */
     static StructureSnapshot village(int chunkX, int chunkZ) {
-        return snapshot(OVERWORLD, VILLAGE, chunkX, chunkZ, Set.of("minecraft:village"), 40, true);
+        return snapshot(OVERWORLD, VILLAGE, chunkX, chunkZ, Set.of("minecraft:village"), 40, true, 2, 3, 2);
     }
 
     static StructureSnapshot structure(String id, int chunkX, int chunkZ) {

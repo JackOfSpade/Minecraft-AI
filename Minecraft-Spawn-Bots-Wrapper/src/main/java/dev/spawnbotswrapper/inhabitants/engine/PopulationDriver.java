@@ -261,6 +261,11 @@ final class PopulationDriver {
         return Math.max(0, pr.maxLiveBots - roster.online() - inFlight.size());
     }
 
+    /** Same as above, for callers (the roll itself) that only have the whole config in hand. */
+    int capacityLeft(InhabitantsConfig cfg) {
+        return capacityLeft(EngineContext.processing(cfg));
+    }
+
     private static List<BotRecord> plannedBots(StructureRecord rec) {
         List<BotRecord> planned = new ArrayList<>();
         for (BotRecord b : rec.bots) {

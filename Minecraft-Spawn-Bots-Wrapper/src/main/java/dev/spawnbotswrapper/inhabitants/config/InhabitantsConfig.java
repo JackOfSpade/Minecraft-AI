@@ -70,38 +70,26 @@ public final class InhabitantsConfig {
     /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
     public Connection connection = new Connection();
 
-    /** Rolled once per structure: occupied or abandoned, and how many bots if occupied. */
+    /**
+     * Rolled once per structure: occupied or abandoned, and the minimum bot count if occupied. There is
+     * deliberately no per-structure/tag maximum here any more: the ceiling for one structure INSTANCE is
+     * always {@code min(EffectiveRule.MAX_BOTS_PER_STRUCTURE, ceil(totalVolume / processing.blocksPerBot))}
+     * (see {@link EffectiveRule#sizeCappedMax}) -- a one-room well and a fifty-house village never share a
+     * hand-picked number just because they share a tag; a bigger structure simply supports more bots, up
+     * to the one global cap every structure shares.
+     */
     public static final class Rule {
         /** Probability in [0,1] that a structure is occupied. */
         public double occupiedChance = 0.65;
-        /** Inclusive bot count range for an occupied structure. */
+        /** Bots an occupied structure gets at minimum (also the floor the size-scaled ceiling folds down to). */
         public int minBots = 1;
-        public int maxBots = 4;
-        /**
-         * How many of the structure's pieces (buildings) roughly justify one more bot. The roll never
-         * exceeds {@code maxBots}; this only pulls the ceiling DOWN for a structure smaller than that
-         * range assumes, so a one-piece well and a fifty-house village never draw from the same effective
-         * range even though they share a {@code maxBots}. A structure with no piece data (bounds only)
-         * counts as one piece. Must stay positive; the default asks for roughly two bots per piece, so a
-         * handful of pieces already reaches a typical {@code maxBots} and only a genuinely small structure
-         * (one or two pieces) draws from a visibly narrower range than a large one sharing the same tag.
-         */
-        public double piecesPerBot = 0.5;
 
         public Rule() {
         }
 
-        public Rule(double occupiedChance, int minBots, int maxBots) {
+        public Rule(double occupiedChance, int minBots) {
             this.occupiedChance = occupiedChance;
             this.minBots = minBots;
-            this.maxBots = maxBots;
-        }
-
-        public Rule(double occupiedChance, int minBots, int maxBots, double piecesPerBot) {
-            this.occupiedChance = occupiedChance;
-            this.minBots = minBots;
-            this.maxBots = maxBots;
-            this.piecesPerBot = piecesPerBot;
         }
     }
 
@@ -109,23 +97,13 @@ public final class InhabitantsConfig {
     public static final class RuleOverride {
         public Double occupiedChance;
         public Integer minBots;
-        public Integer maxBots;
-        public Double piecesPerBot;
 
         public RuleOverride() {
         }
 
-        public RuleOverride(Double occupiedChance, Integer minBots, Integer maxBots) {
+        public RuleOverride(Double occupiedChance, Integer minBots) {
             this.occupiedChance = occupiedChance;
             this.minBots = minBots;
-            this.maxBots = maxBots;
-        }
-
-        public RuleOverride(Double occupiedChance, Integer minBots, Integer maxBots, Double piecesPerBot) {
-            this.occupiedChance = occupiedChance;
-            this.minBots = minBots;
-            this.maxBots = maxBots;
-            this.piecesPerBot = piecesPerBot;
         }
     }
 
@@ -180,11 +158,20 @@ public final class InhabitantsConfig {
          */
         public boolean onlyNewlyGenerated = false;
         /** How many newly seen structures are rolled per server tick. */
-        public int maxStructuresPerTick = 4;
+        public int maxStructuresPerTick = 2;
         /** How many bots are requested from PvP BOT per server tick (spawning a fake player is not free). */
         public int maxBotsPerTick = 1;
         /** Minimum ticks between two bot spawn requests. */
-        public int spawnIntervalTicks = 4;
+        public int spawnIntervalTicks = 20;
+        /**
+         * How many blocks of a structure's total volume (sum of its pieces' bounding boxes, or the
+         * overall bounds when it has no piece data) justify one more bot, before
+         * {@link EffectiveRule#MAX_BOTS_PER_STRUCTURE} clamps the result. A single global knob rather than
+         * a per-structure one: a bigger structure earning more bots is a property of its size, not of an
+         * operator having hand-picked a number for that particular structure type. Tune this once you have
+         * seen real structures in play -- it is a rough starting estimate, not a calibrated constant.
+         */
+        public double blocksPerBot = 300.0;
         /** Ticks to wait before the first population attempt, so neighbouring chunks of the structure can load. */
         public int initialDelayTicks = 40;
         /** Ticks between retries while a structure's chunks are not loaded/valid yet. */
@@ -192,7 +179,7 @@ public final class InhabitantsConfig {
         /** Population attempts (with loaded chunks) before an occupied structure is given up on permanently. */
         public int maxAttemptsPerStructure = 12;
         /** Never have more than this many living inhabitants at once; further population waits (no re-roll). 0 = unlimited. */
-        public int maxLiveBots = 256;
+        public int maxLiveBots = 64;
         /** Ticks to wait for PvP BOT to make a requested bot appear before counting the attempt as failed. */
         public int appearTimeoutTicks = 200;
         /** Ticks between disk saves of changed state (also saved on server stop). */
@@ -246,16 +233,16 @@ public final class InhabitantsConfig {
 
     private static Map<String, RuleOverride> defaultStructureOverrides() {
         Map<String, RuleOverride> m = new LinkedHashMap<>();
-        m.put("minecraft:pillager_outpost", new RuleOverride(0.85, 2, 6));
-        m.put("minecraft:mansion", new RuleOverride(0.90, 2, 6));
-        m.put("minecraft:ancient_city", new RuleOverride(0.50, 1, 3));
-        m.put("minecraft:trial_chambers", new RuleOverride(0.60, 1, 4));
+        m.put("minecraft:pillager_outpost", new RuleOverride(0.85, 2));
+        m.put("minecraft:mansion", new RuleOverride(0.90, 2));
+        m.put("minecraft:ancient_city", new RuleOverride(0.50, 1));
+        m.put("minecraft:trial_chambers", new RuleOverride(0.60, 1));
         return m;
     }
 
     private static Map<String, RuleOverride> defaultTagOverrides() {
         Map<String, RuleOverride> m = new LinkedHashMap<>();
-        m.put("#minecraft:village", new RuleOverride(0.70, 1, 5));
+        m.put("#minecraft:village", new RuleOverride(0.70, 1));
         return m;
     }
 }

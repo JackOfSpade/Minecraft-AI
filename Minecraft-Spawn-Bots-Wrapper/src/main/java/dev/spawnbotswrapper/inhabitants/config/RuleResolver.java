@@ -7,15 +7,16 @@ import java.util.function.Function;
 /**
  * Turns the config into the {@link EffectiveRule} for one structure, and decides eligibility.
  * <p>
- * Precedence, applied to each of the three values independently (so an override may set only
- * {@code occupiedChance} and inherit the bot counts):
+ * Precedence, applied to each of {@code occupiedChance} and {@code minBots} independently (so an
+ * override may set only {@code occupiedChance} and inherit the minimum bot count):
  * <ol>
  *   <li>exact id in {@code structures}</li>
  *   <li>the first matching {@code tags} entry, in file order, that sets the value</li>
  *   <li>a {@code namespace:*} entry in {@code structures}</li>
  *   <li>{@code default}</li>
  * </ol>
- * The result is clamped to sane bounds (chance 0..1, at least one bot, max >= min, at most 64).
+ * The result is clamped to sane bounds (chance 0..1, at least one bot, at most {@link
+ * EffectiveRule#MAX_BOTS_PER_STRUCTURE}). There is no {@code maxBots} to resolve here: see {@link EffectiveRule}.
  */
 public final class RuleResolver {
     private RuleResolver() {
@@ -49,8 +50,6 @@ public final class RuleResolver {
 
         Resolved<Double> chance = pick(cfg, structureId, tagIds, o -> o.occupiedChance, base.occupiedChance);
         Resolved<Integer> min = pick(cfg, structureId, tagIds, o -> o.minBots, base.minBots);
-        Resolved<Integer> max = pick(cfg, structureId, tagIds, o -> o.maxBots, base.maxBots);
-        Resolved<Double> piecesPerBot = pick(cfg, structureId, tagIds, o -> o.piecesPerBot, base.piecesPerBot);
 
         double p = chance.value;
         if (Double.isNaN(p)) {
@@ -58,12 +57,7 @@ public final class RuleResolver {
         }
         p = Math.max(0.0, Math.min(1.0, p));
         int lo = Math.max(1, Math.min(EffectiveRule.MAX_BOTS_PER_STRUCTURE, min.value));
-        int hi = Math.max(lo, Math.min(EffectiveRule.MAX_BOTS_PER_STRUCTURE, max.value));
-        double ppb = piecesPerBot.value;
-        if (Double.isNaN(ppb) || Double.isInfinite(ppb) || ppb <= 0.0) {
-            ppb = 0.1; // never let a bad config value divide by zero or invert the scaling
-        }
-        return new EffectiveRule(p, lo, hi, ppb, chance.from, min.from, max.from, piecesPerBot.from);
+        return new EffectiveRule(p, lo, chance.from, min.from);
     }
 
     private record Resolved<T>(T value, String from) {
