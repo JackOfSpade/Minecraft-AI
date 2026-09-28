@@ -84,6 +84,7 @@ public class MinecraftAiMod implements ModInitializer {
             AmbientConversationCoordinator.INSTANCE.tick(server);
             MinecraftAiServerNetworking.INSTANCE.tick(server);
             io.github.zoyluo.minecraftai.log.DiagnosticLogger.INSTANCE.tick(server);
+            io.github.zoyluo.minecraftai.log.InventoryAudit.INSTANCE.tick(server);
             if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {
                 BotPersistence.INSTANCE.saveAllAsync(server);
             }

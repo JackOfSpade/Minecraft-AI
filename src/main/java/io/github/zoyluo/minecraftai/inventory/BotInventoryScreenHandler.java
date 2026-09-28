@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.inventory;
 import io.github.zoyluo.minecraftai.MinecraftAiMod;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.log.InventoryAudit;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.minecraft.entity.ContainerUser;
 import net.minecraft.entity.EquipmentSlot;
@@ -429,6 +430,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
                 return;
             }
             OpenScreenLeases.open(bot);
+            InventoryAudit.INSTANCE.viewerOpened(bot.getUuid(), player.getUuid(), player.getGameProfile().name());
             BotLog.action(bot, "inventory_screen_opened", "viewer", player.getGameProfile().name());
         }
 
@@ -438,6 +440,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
             boolean closed = player != null && viewers.remove(player.getUuid());
             if (closed) {
                 OpenScreenLeases.close(bot);
+                InventoryAudit.INSTANCE.viewerClosed(bot.getUuid(), player.getUuid());
             }
             if (player != null) {
                 BotLog.action(bot, "inventory_screen_closed", "viewer", player.getGameProfile().name());

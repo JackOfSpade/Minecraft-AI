@@ -15,7 +15,9 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.BotLogWriter;
+import io.github.zoyluo.minecraftai.log.CapabilityTally;
 import io.github.zoyluo.minecraftai.log.DiagnosticLogger;
+import io.github.zoyluo.minecraftai.log.InventoryAudit;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.memory.EpisodeLog;
@@ -137,7 +139,9 @@ public final class RuntimeLifecycleCoordinator {
         EpisodeMemory.INSTANCE.reset(bot.getUuid());
         BotReporter.INSTANCE.onCleared(bot);
         DiagnosticLogger.INSTANCE.clear(bot);
+        InventoryAudit.INSTANCE.clear(bot);
         CapabilityRuntime.clear(bot);
+        CapabilityTally.INSTANCE.clear(bot.getUuid());
         MiningAssistRuntime.clearBotUnload(bot);
         // P3: the R4 in-flight-consult bookkeeping is per-bot state too, same restart-safety reasoning as
         // MiningAssistRuntime.clearBotUnload immediately above (see PoiCoordinator.clearBot's own javadoc).
@@ -171,10 +175,12 @@ public final class RuntimeLifecycleCoordinator {
         BotRuntimeOptions.INSTANCE.clearAll();
         BotReporter.INSTANCE.clearAll();
         DiagnosticLogger.INSTANCE.clearAll();
+        InventoryAudit.INSTANCE.clearAll();
         ReplayRecorder.INSTANCE.clearAll();
         BotProfiler.INSTANCE.clearAll();
         MinecraftAiServerNetworking.INSTANCE.clear();
         CapabilityRuntime.clearAll();
+        CapabilityTally.INSTANCE.clearAll();
         MiningEvidenceAudit.clearAll();
         MiningAssistRuntime.clearWorldRuntime();
         PoiCoordinator.INSTANCE.clearAll();
