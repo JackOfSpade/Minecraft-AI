@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.ModifyConstant;
  */
 @Mixin(ServerLoginNetworkHandler.class)
 public abstract class LoginTimeoutMixin {
-    @ModifyConstant(method = "method_52421()V", constant = @Constant(intValue = 600))
+    @ModifyConstant(method = "tick()V", constant = @Constant(intValue = 600))
     private int minecraftai$extendLoginTimeout(int original) {
         return 6000;
     }
