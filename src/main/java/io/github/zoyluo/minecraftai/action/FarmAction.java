@@ -66,8 +66,8 @@ public final class FarmAction {
     public static ActionResult placeWater(AIPlayerEntity bot, BlockPos pos) {
         ServerWorld world = bot.getEntityWorld();
         BlockState at = world.getBlockState(pos);
-        if (!at.isAir() && !at.isOf(Blocks.WATER) && world.getFluidState(pos).isEmpty()) {
-            return ActionResult.failed("not_empty"); // target is occupied by a solid block, water cannot be placed
+        if (!at.isAir() && !at.isOf(Blocks.WATER) && (!world.getFluidState(pos).isEmpty() || !at.isReplaceable())) {
+            return ActionResult.failed("not_empty"); // target is occupied by a solid block or a non-water fluid (e.g. lava); water cannot be placed
         }
         if (!InventoryAction.removeItems(bot, Items.WATER_BUCKET, 1)) {
             return ActionResult.failed("missing_water_bucket");
@@ -75,21 +75,6 @@ public final class FarmAction {
         world.setBlockState(pos, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET, 1));
         BotLog.action(bot, "place_water", "pos", pos);
-        return ActionResult.SUCCESS;
-    }
-
-    // Irrigation: scoop water from the source at pos into an empty bucket (this is how infinite water source "renewability" is verified: scoop one cell away, and the adjacent source refills it).
-    public static ActionResult fillBucket(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getEntityWorld();
-        if (!isWaterSource(world, pos)) {
-            return ActionResult.failed("not_water_source");
-        }
-        if (!InventoryAction.removeItems(bot, Items.BUCKET, 1)) {
-            return ActionResult.failed("missing_bucket");
-        }
-        world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET, 1));
-        BotLog.action(bot, "fill_bucket", "pos", pos);
         return ActionResult.SUCCESS;
     }
 
@@ -105,23 +90,6 @@ public final class FarmAction {
             case "potato", "potatoes", "minecraft:potato", "minecraft:potatoes" -> new CropSpec(Items.POTATO, Blocks.POTATOES, "potato");
             default -> throw new IllegalArgumentException("unknown_crop: " + cropName);
         };
-    }
-
-    public static boolean isSupportedCrop(Block block) {
-        return block == Blocks.WHEAT || block == Blocks.CARROTS || block == Blocks.POTATOES;
-    }
-
-    public static Item seedFor(Block crop) {
-        if (crop == Blocks.WHEAT) {
-            return Items.WHEAT_SEEDS;
-        }
-        if (crop == Blocks.CARROTS) {
-            return Items.CARROT;
-        }
-        if (crop == Blocks.POTATOES) {
-            return Items.POTATO;
-        }
-        throw new IllegalArgumentException("unknown_crop_block: " + crop);
     }
 
     public static boolean isTillable(BlockState state) {
