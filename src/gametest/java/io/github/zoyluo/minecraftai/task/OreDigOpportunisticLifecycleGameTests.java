@@ -242,8 +242,20 @@ public final class OreDigOpportunisticLifecycleGameTests {
             h.require(task[0].state() != TaskState.FAILED, "the mission failed: " + task[0].failureReason());
             switch (stage[0]) {
                 case 0 -> {
-                    if (phaseOf(id) == DetourPhase.IDLE) {
-                        h.require(p.tick - stageStart[0] < 1200, "the opportunistic detour never started");
+                    // Wait for the engine to have actually reached MINE (not merely a still-walking APPROACH,
+                    // and never the very first tick APPROACH itself is published): pausing the instant phase
+                    // leaves IDLE catches the detour before the bot has walked a single block away from its
+                    // pre-detour anchor, since APPROACH is published the same tick the excursion is chosen.
+                    // With zero real displacement, resume finds the bot already standing on the anchor
+                    // (restoringFace false, nothing to walk back for), so ordinary corridor digging resumes
+                    // immediately and can move the bot off that exact cell within the very next server tick --
+                    // before this polling loop (one tick behind the engine) ever observes it there -- so the
+                    // "walked back to the anchor" check below never fires true. Waiting for MINE (the bot has
+                    // actually reached the ore's stand pose) guarantees a genuine mid-flight interruption, the
+                    // same care restartMidDetourReturnsToAnchor takes for the same reason.
+                    if (phaseOf(id) != DetourPhase.MINE && phaseOf(id) != DetourPhase.POSTBREAK
+                            && phaseOf(id) != DetourPhase.SETTLE_DROP) {
+                        h.require(p.tick - stageStart[0] < 1200, "the detour never reached MINE");
                         return;
                     }
                     // Capture the checkpoint's published face (the anchor, hook 11) and strip numbers now, mid-flight.
@@ -650,24 +662,38 @@ public final class OreDigOpportunisticLifecycleGameTests {
         Room room = h.newRoom(36, -3, 8, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
         //
-        // KNOWN REMAINING ISSUE (not resolved, documented per the debugging brief rather than guessed at
-        // further): this test is still flaky. No local coal at all (matching this file's other long-idle
-        // fixtures, e.g. pauseMidDetourResumesToAnchor) reliably fixes the diamond's sighting for MOST of
-        // the run, and is a real improvement over the original fixture's own 7-cell coal column (which
-        // reliably went stale by the time inventory space freed at tick ~900, confirmed in the real
-        // GameTest log: capacity -> unknown, never present again). But two things have NOT been pinned
-        // down with the same confidence: (a) whether "no local ore" alone is fully sufficient across runs,
-        // since one repositioning experiment (dx=2 dz=-3, beside the corridor's own default first leg
-        // instead of off to the side at dx=5 dz=0) produced a WORSE, not better, "never even sighted"
-        // result in an isolated single-test run -- suggesting position along the corridor's own axis is
-        // not the deciding factor after all; and (b) this is the only test in the whole suite that calls
-        // setInventory (every slot but a couple pre-filled to 63 cobblestone), and its own task ticks log
-        // consistently high profile_slow_section costs (50-150ms, several times a normal tick budget) that
-        // no sibling fixture shows, hinting the extra per-tick inventory-merge bookkeeping itself may be
-        // competing for the same tick budget the sense sweep uses (design's own "adaptive_throttle"), which
-        // would explain a fixture-specific flake no geometry change alone can fix. Left at the original
-        // ore position with no local supply (the best-confirmed partial improvement) rather than guessing
-        // further.
+        // KNOWN REMAINING ISSUE (not resolved; effort spent this round is recorded here rather than
+        // guessed past, per the debugging brief -- see the g2 debugging session's own report for the full
+        // analysis). ROOT CAUSE, confirmed against the real GameTest log: with no local coal at all,
+        // OreDig's own ordinary ladder (target=coal_ore, none present) has nothing to find near spawn and
+        // commits to a single STRIP_SEGMENT(48)-block leg in its default direction (north, -z). This room's
+        // interior is only 7 cells deep in z (-3..3), so that leg exits the sealed room through the shell
+        // within the first few blocks and then keeps digging straight through 40+ blocks of the platform's
+        // ordinary solid rock beyond it -- a real corridor with solid walls on both sides, not open air --
+        // at ordinary mining speed, going stale (present -> unknown, never present again) within as little
+        // as ~150-200 ticks of active mining once the leg is well underway. The bot is walled away from its
+        // own sightline to the diamond, not merely far from it; freeing inventory space afterward correctly
+        // finds nothing to detour to because there really is nothing observable any more.
+        //
+        // Three classes of fixture-only fix were tried this round and every one, confirmed against the real
+        // GameTest log, traded this failure for a different one instead of resolving it: (a) a local coal
+        // supply generous enough to outlast a shortened wait pulled the bot away before the diamond was ever
+        // sighted (a checkerboard on the room's far side) or put a solid cell squarely on the spawn-diamond
+        // sightline (a checkerboard/block between the two, confirmed to occlude at (2,1,0)); (b) shortening
+        // the "wait for the reserve to free" step alone (900 -> 300 ticks) was not enough on its own -- the
+        // escape leg goes stale well inside even a 300-tick window; (c) a small, purely-local coal column
+        // right next to spawn (matching slowMineAndDropLostAndLongReturnNeverTripNoProgress's own technique)
+        // combined with a much shorter wait avoided both the occlusion and the escape-leg staleness, but
+        // then failed a different way: "ore_dig_drop_unrecovered", a real drop physics/recovery edge case
+        // of adding a fresh local supply this fixture did not previously exercise, and the P1 contract calls
+        // out an unrecovered drop as expected to be non-terminal (test 14 in this file, itself one of this
+        // round's other open items) rather than something a fixture should route around.
+        //
+        // Left unchanged (no local supply, the original position) rather than trading one failure for
+        // another without a clearer fix in hand; a genuine repair likely needs either a product-level look
+        // at how long a below-reserve sighting is trusted before its own re-proof, or a fixture technique
+        // this round did not find that keeps the ladder near the diamond for the whole reserve wait without
+        // ever creating a fresh drop to recover or a cell on the sightline.
         BlockPos ore = room.at(5, 1, 0);
         room.set(5, 1, 0, Blocks.DIAMOND_ORE);
         room.set(5, 2, 0, Blocks.STONE);
