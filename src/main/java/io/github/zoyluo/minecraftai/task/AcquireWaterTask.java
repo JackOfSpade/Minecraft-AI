@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.BucketAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
@@ -119,6 +120,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
     private int lastScanBudget = -SCAN_INTERVAL;
     private int lastPathAttemptBudget = -PATH_RETRY_INTERVAL;
     private BlockPos ascentTarget;
+    private BlockPos ascentCommittedFrom;
     private boolean ascentPathStarted;
     private int ascentPathStartedBudget;
     private BlockPos ascentRelocationTarget;
@@ -614,12 +616,38 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
             noteAscentProgress();
             return true;
         }
-        if (ascentTarget == null || !isAdjacentUp(current, ascentTarget)
-                || !inspectAscentCandidate(bot, world, current, ascentTarget).accepted()) {
+        // A subtask that ran mid-ascent (tool crafting, then physically walking over to reclaim
+        // its crafting table) can leave the bot one cell away from the stance this step committed
+        // from, even though the committed target still blocks the same stair and stays within
+        // ordinary reach. Re-deriving everything from that drifted `current` would fail the
+        // adjacency check below and abandon a live commitment for an easier direction instead of
+        // finishing it. Keep evaluating the target from its already-vetted stance as long as the
+        // bot can still physically reach both that stance and the obstruction itself; a real
+        // safety displacement clears ascentTarget outright (see onResume) well before this runs,
+        // so this never resurrects a target across an unrelated relocation.
+        AscentCandidate driftCandidate = null;
+        if (ascentTarget != null && !isAdjacentUp(current, ascentTarget)
+                && ascentCommittedFrom != null
+                && isAdjacentUp(ascentCommittedFrom, ascentTarget)
+                && current.getY() == ascentCommittedFrom.getY()
+                && HarvestCore.canReach(bot, ascentCommittedFrom)) {
+            AscentCandidate inspected =
+                    inspectAscentCandidate(bot, world, ascentCommittedFrom, ascentTarget);
+            if (inspected.accepted() && inspected.obstruction() != null
+                    && HarvestCore.canReach(bot, inspected.obstruction())) {
+                driftCandidate = inspected;
+            }
+        }
+        boolean keepDriftedTarget = driftCandidate != null;
+
+        if (!keepDriftedTarget
+                && (ascentTarget == null || !isAdjacentUp(current, ascentTarget)
+                    || !inspectAscentCandidate(bot, world, current, ascentTarget).accepted())) {
             returnMiner.cancel(bot);
             ascentPathStarted = false;
             AscentChoice choice = selectAscentTarget(bot, world, current);
             ascentTarget = choice.target();
+            ascentCommittedFrom = ascentTarget == null ? null : current.toImmutable();
             if (ascentTarget == null) {
                 if (beginAscentRelocation(bot, world, current, choice.rejections())) {
                     return true;
@@ -632,7 +660,9 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
                     "from", current.toShortString(), "to", ascentTarget.toShortString());
         }
 
-        AscentCandidate candidate = inspectAscentCandidate(bot, world, current, ascentTarget);
+        AscentCandidate candidate = keepDriftedTarget
+                ? driftCandidate
+                : inspectAscentCandidate(bot, world, current, ascentTarget);
         if (candidate.foundationMissing()) {
             placeAscentFoundation(bot, current, ascentTarget.down().down());
             return true;
