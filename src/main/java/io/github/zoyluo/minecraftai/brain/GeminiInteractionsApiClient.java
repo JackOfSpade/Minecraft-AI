@@ -250,20 +250,7 @@ public final class GeminiInteractionsApiClient {
     }
 
     private static String classifyStatus(int status, String body) {
-        String excerpt = body == null ? "" : body.substring(0, Math.min(400, body.length()));
-        if (status == 429) {
-            return "rate_limited: status=429 body=" + excerpt;
-        }
-        if (status == 408) {
-            return "api_timeout: status=408 body=" + excerpt;
-        }
-        if (status >= 500) {
-            return "server_error: status=" + status + " body=" + excerpt;
-        }
-        if (status == 401 || status == 403) {
-            return "auth_error: status=" + status + " body=" + excerpt;
-        }
-        return "http_error: status=" + status + " body=" + excerpt;
+        return LlmHttpStatus.classify(status, body, 400);
     }
 
     static InteractionResponse parseResponse(String body, int maxFunctionCalls) throws GeminiInteractionsApiException {
