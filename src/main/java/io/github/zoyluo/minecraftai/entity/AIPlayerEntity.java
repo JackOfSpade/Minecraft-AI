@@ -39,7 +39,11 @@ public class AIPlayerEntity extends ServerPlayerEntity {
             super.tick();
             this.playerTick();
             this.actionPack.onUpdate();
-        } catch (NullPointerException exception) {
+        } catch (RuntimeException exception) {
+            // Was NullPointerException-only; widened so any unexpected exception here (not just an
+            // NPE) is absorbed for this tick instead of crashing the whole server as a "Ticking
+            // player" failure. A stuck bot self-recovers via StuckWatcher's own timeout, so this
+            // catch intentionally does not reset actionPack state itself.
             BotLog.error(this, "tick_npe_swallowed", exception);
         }
     }
