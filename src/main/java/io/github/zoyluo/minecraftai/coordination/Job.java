@@ -7,7 +7,6 @@ public record Job(
         UUID id,
         String kind,
         Map<String, String> params,
-        String role,
         Scope scope,
         UUID ownerUuid,
         Status status,
@@ -29,17 +28,17 @@ public record Job(
     }
 
     public Job withStatus(Status newStatus, UUID newClaimant, String reason) {
-        return new Job(id, kind, Map.copyOf(params), role, scope, ownerUuid,
+        return new Job(id, kind, Map.copyOf(params), scope, ownerUuid,
                 newStatus, newClaimant, leaseSessionId, leaseId, reason == null ? "" : reason);
     }
 
     public Job claim(UUID botUuid, UUID runtimeSessionId) {
-        return new Job(id, kind, Map.copyOf(params), role, scope, ownerUuid,
+        return new Job(id, kind, Map.copyOf(params), scope, ownerUuid,
                 Status.CLAIMED, botUuid, runtimeSessionId, UUID.randomUUID(), "");
     }
 
     public Job reopen(String reason) {
-        return new Job(id, kind, Map.copyOf(params), role, scope, ownerUuid,
+        return new Job(id, kind, Map.copyOf(params), scope, ownerUuid,
                 Status.OPEN, null, null, null, reason == null ? "" : reason);
     }
 

@@ -717,7 +717,7 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     private static Result verifyJob() {
-        UUID id = TaskBoard.INSTANCE.postGlobal("verify", Map.of("feature", "job"), "worker");
+        UUID id = TaskBoard.INSTANCE.postGlobal("verify", Map.of("feature", "job"));
         boolean found = TaskBoard.INSTANCE.snapshot().stream().anyMatch(job -> job.id().equals(id));
         if (found) {
             TaskBoard.INSTANCE.markDone(id);

@@ -173,7 +173,6 @@ public final class ChatRecipientRouter {
         for (Candidate candidate : candidates) {
             JsonObject item = new JsonObject();
             item.addProperty("name", candidate.name());
-            item.addProperty("role", candidate.role());
             item.addProperty("same_dimension", candidate.sameDimension());
             if (candidate.sameDimension()) {
                 item.addProperty("distance_blocks", Math.round(candidate.distanceBlocks() * 10.0D) / 10.0D);
@@ -291,7 +290,6 @@ public final class ChatRecipientRouter {
 
     public record Candidate(UUID botId,
                             String name,
-                            String role,
                             boolean sameDimension,
                             double distanceBlocks,
                             boolean nearestSameDimension,
@@ -303,7 +301,6 @@ public final class ChatRecipientRouter {
             if (name.isBlank()) {
                 throw new IllegalArgumentException("candidate_name_blank");
             }
-            role = role == null || role.isBlank() ? "worker" : role;
         }
     }
 

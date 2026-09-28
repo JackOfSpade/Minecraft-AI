@@ -195,8 +195,8 @@ public final class MinecraftAiRestartHarnessCommand {
         expected.put("queue_count", String.valueOf(pausedRuntime.queue().size()));
         boolean expectedPersisted = writeExpectedCheckpoint(source.getServer(), checkpoint);
         TaskBoard.INSTANCE.clear();
-        TaskBoard.INSTANCE.postGlobal(PROBE_JOB_KIND, expected, "worker");
-        Optional<Job> claimed = TaskBoard.INSTANCE.claimNext(bot, AIPlayerManager.INSTANCE.roles(bot));
+        TaskBoard.INSTANCE.postGlobal(PROBE_JOB_KIND, expected);
+        Optional<Job> claimed = TaskBoard.INSTANCE.claimNext(bot);
         boolean leaseClaimed = claimed.isPresent()
                 && claimed.get().status() == Job.Status.CLAIMED
                 && bot.getUuid().equals(claimed.get().claimant())

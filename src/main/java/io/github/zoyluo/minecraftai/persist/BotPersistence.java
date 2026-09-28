@@ -202,9 +202,10 @@ public final class BotPersistence {
                 bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), bot.getPitch(),
                 bot.interactionManager.getGameMode().asString(),
                 bot.getHealth(), bot.getHungerManager().getFoodLevel(),
-                encodeInventory(bot), AIPlayerManager.INSTANCE.role(bot),
+                encodeInventory(bot),
                 BotMemoryStore.INSTANCE.saveString(bot.getUuid()),
-                AIPlayerManager.INSTANCE.ownerOf(bot).map(UUID::toString).orElse(""));
+                AIPlayerManager.INSTANCE.ownerOf(bot).map(UUID::toString).orElse(""),
+                AIPlayerManager.INSTANCE.skinIndex(bot));
     }
 
     public static String encodeInventory(ServerPlayerEntity player) {
@@ -323,10 +324,10 @@ public final class BotPersistence {
             UUID owner = job.claimant() == null ? null : AIPlayerManager.INSTANCE.getByUuid(job.claimant())
                     .flatMap(AIPlayerManager.INSTANCE::ownerOf).orElse(null);
             if (owner != null) {
-                migrated.add(new Job(job.id(), job.kind(), job.params(), job.role(), Job.Scope.OWNER, owner,
+                migrated.add(new Job(job.id(), job.kind(), job.params(), Job.Scope.OWNER, owner,
                         Job.Status.OPEN, null, null, null, "legacy_claim_reopened"));
             } else {
-                migrated.add(new Job(job.id(), job.kind(), job.params(), job.role(), Job.Scope.GLOBAL_ADMIN, null,
+                migrated.add(new Job(job.id(), job.kind(), job.params(), Job.Scope.GLOBAL_ADMIN, null,
                         Job.Status.FAILED, null, null, null, "legacy_scope_required"));
             }
         }

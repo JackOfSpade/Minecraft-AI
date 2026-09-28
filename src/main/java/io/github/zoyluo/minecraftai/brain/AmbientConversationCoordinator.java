@@ -185,8 +185,7 @@ public final class AmbientConversationCoordinator {
                 .map(id -> AIPlayerManager.INSTANCE.getByUuid(id).map(bot -> bot.getGameProfile().name()).orElse("someone"))
                 .toList();
         List<ChatMessage> history = List.of(
-                ChatMessage.system(systemPrompt(speaker.getGameProfile().name(),
-                        AIPlayerManager.INSTANCE.role(speaker), others, mustBeStatement)),
+                ChatMessage.system(systemPrompt(speaker.getGameProfile().name(), others, mustBeStatement)),
                 ChatMessage.user(userPayload(conversation.transcript, PerceptionCollector.collect(speaker))));
 
         OpenAiCompatibleApiClient requestClient;
@@ -258,14 +257,14 @@ public final class AmbientConversationCoordinator {
         });
     }
 
-    private static String systemPrompt(String botName, String role, List<String> others, boolean mustBeStatement) {
+    private static String systemPrompt(String botName, List<String> others, boolean mustBeStatement) {
         String companions = others.isEmpty() ? "your fellow companion" : String.join(" and ", others);
         String turnRule = mustBeStatement
                 ? "You are the LAST one speaking in this conversation -- nobody else will reply after you. "
                         + "End with a statement or remark, NOT a question, since there is no one left to answer it."
                 : "You may end with a question or a statement, whichever feels natural.";
         return """
-                You are %s, an AI companion in Minecraft with the role "%s". You are having a short, casual,
+                You are %s, an AI companion in Minecraft. You are having a short, casual,
                 in-character conversation with %s while going about your day. This is NOT a task request from a
                 player -- nobody is asking you to do anything right now. Just chat naturally like a real person
                 would, reacting to what has been said so far (if anything) and to your own current surroundings
@@ -278,7 +277,7 @@ public final class AmbientConversationCoordinator {
                    what you are currently doing or seeing.
                 4. %s
                 5. Do not use any tools. Do not narrate actions. Reply with only the spoken line, nothing else.
-                """.formatted(botName, role, companions, turnRule);
+                """.formatted(botName, companions, turnRule);
     }
 
     private static String userPayload(List<TranscriptEntry> transcript, PerceptionSnapshot snapshot) {

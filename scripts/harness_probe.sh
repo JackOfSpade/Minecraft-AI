@@ -27,7 +27,7 @@ done
 if [ "$READY" = 1 ]; then
   echo "[harness] === injecting test commands ==="
   echo "say HARNESS_PING_123" > "$FIFO"; sleep 2
-  echo "minecraftai spawn Bob assistant" > "$FIFO"; sleep 6
+  echo "minecraftai spawn Bob" > "$FIFO"; sleep 6
   echo "minecraftai list" > "$FIFO"; sleep 3
   echo "[harness] === command injection done ==="
 fi

@@ -10,7 +10,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,40 +22,40 @@ public final class TaskBoard {
     private TaskBoard() {
     }
 
-    public UUID postForOwner(UUID ownerUuid, String kind, Map<String, String> params, String role) {
-        return post(Job.Scope.OWNER, java.util.Objects.requireNonNull(ownerUuid, "ownerUuid"), kind, params, role);
+    public UUID postForOwner(UUID ownerUuid, String kind, Map<String, String> params) {
+        return post(Job.Scope.OWNER, java.util.Objects.requireNonNull(ownerUuid, "ownerUuid"), kind, params);
     }
 
-    public UUID postGlobal(String kind, Map<String, String> params, String role) {
-        return post(Job.Scope.GLOBAL_ADMIN, null, kind, params, role);
+    public UUID postGlobal(String kind, Map<String, String> params) {
+        return post(Job.Scope.GLOBAL_ADMIN, null, kind, params);
     }
 
-    private UUID post(Job.Scope scope, UUID ownerUuid, String kind, Map<String, String> params, String role) {
+    private UUID post(Job.Scope scope, UUID ownerUuid, String kind, Map<String, String> params) {
         UUID id = UUID.randomUUID();
-        Job job = new Job(id, clean(kind), Map.copyOf(params), clean(role), scope, ownerUuid,
+        Job job = new Job(id, clean(kind), Map.copyOf(params), scope, ownerUuid,
                 Job.Status.OPEN, null, null, null, "");
         jobs.put(id, job);
-        BotLog.task(null, "job_posted", "id", id, "kind", job.kind(), "role", job.role(),
+        BotLog.task(null, "job_posted", "id", id, "kind", job.kind(),
                 "scope", scope, "owner_uuid", ownerUuid == null ? "-" : ownerUuid);
         return id;
     }
 
-    public Optional<Job> claimNext(AIPlayerEntity bot, Set<String> roles) {
+    public Optional<Job> claimNext(AIPlayerEntity bot) {
         UUID ownerUuid = AIPlayerManager.INSTANCE.ownerOf(bot).orElse(null);
         for (Job job : snapshot()) {
-            if (job.status() != Job.Status.OPEN || !job.claimableBy(ownerUuid) || !roleMatches(job.role(), roles)) {
+            if (job.status() != Job.Status.OPEN || !job.claimableBy(ownerUuid)) {
                 continue;
             }
             UUID id = job.id();
             Job claimed = jobs.compute(id, (ignored, current) -> {
                 if (current == null || current.status() != Job.Status.OPEN
-                        || !current.claimableBy(ownerUuid) || !roleMatches(current.role(), roles)) {
+                        || !current.claimableBy(ownerUuid)) {
                     return current;
                 }
                 return current.claim(bot.getUuid(), runtimeSessionId);
             });
             if (claimed != null && claimed.status() == Job.Status.CLAIMED && bot.getUuid().equals(claimed.claimant())) {
-                BotLog.task(bot, "job_claimed", "id", claimed.id(), "kind", claimed.kind(), "role", claimed.role());
+                BotLog.task(bot, "job_claimed", "id", claimed.id(), "kind", claimed.kind());
                 return Optional.of(claimed);
             }
         }
@@ -105,7 +104,6 @@ public final class TaskBoard {
                     job.id(),
                     clean(job.kind()),
                     new LinkedHashMap<>(job.params()),
-                    clean(job.role()),
                     job.scope(),
                     job.ownerUuid(),
                     job.status() == null ? Job.Status.OPEN : job.status(),
@@ -134,10 +132,6 @@ public final class TaskBoard {
     public void clear() {
         jobs.clear();
         BotLog.task(null, "jobs_cleared");
-    }
-
-    private static boolean roleMatches(String jobRole, Set<String> roles) {
-        return jobRole == null || jobRole.isBlank() || roles.contains(jobRole.toLowerCase(java.util.Locale.ROOT));
     }
 
     private static String clean(String value) {

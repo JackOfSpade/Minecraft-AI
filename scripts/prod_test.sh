@@ -48,7 +48,7 @@ done
 
 if [ "$READY" = 1 ]; then
   sleep 2
-  echo "minecraftai spawn TestBob assistant" > "$FIFO"; sleep 5
+  echo "minecraftai spawn TestBob" > "$FIFO"; sleep 5
   echo "minecraftai verify $FEATURE" > "$FIFO"
   echo "[prod] verify '$FEATURE' dispatched, waiting up to ${MAXWAIT}s ..."
   for i in $(seq 1 "$((MAXWAIT/2))"); do

@@ -91,6 +91,6 @@ final class ChatRecipientRouterCapabilityTest {
                 "diamond",
                 "boat",
                 new ChatRecipientRouter.TaskSummary("follow", "RUNNING", 0.5D));
-        return new ChatRecipientRouter.Candidate(id, name, "worker", true, 4.0D, true, capability);
+        return new ChatRecipientRouter.Candidate(id, name, true, 4.0D, true, capability);
     }
 }

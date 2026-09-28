@@ -70,7 +70,7 @@ public final class IdleCoordinator {
         if (BrainCoordinator.INSTANCE.status(bot).busy()) {
             return false;
         }
-        Optional<Job> job = TaskBoard.INSTANCE.claimNext(bot, AIPlayerManager.INSTANCE.roles(bot));
+        Optional<Job> job = TaskBoard.INSTANCE.claimNext(bot);
         job.ifPresent(next -> assignJob(bot, next));
         if (job.isPresent()) {
             markDirty(bot);

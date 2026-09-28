@@ -648,9 +648,8 @@ public final class ToolRegistry {
             return ok(outcome.changed() ? "cancelled_all" : "already_idle");
         });
 
-        register("post_job", "Post a shared job to the multi-bot task board. Idle bots whose role matches the job role can claim and execute it.", objectSchema()
+        register("post_job", "Post a shared job to the multi-bot task board. Any idle bot can claim and execute it.", objectSchema()
                 .property("kind", stringSchema("job kind, for example mine, build, craft, smelt, move, eat, or light_area"))
-                .property("role", stringSchema("bot role that should claim it, for example miner or builder; blank means any role"))
                 .property("params", objectSchema().build())
                 .required("kind")
                 .required("params")
@@ -660,7 +659,7 @@ public final class ToolRegistry {
                 return fail("coordination_requires_owned_bot");
             }
             UUID id = TaskBoard.INSTANCE.postForOwner(ownerUuid.get(), requiredString(args, "kind"),
-                    paramsObject(args, "params"), optionalString(args, "role", ""));
+                    paramsObject(args, "params"));
             io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
             return ok("job_posted: " + id);
         });
@@ -682,7 +681,6 @@ public final class ToolRegistry {
                 }
                 builder.append("{id=").append(job.id())
                         .append(", kind=").append(job.kind())
-                        .append(", role=").append(job.role())
                         .append(", status=").append(job.status())
                         .append(", reason=").append(job.failureReason())
                         .append("}");

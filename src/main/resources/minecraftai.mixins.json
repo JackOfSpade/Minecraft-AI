@@ -9,7 +9,8 @@
     "PlayerManagerFakePlayerMixin",
     "MerchantEntityInvokerMixin",
     "ServerWorldEntityManagerAccessorMixin",
-    "ServerEntityManagerCacheAccessorMixin"
+    "ServerEntityManagerCacheAccessorMixin",
+    "LoginTimeoutMixin"
   ],
   "client": [],
   "server": [],

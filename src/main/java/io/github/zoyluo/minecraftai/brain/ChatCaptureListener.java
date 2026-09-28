@@ -72,7 +72,6 @@ public final class ChatCaptureListener {
                     return new ChatRecipientRouter.Candidate(
                             bot.getUuid(),
                             bot.getGameProfile().name(),
-                            AIPlayerManager.INSTANCE.role(bot),
                             sameDimension,
                             distance,
                             bot.getUuid().equals(nearestId),

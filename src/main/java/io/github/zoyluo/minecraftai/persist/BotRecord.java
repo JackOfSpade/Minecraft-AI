@@ -12,8 +12,10 @@ public record BotRecord(
         float health,
         int hunger,
         String inventoryNbt,
-        String role,
         String memoryNbt,
-        String ownerUuid
+        String ownerUuid,
+        /** One of OfflineProfileFactory's 18 default-skin indices; null for records saved before
+         *  skin randomization existed, in which case a fresh random one is assigned on restore. */
+        Integer skinIndex
 ) {
 }

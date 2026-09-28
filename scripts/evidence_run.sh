@@ -404,7 +404,7 @@ else
     [[ -n "$ACTUAL_SEED" ]] || ACTUAL_SEED=unknown
     if [[ "$ACTUAL_SEED" == "$REQUESTED_SEED" ]]; then ACTUAL_SEED_VERIFIED=yes; fi
 
-    printf 'minecraftai spawn EvidenceBot assistant\n' >&9 || READY=no
+    printf 'minecraftai spawn EvidenceBot\n' >&9 || READY=no
     sleep 5
     printf 'minecraftai verify %s\n' "$SCENARIO" >&9 || READY=no
     for ((i = 0; i < MAXWAIT; i++)); do

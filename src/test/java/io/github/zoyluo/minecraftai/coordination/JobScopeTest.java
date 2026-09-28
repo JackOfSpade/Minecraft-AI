@@ -34,7 +34,7 @@ class JobScopeTest {
 
     @Test
     void legacyJobWithoutScopeIsRejectedOnLoad() {
-        Job legacy = new Job(UUID.randomUUID(), "mine", Map.of(), "miner",
+        Job legacy = new Job(UUID.randomUUID(), "mine", Map.of(),
                 null, null, Job.Status.OPEN, null, null, null, "");
         TaskBoard.INSTANCE.replaceAll(java.util.List.of(legacy));
         try {
@@ -61,7 +61,7 @@ class JobScopeTest {
     }
 
     private static Job job(Job.Scope scope, UUID ownerUuid) {
-        return new Job(UUID.randomUUID(), "mine", Map.of("block", "minecraft:iron_ore"), "miner",
+        return new Job(UUID.randomUUID(), "mine", Map.of("block", "minecraft:iron_ore"),
                 scope, ownerUuid, Job.Status.OPEN, null, null, null, "");
     }
 }

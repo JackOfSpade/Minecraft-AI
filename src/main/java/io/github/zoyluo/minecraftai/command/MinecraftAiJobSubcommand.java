@@ -7,7 +7,6 @@ import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.coordination.Job;
 import io.github.zoyluo.minecraftai.coordination.TaskBoard;
-import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
@@ -27,16 +26,13 @@ public final class MinecraftAiJobSubcommand {
         return literal("job")
                 .then(literal("post")
                         .then(argument("kind", StringArgumentType.word())
-                                .then(argument("role", StringArgumentType.word())
+                                .executes(context -> post(context.getSource(),
+                                        StringArgumentType.getString(context, "kind"),
+                                        ""))
+                                .then(argument("params", StringArgumentType.greedyString())
                                         .executes(context -> post(context.getSource(),
                                                 StringArgumentType.getString(context, "kind"),
-                                                StringArgumentType.getString(context, "role"),
-                                                ""))
-                                        .then(argument("params", StringArgumentType.greedyString())
-                                                .executes(context -> post(context.getSource(),
-                                                        StringArgumentType.getString(context, "kind"),
-                                                        StringArgumentType.getString(context, "role"),
-                                                        StringArgumentType.getString(context, "params")))))))
+                                                StringArgumentType.getString(context, "params"))))))
                 .then(literal("list")
                         .executes(context -> list(context.getSource())))
                 .then(literal("tell")
@@ -51,13 +47,13 @@ public final class MinecraftAiJobSubcommand {
                         .executes(context -> clear(context.getSource())));
     }
 
-    private static int post(ServerCommandSource source, String kind, String role, String paramsText) {
+    private static int post(ServerCommandSource source, String kind, String paramsText) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:job_post")) {
             return 0;
         }
-        UUID id = TaskBoard.INSTANCE.postGlobal(kind, parseParams(paramsText), role);
+        UUID id = TaskBoard.INSTANCE.postGlobal(kind, parseParams(paramsText));
         io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] job posted " + id + " kind=" + kind + " role=" + role), false);
+        source.sendFeedback(() -> Text.literal("[Minecraft-AI] job posted " + id + " kind=" + kind), false);
         return 1;
     }
 
@@ -126,6 +122,6 @@ public final class MinecraftAiJobSubcommand {
         String shortId = job.id().toString().substring(0, 8);
         String claimant = job.claimant() == null ? "-" : job.claimant().toString().substring(0, 8);
         String reason = job.failureReason() == null || job.failureReason().isBlank() ? "" : " reason=" + job.failureReason();
-        return shortId + " " + job.kind() + " role=" + job.role() + " status=" + job.status() + " bot=" + claimant + reason;
+        return shortId + " " + job.kind() + " status=" + job.status() + " bot=" + claimant + reason;
     }
 }

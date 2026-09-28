@@ -25,17 +25,7 @@ public final class MinecraftAiCommand {
         dispatcher.register(literal("minecraftai")
                 .then(literal("spawn")
                         .then(argument("name", StringArgumentType.word())
-                                .executes(context -> spawn(context.getSource(), StringArgumentType.getString(context, "name"), "worker"))
-                                .then(argument("role", StringArgumentType.word())
-                                        .executes(context -> spawn(context.getSource(),
-                                                StringArgumentType.getString(context, "name"),
-                                                StringArgumentType.getString(context, "role"))))))
-                .then(literal("role")
-                        .then(argument("name", StringArgumentType.word())
-                                .then(argument("role", StringArgumentType.word())
-                                        .executes(context -> role(context.getSource(),
-                                                StringArgumentType.getString(context, "name"),
-                                                StringArgumentType.getString(context, "role"))))))
+                                .executes(context -> spawn(context.getSource(), StringArgumentType.getString(context, "name")))))
                 .then(literal("despawn")
                         .then(argument("name", StringArgumentType.word())
                                 .executes(context -> despawn(context.getSource(), StringArgumentType.getString(context, "name")))))
@@ -54,7 +44,7 @@ public final class MinecraftAiCommand {
                 .then(MinecraftAiSnapshotSubcommand.build()));
     }
 
-    private static int spawn(ServerCommandSource source, String name, String role) {
+    private static int spawn(ServerCommandSource source, String name) {
         if (!BotAuthorizationGate.INSTANCE.canProvisionPersonalBot(source, "command:spawn")) {
             return 0;
         }
@@ -73,24 +63,12 @@ public final class MinecraftAiCommand {
                 ownerUuid);
 
         if (spawned.isPresent()) {
-            AIPlayerManager.INSTANCE.setRole(spawned.get(), role);
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] Spawned " + name + " role=" + AIPlayerManager.INSTANCE.role(spawned.get())), true);
+            source.sendFeedback(() -> Text.literal("[Minecraft-AI] Spawned " + name), true);
             return 1;
         }
 
         source.sendError(Text.literal("[Minecraft-AI] Failed to spawn " + name + " (name already in use)"));
         return 0;
-    }
-
-    private static int role(ServerCommandSource source, String name, String role) {
-        var bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
-                source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:role");
-        if (bot.isEmpty()) {
-            return 0;
-        }
-        AIPlayerManager.INSTANCE.setRole(bot.get(), role);
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + name + " role=" + AIPlayerManager.INSTANCE.role(bot.get())), false);
-        return 1;
     }
 
     private static int despawn(ServerCommandSource source, String name) {
@@ -114,7 +92,7 @@ public final class MinecraftAiCommand {
                 .filter(bot -> BotAuthorizationGate.INSTANCE.canView(source, bot))
                 .toList();
         String names = bots.stream()
-                .map(player -> player.getGameProfile().name() + "(" + AIPlayerManager.INSTANCE.role(player) + ")")
+                .map(player -> player.getGameProfile().name())
                 .collect(Collectors.joining(", "));
         source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + bots.size() + " bot(s): " + names), false);
         return bots.size();

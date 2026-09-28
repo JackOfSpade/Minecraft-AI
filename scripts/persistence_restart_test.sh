@@ -122,7 +122,7 @@ phase2="$REPORT_DIR/phase2.log"
 : > "$phase2"
 
 start_server "$phase1"
-printf 'minecraftai spawn RestartBob assistant\n' >&9
+printf 'minecraftai spawn RestartBob\n' >&9
 printf 'minecraftai harness restart-stage RestartBob\n' >&9
 wait_for_outcome "$phase1" \
   '[MinecraftAi Harness] restart-stage STARTED' \

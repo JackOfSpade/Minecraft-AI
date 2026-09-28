@@ -44,7 +44,6 @@ public final class AIPlayerManager {
 
     private final Map<UUID, AIPlayerEntity> players = new ConcurrentHashMap<>();
     private final Map<String, UUID> nameIndex = new ConcurrentHashMap<>();
-    private final Map<UUID, String> roles = new ConcurrentHashMap<>();
     /**
      * Every bot a player owns, in spawn order (oldest first). A player may own any number of bots;
      * {@link #botOf} picks the most recently spawned one as the implicit "my bot" default when a
@@ -52,6 +51,8 @@ public final class AIPlayerManager {
      */
     private final Map<UUID, java.util.LinkedHashSet<UUID>> ownerIndex = new ConcurrentHashMap<>();
     private final Map<UUID, UUID> botOwners = new ConcurrentHashMap<>();
+    /** One of {@link OfflineProfileFactory}'s 18 default-skin indices, chosen once per bot. */
+    private final Map<UUID, Integer> skinIndices = new ConcurrentHashMap<>();
 
     private AIPlayerManager() {
     }
@@ -121,12 +122,30 @@ public final class AIPlayerManager {
                                           float pitch,
                                           GameMode gameMode,
                                           UUID ownerUuid) {
+        return spawnInternal(server, name, world, pos, yaw, pitch, gameMode, ownerUuid, null);
+    }
+
+    /**
+     * {@code explicitSkinIndex} is null for every ordinary spawn (a fresh random default skin is
+     * picked below); {@link #respawnFromRecord} is the one caller that passes a persisted index, so
+     * a restored bot keeps looking like itself across a server restart instead of re-rolling.
+     */
+    private Optional<AIPlayerEntity> spawnInternal(MinecraftServer server,
+                                                    String name,
+                                                    ServerWorld world,
+                                                    Vec3d pos,
+                                                    float yaw,
+                                                    float pitch,
+                                                    GameMode gameMode,
+                                                    UUID ownerUuid,
+                                                    Integer explicitSkinIndex) {
         String normalizedName = normalizeName(name);
         if (nameIndex.containsKey(normalizedName) || server.getPlayerManager().getPlayer(name) != null) {
             return Optional.empty();
         }
 
-        GameProfile profile = OfflineProfileFactory.create(name);
+        int skinIndex = explicitSkinIndex != null ? explicitSkinIndex : OfflineProfileFactory.randomSkinIndex();
+        GameProfile profile = OfflineProfileFactory.create(name, skinIndex);
         SyncedClientOptions options = SyncedClientOptions.createDefault();
         AIPlayerEntity player = new AIPlayerEntity(server, world, profile, options);
         FakeClientConnection connection = new FakeClientConnection(NetworkSide.SERVERBOUND);
@@ -150,7 +169,7 @@ public final class AIPlayerManager {
 
         players.put(player.getUuid(), player);
         nameIndex.put(normalizedName, player.getUuid());
-        roles.put(player.getUuid(), "worker");
+        skinIndices.put(player.getUuid(), skinIndex);
         if (ownerUuid != null) {
             ownerIndex.computeIfAbsent(ownerUuid, ignored -> new java.util.LinkedHashSet<>()).add(player.getUuid());
             botOwners.put(player.getUuid(), ownerUuid);
@@ -163,7 +182,7 @@ public final class AIPlayerManager {
     public Optional<AIPlayerEntity> respawnFromRecord(MinecraftServer server, BotRecord record) {
         RestoreTarget target = restoreTarget(server, record);
         GameMode gameMode = GameMode.SURVIVAL;  // The AI assistant is always survival; ignore any creative mode that may have been saved in the old record
-        Optional<AIPlayerEntity> spawned = spawn(
+        Optional<AIPlayerEntity> spawned = spawnInternal(
                 server,
                 record.name(),
                 target.world(),
@@ -171,10 +190,10 @@ public final class AIPlayerManager {
                 record.yaw(),
                 record.pitch(),
                 gameMode,
-                parseUuid(record.ownerUuid()));
+                parseUuid(record.ownerUuid()),
+                record.skinIndex());
         spawned.ifPresent(bot -> {
             BotPersistence.applyInventory(bot, record.inventoryNbt());
-            setRole(bot, record.role());
             BotMemoryStore.INSTANCE.loadString(bot.getUuid(), record.memoryNbt());
             bot.setHealth(Math.max(1.0F, Math.min(record.health(), bot.getMaxHealth())));
             bot.getHungerManager().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));
@@ -197,7 +216,7 @@ public final class AIPlayerManager {
         RuntimeLifecycleCoordinator.INSTANCE.deleteBot(entity);
         players.remove(entity.getUuid());
         nameIndex.remove(normalizeName(name));
-        roles.remove(entity.getUuid());
+        skinIndices.remove(entity.getUuid());
         clearOwner(entity.getUuid());
         disconnect(server, entity, "MinecraftAi despawn");
         BotLog.lifecycle(entity, "bot_despawned", "reason", "command_or_shutdown");
@@ -274,21 +293,9 @@ public final class AIPlayerManager {
         return Collections.unmodifiableCollection(players.values());
     }
 
-    public void setRole(AIPlayerEntity bot, String role) {
-        roles.put(bot.getUuid(), normalizeRole(role));
-        BotLog.lifecycle(bot, "bot_role_set", "role", role(bot));
-    }
-
-    public String role(AIPlayerEntity bot) {
-        return roles.getOrDefault(bot.getUuid(), "worker");
-    }
-
-    public java.util.Set<String> roles(AIPlayerEntity bot) {
-        String role = role(bot);
-        java.util.Set<String> result = new java.util.LinkedHashSet<>();
-        result.add("worker");
-        result.add(role);
-        return java.util.Set.copyOf(result);
+    /** The one of {@link OfflineProfileFactory}'s 18 default-skin indices this bot was spawned with. */
+    public int skinIndex(AIPlayerEntity bot) {
+        return skinIndices.getOrDefault(bot.getUuid(), 0);
     }
 
     public void onServerStopping(MinecraftServer server) {
@@ -299,7 +306,7 @@ public final class AIPlayerManager {
         }
         players.clear();
         nameIndex.clear();
-        roles.clear();
+        skinIndices.clear();
         ownerIndex.clear();
         botOwners.clear();
         BotLog.lifecycle("all_bots_cleared", "count", count);
@@ -379,13 +386,6 @@ public final class AIPlayerManager {
 
     private static String normalizeName(String name) {
         return name.toLowerCase(Locale.ROOT);
-    }
-
-    private static String normalizeRole(String role) {
-        if (role == null || role.isBlank()) {
-            return "worker";
-        }
-        return role.trim().toLowerCase(Locale.ROOT);
     }
 
     private record RestoreTarget(ServerWorld world, Vec3d pos, boolean fallback) {

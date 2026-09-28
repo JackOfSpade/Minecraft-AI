@@ -28,7 +28,7 @@ done
 
 if [ "$READY" = 1 ]; then
   sleep 2
-  echo "minecraftai spawn QCBot assistant" > "$FIFO"; sleep 5
+  echo "minecraftai spawn QCBot" > "$FIFO"; sleep 5
   echo "minecraftai verify food" > "$FIFO"; sleep 15
 fi
 

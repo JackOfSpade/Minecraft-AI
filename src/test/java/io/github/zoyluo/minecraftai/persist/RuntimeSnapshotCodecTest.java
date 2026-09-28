@@ -42,7 +42,7 @@ class RuntimeSnapshotCodecTest {
         BotRecord bot = new BotRecord(
                 "MiningCodecBot", "minecraft:overworld",
                 12.5D, -59.0D, 24.5D, 0.0F, 0.0F,
-                "survival", 20.0F, 18, "{}", "assistant", "{}", "");
+                "survival", 20.0F, 18, "{}", "{}", "", 3);
         MissionRuntimeRecord missions = new MissionRuntimeRecord(
                 new MissionRecord(
                         "11111111-2222-3333-4444-555555555555",
