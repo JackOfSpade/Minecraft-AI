@@ -534,7 +534,7 @@ public final class PvpBotAdapter implements PvpBotOperations {
                 log.debugOnce("patrol-name|" + botName, "no patrol assigned: '" + botName + "' is not a valid bot name");
                 return false;
             }
-            PatrolPlanner.Outcome outcome = PatrolPlanner.plan(botName, behavior);
+            UpstreamPathPlanner.Outcome outcome = UpstreamPathPlanner.plan(botName, behavior);
             if (outcome.plan() == null) {
                 log.debugOnce("patrol-plan|" + outcome.rejection(), "no patrol assigned to " + botName + ": "
                         + outcome.rejection());

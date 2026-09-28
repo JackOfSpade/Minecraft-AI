@@ -9,7 +9,7 @@ import java.util.List;
  * PvP BOT cannot be constructed: a ping-pong loop with fewer than two points makes the upstream tick read
  * index -1 (trap P1), so the invariant is enforced here, at the last possible moment, whatever the caller did.
  *
- * @param pathName upstream path name, see {@link PatrolPlanner#pathName}
+ * @param pathName upstream path name, see {@link UpstreamPathPlanner#pathName}
  * @param points   waypoints in walking order; never empty
  * @param loop     upstream "loop" flag: TRUE means walk back and forth (ping-pong), FALSE means restart (ring)
  * @param attack   upstream "attack" flag: FALSE makes the follower a pacifist

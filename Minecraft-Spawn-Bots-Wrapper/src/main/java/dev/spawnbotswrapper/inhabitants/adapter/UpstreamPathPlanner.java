@@ -21,7 +21,7 @@ import java.util.Locale;
  * refused: refusing would leave the bot with no path at all, and a pacifist ({@code combatant=false})
  * would silently turn into a fighter.
  */
-final class PatrolPlanner {
+final class UpstreamPathPlanner {
 
     /** Reserved namespace of every path this addon creates; also how leftovers of a past session are recognised. */
     static final String PATH_PREFIX = "inh_";
@@ -31,7 +31,7 @@ final class PatrolPlanner {
     static final int MAX_WAYPOINTS = 64;
     static final String DEFAULT_WALK_TYPE = BotProfile.WalkType.BHOP;
 
-    private PatrolPlanner() {
+    private UpstreamPathPlanner() {
     }
 
     /** {@code plan} is null exactly when {@code rejection} is set. */

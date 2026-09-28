@@ -445,7 +445,7 @@ class PvpBotAdapterPatrolTest {
 
         assertEquals(3, f.adapter.releaseAllPatrols());
         for (String bot : List.of("Inh_A1", "Inh_B2", "Inh_C3")) {
-            assertNull(BotPath.getPath(PatrolPlanner.pathName(bot)), bot);
+            assertNull(BotPath.getPath(UpstreamPathPlanner.pathName(bot)), bot);
             assertNull(BotPath.followerOf(bot), bot);
         }
         assertNotNull(BotPath.getPath("foreign"), "never touches paths it did not create");

@@ -119,7 +119,7 @@ final class PatrolManager {
         String bot = mine != null ? mine.bot() : botName;
         boolean leftover = false;
         if (path == null) {
-            String candidate = PatrolPlanner.pathName(botName);
+            String candidate = UpstreamPathPlanner.pathName(botName);
             try {
                 if (candidate != null && calls.pathExists(candidate)) {
                     path = candidate;
