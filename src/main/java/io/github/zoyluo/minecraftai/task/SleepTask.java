@@ -230,10 +230,6 @@ public final class SleepTask extends AbstractTask {
                 .orElse(null);
     }
 
-    public static boolean hasBedAccess(AIPlayerEntity bot) {
-        return findNearbyBed(bot, 8) != null || rememberedBed(bot) != null || findBedItemSlot(bot).isPresent();
-    }
-
     private static BlockPos rememberedBed(AIPlayerEntity bot) {
         return BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .placeIn(bot.getEntityWorld(), "bed", "home", "base")
