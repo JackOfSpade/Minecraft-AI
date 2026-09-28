@@ -5189,6 +5189,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             detourHost = new DetourHostImpl();
         }
         detourHost.bind(bot, world, state);
+        if (detourHost.ledger().detoursDisabled()) {
+            // A return that already had to rebase the cursor (design 4.3 DISABLED) ends every further excursion
+            // this mission, not only ordinary ore detours: a cave excursion is the riskier walk of the two.
+            return false;
+        }
         if (detourHost.safety(SafeGate.Stage.START, null, null) != SafeReason.OK) {
             return false;
         }
