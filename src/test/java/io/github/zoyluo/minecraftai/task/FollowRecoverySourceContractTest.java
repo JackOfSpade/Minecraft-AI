@@ -33,6 +33,7 @@ final class FollowRecoverySourceContractTest {
     void cancelledShelterHandsOffOnlyItsOwnedDoorwayToFollow() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
         String follow = read("task/FollowTask.java");
+        String repayer = read("task/ShelterExitDebtRepayer.java");
 
         int onAbort = shelter.indexOf("protected void onAbort(AIPlayerEntity bot)");
         int preserve = shelter.indexOf("preserveOwnedExitDebt(bot);", onAbort);
@@ -42,11 +43,15 @@ final class FollowRecoverySourceContractTest {
         assertTrue(shelter.contains("currentOwned.containsKey(candidate) && currentOwned.containsKey(candidate.up())"));
         assertTrue(shelter.contains("boolean matchesDimension(AIPlayerEntity bot)"));
         assertTrue(shelter.contains("owned.equals(bot.getEntityWorld().getBlockState(position))"));
-        assertTrue(follow.contains("EmergencyShelterTask.pendingExitDebt(bot).orElse(null)"));
-        assertTrue(follow.contains("!shelterExitDebt.matchesDimension(bot)"));
-        assertTrue(follow.contains("shelterExitDebt.ownsCurrentPlacement(bot, obstruction)"));
-        assertTrue(follow.contains("shelterExitMiner.begin(bot, obstruction)"));
-        assertTrue(follow.contains("FakePlayerMotion.stepToStandable(bot, egress, \"follow_shelter_exit\")"));
+        // FollowTask delegates its shelter-exit-debt mini state machine to a dedicated
+        // collaborator (a mechanical extraction, same behaviour); the invariants below now live
+        // in that collaborator rather than in FollowTask itself.
+        assertTrue(follow.contains("shelterExitDebtRepayer.repay(bot, target, elapsed)"));
+        assertTrue(repayer.contains("EmergencyShelterTask.pendingExitDebt(bot).orElse(null)"));
+        assertTrue(repayer.contains("!shelterExitDebt.matchesDimension(bot)"));
+        assertTrue(repayer.contains("shelterExitDebt.ownsCurrentPlacement(bot, obstruction)"));
+        assertTrue(repayer.contains("shelterExitMiner.begin(bot, obstruction)"));
+        assertTrue(repayer.contains("FakePlayerMotion.stepToStandable(bot, egress, \"follow_shelter_exit\")"));
     }
 
     private static String read(String relative) throws IOException {

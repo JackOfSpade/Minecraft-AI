@@ -28,7 +28,9 @@ final class EmergencyShelterRecoverySourceContractTest {
         String shelter = read("task/EmergencyShelterTask.java");
         String watcher = read("task/DangerWatcher.java");
         String cleanup = read("task/ShelterCleanupTask.java");
-        String follow = read("task/FollowTask.java");
+        // FollowTask delegates the shelter-exit-debt repayment (including this promotion call) to
+        // a dedicated collaborator; see ShelterExitDebtRepayer for the mechanical extraction.
+        String repayer = read("task/ShelterExitDebtRepayer.java");
 
         assertTrue(shelter.contains("RETREAT_TO_SAFE_ANCHOR"));
         assertTrue(shelter.contains("NavSafetyNet.INSTANCE.requestWaterRescue(bot)"));
@@ -51,7 +53,7 @@ final class EmergencyShelterRecoverySourceContractTest {
         assertTrue(cleanup.contains("DangerWatcher.hasObservableHostilePressure(bot)"));
         assertTrue(cleanup.contains("EmergencyShelterTask.ownsCleanupBlock(bot, debt, target)"));
         assertTrue(cleanup.contains("bot.getHungerManager().getFoodLevel() < 20"));
-        assertTrue(follow.contains("EmergencyShelterTask.promoteExitDebtForCleanup(bot, shelterExitDebt);"));
+        assertTrue(repayer.contains("EmergencyShelterTask.promoteExitDebtForCleanup(bot, shelterExitDebt);"));
     }
 
     /**
