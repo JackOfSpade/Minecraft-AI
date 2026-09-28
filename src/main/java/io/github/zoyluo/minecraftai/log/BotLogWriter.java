@@ -8,6 +8,7 @@ import org.slf4j.event.Level;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -129,6 +130,27 @@ public final class BotLogWriter {
         }
     }
 
+    /**
+     * Cheap pre-check for call sites that build an expensive field map before calling {@link
+     * #submit}: true exactly when that category+level combination would produce some observable
+     * effect (a mirrored line, bootstrap buffering, or an enqueued structured entry) once it
+     * reaches {@link #submit}. Reads only {@code thresholds}/{@code config}/{@code started} --
+     * no entry or map construction -- so a disabled category can be skipped before its
+     * kv-&gt;map allocation and stringification ever run.
+     */
+    public boolean enabled(LogCategory category, Level level) {
+        if (category == LogCategory.SECURITY) {
+            // Authorization denials must remain observable unconditionally -- see submit().
+            return true;
+        }
+        boolean bootstrapCritical = (category == LogCategory.CONFIG || category == LogCategory.ERROR)
+                && (!started || !config.enabled());
+        if (bootstrapCritical) {
+            return true;
+        }
+        return started && config.enabled() && level.toInt() >= thresholds.getOrDefault(category, Level.INFO).toInt();
+    }
+
     public void submit(LogCategory category, Level level, String botName, String scope, String event, Map<String, String> fields, String humanMessage, Throwable throwable) {
         LogEntry entry = new LogEntry(System.currentTimeMillis(), category, level, botName,
                 scope == null || scope.isBlank() ? "-" : scope, event, Map.copyOf(fields), humanMessage, throwable);
@@ -165,6 +187,20 @@ public final class BotLogWriter {
                 workerThread.join(timeoutMs);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
+            }
+            if (workerThread.isAlive()) {
+                // xPersist-2: join() timed out and the worker is still mid-writeEntry() (its
+                // blocking java.io calls don't respond to interrupt()). Draining and closing
+                // from this thread now would race the still-live worker's writerFor()/allWriter
+                // access -- both threads could each open an independent writer onto the same
+                // per-bot file (leaking one handle) or interleave writes to the same on-disk
+                // file. Skip the drain/close instead: whatever is still queued is lost in this
+                // rare stalled-disk case, but no concurrent write/close ever happens. The worker
+                // (a daemon thread) finishes its one in-flight entry and then exits on its own.
+                MIRROR.warn("[Minecraft-AI] structured log writer thread did not stop within {}ms; "
+                        + "skipping drain to avoid a write race, {} entries may be lost", timeoutMs, queue.size());
+                started = false;
+                return;
             }
         }
         drainQueue();
@@ -305,14 +341,22 @@ public final class BotLogWriter {
 
     private BufferedWriter writerFor(String botName) throws IOException {
         String safe = "-".equals(botName) ? "_system" : botName.replaceAll("[^a-zA-Z0-9_.-]", "_");
-        BufferedWriter existing = botWriters.get(safe);
-        if (existing != null) {
-            return existing;
+        // xPersist-2: computeIfAbsent makes the get-then-put atomic, so two threads can no
+        // longer both observe a missing entry for the same bot and each open their own
+        // BufferedWriter onto the same underlying file (the second put() used to clobber the
+        // map entry for the first, leaking that writer's handle).
+        try {
+            return botWriters.computeIfAbsent(safe, key -> {
+                try {
+                    return Files.newBufferedWriter(baseDir.resolve("by-bot").resolve(key + ".log"),
+                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+                } catch (IOException exception) {
+                    throw new UncheckedIOException(exception);
+                }
+            });
+        } catch (UncheckedIOException exception) {
+            throw exception.getCause();
         }
-        BufferedWriter created = Files.newBufferedWriter(baseDir.resolve("by-bot").resolve(safe + ".log"),
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
-        botWriters.put(safe, created);
-        return created;
     }
 
     private String format(LogEntry entry) {

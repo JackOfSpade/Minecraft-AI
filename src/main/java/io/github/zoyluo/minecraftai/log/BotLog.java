@@ -96,10 +96,19 @@ public final class BotLog {
     }
 
     private static void submit(LogCategory category, Level level, AIPlayerEntity bot, String event, String humanMessage, Throwable throwable, Object... kv) {
+        // Check enabled() -- which reads only thresholds/config/started -- before building the
+        // field map below: a filtered-out category+level then costs nothing beyond that check,
+        // instead of always paying a LinkedHashMap allocation and N String.valueOf conversions.
+        if (!BotLogWriter.INSTANCE.enabled(category, level)) {
+            return;
+        }
         BotLogWriter.INSTANCE.submit(category, level, nameOf(bot), scopeOf(bot), event, toMap(kv), humanMessage, throwable);
     }
 
     private static void submit(LogCategory category, Level level, String botName, String event, String humanMessage, Throwable throwable, Object... kv) {
+        if (!BotLogWriter.INSTANCE.enabled(category, level)) {
+            return;
+        }
         BotLogWriter.INSTANCE.submit(category, level, botName, "-", event, toMap(kv), humanMessage, throwable);
     }
 
