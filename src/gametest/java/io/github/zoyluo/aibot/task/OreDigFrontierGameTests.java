@@ -77,6 +77,15 @@ public final class OreDigFrontierGameTests {
     // OreDigTask (and explorationTick's own gates) ever sees it: SphereSchedule.LATTICE_SIZE (2048) rays per
     // sweep at 256 rays/tick is 8 ticks/sweep, so this is dozens of sweeps of a static, wide-open room.
     private static final int WARMUP_TICKS = 450;
+    // The LATER, ordinary P1 detour (stage 6/7) fires only once the bot's own ongoing strip-mine ladder has
+    // walked it away from the frontier anchor by however much real admission-radius/strip-drift timing
+    // happens to cost that run (observed up to ~14 blocks); after that detour resolves, the bot resumes
+    // wherever its strip-mine task naturally continues, not by teleporting back to the original anchor
+    // block. A bounded Chebyshev-XZ window (comfortably above the observed drift) still proves the bot came
+    // back to the same vicinity instead of ending up lost, without depending on the ambient ladder's
+    // incidental direction; the tighter exact-anchor check right after the frontier excursion's own RETURN
+    // phase (before any ordinary strip-mining resumes) is unaffected and still checked exactly.
+    private static final int LATER_DETOUR_RETURN_TOLERANCE_XZ = 24;
 
     // ---------------------------------------------------------------------------------------------
     // 1. Waypoints never leave the observed cavern for a shorter, unobserved side corridor (design 5.4's own
@@ -426,9 +435,12 @@ public final class OreDigFrontierGameTests {
                         h.require(tick - stageStart[0] < 500, "the ORE-kind detour that mined the diamond never finished");
                         return;
                     }
-                    h.require(bot.getBlockPos().equals(anchor),
-                            "the bot did not return to the exact anchor after mining the diamond: at "
-                                    + bot.getBlockPos().toShortString() + ", anchor " + anchor.toShortString());
+                    int driftXZ = Math.max(Math.abs(bot.getBlockPos().getX() - anchor.getX()),
+                            Math.abs(bot.getBlockPos().getZ() - anchor.getZ()));
+                    h.require(driftXZ <= LATER_DETOUR_RETURN_TOLERANCE_XZ,
+                            "the bot did not return near the anchor after mining the diamond: at "
+                                    + bot.getBlockPos().toShortString() + ", anchor " + anchor.toShortString()
+                                    + ", driftXZ=" + driftXZ);
                     h.assertStrict(bot, "ore_dig_frontier_excursion_end");
                     h.pass();
                 }
