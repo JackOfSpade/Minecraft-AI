@@ -30,11 +30,6 @@ public final class MovementAction {
         return ActionResult.SUCCESS;
     }
 
-    public static ActionResult startJump(AIPlayerEntity player) {
-        player.getActionPack().setJumping(true);
-        return ActionResult.SUCCESS;
-    }
-
     public static ActionResult jumpOnce(AIPlayerEntity player) {
         player.getActionPack().jumpOnce();
         BotLog.action(player, "jump");

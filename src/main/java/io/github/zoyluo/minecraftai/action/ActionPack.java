@@ -45,8 +45,6 @@ public final class ActionPack {
     private WalkToController walkTo;
     private MiningController mining;
     private PathExecutor pathExecutor;
-    private int itemUseCooldown;
-    private int blockHitDelay;
     private PathRequestIdentity lastPathRequest;
     private PathRequestIdentity activePathRequest;
     private BlockPos activePathGoal;
@@ -526,13 +524,6 @@ public final class ActionPack {
         tickWalkTo();
         tickMining();
 
-        if (itemUseCooldown > 0) {
-            itemUseCooldown--;
-        }
-        if (blockHitDelay > 0) {
-            blockHitDelay--;
-        }
-
         float velocity = sneaking ? 0.3F : 1.0F;
         player.forwardSpeed = forward * velocity;
         player.sidewaysSpeed = strafing * velocity;
@@ -541,22 +532,6 @@ public final class ActionPack {
         if (jumpTicks > 0) {
             jumpTicks--;
         }
-    }
-
-    public int itemUseCooldown() {
-        return itemUseCooldown;
-    }
-
-    public void setItemUseCooldown(int itemUseCooldown) {
-        this.itemUseCooldown = Math.max(0, itemUseCooldown);
-    }
-
-    public int blockHitDelay() {
-        return blockHitDelay;
-    }
-
-    public void setBlockHitDelay(int blockHitDelay) {
-        this.blockHitDelay = Math.max(0, blockHitDelay);
     }
 
     private void tickWalkTo() {
