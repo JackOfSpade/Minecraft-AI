@@ -24,6 +24,10 @@ Google's `generativelanguage.googleapis.com` host. In `config/minecraftai.json`:
 * The API key can also come from the environment: `MINECRAFTAI_LLM_API_KEY`, or the legacy
   `DEEPSEEK_API_KEY`. The environment overrides the file.
 * The shipped defaults still point at DeepSeek (`https://api.deepseek.com`, `deepseek-v4-flash`).
+* `deploy_profile.sh`'s own `.env` parsing separately accepts the pre-rename interim names
+  `AIBOT_LLM_API_KEY` / `AIBOT_LLM_BASE_URL` / `AIBOT_LLM_MODEL` as a per-variable fallback (in the
+  file or the environment) when the current `MINECRAFTAI_LLM_*` name is absent; it prints a warning
+  naming whichever legacy names it used. `MINECRAFTAI_LLM_*` always wins when both are present.
 
 ## Secrets stay out of git
 

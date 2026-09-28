@@ -14,13 +14,18 @@
 #      is accepted (prints only the HTTP status).
 #
 # .env (gitignored; template: .env.example): MINECRAFTAI_LLM_API_KEY, MINECRAFTAI_LLM_BASE_URL, MINECRAFTAI_LLM_MODEL.
-# The same variables in the process environment win over the file. The game never reads .env itself.
+# The same variables in the process environment win over the file. The pre-rename interim names
+# AIBOT_LLM_API_KEY / AIBOT_LLM_BASE_URL / AIBOT_LLM_MODEL are still accepted as a per-variable
+# fallback when the current name is absent (see scripts/lib/env_parse.sh). The game never reads
+# .env itself.
 #
 # Default profile: %APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.11
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
+# shellcheck source=lib/env_parse.sh
+source "$ROOT/scripts/lib/env_parse.sh"
 
 die() { printf 'deploy: %s\n' "$*" >&2; exit 1; }
 
@@ -34,7 +39,7 @@ while [ $# -gt 0 ]; do
     --no-build) DO_BUILD=0; shift ;;
     --no-config) DO_CONFIG=0; shift ;;
     --check-key) CHECK_KEY=1; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -53,25 +58,12 @@ running="$(powershell.exe -NoProfile -Command '@(Get-CimInstance Win32_Process |
 [ "${running:-0}" = "0" ] || die "a Minecraft game client is running; close it first"
 
 # ---- .env (parsed, never sourced: nothing in it is executed)
-KEY=""; BASE=""; MODEL=""
 ENV_FILE="$ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%$'\r'}"
-    case "$line" in ''|'#'*) continue ;; esac
-    name="${line%%=*}"
-    value="${line#*=}"
-    value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
-    case "$name" in
-      MINECRAFTAI_LLM_API_KEY) KEY="$value" ;;
-      MINECRAFTAI_LLM_BASE_URL) BASE="$value" ;;
-      MINECRAFTAI_LLM_MODEL) MODEL="$value" ;;
-    esac
-  done < "$ENV_FILE"
+deploy_profile_parse_env "$ENV_FILE"
+if [ -n "$DEPLOY_ENV_LEGACY_NAMES_USED" ]; then
+  printf 'deploy: warning: using legacy .env/environment name(s) (rename to MINECRAFTAI_LLM_* when convenient): %s\n' \
+    "$DEPLOY_ENV_LEGACY_NAMES_USED"
 fi
-KEY="${MINECRAFTAI_LLM_API_KEY:-$KEY}"
-BASE="${MINECRAFTAI_LLM_BASE_URL:-$BASE}"
-MODEL="${MINECRAFTAI_LLM_MODEL:-$MODEL}"
 
 # ---- 2. build
 if [ "$DO_BUILD" = 1 ]; then
