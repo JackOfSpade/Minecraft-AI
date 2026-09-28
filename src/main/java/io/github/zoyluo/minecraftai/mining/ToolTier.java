@@ -97,10 +97,6 @@ public final class ToolTier {
         return best;
     }
 
-    public static boolean hasRequiredPickaxe(AIPlayerEntity bot, Set<Block> blocks) {
-        return bestPickaxeTier(bot) >= requiredPickaxeTier(blocks);
-    }
-
     public static boolean canHarvestWithInventory(AIPlayerEntity bot, BlockState state) {
         if (!state.isToolRequired()) {
             return true;
@@ -127,6 +123,9 @@ public final class ToolTier {
     }
 
     private static Item pickaxeItem(int tier) {
+        if (tier >= NETHERITE) {
+            return Items.NETHERITE_PICKAXE;
+        }
         if (tier >= DIAMOND) {
             return Items.DIAMOND_PICKAXE; // Obsidian tier: missing this case makes need_better_tool falsely report iron, causing the plan to fetch the wrong pickaxe
         }
