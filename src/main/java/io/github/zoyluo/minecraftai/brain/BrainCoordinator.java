@@ -186,6 +186,19 @@ public final class BrainCoordinator {
             return;
         }
 
+        recordResponseAndDeliverReply(bot, conversation, response);
+        InitialActionGate initialActionGate = prepareToolCallsForThisRound(conversation, response);
+        List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
+
+        if (response.wantsToolCalls()) {
+            dispatchToolCallRound(bot, lease, conversation, response, toolCalls, initialActionGate);
+            return;
+        }
+        handleTextOnlyResponse(bot, lease, conversation, response);
+    }
+
+    /** Logs the API response, delivers any chat reply, and records token/Gemini-interaction bookkeeping. */
+    private void recordResponseAndDeliverReply(AIPlayerEntity bot, BotConversation conversation, ChatResponse response) {
         BotLog.api(bot, "api_response",
                 "tokens_in", response.promptTokens(),
                 "tokens_out", response.completionTokens(),
@@ -205,6 +218,10 @@ public final class BrainCoordinator {
             conversation.geminiInteractionId = response.geminiInteractionId();
             conversation.pendingGeminiFunctionResults = List.of();
         }
+    }
+
+    /** Applies the initial-action-plan gate to this round's tool calls and appends the assistant message to history. */
+    private InitialActionGate prepareToolCallsForThisRound(BotConversation conversation, ChatResponse response) {
         InitialActionGate initialActionGate = initialActionGate(
                 response.toolCalls(), conversation.initialActionStarted || conversation.initialPlanSpoken);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
@@ -212,131 +229,151 @@ public final class BrainCoordinator {
             conversation.initialPlanSpoken = true;
         }
         conversation.history.add(ChatMessage.assistant(response.content(), toolCalls));
+        return initialActionGate;
+    }
 
-        if (response.wantsToolCalls()) {
-            ActionDispatcher.DispatchBatch dispatchBatch = dispatchWithInitialPlanGate(
-                    bot,
-                    toolCalls,
-                    initialActionGate,
-                    () -> conversation.decision.isApplying(lease));
-            if (!conversation.decision.isApplying(lease)) {
-                logStaleDecision(lease, "tool_batch");
-                return;
+    /**
+     * Dispatches this round's tool calls, resolves any control effect (stop/cancel), and then
+     * evaluates whether the round satisfies the initial-action requirement, scheduling a
+     * continuation or completing the decision as appropriate.
+     */
+    private void dispatchToolCallRound(AIPlayerEntity bot,
+                                       DecisionLease lease,
+                                       BotConversation conversation,
+                                       ChatResponse response,
+                                       List<ChatToolCall> toolCalls,
+                                       InitialActionGate initialActionGate) {
+        ActionDispatcher.DispatchBatch dispatchBatch = dispatchWithInitialPlanGate(
+                bot,
+                toolCalls,
+                initialActionGate,
+                () -> conversation.decision.isApplying(lease));
+        if (!conversation.decision.isApplying(lease)) {
+            logStaleDecision(lease, "tool_batch");
+            return;
+        }
+        List<ChatMessage> toolResults = dispatchBatch.messages();
+        ReplayRecorder.INSTANCE.onDecision(bot, conversation.lastPerceptionDigest, toolCalls, replayResult(toolResults));
+        conversation.history.addAll(toolResults);
+        if (executor.usesGeminiInteractions()) {
+            List<GeminiInteractionsApiClient.FunctionResult> nativeResults = new ArrayList<>();
+            for (ActionDispatcher.ExecutedToolCall call : dispatchBatch.executedCalls()) {
+                nativeResults.add(new GeminiInteractionsApiClient.FunctionResult(
+                        call.callId(), call.name(), call.content()));
             }
-            List<ChatMessage> toolResults = dispatchBatch.messages();
-            ReplayRecorder.INSTANCE.onDecision(bot, conversation.lastPerceptionDigest, toolCalls, replayResult(toolResults));
-            conversation.history.addAll(toolResults);
-            if (executor.usesGeminiInteractions()) {
-                List<GeminiInteractionsApiClient.FunctionResult> nativeResults = new ArrayList<>();
-                for (ActionDispatcher.ExecutedToolCall call : dispatchBatch.executedCalls()) {
-                    nativeResults.add(new GeminiInteractionsApiClient.FunctionResult(
-                            call.callId(), call.name(), call.content()));
-                }
-                nativeResults.addAll(response.geminiCappedFunctionResults());
-                conversation.pendingGeminiFunctionResults = List.copyOf(nativeResults);
-            }
-            if (dispatchBatch.controlEffect() != ActionDispatcher.ControlEffect.NONE) {
-                boolean replacementWorkActive = shouldContinueAfterControl(
-                        dispatchBatch.controlEffect(),
-                        TaskManager.INSTANCE.getActive(bot).isPresent(),
-                        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
-                        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
-                        bot.getActionPack().hasActiveActions());
-                if (!replacementWorkActive) {
-                    if (!conversation.decision.complete(lease)) {
-                        logStaleDecision(lease, "control_completion");
-                        return;
-                    }
-                    trimHistory(conversation);
-                    BotLog.comm(bot, "conversation_controlled", "effect", dispatchBatch.controlEffect());
-                    return;
-                }
-                BotLog.comm(bot, "conversation_control_replaced", "effect", dispatchBatch.controlEffect());
-            }
-            boolean workActive = hasRuntimeWork(
+            nativeResults.addAll(response.geminiCappedFunctionResults());
+            conversation.pendingGeminiFunctionResults = List.copyOf(nativeResults);
+        }
+        if (dispatchBatch.controlEffect() != ActionDispatcher.ControlEffect.NONE) {
+            boolean replacementWorkActive = shouldContinueAfterControl(
+                    dispatchBatch.controlEffect(),
                     TaskManager.INSTANCE.getActive(bot).isPresent(),
                     io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
                     io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
                     bot.getActionPack().hasActiveActions());
-            int failedToolCalls = dispatchBatch.failedCallCount() + response.geminiCappedFunctionResults().size();
-            boolean actionToolSucceeded = dispatchBatch.executedCalls().stream()
-                    .anyMatch(call -> call.ok() && isWorkStartTool(call.name()));
-            if (workActive || actionToolSucceeded) {
-                conversation.initialActionStarted = true;
-            }
-            boolean answerOnly = isAnswerOnlyReply(toolCalls);
-            boolean missingRequiredAction = !answerOnly
-                    && !conversation.initialActionStarted
-                    && !isControlOnlyReply(toolCalls)
-                    && failedToolCalls == 0;
-            conversation.lastToolRoundFailureCount = failedToolCalls;
-            conversation.lastToolRoundMissingRequiredAction = missingRequiredAction
-                    || initialActionGate.blockedActionCalls();
-            conversation.lastToolRoundPlanBlockedAction = initialActionGate.blockedActionCalls();
-            BotLog.comm(bot, "tool_round_evaluated",
-                    "model_call", conversation.callBudget.callsUsed(),
-                    "model_calls_remaining", conversation.callBudget.callsRemaining(),
-                    "tool_calls", toolCalls.size(),
-                    "failed_tool_calls", failedToolCalls,
-                    "missing_required_action", conversation.lastToolRoundMissingRequiredAction,
-                    "initial_plan_blocked_action", initialActionGate.blockedActionCalls(),
-                    "initial_plan_reordered", initialActionGate.reorderedPlan(),
-                    "work_active", workActive,
-                    "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions");
-            if (missingRequiredAction || initialActionGate.blockedActionCalls()) {
-                BotLog.warn(LogCategory.COMM, bot, "action_request_not_started",
-                        "model_call", conversation.callBudget.callsUsed(),
-                        "tool_calls", toolCalls.stream().map(ChatToolCall::name).toList(),
-                        "initial_plan_blocked_action", initialActionGate.blockedActionCalls());
-                if (conversation.callBudget.exhausted()) {
-                    if (!conversation.decision.complete(lease)) {
-                        logStaleDecision(lease, "missing_action_budget_completion");
-                        return;
-                    }
-                    trimHistory(conversation);
-                    finishCallBudget(bot, conversation, initialActionGate.blockedActionCalls()
-                            ? "initial_plan_required"
-                            : "missing_required_action");
-                    return;
-                }
-                trimHistory(conversation);
-                if (!conversation.decision.awaitContinuation(lease)) {
-                    logStaleDecision(lease, "missing_action_continuation_wait");
-                    return;
-                }
-                scheduleContinuation(bot, conversation, lease);
-                return;
-            }
-            // A valid one-off answer (for example say for a pure question) does not need a
-            // second model call. Retries are reserved for an actual tool failure or for work
-            // whose deterministic runtime is still progressing.
-            if (!workActive && failedToolCalls == 0) {
+            if (!replacementWorkActive) {
                 if (!conversation.decision.complete(lease)) {
-                    logStaleDecision(lease, "tool_round_completion");
+                    logStaleDecision(lease, "control_completion");
                     return;
                 }
                 trimHistory(conversation);
-                BotLog.comm(bot, "tool_round_completed", "model_call", conversation.callBudget.callsUsed());
+                BotLog.comm(bot, "conversation_controlled", "effect", dispatchBatch.controlEffect());
                 return;
             }
+            BotLog.comm(bot, "conversation_control_replaced", "effect", dispatchBatch.controlEffect());
+        }
+        boolean workActive = hasRuntimeWork(
+                TaskManager.INSTANCE.getActive(bot).isPresent(),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
+                io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
+                bot.getActionPack().hasActiveActions());
+        int failedToolCalls = dispatchBatch.failedCallCount() + response.geminiCappedFunctionResults().size();
+        boolean actionToolSucceeded = dispatchBatch.executedCalls().stream()
+                .anyMatch(call -> call.ok() && isWorkStartTool(call.name()));
+        if (workActive || actionToolSucceeded) {
+            conversation.initialActionStarted = true;
+        }
+        boolean answerOnly = isAnswerOnlyReply(toolCalls);
+        boolean missingRequiredAction = !answerOnly
+                && !conversation.initialActionStarted
+                && !isControlOnlyReply(toolCalls)
+                && failedToolCalls == 0;
+        conversation.lastToolRoundFailureCount = failedToolCalls;
+        conversation.lastToolRoundMissingRequiredAction = missingRequiredAction
+                || initialActionGate.blockedActionCalls();
+        conversation.lastToolRoundPlanBlockedAction = initialActionGate.blockedActionCalls();
+        BotLog.comm(bot, "tool_round_evaluated",
+                "model_call", conversation.callBudget.callsUsed(),
+                "model_calls_remaining", conversation.callBudget.callsRemaining(),
+                "tool_calls", toolCalls.size(),
+                "failed_tool_calls", failedToolCalls,
+                "missing_required_action", conversation.lastToolRoundMissingRequiredAction,
+                "initial_plan_blocked_action", initialActionGate.blockedActionCalls(),
+                "initial_plan_reordered", initialActionGate.reorderedPlan(),
+                "work_active", workActive,
+                "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions");
+        if (missingRequiredAction || initialActionGate.blockedActionCalls()) {
+            BotLog.warn(LogCategory.COMM, bot, "action_request_not_started",
+                    "model_call", conversation.callBudget.callsUsed(),
+                    "tool_calls", toolCalls.stream().map(ChatToolCall::name).toList(),
+                    "initial_plan_blocked_action", initialActionGate.blockedActionCalls());
             if (conversation.callBudget.exhausted()) {
                 if (!conversation.decision.complete(lease)) {
-                    logStaleDecision(lease, "model_call_budget_completion");
+                    logStaleDecision(lease, "missing_action_budget_completion");
                     return;
                 }
                 trimHistory(conversation);
-                finishCallBudget(bot, conversation, "tool_round");
+                finishCallBudget(bot, conversation, initialActionGate.blockedActionCalls()
+                        ? "initial_plan_required"
+                        : "missing_required_action");
                 return;
             }
             trimHistory(conversation);
             if (!conversation.decision.awaitContinuation(lease)) {
-                logStaleDecision(lease, "continuation_wait");
+                logStaleDecision(lease, "missing_action_continuation_wait");
                 return;
             }
             scheduleContinuation(bot, conversation, lease);
             return;
         }
+        // A valid one-off answer (for example say for a pure question) does not need a
+        // second model call. Retries are reserved for an actual tool failure or for work
+        // whose deterministic runtime is still progressing.
+        if (!workActive && failedToolCalls == 0) {
+            if (!conversation.decision.complete(lease)) {
+                logStaleDecision(lease, "tool_round_completion");
+                return;
+            }
+            trimHistory(conversation);
+            BotLog.comm(bot, "tool_round_completed", "model_call", conversation.callBudget.callsUsed());
+            return;
+        }
+        if (conversation.callBudget.exhausted()) {
+            if (!conversation.decision.complete(lease)) {
+                logStaleDecision(lease, "model_call_budget_completion");
+                return;
+            }
+            trimHistory(conversation);
+            finishCallBudget(bot, conversation, "tool_round");
+            return;
+        }
+        trimHistory(conversation);
+        if (!conversation.decision.awaitContinuation(lease)) {
+            logStaleDecision(lease, "continuation_wait");
+            return;
+        }
+        scheduleContinuation(bot, conversation, lease);
+        return;
+    }
 
+    /**
+     * Handles a response with no tool calls: rejects it as an incomplete turn unless an
+     * initial action already started this instruction, otherwise completes the decision.
+     */
+    private void handleTextOnlyResponse(AIPlayerEntity bot,
+                                        DecisionLease lease,
+                                        BotConversation conversation,
+                                        ChatResponse response) {
         // Tool choice is required for every fresh player turn. A bare text response cannot say
         // whether it was an answer or a plan, so do not let it silently complete an action
         // request. Once an initial action has genuinely started, a later text-only completion
@@ -651,10 +688,6 @@ public final class BrainCoordinator {
         return manualModes.getOrDefault(bot.getUuid(), false);
     }
 
-    public boolean maybeWakeForFailure(AIPlayerEntity bot) {
-        return maybeWakeForFailureOrGoal(bot);
-    }
-
     public boolean maybeWakeForFailureOrGoal(AIPlayerEntity bot) {
         // GOALFIX-GF1 P0-A: whenever the bot has an active deterministic goal plan, auto-wake
         // (FLOW-2 / failure injection) always defers to GoalExecutor, so the two orchestrators do
@@ -755,10 +788,6 @@ public final class BrainCoordinator {
         sendPanelChat(bot, "bot", concise);
         bot.getEntityWorld().getServer().getPlayerManager().broadcast(
                 Text.literal("<" + bot.getGameProfile().name() + "> ").append(Text.literal(concise)), false);
-    }
-
-    public int conversationCount() {
-        return conversations.size();
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation, DecisionLease lease) {
@@ -1022,10 +1051,23 @@ public final class BrainCoordinator {
             rest = rest.subList(1, rest.size());
         }
         int keep = Math.max(0, max - conversation.history.size());
+        conversation.history.addAll(trimmedTail(rest, keep));
+    }
+
+    /**
+     * Returns the last {@code keep} messages of {@code rest}, skipping forward past any
+     * leading {@code role="tool"} messages. A "tool" message only ever follows its owning
+     * assistant(tool_calls) message within the same round (onResponse always appends that
+     * assistant message before its tool-result messages), so a tool message still at the
+     * front of the count-based cut necessarily lost its assistant owner to the cut; keeping
+     * it anyway would open the trimmed history with an orphaned tool result.
+     */
+    static List<ChatMessage> trimmedTail(List<ChatMessage> rest, int keep) {
         int start = Math.max(0, rest.size() - keep);
-        for (int index = start; index < rest.size(); index++) {
-            conversation.history.add(rest.get(index));
+        while (start < rest.size() && "tool".equals(rest.get(start).role())) {
+            start++;
         }
+        return rest.subList(start, rest.size());
     }
 
     private boolean maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
