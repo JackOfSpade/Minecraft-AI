@@ -24,3 +24,9 @@ Thumbs.db
 
 # Local scratch
 scratch/
+
+# The root .gitignore's blanket "*.md" rule is anchored to repo-root docs/, not this module's own; keep this
+# module's docs tracked too (see docs/SETTINGS.md, generated from SettingCatalog and checked by SettingsDocTest).
+!docs/
+!docs/*.md
+!docs/**/*.md
