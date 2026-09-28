@@ -112,8 +112,7 @@ final class StructureFormatter {
         if ("ADMIN_FORCED".equals(r.source)) {
             return label("  no roll (forced)");
         }
-        boolean rolled = r.roll > 0 || r.occupiedChance > 0;
-        if (!rolled) {
+        if (!r.rollDetailsKept) {
             return r.status == StructureStatus.ABANDONED ? label("  roll details not kept") : "";
         }
         String cmp = r.status == StructureStatus.ABANDONED ? " >= " : " < ";
@@ -187,7 +186,7 @@ final class StructureFormatter {
         }
         if ("ADMIN_FORCED".equals(r.source)) {
             sb.append(label(" forced"));
-        } else if (r.roll > 0 || r.occupiedChance > 0) {
+        } else if (r.rollDetailsKept) {
             sb.append(label(" chance " + Fmt.percent(r.occupiedChance) + " roll " + Fmt.decimal(r.roll, 2)));
         }
         return sb.toString();

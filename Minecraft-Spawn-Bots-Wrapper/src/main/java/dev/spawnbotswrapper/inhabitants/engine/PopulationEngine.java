@@ -285,6 +285,7 @@ public final class PopulationEngine implements EngineControl {
         rec.source = capacityFull ? StructureRoll.SOURCE_CAPACITY_FULL : roll.source();
         rec.occupiedChance = roll.chance();
         rec.roll = roll.roll();
+        rec.rollDetailsKept = true; // a real roll happened, unlike StructureRecord.abandoned()'s compact placeholder
         rec.structureSeed = roll.structureSeed();
         rec.rolledAtMillis = ctx.clock.nowMillis();
         rec.bounds = boundsOf(snapshot.bounds());

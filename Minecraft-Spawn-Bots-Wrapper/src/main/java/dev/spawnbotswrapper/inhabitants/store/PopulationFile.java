@@ -284,6 +284,14 @@ final class PopulationFile {
         if (record.dataVersion > StructureRecord.CURRENT_DATA_VERSION) {
             throw tooNew(record.dataVersion);
         }
+        if (record.dataVersion < 2) {
+            // wrapperB-1: rollDetailsKept did not exist before dataVersion 2, so every such record deserialises
+            // with it false regardless of whether a real roll happened. Backfill with the same numeric
+            // heuristic the code used to rely on, so old records keep displaying exactly as before; only a
+            // FRESH roll of exactly 0.0 against a genuinely 0% chance can now tell itself apart from "no data".
+            record.rollDetailsKept = record.roll > 0 || record.occupiedChance > 0;
+            record.dataVersion = StructureRecord.CURRENT_DATA_VERSION;
+        }
         if (record.status == null) {
             throw new MalformedJsonException("structure " + key + " has an unknown status");
         }

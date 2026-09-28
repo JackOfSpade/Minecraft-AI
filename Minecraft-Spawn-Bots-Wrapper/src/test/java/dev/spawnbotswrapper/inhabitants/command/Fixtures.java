@@ -57,6 +57,7 @@ final class Fixtures {
         r.source = "RANDOM";
         r.occupiedChance = 0.65;
         r.roll = 0.31;
+        r.rollDetailsKept = true;
         r.plannedBots = planned;
         r.bots = new ArrayList<>(List.of(bots));
         return r;
@@ -75,6 +76,7 @@ final class Fixtures {
         StructureRecord r = StructureRecord.abandoned();
         r.occupiedChance = chance;
         r.roll = roll;
+        r.rollDetailsKept = true;
         return r;
     }
 
@@ -118,5 +120,15 @@ final class Fixtures {
 
     static BotProfile profile() {
         return new BotProfile(BotProfile.CURRENT_VERSION, 42L, "guard", null, null, null);
+    }
+
+    /** True as soon as some line contains {@code fragment}. */
+    static boolean contains(List<String> lines, String fragment) {
+        return lines.stream().anyMatch(l -> l.contains(fragment));
+    }
+
+    /** As {@link #contains}, but strips markup first: for output a test never ran through {@link Markup#strip}. */
+    static boolean containsStripped(List<String> lines, String fragment) {
+        return contains(Markup.strip(lines), fragment);
     }
 }

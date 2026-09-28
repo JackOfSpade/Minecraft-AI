@@ -12,7 +12,7 @@ import java.util.List;
  */
 public final class StructureRecord {
     /** Bump when the meaning of stored fields changes incompatibly. */
-    public static final int CURRENT_DATA_VERSION = 1;
+    public static final int CURRENT_DATA_VERSION = 2;
 
     public int dataVersion = CURRENT_DATA_VERSION;
     public StructureStatus status = StructureStatus.OCCUPIED_PENDING;
@@ -22,6 +22,15 @@ public final class StructureRecord {
     /** The effective occupied chance in force when rolled, and the uniform roll in [0,1) that was compared to it. */
     public double occupiedChance;
     public double roll;
+    /**
+     * True only for a full record actually produced by a roll (see {@code PopulationEngine.roll()}), never for
+     * the compact placeholder {@link #abandoned()} synthesises for entries that live only in the abandoned-key
+     * log with no details retained. {@code occupiedChance}/{@code roll} alone cannot tell those two apart: a
+     * real roll of exactly {@code 0.0} against a genuinely 0% chance is rare but possible, and would otherwise
+     * be mistaken for "no data" (wrapperB-1). Records persisted before this field existed (dataVersion &lt; 2)
+     * are backfilled with the old numeric heuristic on load -- see {@code PopulationFile.normalise}.
+     */
+    public boolean rollDetailsKept;
     /** Seed all per-structure randomness derives from (positions, bot names, bot seeds). */
     public long structureSeed;
     /** Number of bots planned when the structure was rolled occupied. */

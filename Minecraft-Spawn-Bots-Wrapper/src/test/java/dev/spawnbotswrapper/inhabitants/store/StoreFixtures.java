@@ -90,6 +90,7 @@ final class StoreFixtures {
         r.source = "DETERMINISTIC";
         r.occupiedChance = 0.65;
         r.roll = 0.123456789;
+        r.rollDetailsKept = true;
         r.structureSeed = 0x1234_5678_9ABC_DEF0L;
         r.plannedBots = botNames.length;
         r.attempts = 1;
@@ -127,6 +128,7 @@ final class StoreFixtures {
         assertEquals(expected.source, actual.source, "source");
         assertEquals(expected.occupiedChance, actual.occupiedChance, "occupiedChance");
         assertEquals(expected.roll, actual.roll, "roll");
+        assertEquals(expected.rollDetailsKept, actual.rollDetailsKept, "rollDetailsKept");
         assertEquals(expected.structureSeed, actual.structureSeed, "structureSeed");
         assertEquals(expected.plannedBots, actual.plannedBots, "plannedBots");
         assertEquals(expected.attempts, actual.attempts, "attempts");

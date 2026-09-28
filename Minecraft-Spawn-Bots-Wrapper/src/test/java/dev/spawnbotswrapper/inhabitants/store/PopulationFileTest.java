@@ -166,6 +166,27 @@ class PopulationFileTest {
         assertTrue(parsed.decks().isEmpty());
     }
 
+    /**
+     * wrapperB-1: {@code rollDetailsKept} did not exist before {@code dataVersion} 2. A record persisted by an
+     * older build (dataVersion 1) is backfilled with the same numeric heuristic the code used to rely on
+     * (roll &gt; 0 || occupiedChance &gt; 0), and its dataVersion is advanced -- so a genuinely-rolled old
+     * ABANDONED record keeps showing its roll, and a synthesized/never-rolled one still says "not kept".
+     */
+    @Test
+    void anOlderDataVersionRecordHasRollDetailsKeptBackfilledFromTheOldHeuristic() {
+        PopulationFile.Parsed parsed = ok(doc(
+                "\"" + K1 + "\":{\"dataVersion\":1,\"status\":\"ABANDONED\",\"occupiedChance\":0.65,\"roll\":0.83},"
+                + "\"" + K2 + "\":{\"dataVersion\":1,\"status\":\"ABANDONED\",\"occupiedChance\":0.0,\"roll\":0.0}"));
+
+        StructureRecord rolled = parsed.structures().get(StructureKey.parse(K1));
+        assertTrue(rolled.rollDetailsKept, "a real roll (nonzero fields) is recognised by the old heuristic");
+        assertEquals(StructureRecord.CURRENT_DATA_VERSION, rolled.dataVersion, "the record is upgraded on load");
+
+        StructureRecord neverRolled = parsed.structures().get(StructureKey.parse(K2));
+        assertFalse(neverRolled.rollDetailsKept, "an all-zero old record still reads as \"not kept\", as before");
+        assertEquals(StructureRecord.CURRENT_DATA_VERSION, neverRolled.dataVersion);
+    }
+
     @Test
     void aProfileWithMissingPartsIsFilledInByTheProfileDefaults() {
         PopulationFile.Parsed parsed = ok(doc("\"" + K1 + "\":{\"bots\":[{\"name\":\"Bare_1\",\"profile\":{\"seed\":5}}]}"));
@@ -320,10 +341,10 @@ class PopulationFileTest {
 
     @Test
     void aNewerDataVersionIsTooNewWhateverElseItContains() {
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":2,\"structures\":{}}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":2,\"structures\":\"a new kind of thing\"}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":2}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":2,\"structures\":{\"" + K1 + "\":{\"status\":\"BRAND_NEW\"}}}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":3,\"structures\":{}}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":3,\"structures\":\"a new kind of thing\"}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":3}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":3,\"structures\":{\"" + K1 + "\":{\"status\":\"BRAND_NEW\"}}}").outcome());
         assertEquals(TOO_NEW, parse(doc("\"" + K1 + "\":{\"dataVersion\":3}")).outcome());
     }
 }

@@ -294,7 +294,7 @@ class PopulationStoreCrashTest {
     @Test
     void aRecordFromANewerVersionInsideAnOlderFileIsUnusable(@TempDir Path dir) throws IOException {
         write(dir.resolve(POPULATIONS_FILE), "{\"dataVersion\":1,\"structures\":{\"minecraft:overworld|a:b|1,1\":"
-                + "{\"dataVersion\":2,\"status\":\"POPULATED\"}}}");
+                + "{\"dataVersion\":3,\"status\":\"POPULATED\"}}}");
         PopulationStore store = new PopulationStore(dir);
         assertFalse(store.load().usable());
     }
