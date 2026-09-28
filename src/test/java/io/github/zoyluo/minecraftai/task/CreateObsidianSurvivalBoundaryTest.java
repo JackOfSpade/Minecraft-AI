@@ -160,6 +160,52 @@ class CreateObsidianSurvivalBoundaryTest {
     }
 
     @Test
+    void equipOrdinaryMiningToolNeverHardFailsAToolNotRequiredBlock() throws IOException {
+        String task = read("task/CreateObsidianTask.java");
+
+        int method = task.indexOf("private static boolean equipOrdinaryMiningTool(");
+        assertTrue(method >= 0, "the SEARCH branch-mine tool gate must still exist");
+        int methodEnd = task.indexOf("\n    private void approachLavaView(", method);
+        assertTrue(methodEnd > method);
+        String body = task.substring(method, methodEnd);
+
+        // obsidianwater-001: a block that needs no tool at all (dirt/gravel/sand, ...) must never
+        // be gated behind an exact-STONE-tier pickaxe requirement -- the floor drops to WOOD so an
+        // actual low-tier pickaxe is still preferred, but is no longer mandatory.
+        assertTrue(body.contains(
+                "? Math.max(ToolTier.STONE, ToolTier.requiredPickaxeTier(state.getBlock()))\n"
+                + "                : ToolTier.WOOD;"),
+                "the tier floor must drop to WOOD (not STONE/NONE) when the block needs no tool, "
+                + "so only real low-tier pickaxes -- never arbitrary non-pickaxe items -- are "
+                + "accepted as a substitute");
+        // Iron/diamond mission pickaxes stay excluded either way: the upper bound is untouched.
+        assertTrue(body.contains("tier > ToolTier.STONE"));
+
+        // No exact-tier candidate is a hard failure only when the block genuinely requires a tool;
+        // a no-tool-required block must fall through to a bare-hand fallback instead of `return false`.
+        int noCandidate = body.indexOf("if (bestSlot < 0 && bestOffhandSlot < 0) {");
+        assertTrue(noCandidate >= 0);
+        int toolRequiredReturnFalse = body.indexOf(
+                "if (state.isToolRequired()) {\n                return false;\n            }", noCandidate);
+        assertTrue(toolRequiredReturnFalse > noCandidate,
+                "only the tool-required branch may still return false here");
+        assertTrue(body.indexOf("PlayerInventory.isValidHotbarIndex(slot)", toolRequiredReturnFalse)
+                        > toolRequiredReturnFalse,
+                "the tool-not-required branch must select an empty hotbar slot as a bare hand, "
+                + "mirroring ToolSelector.equipBestTool's own fallback, instead of failing the mission");
+        assertTrue(body.indexOf("InventoryAction.selectHotbar(bot, slot);", toolRequiredReturnFalse) > 0);
+        // The no-candidate block for a tool-not-required block must close on `return true;`, with
+        // no `return false` anywhere between the tool-required check and that close -- i.e. the
+        // bare-hand fallback path itself can never hard-fail the search leg.
+        int fallbackClose = body.indexOf("            return true;\n        }", toolRequiredReturnFalse);
+        assertTrue(fallbackClose > toolRequiredReturnFalse);
+        assertEquals(-1, body.substring(
+                toolRequiredReturnFalse + "if (state.isToolRequired()) {\n                return false;\n            }"
+                        .length(),
+                fallbackClose).indexOf("return false"));
+    }
+
+    @Test
     void bucketAdapterUsesTheVanillaItemInteractionEntryPoint() throws IOException {
         String action = read("action/BucketAction.java");
 

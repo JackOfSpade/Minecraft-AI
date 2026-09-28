@@ -18,6 +18,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.FluidTags;
@@ -1030,11 +1031,18 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         return null;
     }
 
-    /** The exploration channel consumes only stone picks; iron and diamond remain mission assets. */
+    /**
+     * The exploration channel consumes only stone picks; iron and diamond remain mission assets.
+     * For a block that needs no tool at all (dirt/gravel/sand, ...) a wood/stone pickaxe is still
+     * preferred when one is on hand, but {@link BlockState#isToolRequired()} being false means bare
+     * hands are always a legal fallback -- see the no-candidate branch below, which never hard-fails
+     * for such a block (mirrors {@code BlockMiner}/{@code ToolSelector.equipMiningChannelTool}'s own
+     * {@code isToolRequired()}-gated policy).
+     */
     private static boolean equipOrdinaryMiningTool(AIPlayerEntity bot, BlockState state) {
         int required = state.isToolRequired()
                 ? Math.max(ToolTier.STONE, ToolTier.requiredPickaxeTier(state.getBlock()))
-                : ToolTier.STONE;
+                : ToolTier.WOOD;
         int bestSlot = -1;
         int bestOffhandSlot = -1;
         int bestTier = Integer.MAX_VALUE;
@@ -1071,7 +1079,25 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             }
         }
         if (bestSlot < 0 && bestOffhandSlot < 0) {
-            return false;
+            if (state.isToolRequired()) {
+                return false;
+            }
+            // No wood/stone pickaxe is available, but this block needs no tool at all: failing the
+            // mission over dirt/gravel/sand is exactly the bug this method must not reintroduce
+            // (obsidianwater-001). Select an empty hotbar slot as an executable bare hand when one
+            // is free -- the same "empty hotbar slot is a valid tool choice" pattern
+            // ToolSelector.equipBestTool uses -- so the equipped item matches what will actually
+            // mine the block. The loop above never considered a tier above STONE, so this can never
+            // newly select the mission's reserved iron/diamond pickaxe; if every hotbar slot is
+            // occupied, proceed with whatever is already equipped rather than aborting.
+            for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
+                if (PlayerInventory.isValidHotbarIndex(slot)
+                        && bot.getInventory().getMainStacks().get(slot).isEmpty()) {
+                    InventoryAction.selectHotbar(bot, slot);
+                    break;
+                }
+            }
+            return true;
         }
         if (bestOffhandSlot >= 0) {
             bestSlot = InventoryAction.promoteOffhandSlot(bot, bestOffhandSlot).orElse(-1);
