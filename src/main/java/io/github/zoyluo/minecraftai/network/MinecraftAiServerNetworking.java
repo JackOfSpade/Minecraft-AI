@@ -173,13 +173,19 @@ public final class MinecraftAiServerNetworking {
             return;
         }
         AIPlayerEntity target = bot.get();
-        switch (payload.key()) {
-            case "manual" -> BrainCoordinator.INSTANCE.setManualMode(target, payload.value());
-            case "memory" -> BotRuntimeOptions.INSTANCE.setMemoryToolsEnabled(target, payload.value());
-            case "reports" -> BotRuntimeOptions.INSTANCE.setVerboseReportsEnabled(target, payload.value());
-            default -> throw new IllegalArgumentException("unknown_option: " + payload.key());
+        try {
+            switch (payload.key()) {
+                case "manual" -> BrainCoordinator.INSTANCE.setManualMode(target, payload.value());
+                case "memory" -> BotRuntimeOptions.INSTANCE.setMemoryToolsEnabled(target, payload.value());
+                case "reports" -> BotRuntimeOptions.INSTANCE.setVerboseReportsEnabled(target, payload.value());
+                default -> throw new IllegalArgumentException("unknown_option: " + payload.key());
+            }
+            sendSystem(player, target.getGameProfile().name(), "Setting updated: " + payload.key() + "=" + payload.value());
+        } catch (RuntimeException exception) {
+            BotLog.error(target, "panel_set_option_exception", exception, "key", payload.key());
+            String reason = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+            sendSystem(player, payload.botName(), "Command execution failed: " + reason);
         }
-        sendSystem(player, target.getGameProfile().name(), "Setting updated: " + payload.key() + "=" + payload.value());
     }
 
     // Panel teleport: runs on the server thread; authorization completes after the target is resolved, before any coordinate change.
@@ -427,8 +433,14 @@ public final class MinecraftAiServerNetworking {
         }
     }
 
+    // Upper bound on a client-supplied task quantity. No sibling clamp exists elsewhere in the
+    // codebase to mirror (command-line task args are only lower-bounded via IntegerArgumentType),
+    // so this uses a generous but finite ceiling (36 inventory slots * 64 = a full inventory of a
+    // single item) to stop a modified/fuzzing client from handing a task an unbounded count.
+    private static final int MAX_TASK_COUNT = 2304;
+
     private static int count(BotCommandC2S payload) {
-        return Math.max(1, payload.count());
+        return Math.max(1, Math.min(MAX_TASK_COUNT, payload.count()));
     }
 
     private static BlockPos parseBlockPos(String value) {
