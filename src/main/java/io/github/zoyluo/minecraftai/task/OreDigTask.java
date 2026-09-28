@@ -5747,10 +5747,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * Hook 3: a lava sighting claimed by a live detour (design 4.14, M40). The original immediate-danger guard
      * of {@code avoidObservedLava} is not dropped here: lava in or touching the bot's own cell still falls
      * through to the generic Evade/pause path. In RETURN a fresh abort would do nothing useful (the detour is
-     * already walking home), but the sighting is still claimed (returns true): the detour's own return route
-     * already answers it, and letting DangerWatcher fall through to its generic Evade+pause here would grow a
-     * pause frame over a task that is already safely self-aborting/returning, which is exactly the race M40's
-     * self-abort contract exists to prevent.
+     * already walking home). If that RETURN is the detour's own answer to lava (its safety gate aborted for
+     * item 7 a tick before this scan saw the same still-visible lava), the sighting is claimed: letting
+     * DangerWatcher fall through to its generic Evade+pause would grow a pause frame over a task that is already
+     * self-aborting for exactly this hazard, the race M40's self-abort contract exists to prevent. A RETURN for
+     * any other reason is left to the generic path, whose interrupt/resume brings the bot home once safe.
      */
     private boolean detourClaimLava(AIPlayerEntity bot, BlockPos lavaPos) {
         if (lavaPos == null || bot.isInLava() || bot.isOnFire()
@@ -5758,7 +5759,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         if (detour.phase() == DetourPhase.RETURN) {
-            return true;
+            return isLavaAbort(detour.abortReason());
         }
         bot.getActionPack().stopAll();
         miner.cancel(bot);
@@ -5766,6 +5767,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BotLog.danger(bot, "ore_dig_detour_lava_claimed",
                 "lava", lavaPos.toShortString(), "phase", detour.phase());
         return true;
+    }
+
+    /** Whether a detour abort reason is one of the two lava items of the safety gate (design 4.12 item 7). */
+    private static boolean isLavaAbort(String abortReason) {
+        return SafeReason.LAVA_THREAT_BOX.abortReason().equals(abortReason)
+                || SafeReason.HAZARD_LAVA.abortReason().equals(abortReason);
     }
 
     /**
