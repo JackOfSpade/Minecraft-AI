@@ -550,11 +550,6 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return futureSticksForRemainingTarget(Math.max(1, targetCount));
         }
 
-        public static int futureSticksAfterBoundary(int targetCount, int boundary) {
-            return futureSticksForRemainingTarget(Math.max(1,
-                    Math.max(1, targetCount) - Math.max(0, boundary)));
-        }
-
         public static int bootstrapStickTarget(int targetCount) {
             return futureSticksBeforeFirstPool(targetCount)
                     + MiningBudget.TUNNELING_SERVICE_TARGET * STONE_PICKAXE_STICK_COST;
@@ -3397,13 +3392,6 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 .sorted()
                 .collect(java.util.stream.Collectors.joining(",")));
         return Map.copyOf(values);
-    }
-
-    /** Ores needed to reconstruct an interrupted service step before replanned mining resumes. */
-    public static Set<net.minecraft.block.Block> restoredTargetOres(Map<String, String> values) {
-        return inspectCheckpoint(values)
-                .map(RestoreMetadata::ores)
-                .orElse(Set.of());
     }
 
     /** Exact live inventory attestation used to omit an already-completed target-64 kit step. */
