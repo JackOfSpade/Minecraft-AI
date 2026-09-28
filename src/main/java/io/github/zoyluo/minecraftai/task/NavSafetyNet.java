@@ -67,6 +67,44 @@ public final class NavSafetyNet {
     private final Map<UUID, Integer> waterRescueSince = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
     private static final int WATER_RESCUE_TELEPORT_AFTER = 200; // Still not out of the water after 10s -> force a teleport
+    // xPerf-NAVSAFE-01 / detour-refactor-navsafetynet-water-search-cost: findPhysicalWaterEscape
+    // (a full BFS over up to ~36k cells) and findNearestBreathableStandable (a full triple-nested
+    // scan of the same size) used to re-run from scratch on every single tick a bot stayed in a
+    // water crisis -- up to WATER_RESCUE_TELEPORT_AFTER (200) ticks in a row. Cache their result per
+    // bot, keyed by the bot's own feet cell, and bound how stale that cache may get instead of
+    // recomputing every tick:
+    // - A changed feet cell invalidates the cache immediately (the very next tick recomputes),
+    //   since the search itself starts from that position.
+    // - Otherwise the cached result is reused for at most WATER_SEARCH_CACHE_TICKS ticks. Water can
+    //   spread/recede every tick from vanilla scheduled fluid ticks (the same reason
+    //   Standability.clearCache() below still runs unconditionally every tick for every *other*
+    //   standability read this method makes), so an unbounded cache could hand back a route through
+    //   a cell that is no longer actually passable. A short, bounded staleness window keeps that
+    //   risk negligible without paying the full scan cost every tick: FakePlayerMotion.stepToStandable
+    //   and swimStepTo both re-verify the specific destination cell's *current* state before moving
+    //   and simply refuse the step (returning false, falling through to the remaining fallbacks
+    //   below) if the cached route's next cell turned out to no longer be valid -- so a stale route
+    //   can never move the bot into now-unsafe terrain, only delay noticing a shape change by at
+    //   most WATER_SEARCH_CACHE_TICKS ticks (a quarter of a second), far below the 200-tick
+    //   emergency-teleport timeout that remains the actual safety backstop.
+    private static final int WATER_SEARCH_CACHE_TICKS = 5;
+    private record WaterSearchCache<T>(BlockPos feet, int computedTick, T result) {
+    }
+    private final Map<UUID, WaterSearchCache<WaterEscapeStep>> waterEscapeCache = new ConcurrentHashMap<>();
+    private final Map<UUID, WaterSearchCache<BlockPos>> breathableStandableCache = new ConcurrentHashMap<>();
+
+    /**
+     * Pure cache-validity check for the water-search memoization above, package-private so it can
+     * be unit-tested without a Minecraft bootstrap. A cache entry is reusable only while it names
+     * the bot's exact current feet cell and is younger than {@link #WATER_SEARCH_CACHE_TICKS}.
+     */
+    static boolean waterSearchCacheValid(BlockPos cachedFeet, int cachedTick,
+                                         BlockPos currentFeet, int currentTick) {
+        return cachedFeet != null
+                && cachedFeet.equals(currentFeet)
+                && currentTick >= cachedTick
+                && currentTick - cachedTick < WATER_SEARCH_CACHE_TICKS;
+    }
 
     private NavSafetyNet() {
     }
@@ -77,6 +115,8 @@ public final class NavSafetyNet {
         waterRescueShore.remove(id);
         waterRescueSince.remove(id);
         followSwimLeaseUntil.remove(id);
+        waterEscapeCache.remove(id);
+        breathableStandableCache.remove(id);
     }
 
     public void clearAll() {
@@ -84,6 +124,8 @@ public final class NavSafetyNet {
         waterRescueShore.clear();
         waterRescueSince.clear();
         followSwimLeaseUntil.clear();
+        waterEscapeCache.clear();
+        breathableStandableCache.clear();
     }
 
     /**
@@ -167,7 +209,9 @@ public final class NavSafetyNet {
         if (inCrisis) {
             // Fluid blocks can disappear/spread from vanilla scheduled ticks without going
             // through our block actions, so the global standability cache may describe the
-            // previous water shape. Rescue decisions must use the current shape every tick.
+            // previous water shape. Every standability read this method makes below (other than
+            // the memoized full-volume searches, which accept their own small bounded staleness --
+            // see WATER_SEARCH_CACHE_TICKS above) must use the current shape every tick.
             Standability.clearCache();
             // Release condition: once the bot reaches a dry, standable position verified by
             // server-side block state -> the crisis is over, hand control back.
@@ -191,7 +235,7 @@ public final class NavSafetyNet {
             // shore wall / current pushing back) -> likewise force a teleport to survive.
             boolean rescueTimedOut = since != null && now - since > WATER_RESCUE_TELEPORT_AFTER;
             if (rescueTimedOut || (bot.getAir() <= EMERGENCY_AIR && !breathableAbove(world, feet))) {
-                if (emergencyTeleportToAir(bot, world, feet)) {
+                if (emergencyTeleportToAir(bot, world, feet, now)) {
                     waterRescueShore.remove(bot.getUuid());
                     waterRescueSince.remove(bot.getUuid());
                     throttledLog(server, bot, "navsafe_drown_teleport", feet);
@@ -202,7 +246,7 @@ public final class NavSafetyNet {
             // choice could select a dry cell directly behind a wall and then reject every first
             // step because it temporarily increased straight-line distance. In a flooded cave
             // that left the bot motionless until strict-survival denied the teleport fallback.
-            WaterEscapeStep escape = findPhysicalWaterEscape(world, feet);
+            WaterEscapeStep escape = cachedFindPhysicalWaterEscape(bot, world, feet, now);
             if (escape != null) {
                 waterRescueShore.put(bot.getUuid(), escape.shore().toImmutable());
                 boolean dryLanding = isDryStandableCell(world, escape.next());
@@ -229,7 +273,7 @@ public final class NavSafetyNet {
             // again (the nearest landing spot that is both standable and has air at feet and head).
             BlockPos shore = waterRescueShore.get(bot.getUuid());
             if (shore == null || shore.equals(feet) || !Standability.isStandable(world, shore)) {
-                shore = findNearestBreathableStandable(world, feet).orElse(null);
+                shore = cachedFindNearestBreathableStandable(bot, world, feet, now).orElse(null);
             }
             if (shore != null) {
                 waterRescueShore.put(bot.getUuid(), shore.toImmutable());
@@ -257,6 +301,31 @@ public final class NavSafetyNet {
         }
 
         return false;
+    }
+
+    /** Memoized front for {@link #findPhysicalWaterEscape} -- see WATER_SEARCH_CACHE_TICKS above. */
+    private WaterEscapeStep cachedFindPhysicalWaterEscape(AIPlayerEntity bot, ServerWorld world,
+                                                           BlockPos feet, int now) {
+        WaterSearchCache<WaterEscapeStep> cached = waterEscapeCache.get(bot.getUuid());
+        if (cached != null && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
+            return cached.result();
+        }
+        WaterEscapeStep escape = findPhysicalWaterEscape(world, feet);
+        waterEscapeCache.put(bot.getUuid(), new WaterSearchCache<>(feet.toImmutable(), now, escape));
+        return escape;
+    }
+
+    /** Memoized front for {@link #findNearestBreathableStandable} -- see WATER_SEARCH_CACHE_TICKS above. */
+    private Optional<BlockPos> cachedFindNearestBreathableStandable(AIPlayerEntity bot, ServerWorld world,
+                                                                     BlockPos feet, int now) {
+        WaterSearchCache<BlockPos> cached = breathableStandableCache.get(bot.getUuid());
+        if (cached != null && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
+            return Optional.ofNullable(cached.result());
+        }
+        Optional<BlockPos> found = findNearestBreathableStandable(world, feet);
+        breathableStandableCache.put(bot.getUuid(),
+                new WaterSearchCache<>(feet.toImmutable(), now, found.orElse(null)));
+        return found;
     }
 
     private static WaterEscapeStep findPhysicalWaterEscape(ServerWorld world, BlockPos start) {
@@ -425,8 +494,8 @@ public final class NavSafetyNet {
         return false;
     }
 
-    private boolean emergencyTeleportToAir(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
-        Optional<BlockPos> safe = findNearestBreathableStandable(world, feet);
+    private boolean emergencyTeleportToAir(AIPlayerEntity bot, ServerWorld world, BlockPos feet, int now) {
+        Optional<BlockPos> safe = cachedFindNearestBreathableStandable(bot, world, feet, now);
         if (safe.isEmpty()) {
             return false;
         }
