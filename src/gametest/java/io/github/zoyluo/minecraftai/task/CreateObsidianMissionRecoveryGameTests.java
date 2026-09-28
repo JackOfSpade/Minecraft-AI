@@ -1204,17 +1204,36 @@ public final class CreateObsidianMissionRecoveryGameTests {
     @GameTest(maxTicks = 80)
     public void skyLitSearchDoesNotSpendTheUndergroundTorchReserve(TestContext context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchSkyGT", 0, true);
-        require(context, fixture.bot().getEntityWorld().isSkyVisible(fixture.start()),
-                "sky-light fixture unexpectedly started underground");
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH));
         Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
                 fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
         ObsidianSearchCursor.initial(fixture.start(), 12).beginNextLeg().encode()
                 .forEach(checkpoint::put);
-        CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
-        task.start(fixture.bot());
-
+        AtomicReference<CreateObsidianTask> taskRef = new AtomicReference<>();
+        // isSkyVisible() depends on a lazily refreshed heightmap and can briefly report the
+        // pre-fixture value when the default GameTest batch prepares many neighbouring
+        // structures in the same server tick (see
+        // searchPhysicallyLightsTheDarkTrailBehindItsReachedFace and
+        // DangerWatcherLowHealthGameTests#hostileLowHealthCannotInterruptAtomicHealingEat).
+        // Gate on the observed sky visibility settling to the expected value instead of
+        // asserting it synchronously right after spawn, so the assertion and the task start
+        // cannot race the engine.
+        AtomicBoolean started = new AtomicBoolean();
         context.runAtEveryTick(() -> {
+            if (!started.get()) {
+                if (!fixture.bot().getEntityWorld().isSkyVisible(fixture.start())) {
+                    return;
+                }
+                started.set(true);
+                CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
+                task.start(fixture.bot());
+                taskRef.set(task);
+                return;
+            }
+            CreateObsidianTask task = taskRef.get();
+            if (task == null) {
+                return;
+            }
             if (task.state() == TaskState.RUNNING) {
                 task.tick(fixture.bot());
             }

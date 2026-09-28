@@ -5746,8 +5746,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     /**
      * Hook 3: a lava sighting claimed by a live detour (design 4.14, M40). The original immediate-danger guard
      * of {@code avoidObservedLava} is not dropped here: lava in or touching the bot's own cell still falls
-     * through to the generic Evade/pause path. In RETURN a claim would do nothing useful (the detour is already
-     * walking home), so it is left to the generic path, whose interrupt/resume brings the bot home once safe.
+     * through to the generic Evade/pause path. In RETURN a fresh abort would do nothing useful (the detour is
+     * already walking home), but the sighting is still claimed (returns true): the detour's own return route
+     * already answers it, and letting DangerWatcher fall through to its generic Evade+pause here would grow a
+     * pause frame over a task that is already safely self-aborting/returning, which is exactly the race M40's
+     * self-abort contract exists to prevent.
      */
     private boolean detourClaimLava(AIPlayerEntity bot, BlockPos lavaPos) {
         if (lavaPos == null || bot.isInLava() || bot.isOnFire()
@@ -5755,7 +5758,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         if (detour.phase() == DetourPhase.RETURN) {
-            return false;
+            return true;
         }
         bot.getActionPack().stopAll();
         miner.cancel(bot);
