@@ -5445,6 +5445,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         private ServerWorld world;
         private MiningAssistState state;
         private String routeFailure = "";
+        private final DropRestGate dropRestGate = new DropRestGate();
         private final Map<String, Boolean> targetIdCache = new HashMap<>();
         /**
          * The block state the last successful {@link #observeBlockIs} of that EXACT cell saw, per cell (not just
@@ -6034,8 +6035,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     && Standability.isStandable(world, stand)
                     && OreScan.adjacentHazard(bot, stand) == OreScan.Observation.OBSERVED_GONE;
             // A freshly spawned item is still falling for a few ticks; only treat it as settled
-            // (design 4.9) once physics says it has actually come to rest.
-            boolean atRest = best.isOnGround() || best.getVelocity().lengthSquared() < 1.0E-4D;
+            // (design 4.9) once physics says it has actually come to rest. A lone low-velocity
+            // reading is not enough (the apex of the pop is airborne and near-stationary for a
+            // tick): see DropRestGate.
+            boolean atRest = dropRestGate.atRest(best.getUuid(), bot.getEntityWorld().getServer().getTicks(),
+                    best.isOnGround(), best.isTouchingWater(), best.getVelocity().lengthSquared());
             return new DropView(true, legal ? stand.toImmutable() : null, atRest);
         }
 
