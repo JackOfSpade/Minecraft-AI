@@ -439,7 +439,7 @@ public final class FollowTask extends AbstractTask {
             handledOutcome = ended;
             if (ended.status() == NavOutcome.Status.FAILED) {
                 // Ended short of the player and Baritone found no more of a way (a lake between us, a sealed room): wait dry.
-                announceNoRoute(bot, targetPos, ended.reason());
+                announceNoRoute(bot, targetPos, ended.reason(), FollowNoRoute.messageFor(ended.reason()));
                 repathBackoff = true;
                 nextRepathTick = elapsed + REPATH_TICKS;
                 baritoneGoalPos = null;
@@ -459,7 +459,7 @@ public final class FollowTask extends AbstractTask {
         }
         nextRepathTick = elapsed + (started.isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
         if (started.isFailed()) {
-            announceNoRoute(bot, targetPos, started.reason());
+            announceNoRoute(bot, targetPos, started.reason(), FollowNoRoute.messageFor(started.reason()));
             repathBackoff = true;
             baritoneGoalPos = null;
             waiting = true;
