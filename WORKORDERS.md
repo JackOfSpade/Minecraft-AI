@@ -30,7 +30,7 @@
 - G4:物品 NBT 用 1.20.5+ 编解码(ItemStack.encode / fromNbt 带 RegistryWrapper)。
 
 【技术栈锁死,不要升级】
-Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16.2、Gradle 9.4.0、Java 21。
+Minecraft 1.21.3、Fabric Loader 0.18.4、Mojang official mappings (loom.officialMojangMappings(), migrated from Yarn)、fabric-loom 1.16.2、Gradle 9.4.0、Java 21。
 ⚠️VERIFY 的 API 以编译通过为准,签名不确定对照 fabric-example-mod 的 1.21.3 分支。
 复用现有类(BrainCoordinator / ToolRegistry / TaskManager / AbstractTask / ActionPack / PerceptionCollector / DangerWatcher / AIPlayerManager / BotMemory / MinecraftAiConfig),不要重造。
 

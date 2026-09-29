@@ -265,7 +265,7 @@ public final class OffhandExecutionGameTests {
         // The recipe consumes its only main-inventory material stack and therefore creates room
         // for just one of five unstackable outputs. Sticks live in offhand to prove that freeing
         // offhand does not count as output capacity. Before the guard this lost all ingredients
-        // and inserted one pick before insertStack reported failure for the remaining four.
+        // and inserted one pick before Inventory.add reported failure for the remaining four.
         ItemStack existingPick = new ItemStack(Items.STONE_PICKAXE);
         existingPick.setDamageValue(17);
         bot.getInventory().getNonEquipmentItems().set(0, existingPick);

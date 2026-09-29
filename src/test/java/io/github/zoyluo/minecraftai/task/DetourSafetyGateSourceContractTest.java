@@ -141,11 +141,11 @@ class DetourSafetyGateSourceContractTest {
     @Test
     void noBlockOrFluidStateIsReadAndNoBannedTokenAppears() throws IOException {
         String code = code();
-        for (String token : List.of("getBlockState(", "getFluidState(", "StructureAccessor", "getStructureAccessor",
-                "getStructureStarts", "locateStructure", "hasAny(", "getBlockEntity(", ".teleport(", "teleportTo(",
-                "requestTeleport(", "setPosition(", "setPos(", "refreshPositionAndAngles(", "getOtherEntities(",
-                "getEntitiesByType(", "getNonSpectatingEntities(", "getLightLevel(", "TaskManager.INSTANCE.assign(",
-                "CapabilityRuntime", "PrivilegedCapability", "getChunk(", "getWorldChunk(")) {
+        for (String token : List.of("getBlockState(", "getFluidState(", "StructureManager", "structureManager",
+                "getAllStarts", "startsForStructure", "findNearestMapStructure", "getStructureGeneratingAt", "maybeHas(", "getBlockEntity(", ".teleportTo(", "teleportTo(",
+                "teleport(", "setPos(", "setPos(", "snapTo(", "getEntities(",
+                "getEntities(", "getEntitiesOfClass(", "getMaxLocalRawBrightness(", "TaskManager.INSTANCE.assign(",
+                "CapabilityRuntime", "PrivilegedCapability", "getChunk(", "getChunkAt(", "getChunkNow(")) {
             assertFalse(code.contains(token), "DetourSafetyGate must not contain " + token);
         }
     }

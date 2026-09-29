@@ -47,7 +47,7 @@ public final class OreProspector {
     /**
      * General-purpose version: finds the nearest "block satisfying match" — reusable for ore search via
      * OreScan.isOre, tree search via "log block set contains", and similar cases.
-     * Palette-level section.hasAny(match) quickly skips sections that don't contain the target, so even a
+     * Palette-level section.maybeHas(match) quickly skips sections that don't contain the target, so even a
      * large radius doesn't lag.
      */
     public static BlockPos nearest(AIPlayerEntity bot, int range, Predicate<BlockState> match) {

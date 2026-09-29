@@ -39,22 +39,21 @@ class AssistObservationSourceContractTest {
             "task/DetourSafetyGate.java");
 
     private static final List<String> BANNED_TOKENS = List.of(
-            "StructureAccessor",
-            "getStructureAccessor",
-            "getStructureStarts",
-            "locateStructure",
-            "hasAny(",
+            "StructureManager",
+            "structureManager",
+            "getAllStarts", "startsForStructure",
+            "findNearestMapStructure", "getStructureGeneratingAt",
+            "maybeHas(",
             "getBlockEntity(",
-            ".teleport(",
+            ".teleportTo(",
             "teleportTo(",
-            "requestTeleport(",
-            "setPosition(",
+            "teleport(",
             "setPos(",
-            "refreshPositionAndAngles(",
-            "getOtherEntities(",
-            "getEntitiesByType(",
-            "getNonSpectatingEntities(",
-            "getLightLevel(",
+            "setPos(",
+            "snapTo(",
+            "getEntities(",
+            "getEntities(",
+            "getMaxLocalRawBrightness(",
             "TaskManager.INSTANCE.assign(");
 
     /** member name of a world call, the one file it may appear in, and how many times it appears there. */
@@ -69,17 +68,17 @@ class AssistObservationSourceContractTest {
         // the one own-cell read of the POI pass: the biome id at the bot's feet
         WORLD_CALLS.put("getBiome", new Allowed("PoiDetector.java", 1));
         // one entity query per POI evaluation, every result still goes through canObserveEntity
-        WORLD_CALLS.put("getEntitiesByClass", new Allowed("PoiDetector.java", 1));
+        WORLD_CALLS.put("getEntitiesOfClass", new Allowed("PoiDetector.java", 1));
         // the other own-cell read: the underground test at the bot's feet (design 2.3 3e)
         WORLD_CALLS.put("canSeeSky", new Allowed("MiningAssistCoordinator.java", 1));
     }
 
     private static final Pattern WORLD_MEMBER = Pattern.compile(
-            "(?:\\bworld|\\bgetServerWorld\\(\\)|\\bgetEntityWorld\\(\\)|\\bgetWorld\\(\\))\\s*\\.\\s*(\\w+)\\s*\\(");
+            "(?:\\bworld|\\bgetServerLevel\\(\\)|\\blevel\\(\\)|\\bgetLevel\\(\\))\\s*\\.\\s*(\\w+)\\s*\\(");
     private static final Pattern WORLD_TYPED_NAME = Pattern.compile(
-            "\\b(?:ServerWorld|World|ClientWorld|WorldView|BlockView|WorldAccess|StructureWorldAccess)\\s+(\\w+)");
+            "\\b(?:ServerLevel|Level|ClientLevel|LevelReader|BlockGetter|LevelAccessor|WorldGenLevel)\\s+(\\w+)");
     private static final Pattern VAR_ALIAS = Pattern.compile(
-            "\\bvar\\s+\\w+\\s*=\\s*[^;]*\\b(?:getServerWorld|getEntityWorld|getWorld)\\s*\\(");
+            "\\bvar\\s+\\w+\\s*=\\s*[^;]*\\b(?:getServerLevel|level|getLevel)\\s*\\(");
 
     private static String read(Path path) throws IOException {
         return Files.readString(path);
@@ -132,7 +131,7 @@ class AssistObservationSourceContractTest {
         assertFalse(sweeper.contains("getBlockState("),
                 "the sweeper must never read a block itself; the first-hit state comes from castViewRay");
         assertFalse(sweeper.contains("CapabilityRuntime"), "the sweeper asks no capability question");
-        assertFalse(sweeper.contains("raycast("), "no direct world raycast in the sweeper");
+        assertFalse(sweeper.contains("clip("), "no direct world raycast in the sweeper");
     }
 
     @Test
@@ -164,7 +163,7 @@ class AssistObservationSourceContractTest {
         int stateRead = body.indexOf("getBlockState(");
         assertTrue(typeCheck > 0 && stateRead > typeCheck, "the state may only be read after the BLOCK type check");
         assertEquals(1, count(body, "getBlockState("), "exactly one read: the first-hit cell");
-        assertTrue(body.indexOf("hasChunk(") > 0 && body.indexOf("hasChunk(") < body.indexOf("raycast("),
+        assertTrue(body.indexOf("hasChunk(") > 0 && body.indexOf("hasChunk(") < body.indexOf("clip("),
                 "an end chunk that is not loaded skips the ray before it is cast");
         assertTrue(body.contains("ViewHit.unknown()"));
         assertFalse(body.contains("FACE_SAMPLE_OFFSETS"));
@@ -213,7 +212,7 @@ class AssistObservationSourceContractTest {
             String source = code(file);
             String name = file.getFileName().toString();
             for (String token : List.of("getBlockState(", "world.getFluidState(", "CapabilityRuntime",
-                    "PrivilegedCapability", "getChunk(", "getWorldChunk(")) {
+                    "PrivilegedCapability", "getChunk(", "getChunkAt(", "getChunkNow(")) {
                 if (source.contains(token)) {
                     violations.add(name + " contains " + token);
                 }

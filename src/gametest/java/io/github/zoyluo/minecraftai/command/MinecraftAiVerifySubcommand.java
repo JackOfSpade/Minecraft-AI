@@ -2629,7 +2629,7 @@ public final class MinecraftAiVerifySubcommand {
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8)); // sealing material (a real player always has cobblestone on hand)
             }
             // R9 flowing water adjoining ore (waterfall base): a water source hangs 2 blocks above the cell adjacent to the ore and naturally flows down over the ore's east neighbor — flowing water (not a source)
-            // also has fluidState.isIn(WATER), so the sealing/side-approach path should behave the same way; sealing off the flowed-through cell is enough to dig safely.
+            // also has fluidState.is(WATER), so the sealing/side-approach path should behave the same way; sealing off the flowed-through cell is enough to dig safely.
             case "flow" -> {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
@@ -2958,7 +2958,7 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     // Death recovery (R1): the bot is killed in one hit while carrying easily-identifiable supplies; assert the respawn reflex auto-runs to the corpse and retrieves the iron ingot back into the inventory before it despawns.
-    // A blind-spot sanity check: the drop is genuinely spawned (this mod's respawn does not restore the inventory; vanilla dropInventory drops it at the death point).
+    // A blind-spot sanity check: the drop is genuinely spawned (this mod's respawn does not restore the inventory; vanilla dropEquipment drops it at the death point).
     private static Result assignGeoRecover(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);

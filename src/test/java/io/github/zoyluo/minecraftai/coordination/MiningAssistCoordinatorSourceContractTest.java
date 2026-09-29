@@ -50,8 +50,8 @@ class MiningAssistCoordinatorSourceContractTest {
                 "resetToIdle",
                 "IntentController",
                 "getActionPack",
-                "interactionManager",
-                ".teleport(")) {
+                "gameMode",
+                ".teleportTo(")) {
             assertFalse(source.contains(token), "P0 is shadow only, found " + token);
         }
         // The only TaskManager use is the read-only lookup of the active task.
@@ -68,7 +68,7 @@ class MiningAssistCoordinatorSourceContractTest {
     void neverChatsCallsAModelOrTouchesTheGoalLayer() throws IOException {
         String source = source();
         for (String token : List.of(
-                "sendMessage(",
+                "displayClientMessage(", "sendSystemMessage(",
                 "io.github.zoyluo.minecraftai.brain",
                 "BrainCoordinator",
                 "PoiAdvisor",
@@ -83,8 +83,8 @@ class MiningAssistCoordinatorSourceContractTest {
     @Test
     void readsNoBlockFluidOrBiomeFromTheWorldItself() throws IOException {
         String source = source();
-        for (String token : List.of("getBlockState(", "getFluidState(", "getChunk(", "getWorldChunk(",
-                "getBiome(", "getBlockEntity(", "CapabilityRuntime", "PrivilegedCapability", "raycast(")) {
+        for (String token : List.of("getBlockState(", "getFluidState(", "getChunk(", "getChunkAt(", "getChunkNow(",
+                "getBiome(", "getBlockEntity(", "CapabilityRuntime", "PrivilegedCapability", "clip(", "pick(")) {
             assertFalse(source.contains(token), "the sensor adapters own every world read, found " + token);
         }
         assertEquals(1, count(source, "canSeeSky("), "the one own-cell read is the underground test (design 2.3 3e)");

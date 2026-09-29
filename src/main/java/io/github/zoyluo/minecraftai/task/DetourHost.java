@@ -30,7 +30,7 @@ import net.minecraft.world.phys.Vec3;
  * after it said PRESENT in the same tick (or while the miner already owns the cell).</p>
  *
  * <p><b>Units.</b> "task ticks" are {@code AbstractTask.elapsedTicks()} (they stop while the task is paused or
- * skipped under degraded TPS); "server ticks" are {@code server.getTicks()}. Deadlines and heartbeats are in task
+ * skipped under degraded TPS); "server ticks" are {@code server.getTickCount()}. Deadlines and heartbeats are in task
  * ticks; cooldowns, exclusions, claims, the route budget and the mission ledger are in server ticks.</p>
  *
  * <p><b>Names.</b> The production implementation is an inner class of {@code OreDigTask}; several methods below
@@ -168,7 +168,7 @@ interface DetourHost {
     /** Task ticks: {@code elapsedTicks()} of the hosting task. Monotonic while the task runs. */
     int now();
 
-    /** Server ticks: {@code server.getTicks()}. */
+    /** Server ticks: {@code server.getTickCount()}. */
     int serverTick();
 
     /** A stable per-bot number in 0..9 that staggers the start checks (design 4.3: "staggered by uuid"). */
@@ -284,7 +284,7 @@ interface DetourHost {
     // ------------------------------------------------------------------------------------------------------
 
     /**
-     * The re-proof of design 4.6 step 1: {@code OreScan.observe(bot, pos, state -> state.isOf(block))} where
+     * The re-proof of design 4.6 step 1: {@code OreScan.observe(bot, pos, state -> state.is(block))} where
      * {@code block} is the registry block of {@code blockId} (a bare path means the {@code minecraft} namespace).
      * PRESENT when observed and it is that block, GONE when observed and it is something else, UNKNOWN when the
      * cell cannot be observed now. An id that is not in the registry is GONE without any observation (it must

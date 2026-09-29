@@ -14,14 +14,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * calls its private {@code controlBoat()} -- the method that turns
  * {@code setInput(left, right, forward, back)} into yaw/velocity change -- under
  * {@code if (world.isClientSide)} (confirmed with javap: it sits right after the {@code
- * updateVelocity()} call, guarded by that check, followed by sending a
+ * floatBoat()} call, guarded by that check, followed by sending a
  * {@code ServerboundPaddleBoatPacket} that only makes sense from an actual client). A real client
  * applies its own inputs locally that way and reports the outcome back over the network; our fake
  * player has no client to do either half of that. Without this, {@code BoatSupport.steerToward()}
  * would keep calling {@code setInput(...)} forever with no server-side code ever consuming it.
  *
  * <p>This runs {@code controlBoat()} directly on the server, in the same relative position the
- * client would (immediately after {@code updateVelocity()}, before {@code move()}), and only when
+ * client would (immediately after {@code floatBoat()}, before {@code move()}), and only when
  * the boat's controlling passenger is our own {@link AIPlayerEntity} -- a real player's boat is
  * untouched and keeps driving its paddles client-side exactly as before.</p>
  */

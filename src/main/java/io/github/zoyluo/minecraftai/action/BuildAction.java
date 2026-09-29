@@ -259,7 +259,7 @@ public final class BuildAction {
     }
 
     /**
-     * The pure equivalent of {@code Entity.raycast(sampleRange, 1.0F, false)} after aiming exactly at
+     * The pure equivalent of {@code Entity.pick(sampleRange, 1.0F, false)} after aiming exactly at
      * {@code target}: same start (the eye), same end (eye plus that direction times {@code sampleRange}),
      * same shape and fluid handling (OUTLINE, no fluids) -- built directly from the two points instead of
      * through the entity's own look vector, so it never reads or writes yaw or pitch.

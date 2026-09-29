@@ -207,7 +207,7 @@ public final class TradeTask extends AbstractTask {
         } catch (LinkageError | RuntimeException ignored) {
             // Keep the reflection path as a runtime fallback for loader or mapping edge cases.
         }
-        for (String methodName : new String[]{"afterUsing", "method_18008"}) {
+        for (String methodName : new String[]{"rewardTradeXp", "method_18008"}) {
             Class<?> type = villager.getClass();
             while (type != null) {
                 try {

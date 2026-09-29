@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Locks down the small, reviewed set of production adapters that may invoke privileged primitives. */
 class PrivilegedBoundarySourceTest {
     private static final Path MAIN = Path.of("src/main/java/io/github/zoyluo/minecraftai");
-    private static final Pattern DIRECT_TELEPORT = Pattern.compile("\\.teleport\\s*\\(");
+    private static final Pattern DIRECT_TELEPORT = Pattern.compile("\\.teleportTo\\s*\\(");
 
     @Test
     void directTeleportsStayInsideReviewedAdapters() throws IOException {
@@ -118,7 +118,7 @@ class PrivilegedBoundarySourceTest {
                 < prospector.indexOf("BlockState state = world.getBlockState(pos)"));
 
         String oreScan = read("mining/OreScan.java");
-        assertFalse(oreScan.contains("veinFrom(World"), "raw world-only vein scans must not be public");
+        assertFalse(oreScan.contains("veinFrom(Level"), "raw world-only vein scans must not be public");
         assertTrue(oreScan.contains("veinFrom(AIPlayerEntity"));
     }
 
@@ -156,7 +156,7 @@ class PrivilegedBoundarySourceTest {
         assertTrue(container.contains("distanceToSqr(containerPos.getCenter()) > REACH_SQUARED"));
         assertTrue(container.contains("ObservableWorldQuery.canObserveBlock(bot, containerPos)"));
 
-        assertTrue(matchingSources(Pattern.compile("setTimeOfDay\\s*\\(")).isEmpty(),
+        assertTrue(matchingSources(Pattern.compile("setDayTime\\s*\\(")).isEmpty(),
                 "no bot task may rewrite the time of day: night skipping belongs to the vanilla sleep vote among human players");
     }
 

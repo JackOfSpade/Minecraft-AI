@@ -53,7 +53,7 @@ public final class SensePlan {
      * @param handled     the danger scan handled this bot this tick
      * @param miningTask  the active task is one of the five sensed classes
      * @param gateOpen    {@code MiningAssistRuntime.enabledFor(bot, tick)}
-     * @param underground {@code !world.isSkyVisible(feet)}
+     * @param underground {@code !world.canSeeSky(feet)}
      */
     public static Verdict decide(boolean handled, BooleanSupplier miningTask, BooleanSupplier gateOpen,
                                  BooleanSupplier underground) {

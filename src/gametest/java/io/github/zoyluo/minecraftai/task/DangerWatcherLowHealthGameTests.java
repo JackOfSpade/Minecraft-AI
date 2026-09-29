@@ -1805,7 +1805,7 @@ public final class DangerWatcherLowHealthGameTests {
         skeleton.snapTo(hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                 hostileFeet.getZ() + 0.5D, 90.0F, 0.0F);
         context.getLevel().addFreshEntity(skeleton);
-        // The physical two-block roof is the fact this regression needs. isSkyVisible() depends
+        // The physical two-block roof is the fact this regression needs. canSeeSky() depends
         // on a lazily refreshed heightmap and can briefly report the pre-fixture value when the
         // default GameTest batch prepares many neighbouring structures in the same server tick.
         require(context, context.getLevel().getBlockState(origin.above(2)).is(Blocks.STONE),

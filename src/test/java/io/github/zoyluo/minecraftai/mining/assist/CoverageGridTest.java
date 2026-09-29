@@ -91,7 +91,7 @@ class CoverageGridTest {
 
     @Test
     void freshFractionDropsToZeroWhenTheWholeCorridorIsMarked() {
-        // NORTH: dz = -1, dx = 0; NORTH.rotateYClockwise() = EAST (dx = +1), the "side" axis.
+        // NORTH: dz = -1, dx = 0; NORTH.getClockWise() = EAST (dx = +1), the "side" axis.
         CoverageGrid grid = new CoverageGrid();
         BlockPos origin = at(0, 64, 0);
         int length = 16;

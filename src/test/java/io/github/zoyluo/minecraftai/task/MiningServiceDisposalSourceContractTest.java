@@ -39,8 +39,8 @@ class MiningServiceDisposalSourceContractTest {
 
         assertTrue(service.contains("InventoryAction.dropSlotEntity"));
         assertTrue(inventory.contains("player.drop(removed, false, true)"));
-        assertFalse(service.contains("setPickupDelay"));
-        assertFalse(service.contains("setPickupDelayInfinite"));
+        assertFalse(service.contains("setPickUpDelay"));
+        assertFalse(service.contains("setNeverPickUp"));
         assertFalse(service.contains(".setOwner("));
         assertFalse(service.contains("discard()"));
     }

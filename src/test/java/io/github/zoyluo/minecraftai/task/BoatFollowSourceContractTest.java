@@ -25,7 +25,7 @@ final class BoatFollowSourceContractTest {
                 "a boat must be placed through the ordinary held-item use path");
         assertTrue(action.contains("InteractAction.useItemOnEntity(player, boat, InteractionHand.MAIN_HAND)"),
                 "boarding must use vanilla entity interaction");
-        assertFalse(action.contains("spawnEntity("), "the task must not fabricate a boat entity");
+        assertFalse(action.contains("addFreshEntity("), "the task must not fabricate a boat entity");
         assertFalse(action.contains("startRiding("), "the task must not bypass vanilla boarding");
         assertTrue(launch.contains("new CraftTask(candidate, 1)"));
         assertTrue(launch.contains("BoatAction.placeBoatInWater"));
@@ -73,12 +73,12 @@ final class BoatFollowSourceContractTest {
         String paddle = read("mixin/AIPlayerControlledBoatPaddleMixin.java");
         String config = Files.readString(Path.of("src/main/resources/minecraftai.mixins.json"));
 
-        assertTrue(logical.contains("isLogicalSideForUpdatingMovement"));
+        assertTrue(logical.contains("isLocalInstanceAuthoritative"));
         assertTrue(logical.contains("boat.level().isClientSide()"),
                 "the client side must keep vanilla behaviour");
         assertTrue(logical.contains("getControllingPassenger() instanceof AIPlayerEntity"),
                 "only a boat controlled by our own AI player may become server-authoritative");
-        assertTrue(paddle.contains("updatePaddles"));
+        assertTrue(paddle.contains("controlBoat"));
         assertTrue(paddle.contains("getControllingPassenger() instanceof AIPlayerEntity"),
                 "server-side paddling must be limited to boats our AI player controls");
         assertTrue(config.contains("AIPlayerControlledBoatLogicalSideMixin")

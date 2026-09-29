@@ -137,7 +137,7 @@ public final class AutomaticLightingSurfaceGameTests {
         BlockPos feet = context.absolutePos(new BlockPos(20, 5, 60));
         buildGrassPlot(world, feet, 9);
         // A big canopy: two persistent leaf layers over 9x9 plus a log column beside the bot. Leaves count as
-        // opaque for isSkyVisible, so the combined-light gate of the dark-spot reflex fires under it at night.
+        // opaque for canSeeSky, so the combined-light gate of the dark-spot reflex fires under it at night.
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
                 for (int dy = 3; dy <= 4; dy++) {

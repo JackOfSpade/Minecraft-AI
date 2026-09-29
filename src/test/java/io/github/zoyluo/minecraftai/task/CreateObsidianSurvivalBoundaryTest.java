@@ -20,8 +20,8 @@ class CreateObsidianSurvivalBoundaryTest {
     void createObsidianNeverSynthesizesBlocksFluidsOrBucketInventory() throws IOException {
         String task = read("task/CreateObsidianTask.java");
 
-        assertFalse(task.contains("setBlockState("));
-        assertFalse(task.contains("breakBlock("));
+        assertFalse(task.contains("setBlock("));
+        assertFalse(task.contains("destroyBlock("));
         assertFalse(task.contains("InventoryAction.removeItems"));
         assertFalse(task.contains("InventoryAction.giveItem"));
         assertFalse(task.contains("FarmAction.placeWater"));
@@ -213,7 +213,7 @@ class CreateObsidianSurvivalBoundaryTest {
     void bucketAdapterUsesTheVanillaItemInteractionEntryPoint() throws IOException {
         String action = read("action/BucketAction.java");
 
-        assertFalse(action.contains("setBlockState("));
+        assertFalse(action.contains("setBlock("));
         assertFalse(action.contains("InventoryAction.removeItems"));
         assertFalse(action.contains("InventoryAction.giveItem"));
         assertTrue(action.contains("InteractAction.useItemInAir"));

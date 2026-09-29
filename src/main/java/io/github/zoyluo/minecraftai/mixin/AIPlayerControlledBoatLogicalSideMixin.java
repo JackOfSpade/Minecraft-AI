@@ -20,7 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <p>This makes the server the logical (authoritative) side for a boat's movement specifically
  * when its controlling passenger is our own {@link AIPlayerEntity}, so
- * {@code AbstractBoat.tick()} runs its normal physics (updateVelocity/move/collisions)
+ * {@code AbstractBoat.tick()} runs its normal physics (floatBoat/move/collisions)
  * server-side exactly as it would for a client, instead of zeroing the boat's velocity and
  * waiting forever. A boat driven by a real player, or any other vehicle (horse, minecart, pig,
  * etc.), is completely unaffected: both continue through the untouched vanilla path.</p>

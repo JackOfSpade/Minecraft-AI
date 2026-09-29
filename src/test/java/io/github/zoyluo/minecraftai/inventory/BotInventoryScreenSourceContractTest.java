@@ -39,8 +39,8 @@ final class BotInventoryScreenSourceContractTest {
         assertTrue(handler.contains("bot.setItemSlot(EquipmentSlot.OFFHAND, value)"));
         assertTrue(handler.contains("TaskManager.INSTANCE.pauseFor(bot, \"inventory_screen_open\")"));
         assertTrue(handler.contains("TaskManager.INSTANCE.resumeFromPause(bot)"));
-        assertFalse(handler.contains("GENERIC_9X5"));
-        assertFalse(handler.contains("GenericContainerScreenHandler"));
+        assertFalse(handler.contains("GENERIC_9x5"));
+        assertFalse(handler.contains("ChestMenu"));
 
         assertTrue(client.contains("MenuScreens.register(BotInventoryScreenHandler.TYPE, BotInventoryScreen::new)"));
         assertTrue(screen.contains("Hotbar (gold = main hand)"));

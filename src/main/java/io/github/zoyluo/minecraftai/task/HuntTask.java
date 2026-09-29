@@ -92,7 +92,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             Items.LIGHT_GRAY_WOOL, Items.CYAN_WOOL, Items.PURPLE_WOOL, Items.BLUE_WOOL,
             Items.BROWN_WOOL, Items.GREEN_WOOL, Items.RED_WOOL, Items.BLACK_WOOL);
     // Walk a small observed ring around the factual kill cell. A low ItemEntity at the player's
-    // feet can fail LivingEntity.canSee even though a sibling drop was physically collected there.
+    // feet can fail LivingEntity.hasLineOfSight even though a sibling drop was physically collected there.
     private static final int[][] PICKUP_SWEEP_OFFSETS = {
             {1, 0}, {0, 1}, {-1, 0}, {0, -1},
             {1, 1}, {-1, 1}, {-1, -1}, {1, -1},
@@ -1269,7 +1269,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 || pickedUpAuxiliary(bot) > targetAuxiliaryPickupBaseline;
         if (!collectionConfirmed && !pickupMovementActive && pickupGrace >= 3) {
             // The kill coordinate is factual. Return there first, but do not camp forever when a
-            // low sibling ItemEntity is hidden from canSee at the player's feet. Picking leather,
+            // low sibling ItemEntity is hidden from hasLineOfSight at the player's feet. Picking leather,
             // wool, feather or hide is observable proof that this kill's loot transaction began;
             // walk an observed, dry ring so the missed meat becomes visible/collidable. The fixed
             // delay covers prey without auxiliary drops (notably pigs) without hidden scans.

@@ -84,7 +84,7 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
  *
  * <h2>A real, documented harness limitation: no player-message capture</h2>
  * <p>{@code PoiCoordinator.sendNotice} sends through {@code BrainCoordinator.sendPanelChat} (a no-op unless a
- * real client has subscribed over the mod's own networking channel) and {@code ServerPlayer.sendMessage}
+ * real client has subscribed over the mod's own networking channel) and {@code ServerPlayer.sendSystemMessage}
  * (routed through each bot's {@code FakeClientConnection}, whose {@code send(Packet)} is an intentional no-op --
  * verified by reading {@code network/FakeClientConnection.java} and {@code network/DeliveredPackets.java} before
  * writing this file). Neither path leaves anything this harness can read back, and grepping the whole
@@ -220,7 +220,7 @@ public final class OreDigPoiGameTests {
             room.set(x, 1, 1, Blocks.OAK_FENCE);
             room.set(x, 2, -1, Blocks.OAK_PLANKS);
             // No z=0 (dead-centre) plank at x=7: round-1 real-server debugging (BotLog diagnostics: a raw
-            // ObservableWorldQuery/Entity#canSee raycast between the bot's and warden's eyes) found this exact
+            // ObservableWorldQuery/Entity#hasLineOfSight raycast between the bot's and warden's eyes) found this exact
             // cell was the actual cause of a real failure here, not a scorer/coordinator bug. The Warden's eye
             // height (~2.47) is much higher than the bot's (~1.62), so the straight sightline from the bot's
             // eye to the warden WARDEN_STANDOFF_BLOCKS away slopes upward and, at x=7 (58% of the way across),

@@ -55,7 +55,7 @@ final class CombatSmartBowSourceContractTest {
         assertTrue(equip.contains("inventory.getNonEquipmentItems().set(choice.mainSlot(), displacedOffhand)"));
         assertTrue(equip.contains("ItemStack.matches(inventory.getNonEquipmentItems().get(restoreSlot), storedOffhand)"));
         assertTrue(equip.contains("ItemStack.isSameItemSameComponents(currentOffhand, ammunition)"));
-        assertFalse(equip.contains("dropItem"),
+        assertFalse(equip.contains("drop("),
                 "ranged preparation/restoration must be an inventory swap, never a drop");
     }
 

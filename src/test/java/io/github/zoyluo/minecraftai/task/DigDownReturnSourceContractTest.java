@@ -40,7 +40,7 @@ class DigDownReturnSourceContractTest {
                 "beginReturn must stop movement and clear local seal ownership before RETURN");
         assertTrue(task.contains("failAfterExactReturn(bot, ReturnOutcome.TIMEOUT)"));
         assertTrue(task.contains("failAfterExactReturn(bot, ReturnOutcome.NO_PROGRESS)"));
-        assertFalse(task.contains("startWalkTo(side.toCenterPos())"),
+        assertFalse(task.contains("startWalkTo(side.getCenter())"),
                 "adjacent horizontal traversal must not restart a long-path controller every tick");
         assertTrue(task.contains("descentTrail.contains(side)"),
                 "horizontal traversal must not reinterpret the exact-return trail as fresh work");

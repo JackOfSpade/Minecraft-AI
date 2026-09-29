@@ -26,7 +26,7 @@ class BuildActionVisibilitySourceTest {
 
         assertTrue(body.contains("player.isWithinBlockInteractionRange(against, 0.0D)"));
         assertTrue(body.contains("exactPlacementSampleRange("));
-        assertFalse(body.contains("squaredDistanceTo(against.toCenterPos())"),
+        assertFalse(body.contains("distanceToSqr(against.getCenter())"),
                 "vanilla block-box reach must not be narrowed to support-center reach");
         assertTrue(body.contains("visibleSupportFaceHit(player, against, face, sampleRange)"));
         assertTrue(body.indexOf("visibleSupportFaceHit")
@@ -103,12 +103,12 @@ class BuildActionVisibilitySourceTest {
 
         assertFalse(body.contains("LookAction.lookAt"),
                 "the pure probe ray must never rotate the player");
-        assertFalse(body.contains(".setYaw"),
+        assertFalse(body.contains(".setYRot"),
                 "the pure probe ray must never write yaw directly either");
-        assertFalse(body.contains(".setPitch"),
+        assertFalse(body.contains(".setXRot"),
                 "the pure probe ray must never write pitch directly either");
         assertFalse(body.contains("player.pick("),
-                "the pure probe ray must build its own RaycastContext, not vanilla's look-direction raycast");
+                "the pure probe ray must build its own ClipContext, not vanilla's look-direction raycast");
         assertTrue(body.contains("new ClipContext("),
                 "the probe must cast its own eye-to-target ray");
     }

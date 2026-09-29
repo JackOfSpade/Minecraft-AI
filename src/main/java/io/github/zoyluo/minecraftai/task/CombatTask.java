@@ -391,7 +391,7 @@ public final class CombatTask extends AbstractTask {
                 return;
             }
         }
-        // getItemUseTime() is Minecraft's own count of ticks since the CURRENT draw began -- it
+        // getTicksUsingItem() is Minecraft's own count of ticks since the CURRENT draw began -- it
         // self-resets if something upstream (e.g. ActionPack#stopAll from another task) interrupted
         // and restarted the use. A hand-rolled tick counter here would desync from that and could
         // release a shot well before it's actually at full pull.
@@ -893,7 +893,7 @@ public final class CombatTask extends AbstractTask {
                 return;
             }
         }
-        // See the identical check in ranged(): getItemUseTime() tracks the CURRENT draw, so it
+        // See the identical check in ranged(): getTicksUsingItem() tracks the CURRENT draw, so it
         // can't fire early even if this draw was interrupted and restarted mid-charge.
         if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
             phase = Phase.COVER_PEEK;

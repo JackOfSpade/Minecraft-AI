@@ -75,7 +75,7 @@ class OreDigAssistSourceContractTest {
         assertEquals(1, count(source, "|| !veinQueue.isEmpty() || bonusOre != null"),
                 "the pinned boolean-or literal must stay on one line, unduplicated");
         assertEquals(4, count(source, "NO_PROGRESS_LIMIT"), "the NO_PROGRESS_LIMIT condition must not be touched");
-        assertEquals(0, count(source, ".teleport("), "no detour text may ever write a teleport call");
+        assertEquals(0, count(source, ".teleportTo("), "no detour text may ever write a teleport call");
     }
 
     // ---- host uses beginMine(, never a fresh miner.begin/fail/failMissingMiningChannelTool -------------------

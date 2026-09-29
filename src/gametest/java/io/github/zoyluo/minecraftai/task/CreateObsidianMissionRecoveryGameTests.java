@@ -1209,7 +1209,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         ObsidianSearchCursor.initial(fixture.start(), 12).beginNextLeg().encode()
                 .forEach(checkpoint::put);
         AtomicReference<CreateObsidianTask> taskRef = new AtomicReference<>();
-        // isSkyVisible() depends on a lazily refreshed heightmap and can briefly report the
+        // canSeeSky() depends on a lazily refreshed heightmap and can briefly report the
         // pre-fixture value when the default GameTest batch prepares many neighbouring
         // structures in the same server tick (see
         // searchPhysicallyLightsTheDarkTrailBehindItsReachedFace and

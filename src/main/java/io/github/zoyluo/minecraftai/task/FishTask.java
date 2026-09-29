@@ -279,8 +279,8 @@ public final class FishTask extends AbstractTask {
         if (hook.getHookedIn() != null) {
             return true;
         }
-        return booleanField(bot, hook, "caughtFish", "field_23232")
-                || intField(bot, hook, "hookCountdown", "field_7173") > 0;
+        return booleanField(bot, hook, "biting", "field_23232")
+                || intField(bot, hook, "nibble", "field_7173") > 0;
     }
 
     private static boolean booleanField(AIPlayerEntity bot, Object target, String named, String intermediary) {
@@ -301,10 +301,10 @@ public final class FishTask extends AbstractTask {
                 field.setAccessible(true);
                 return field.get(target);
             } catch (ReflectiveOperationException ignored) {
-                // Try the next runtime name. Yarn dev runs use named fields, remapped jars use intermediary names.
+                // Try the next runtime name. Dev runs use the Mojang field names, remapped jars use intermediary names.
             }
         }
-        // Both the yarn and intermediary names failed to resolve -- without this, hasBite()
+        // Both the Mojang and intermediary names failed to resolve -- without this, hasBite()
         // silently falls back to always-false with no diagnostic anywhere if a future mapping
         // change renames the field again. Log once per field so the break is visible.
         if (UNRESOLVED_FISH_BOBBER_FIELDS.add(named)) {

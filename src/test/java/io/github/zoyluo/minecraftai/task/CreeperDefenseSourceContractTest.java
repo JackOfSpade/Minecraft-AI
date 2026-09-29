@@ -28,7 +28,7 @@ class CreeperDefenseSourceContractTest {
         int charged = source.indexOf("entity.isPowered()", fuse);
         assertTrue(scan >= 0 && observable > scan && fuse > observable && charged > fuse,
                 "fuse/charged facts must be read only after exact entity observation");
-        assertFalse(source.contains("getOtherEntities"),
+        assertFalse(source.contains("getEntities("),
                 "wall admission must not discover hidden entity occupancy");
     }
 

@@ -581,7 +581,7 @@ public final class CraftTask extends AbstractTask {
      * shape intersects a live entity -- so without this check, a stale drop at this exact cell
      * would keep failing every future placement attempt here, not just the reclaim that left it.
      *
-     * <p>{@code isSpaceEmpty(bot, box)} deliberately excludes the bot itself so a candidate this
+     * <p>{@code noCollision(bot, box)} deliberately excludes the bot itself so a candidate this
      * close never reads as blocked by the placer's own presence -- but vanilla's own placement
      * check has no such self-exemption (see the same reasoning just above for why {@code
      * origin.up()} is skipped entirely). A bot whose real sub-block stance has drifted off-center

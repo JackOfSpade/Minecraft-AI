@@ -28,10 +28,10 @@ class AcquireWaterSurvivalBoundaryTest {
         assertTrue(task.contains("InventoryAction.countItem(bot, Items.WATER_BUCKET)"),
                 "inventory observation must be the postcondition");
 
-        assertFalse(task.contains("setBlockState("));
+        assertFalse(task.contains("setBlock("));
         assertFalse(task.contains("InventoryAction.giveItem("));
         assertFalse(task.contains("InventoryAction.removeItems("));
-        assertFalse(task.contains("teleport("));
+        assertFalse(task.contains("teleportTo("));
         assertTrue(task.contains("FakePlayerMotion.shiftToSupportEdge(")
                         && task.contains("FakePlayerMotion.returnToBlockCenter("),
                 "multi-level cave ascent must pay for an isolated support with a bounded"
@@ -100,7 +100,7 @@ class AcquireWaterSurvivalBoundaryTest {
         assertTrue(task.contains("ObservableWorldQuery.canObserveCell(bot, pos)")
                         && task.contains("ObservableWorldQuery.canObserveBlock(bot, pos)"),
                 "empty and solid ascent cells must each use the matching observable query");
-        assertFalse(task.contains("firstAscentObstruction(ServerWorld"),
+        assertFalse(task.contains("firstAscentObstruction(ServerLevel"),
                 "a second ungated obstruction scan must not bypass the inspected arc result");
     }
 

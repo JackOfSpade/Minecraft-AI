@@ -1039,7 +1039,7 @@ public final class DangerWatcher {
                 || world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) >= threshold) {
             return false;
         }
-        // Block light alone also fires in broad daylight under a leaf canopy: isSkyVisible is
+        // Block light alone also fires in broad daylight under a leaf canopy: canSeeSky is
         // false there (leaves are opaque to the sky-visibility test) even though enough sunlight
         // filters through to keep the spot above the mob-spawn light level. The combined light --
         // block light OR sky light reduced by the current ambient darkness, the same value vanilla

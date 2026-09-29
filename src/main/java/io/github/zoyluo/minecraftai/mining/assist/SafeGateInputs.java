@@ -21,7 +21,7 @@ package io.github.zoyluo.minecraftai.mining.assist;
  * @param hurtTime            item 3: {@code bot.hurtTime}
  * @param onFire              item 3
  * @param inLava              item 3
- * @param submerged           item 3: {@code bot.isSubmergedInWater()}
+ * @param submerged           item 3: {@code bot.isUnderWater()}
  * @param touchingWater       item 3: {@code bot.isInWater()}
  * @param foodLevel           item 3: the hunger manager's food level
  * @param hungerCritical      item 3: {@code MinecraftAiConfig.survival().hungerCriticalThreshold()}
