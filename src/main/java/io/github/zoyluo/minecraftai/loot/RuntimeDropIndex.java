@@ -65,7 +65,8 @@ public final class RuntimeDropIndex {
     static final int WARMUP_DELAY_TICKS = 100;
 
     // Only ever touched on the server thread (arm from SERVER_STARTED, tickWarmup from the tick hook).
-    private static int warmupTicksLeft;
+    // > 0: counting down; 0: delay elapsed, waiting for an idle moment; -1: no warm-up pending.
+    private static int warmupTicksLeft = -1;
 
     /**
      * Registers the server without building: the build costs 200-350 ms (build_ms in
@@ -83,16 +84,29 @@ public final class RuntimeDropIndex {
     }
 
     /**
-     * Server-thread tick hook: counts down from {@link #arm} and builds the index once when the
-     * warm-up delay elapses (no-op if a first query already built it lazily). Cheap when idle.
+     * Server-thread tick hook: counts down from {@link #arm}, then builds the index once at the first
+     * moment {@code idle} says no bot task is running (a 200-650 ms build inside a running task is a
+     * visible hitch and skews any timing-sensitive work); no-op if a first query already built it
+     * lazily. Cheap when nothing is pending. If the server is never idle the lazy first-use build
+     * remains the fallback.
      */
-    public static void tickWarmup(MinecraftServer server) {
-        if (warmupTicksLeft <= 0) {
+    public static void tickWarmup(MinecraftServer server, java.util.function.BooleanSupplier idle) {
+        if (warmupTicksLeft < 0) {
             return;
         }
-        if (--warmupTicksLeft == 0 && !ready && server == armedServer) {
-            rebuild(server);
+        if (ready || server != armedServer) {
+            warmupTicksLeft = -1;
+            return;
         }
+        if (warmupTicksLeft > 0) {
+            warmupTicksLeft--;
+            return;
+        }
+        if (!idle.getAsBoolean()) {
+            return;
+        }
+        warmupTicksLeft = -1;
+        rebuild(server);
     }
 
     private static void ensureBuilt() {
@@ -148,7 +162,7 @@ public final class RuntimeDropIndex {
         }
         ready = false;
         armedServer = null;
-        warmupTicksLeft = 0;
+        warmupTicksLeft = -1;
     }
 
     /**

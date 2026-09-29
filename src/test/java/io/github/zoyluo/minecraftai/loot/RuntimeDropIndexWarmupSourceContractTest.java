@@ -21,14 +21,16 @@ final class RuntimeDropIndexWarmupSourceContractTest {
         String index = Files.readString(MAIN.resolve("loot/RuntimeDropIndex.java"));
         String mod = Files.readString(MAIN.resolve("MinecraftAiMod.java"));
 
-        assertTrue(index.contains("public static void tickWarmup(MinecraftServer server)"));
+        assertTrue(index.contains("public static void tickWarmup(MinecraftServer server, java.util.function.BooleanSupplier idle)"));
+        assertTrue(index.contains("if (!idle.getAsBoolean()) {"), "the warm-up must wait for an idle moment (no running bot task)");
         assertTrue(index.contains("warmupTicksLeft = WARMUP_DELAY_TICKS;"), "arm() must schedule the warm-up");
-        assertTrue(index.contains("warmupTicksLeft = 0;"), "clear() must cancel a pending warm-up");
+        assertTrue(index.contains("warmupTicksLeft = -1;"), "clear() must cancel a pending warm-up");
         assertTrue(index.contains("private static void ensureBuilt()"), "the lazy first-use build stays as fallback");
-        assertTrue(mod.contains("RuntimeDropIndex.tickWarmup(server);"),
+        assertTrue(mod.contains("RuntimeDropIndex.tickWarmup(server,"),
                 "the server tick hook must drive the warm-up");
+        assertTrue(mod.contains("TaskManager.INSTANCE.activeCount() == 0"), "idle means no bot task is running");
         int hook = mod.indexOf("ServerTickEvents.END_SERVER_TICK.register(server -> {");
-        assertTrue(mod.indexOf("RuntimeDropIndex.tickWarmup(server);") > hook,
+        assertTrue(mod.indexOf("RuntimeDropIndex.tickWarmup(server,") > hook,
                 "the warm-up runs on the server thread inside the tick hook");
     }
 
