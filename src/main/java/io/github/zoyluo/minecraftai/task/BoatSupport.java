@@ -16,18 +16,29 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.UUID;
 
 /** Shared, local-only discovery helpers for the boat task family. */
 final class BoatSupport {
     static final int LOCAL_WATER_SEARCH_RADIUS = 16;
     static final double BOARD_REACH = 4.5D;
+    // Lakes and rivers sit at or below the bank the bot stands on, so look further down than up.
+    private static final int LAUNCH_SEARCH_DOWN = 6;
+    private static final int LAUNCH_SEARCH_UP = 3;
+    private static final int LAUNCH_SHORE_RADIUS = 3;
+    // Comfortably inside the 4.5-block block-interaction range used when the boat item is placed.
+    private static final double LAUNCH_REACH = 4.0D;
 
     /**
      * Keep recipes species-specific.  A boat should be craftable from the logs/planks the bot
@@ -43,6 +54,10 @@ final class BoatSupport {
             Items.MANGROVE_BOAT,
             Items.CHERRY_BOAT,
             Items.PALE_OAK_BOAT);
+
+    private static final double[][] WATER_SURFACE_SAMPLES = {
+            {0.0D, 0.0D}, {-0.3D, 0.0D}, {0.3D, 0.0D}, {0.0D, -0.3D}, {0.0D, 0.3D}
+    };
 
     private BoatSupport() {
     }
@@ -74,20 +89,78 @@ final class BoatSupport {
                 .findFirst();
     }
 
-    /** Finds a visible local water cell with a dry, supported shore cell from which it can be used. */
+    /**
+     * Finds a visible local water cell with a dry, supported shore cell from which it can be used.
+     *
+     * <p>The shore is either level with the water cell or one block above it. The second shape is
+     * the ordinary vanilla bank (a beach or grass block whose top is flush with the water's
+     * surface: the bot stands one cell above the water block that touches its floor block); the
+     * old same-level-only test matched almost no real terrain, which is why a bot standing a few
+     * blocks from a lake reported {@code no_nearby_water_shore}.</p>
+     */
     static Optional<LaunchSite> findLaunchSite(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         Standability.clearCache();
+        // Cheap block-state tests first; the (raycast) visibility test only runs for the few
+        // cells that are already real open-water launch candidates.
         return BlockPos.stream(
-                        origin.add(-LOCAL_WATER_SEARCH_RADIUS, -3, -LOCAL_WATER_SEARCH_RADIUS),
-                        origin.add(LOCAL_WATER_SEARCH_RADIUS, 3, LOCAL_WATER_SEARCH_RADIUS))
+                        origin.add(-LOCAL_WATER_SEARCH_RADIUS, -LAUNCH_SEARCH_DOWN, -LOCAL_WATER_SEARCH_RADIUS),
+                        origin.add(LOCAL_WATER_SEARCH_RADIUS, LAUNCH_SEARCH_UP, LOCAL_WATER_SEARCH_RADIUS))
                 .map(BlockPos::toImmutable)
-                .filter(water -> ObservableWorldQuery.canObserveBlock(bot, water))
                 .filter(water -> isOpenWater(world, water))
                 .map(water -> launchSite(world, water))
                 .flatMap(Optional::stream)
-                .min(Comparator.comparingDouble(site -> site.shore().getSquaredDistance(origin)));
+                .sorted(Comparator.comparingDouble(site -> site.shore().getSquaredDistance(origin)))
+                .filter(site -> canObserveWater(bot, site.water()))
+                .findFirst();
+    }
+
+    /**
+     * A dry, standable cell close to the nearest visible open water, for walking toward a lake or
+     * river the bot can see but is not yet beside (its launch-site test needs the water next to a
+     * shore, and near water is only visible from up close).  Empty when no open water is visible.
+     */
+    static Optional<BlockPos> findWaterApproach(AIPlayerEntity bot) {
+        ServerWorld world = bot.getEntityWorld();
+        BlockPos origin = bot.getBlockPos();
+        Standability.clearCache();
+        Optional<BlockPos> water = BlockPos.stream(
+                        origin.add(-LOCAL_WATER_SEARCH_RADIUS, -LAUNCH_SEARCH_DOWN, -LOCAL_WATER_SEARCH_RADIUS),
+                        origin.add(LOCAL_WATER_SEARCH_RADIUS, LAUNCH_SEARCH_UP, LOCAL_WATER_SEARCH_RADIUS))
+                .map(BlockPos::toImmutable)
+                .filter(cell -> isOpenWater(world, cell))
+                .sorted(Comparator.comparingDouble(cell -> cell.getSquaredDistance(origin)))
+                .filter(cell -> canObserveWater(bot, cell))
+                .findFirst();
+        return water.flatMap(cell -> Standability.findNearestStandable(world, cell, 6, 4, 4));
+    }
+
+    /**
+     * Line-of-sight test for a water cell.  {@link ObservableWorldQuery#canObserveBlock} aims at
+     * the block-face centres, all of which sit outside the (0.89-high) water surface or on hidden
+     * side faces, so a calm lake seen from a bank never passes it; here the rays aim at points
+     * just under the water surface, which is exactly what a player looking at the lake sees.
+     */
+    static boolean canObserveWater(AIPlayerEntity bot, BlockPos water) {
+        if (ObservableWorldQuery.canObserveBlock(bot, water)) {
+            return true;
+        }
+        ServerWorld world = bot.getEntityWorld();
+        double surface = water.getY() + world.getFluidState(water).getHeight(world, water) - 0.05D;
+        double reach = LOCAL_WATER_SEARCH_RADIUS;
+        for (double[] offset : WATER_SURFACE_SAMPLES) {
+            Vec3d target = new Vec3d(water.getX() + 0.5D + offset[0], surface, water.getZ() + 0.5D + offset[1]);
+            if (bot.getEyePos().squaredDistanceTo(target) > reach * reach) {
+                continue;
+            }
+            BlockHitResult hit = world.raycast(new RaycastContext(bot.getEyePos(), target,
+                    RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, bot));
+            if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(water)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static Optional<BlockPos> nearestBoardingShore(AIPlayerEntity bot, AbstractBoatEntity boat) {
@@ -121,10 +194,19 @@ final class BoatSupport {
     }
 
     static Optional<AbstractBoatEntity> nearbyEmptyBoat(AIPlayerEntity bot) {
+        return nearbyEmptyBoat(bot, Set.of());
+    }
+
+    /**
+     * Nearest visible boat with nobody in it. An occupied boat is never returned, which is also
+     * what keeps a follower from taking the boat its own target is riding.
+     */
+    static Optional<AbstractBoatEntity> nearbyEmptyBoat(AIPlayerEntity bot, Set<UUID> excluded) {
         return bot.getEntityWorld().getEntitiesByClass(
                         AbstractBoatEntity.class,
                         bot.getBoundingBox().expand(LOCAL_WATER_SEARCH_RADIUS),
                         boat -> boat.isAlive()
+                                && !excluded.contains(boat.getUuid())
                                 && boat.getPassengerList().isEmpty()
                                 && ObservableWorldQuery.canObserveEntity(bot, boat))
                 .stream()
@@ -197,6 +279,7 @@ final class BoatSupport {
 
     private static boolean isOpenWater(ServerWorld world, BlockPos water) {
         if (!isWater(world, water)
+                || !world.getFluidState(water.up()).isEmpty()
                 || !world.getBlockState(water.up()).getCollisionShape(world, water.up()).isEmpty()) {
             return false;
         }
@@ -209,11 +292,47 @@ final class BoatSupport {
         return connectedWater >= 1;
     }
 
+    /**
+     * A boat item is placed where the bot's ray meets the water surface, so the spot has to hold a
+     * whole boat (1.375 wide, 0.56 high, sitting on the surface): no solid block in the 3x3 cells
+     * around it at surface level, none in the 3x3 above.  The water cell right beside a flush bank
+     * fails this (the hull would overlap the bank block: vanilla answers FAIL), so the launch
+     * water is picked a cell or two out from the shore.
+     */
+    private static boolean holdsBoat(ServerWorld world, BlockPos water) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dy = 0; dy <= 1; dy++) {
+                    BlockPos pos = water.add(dx, dy, dz);
+                    if (!world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Nearest standable shore cell (level with or one above the water) that can reach {@code water}. */
     private static Optional<LaunchSite> launchSite(ServerWorld world, BlockPos water) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos shore = water.offset(direction);
-            if (Standability.isStandable(world, shore)) {
-                return Optional.of(new LaunchSite(water, shore));
+        if (!holdsBoat(world, water)) {
+            return Optional.empty();
+        }
+        for (int radius = 1; radius <= LAUNCH_SHORE_RADIUS; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+                        continue;
+                    }
+                    for (int dy = 0; dy <= 1; dy++) {
+                        BlockPos shore = water.add(dx, dy, dz);
+                        double eyeToWater = Math.sqrt(dx * dx + dz * dz
+                                + Math.pow(dy + 1.62D - 0.5D, 2));
+                        if (eyeToWater <= LAUNCH_REACH && Standability.isStandable(world, shore)) {
+                            return Optional.of(new LaunchSite(water, shore));
+                        }
+                    }
+                }
             }
         }
         return Optional.empty();

@@ -5,8 +5,12 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.math.Vec3d;
 
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Waterborne follower.  It first tries an empty nearby boat, then crafts/launches one only when
@@ -15,6 +19,20 @@ import java.util.Optional;
 public final class BoatFollowTask extends AbstractTask {
     private static final double BOAT_STOP_DISTANCE = 5.0D;
     private static final double TURN_ONLY_ANGLE = 82.0D;
+    // Watchdog for a mounted boat that is being steered but not actually going anywhere (beached,
+    // wedged against a bank or wall, hung on a rock).  steerToward()/setInputs() only issue paddle
+    // input and never confirm it moved anything, so without this the bot would sit in a dead boat
+    // forever.  Progress is judged over a whole window, not tick to tick, so a legitimate in-place
+    // U-turn (yaw changes, position barely does) or a slow start from rest is never mistaken for
+    // being stuck.
+    private static final int STUCK_WINDOW_TICKS = 40; // 2s at 20 TPS
+    private static final double STUCK_MIN_PROGRESS = 1.0D; // blocks over one window
+    private static final float STUCK_MIN_TURN = 20.0F; // degrees over one window
+    // First recovery: paddle backwards for a moment to free the hull, then steer again.  Second
+    // consecutive stall: give the boat up (dismount + report it so it is never re-boarded).
+    private static final int REVERSE_TICKS = 25;
+    private static final int MAX_REVERSE_ATTEMPTS = 1;
+    private static final int MAX_ABANDONED_BOATS = 2;
 
     private enum Phase {
         ACQUIRE_EXISTING_BOAT,
@@ -31,23 +49,38 @@ public final class BoatFollowTask extends AbstractTask {
     private FollowTask continuedFollow;
     private boolean waiting;
     private boolean observedTargetBoat;
+    // Stuck watchdog state (see STUCK_WINDOW_TICKS).
+    private Vec3d windowStartPos;
+    private float windowStartYaw;
+    private int windowTicks;
+    private int reverseTicksLeft;
+    private int reverseAttempts;
+    private int abandonedBoatCount;
+    // Boats this follower gave up on (beached / wedged); shared with the owning FollowTask so a
+    // recreated BoatFollowTask never re-boards the very boat that just failed.
+    private final Set<UUID> abandonedBoats;
 
     /**
      * Creates an explicit boat-follow request.  The bot prepares its own boat even if the player
      * has not boarded yet, then waits on the water rather than silently changing to land-follow.
      */
     public BoatFollowTask(String targetName) {
-        this(targetName, true);
+        this(targetName, true, new HashSet<>());
     }
 
-    /** Used by the ordinary follow task after it observes its target boarding a boat. */
-    static BoatFollowTask automatic(String targetName) {
-        return new BoatFollowTask(targetName, false);
+    /**
+     * Used by the ordinary follow task after it observes its target boarding a boat.
+     *
+     * @param abandonedBoats boats an earlier attempt already gave up on; new giveups are added
+     */
+    static BoatFollowTask automatic(String targetName, Set<UUID> abandonedBoats) {
+        return new BoatFollowTask(targetName, false, abandonedBoats);
     }
 
-    private BoatFollowTask(String targetName, boolean prepareBeforeTargetBoards) {
+    private BoatFollowTask(String targetName, boolean prepareBeforeTargetBoards, Set<UUID> abandonedBoats) {
         this.targetName = FollowTargetResolver.normalize(targetName);
         this.prepareBeforeTargetBoards = prepareBeforeTargetBoards;
+        this.abandonedBoats = abandonedBoats;
     }
 
     @Override
@@ -87,6 +120,9 @@ public final class BoatFollowTask extends AbstractTask {
         continuedFollow = null;
         waiting = false;
         observedTargetBoat = false;
+        resetStuckWatchdog();
+        reverseAttempts = 0;
+        abandonedBoatCount = 0;
     }
 
     @Override
@@ -155,10 +191,31 @@ public final class BoatFollowTask extends AbstractTask {
                 BoatAction.stopBoat(mounted);
                 waiting = true;
                 phase = Phase.WAITING;
+                resetStuckWatchdog();
+                return;
+            }
+            phase = Phase.FOLLOWING;
+            if (reverseTicksLeft > 0) {
+                // Recovery manoeuvre from the stuck watchdog: back the hull off whatever it is
+                // wedged on, then resume normal steering (with a fresh progress window).
+                mounted.setInputs(false, false, false, true);
+                reverseTicksLeft--;
+                waiting = false;
+                if (reverseTicksLeft == 0) {
+                    resetStuckWatchdog();
+                }
                 return;
             }
             waiting = BoatSupport.steerToward(mounted, target.getX(), target.getZ(), BOAT_STOP_DISTANCE, TURN_ONLY_ANGLE);
-            phase = Phase.FOLLOWING;
+            if (waiting) {
+                // Arrived (within BOAT_STOP_DISTANCE): not stuck, just done for now.
+                resetStuckWatchdog();
+                reverseAttempts = 0;
+                return;
+            }
+            if (isStuck(mounted)) {
+                onBoatStuck(bot, mounted);
+            }
             return;
         }
 
@@ -185,7 +242,7 @@ public final class BoatFollowTask extends AbstractTask {
             return;
         }
         if (phase == Phase.ACQUIRE_EXISTING_BOAT) {
-            boardTask = new BoardBoatTask();
+            boardTask = new BoardBoatTask(abandonedBoats);
             boardTask.start(bot);
             return;
         }
@@ -201,6 +258,71 @@ public final class BoatFollowTask extends AbstractTask {
         if (launchTask.state() == TaskState.FAILED) {
             fail("boat_unavailable:" + launchTask.failureReason());
         }
+    }
+
+    private void resetStuckWatchdog() {
+        windowStartPos = null;
+        windowTicks = 0;
+    }
+
+    /**
+     * @return true once a whole {@link #STUCK_WINDOW_TICKS} window of active steering produced
+     *     neither real displacement nor a real turn (grounded, wedged against a bank or wall, or
+     *     otherwise physically stuck -- steerToward/setInputs alone cannot detect this, they only
+     *     issue paddle input, never confirm it moved anything).
+     */
+    private boolean isStuck(AbstractBoatEntity mounted) {
+        Vec3d current = mounted.getEntityPos();
+        if (windowStartPos == null) {
+            windowStartPos = current;
+            windowStartYaw = mounted.getYaw();
+            windowTicks = 0;
+            return false;
+        }
+        windowTicks++;
+        if (windowTicks < STUCK_WINDOW_TICKS) {
+            return false;
+        }
+        double moved = Math.hypot(current.x - windowStartPos.x, current.z - windowStartPos.z);
+        float turned = Math.abs(net.minecraft.util.math.MathHelper.wrapDegrees(mounted.getYaw() - windowStartYaw));
+        boolean progressed = moved >= STUCK_MIN_PROGRESS || turned >= STUCK_MIN_TURN;
+        windowStartPos = current;
+        windowStartYaw = mounted.getYaw();
+        windowTicks = 0;
+        return !progressed;
+    }
+
+    /**
+     * Stuck-boat recovery ladder: first back the hull off (once per stall), then give the boat up:
+     * dismount, remember it so it is never re-boarded, and re-acquire another boat (own inventory
+     * boat / crafted boat launched from a proper shore).  Too many give-ups fail the task so the
+     * owner can fall back to land or swim following.
+     */
+    private void onBoatStuck(AIPlayerEntity bot, AbstractBoatEntity mounted) {
+        if (reverseAttempts < MAX_REVERSE_ATTEMPTS) {
+            reverseAttempts++;
+            reverseTicksLeft = REVERSE_TICKS;
+            BotLog.action(bot, "boat_follow_stuck_reverse",
+                    "pos", mounted.getBlockPos().toShortString(), "attempt", reverseAttempts);
+            return;
+        }
+        BotLog.action(bot, "boat_follow_stuck_recovered",
+                "pos", mounted.getBlockPos().toShortString(), "boat_id", mounted.getUuid());
+        abandonedBoats.add(mounted.getUuid());
+        BoatAction.stopBoat(mounted);
+        bot.dismountVehicle();
+        resetStuckWatchdog();
+        reverseAttempts = 0;
+        reverseTicksLeft = 0;
+        abandonedBoatCount++;
+        if (abandonedBoatCount > MAX_ABANDONED_BOATS) {
+            fail("boat_stuck_no_progress");
+            return;
+        }
+        boardTask = null;
+        launchTask = null;
+        phase = Phase.LAUNCH_BOAT;
+        waiting = false;
     }
 
     /** @return true while the boat still needs to reach a dry shore before dismounting. */

@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -14,8 +15,11 @@ import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Mirrors the followed player's travel mode without treating water as ordinary land:
@@ -42,6 +46,17 @@ public final class FollowTask extends AbstractTask {
     // only, not the offset above), so the bot still settles close to STOP_DISTANCE and never
     // closer than STOP_DISTANCE - 0 (this only ever widens the accepted far edge).
     private static final double STOP_ARRIVAL_SLACK = 0.5D;
+    // A failed acquisition (BoatFollowTask.FAILED, e.g. "no water shore nearby yet") must not be
+    // retried every tick: BoatLaunchTask.findLaunchSite alone is an O(33^3) visibility scan, and
+    // retrying it every tick while the bot has not moved an inch produces the exact same failure
+    // every time -- this is the "follow_boat_fallback_swim churn" from the live diagnosis. Back off
+    // for a few real seconds between attempts, walking toward water in the meantime instead.
+    private static final int BOAT_ACQUIRE_COOLDOWN_TICKS = 60;
+    // Throttles the walk-toward-water helper's own findLaunchSite scan the same way followLand
+    // throttles its repathing, so backing off from a failed acquisition does not just trade one
+    // every-tick scan for another.
+    private static final int BOAT_WATER_SCAN_COOLDOWN_TICKS = 30;
+    private static final int BOAT_TARGET_SHORE_RADIUS = 12;
 
     private final String targetName;
     private int nextRepathTick;
@@ -53,6 +68,12 @@ public final class FollowTask extends AbstractTask {
     // leg that simply finishes early is never mistaken for this backoff and can re-path immediately.
     private boolean repathBackoff;
     private BoatFollowTask boatFollow;
+    private int nextBoatAttemptTick;
+    private int nextBoatWaterScanTick;
+    // Reason the last acquisition failed, and boats already given up on (beached/wedged): both
+    // outlive the BoatFollowTask instance that produced them.
+    private String lastBoatFailure = "";
+    private final Set<UUID> abandonedBoats = new HashSet<>();
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
     private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
 
@@ -89,6 +110,10 @@ public final class FollowTask extends AbstractTask {
         waiting = false;
         repathBackoff = false;
         boatFollow = null;
+        nextBoatAttemptTick = 0;
+        nextBoatWaterScanTick = 0;
+        lastBoatFailure = "";
+        abandonedBoats.clear();
         shelterExitDebtRepayer.reset(bot);
         stuckRecovery.reset(bot, elapsed);
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
@@ -147,19 +172,78 @@ public final class FollowTask extends AbstractTask {
 
     private void followBoat(AIPlayerEntity bot, ServerPlayerEntity target) {
         if (boatFollow == null) {
-            boatFollow = BoatFollowTask.automatic(targetName);
+            if (elapsed < nextBoatAttemptTick) {
+                // Backing off a recent failed acquisition (see BOAT_ACQUIRE_COOLDOWN_TICKS): make
+                // real progress toward water/the target instead of silently doing nothing, but do
+                // not re-scan for a boat/launch site every tick while doing it.
+                boatAcquireBackoffStep(bot, target);
+                return;
+            }
+            boatFollow = BoatFollowTask.automatic(targetName, abandonedBoats);
             boatFollow.start(bot);
         }
         boatFollow.tick(bot);
         waiting = boatFollow.isWaiting();
         if (boatFollow.state() == TaskState.FAILED) {
             // The automatic priority is encoded inside BoatFollowTask: board a nearby empty
-            // boat first, then craft/launch one.  When both are unavailable, keep following by
-            // swimming instead of standing still or attempting a second arbitrary boat route.
+            // boat first, then craft/launch one.  When both are unavailable (or the mounted boat
+            // watchdog gave up on a stuck/beached one), back off for a few seconds and walk toward
+            // water in the meantime rather than immediately retrying the same failing scan.
+            lastBoatFailure = String.valueOf(boatFollow.failureReason());
+            BotLog.action(bot, "follow_boat_acquire_failed_backoff", "reason", lastBoatFailure);
             boatFollow = null;
-            BotLog.action(bot, "follow_boat_fallback_swim");
-            followSwimming(bot, target);
+            nextBoatAttemptTick = elapsed + BOAT_ACQUIRE_COOLDOWN_TICKS;
+            boatAcquireBackoffStep(bot, target);
         }
+    }
+
+    /**
+     * One tick of following while the next boat acquisition attempt is backed off.  A bot that
+     * cannot get any boat at all (no boat item and no planks for one) or is already in the water
+     * keeps following the boating player by swimming, exactly as before; otherwise it walks toward
+     * the water so that the next attempt starts from a shore.
+     */
+    private void boatAcquireBackoffStep(AIPlayerEntity bot, ServerPlayerEntity target) {
+        boolean noBoatMaterial = lastBoatFailure.contains("need_boat_or_five_matching_planks");
+        if (noBoatMaterial || bot.isTouchingWater() || bot.isSubmergedInWater()) {
+            followSwimming(bot, target);
+            return;
+        }
+        walkTowardBoatWater(bot, target);
+    }
+
+    /**
+     * Makes real progress toward water while a boat acquisition attempt is backed off, per
+     * REQUIRED BEHAVIOUR (A)/(E): walk to the nearest observable launch shore when one is visible,
+     * otherwise walk toward the target itself (the boating player is usually near or over water,
+     * so closing distance on them tends to bring water into view). The launch-site scan itself is
+     * throttled the same way followLand throttles its own repathing -- never done every tick.
+     */
+    private void walkTowardBoatWater(AIPlayerEntity bot, ServerPlayerEntity target) {
+        if (elapsed < nextBoatWaterScanTick) {
+            // Strictly time-gated: an arrived (idle) bot must not turn this into an every-tick
+            // launch-site scan plus a zero-length walk request.
+            waiting = false;
+            return;
+        }
+        nextBoatWaterScanTick = elapsed + BOAT_WATER_SCAN_COOLDOWN_TICKS;
+        BoatSupport.LaunchSite site = BoatSupport.findLaunchSite(bot).orElse(null);
+        // No visible launch shore yet: close in on the boating player over dry land.  Their boat is
+        // on water, so aim at the nearest standable cell to them rather than at the water itself.
+        BlockPos destination = site != null
+                ? site.shore()
+                : BoatSupport.findWaterApproach(bot).orElseGet(() -> Standability.findNearestStandable(
+                        bot.getEntityWorld(), target.getBlockPos(), BOAT_TARGET_SHORE_RADIUS, 8, 4)
+                        .orElse(null));
+        if (destination == null) {
+            waiting = true;
+            return;
+        }
+        ActionResult path = bot.getActionPack().startPathTo(destination);
+        if (path.isFailed() && site != null) {
+            bot.getActionPack().startWalkTo(destination.toCenterPos(), 1.0D);
+        }
+        waiting = false;
     }
 
     private void followSwimming(AIPlayerEntity bot, ServerPlayerEntity target) {

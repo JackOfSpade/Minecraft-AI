@@ -9,6 +9,7 @@ import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** Boards a nearby empty boat through the normal entity-interaction path. */
@@ -24,6 +25,9 @@ public final class BoardBoatTask extends AbstractTask {
     }
 
     private final UUID requestedBoatId;
+    // Boats that must never be picked by the "nearest empty boat" search (e.g. one a follower just
+    // gave up on because it was beached); ignored when a specific boat was requested.
+    private final Set<UUID> excludedBoats;
     private Phase phase = Phase.FIND_BOAT;
     private UUID boatId;
     private BlockPos shore;
@@ -32,12 +36,19 @@ public final class BoardBoatTask extends AbstractTask {
 
     /** Boards the nearest nearby empty boat. */
     public BoardBoatTask() {
-        this(null);
+        this((UUID) null);
+    }
+
+    /** Boards the nearest nearby empty boat that is not in {@code excludedBoats}. */
+    public BoardBoatTask(Set<UUID> excludedBoats) {
+        this.requestedBoatId = null;
+        this.excludedBoats = excludedBoats;
     }
 
     /** Boards a particular boat created by a preceding launch task. */
     public BoardBoatTask(UUID requestedBoatId) {
         this.requestedBoatId = requestedBoatId;
+        this.excludedBoats = Set.of();
     }
 
     @Override
@@ -90,7 +101,7 @@ public final class BoardBoatTask extends AbstractTask {
 
     private void findBoat(AIPlayerEntity bot) {
         AbstractBoatEntity boat = requestedBoatId == null
-                ? BoatSupport.nearbyEmptyBoat(bot).orElse(null)
+                ? BoatSupport.nearbyEmptyBoat(bot, excludedBoats).orElse(null)
                 : BoatSupport.boatById(bot, requestedBoatId).orElse(null);
         if (boat == null) {
             fail(requestedBoatId == null ? "no_nearby_empty_boat" : "requested_boat_unavailable");

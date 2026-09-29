@@ -22,10 +22,15 @@ public final class BoatLaunchTask extends AbstractTask {
     private static final int MAX_LAUNCH_ATTEMPTS = 3;
     private static final int MAX_BOARD_ATTEMPTS = 3;
     private static final int REPATH_TICKS = 40;
+    // Water that is visible but not yet beside a usable shore (a lake seen from a few blocks up the
+    // bank): walk toward it and look for a launch site again every few ticks.
+    private static final int WATER_APPROACH_RESCAN_TICKS = 15;
+    private static final int MAX_WATER_APPROACHES = 6;
 
     private enum Phase {
         ENSURE_BOAT,
         FIND_WATER,
+        APPROACH_WATER,
         APPROACH_SHORE,
         LAUNCH,
         BOARD
@@ -37,6 +42,9 @@ public final class BoatLaunchTask extends AbstractTask {
     private BoatSupport.LaunchSite launchSite;
     private UUID launchedBoatId;
     private int nextRepathTick;
+    private int nextRescanTick;
+    private BlockPos waterApproach;
+    private int waterApproaches;
     private int launchAttempts;
     private int boardAttempts;
     private String lastProblem = "";
@@ -70,6 +78,7 @@ public final class BoatLaunchTask extends AbstractTask {
         return switch (phase) {
             case ENSURE_BOAT -> 0.10D;
             case FIND_WATER -> 0.25D;
+            case APPROACH_WATER -> 0.35D;
             case APPROACH_SHORE -> 0.50D;
             case LAUNCH -> 0.75D;
             case BOARD -> 0.90D;
@@ -87,6 +96,9 @@ public final class BoatLaunchTask extends AbstractTask {
         launchSite = null;
         launchedBoatId = null;
         nextRepathTick = 0;
+        nextRescanTick = 0;
+        waterApproach = null;
+        waterApproaches = 0;
         launchAttempts = 0;
         boardAttempts = 0;
         lastProblem = "";
@@ -101,6 +113,7 @@ public final class BoatLaunchTask extends AbstractTask {
         switch (phase) {
             case ENSURE_BOAT -> ensureBoat(bot);
             case FIND_WATER -> findWater(bot);
+            case APPROACH_WATER -> approachWater(bot);
             case APPROACH_SHORE -> approachShore(bot);
             case LAUNCH -> launch(bot);
             case BOARD -> board(bot);
@@ -138,11 +151,54 @@ public final class BoatLaunchTask extends AbstractTask {
     private void findWater(AIPlayerEntity bot) {
         launchSite = BoatSupport.findLaunchSite(bot).orElse(null);
         if (launchSite == null) {
-            fail("no_nearby_water_shore");
+            // Water that is visible but not yet beside a shore: walk up to it first (near water is
+            // only visible from close by, so it is found again once the bot is on the bank).
+            waterApproach = waterApproaches >= MAX_WATER_APPROACHES
+                    ? null : BoatSupport.findWaterApproach(bot).orElse(null);
+            if (waterApproach == null) {
+                fail("no_nearby_water_shore");
+                return;
+            }
+            waterApproaches++;
+            BotLog.action(bot, "boat_water_approach", "cell", waterApproach.toShortString());
+            nextRepathTick = 0;
+            nextRescanTick = elapsed + WATER_APPROACH_RESCAN_TICKS;
+            phase = Phase.APPROACH_WATER;
             return;
         }
         nextRepathTick = 0;
         phase = Phase.APPROACH_SHORE;
+    }
+
+    private void approachWater(AIPlayerEntity bot) {
+        if (elapsed >= nextRescanTick) {
+            nextRescanTick = elapsed + WATER_APPROACH_RESCAN_TICKS;
+            launchSite = BoatSupport.findLaunchSite(bot).orElse(null);
+            if (launchSite != null) {
+                bot.getActionPack().stopAll();
+                nextRepathTick = 0;
+                phase = Phase.APPROACH_SHORE;
+                return;
+            }
+        }
+        boolean arrived = bot.getEntityPos().squaredDistanceTo(waterApproach.toCenterPos()) <= 2.25D;
+        if (arrived) {
+            bot.getActionPack().stopAll();
+            phase = Phase.FIND_WATER;
+            return;
+        }
+        if (elapsed < nextRepathTick) {
+            return;
+        }
+        ActionResult path = bot.getActionPack().startPathTo(waterApproach);
+        if (path.isFailed()) {
+            ActionResult walk = bot.getActionPack().startWalkTo(waterApproach.toCenterPos(), 1.0D);
+            if (walk.isFailed()) {
+                lastProblem = "water_unreachable:" + path.reason();
+                phase = Phase.FIND_WATER;
+            }
+        }
+        nextRepathTick = elapsed + REPATH_TICKS;
     }
 
     private void approachShore(AIPlayerEntity bot) {

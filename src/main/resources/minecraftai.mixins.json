@@ -10,7 +10,9 @@
     "MerchantEntityInvokerMixin",
     "ServerWorldEntityManagerAccessorMixin",
     "ServerEntityManagerCacheAccessorMixin",
-    "LoginTimeoutMixin"
+    "LoginTimeoutMixin",
+    "AIPlayerControlledBoatLogicalSideMixin",
+    "AIPlayerControlledBoatPaddleMixin"
   ],
   "client": [],
   "server": [],

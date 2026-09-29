@@ -52,7 +52,8 @@
       "io.github.zoyluo.minecraftai.task.GiveItemTaskGameTests",
       "io.github.zoyluo.minecraftai.task.HungerEatToFullGameTests",
       "io.github.zoyluo.minecraftai.task.FollowTaskGameTests",
-      "io.github.zoyluo.minecraftai.pathfinding.GoalSnapGameTests"
+      "io.github.zoyluo.minecraftai.pathfinding.GoalSnapGameTests",
+      "io.github.zoyluo.minecraftai.task.BoatFollowGameTests"
     ]
   },
   "depends": {
