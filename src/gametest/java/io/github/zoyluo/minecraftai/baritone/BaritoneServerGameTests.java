@@ -253,7 +253,7 @@ public final class BaritoneServerGameTests {
         return baritone.Baritone.getExecutor();
     }
 
-    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
+    static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
                         context.getLevel().getServer(), name, context.getLevel(), Vec3.atBottomCenterOf(feet),
                         0.0F, 0.0F, GameType.SURVIVAL)
@@ -265,7 +265,7 @@ public final class BaritoneServerGameTests {
     }
 
     /** Flat, open, solid-floored platform. */
-    private static void preparePlatform(ServerLevel world, BlockPos feet, int radius) {
+    static void preparePlatform(ServerLevel world, BlockPos feet, int radius) {
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 BlockPos cell = feet.offset(dx, 0, dz);
@@ -277,7 +277,7 @@ public final class BaritoneServerGameTests {
         }
     }
 
-    private static void require(GameTestHelper context, boolean condition, String message) {
+    static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
             context.fail(Component.nullToEmpty(message));
             throw new IllegalStateException(message);

@@ -2,7 +2,6 @@ package io.github.zoyluo.minecraftai.baritone;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
-import baritone.api.Settings;
 import baritone.api.utils.HostEnvironment;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import java.util.function.Supplier;
@@ -33,6 +32,7 @@ public final class BaritoneHost {
      */
     public static IBaritone create(Supplier<? extends AIPlayerEntity> bot) {
         configure(bot.get().getServer());
+        BaritoneSettings.applyNavLimits();
         return BaritoneAPI.getProvider().createBaritone(baritone -> new ServerPlayerContext(baritone, bot));
     }
 
@@ -65,15 +65,8 @@ public final class BaritoneHost {
         if (configured) {
             return;
         }
-        Settings settings = BaritoneAPI.getSettings();
-        // A bot's yaw is its real yaw (ActionPack and vanilla movement read it directly), so Baritone must set it for
-        // real instead of the "free look" trick that only changes the direction of the next move.
-        settings.freeLook.value = false;
-        settings.blockFreeLook.value = false;
-        // There is no chat, toast or desktop to tell.
-        settings.desktopNotifications.value = false;
-        settings.logAsToast.value = false;
-        settings.chatControl.value = false;
+        BaritoneExecutor.install();
+        BaritoneSettings.applyFixed();
         configured = true;
     }
 }

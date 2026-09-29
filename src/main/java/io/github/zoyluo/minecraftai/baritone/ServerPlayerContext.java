@@ -10,11 +10,14 @@ import baritone.api.utils.Rotation;
 import baritone.behavior.LookBehavior;
 import baritone.utils.accessor.IClientChunkProvider;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SlabBlock;
@@ -36,9 +39,17 @@ public final class ServerPlayerContext implements IPlayerContext {
      */
     private static final double MOUSE_SENSITIVITY = 0.0D;
 
+    /** Dropped items farther than this from the bot are not offered to Baritone's scans. */
+    private static final double ENTITY_RANGE = 64.0D;
+    /** Dropped items neither appear nor vanish faster than a bot can act on them: the list is rebuilt at most this often. */
+    private static final int REFRESH_TICKS = 5;
+
     private final IBaritone baritone;
     private final Supplier<? extends AIPlayerEntity> bot;
     private final ServerPlayerController controller;
+    /** Written on the server thread, read from any thread (see {@link #entities()}). */
+    private volatile List<Entity> observedEntities = List.of();
+    private int observedAtTick = -1;
 
     public ServerPlayerContext(IBaritone baritone, Supplier<? extends AIPlayerEntity> bot) {
         this.baritone = baritone;
@@ -66,9 +77,44 @@ public final class ServerPlayerContext implements IPlayerContext {
         return bot.get().level();
     }
 
+    /**
+     * The bot itself and the dropped items it can observe, which is everything Baritone asks for (the mine and farm
+     * processes look for {@code ItemEntity}s; nothing else reads this list). Observability is the mod's own rule
+     * ({@link ObservableWorldQuery#canObserveEntity}): a strict-survival bot sees what is in range and in line of sight, a
+     * bot with the hidden-scan privilege sees everything in range.
+     *
+     * <p>Called on the server thread this rebuilds the list if it is more than a few ticks old; called from a worker (the mine/farm rescans
+     * run there) it returns the list the server thread last built, because a level's entity lookup must not be walked from
+     * another thread. {@link #refreshEntities()} is what the tick pump calls so that list is never more than a moment old.</p>
+     */
     @Override
     public Iterable<Entity> entities() {
-        return ((ServerLevel) world()).getAllEntities();
+        if (minecraft().isSameThread()) {
+            refreshEntities();
+        }
+        return observedEntities;
+    }
+
+    /** Rebuilds the observable entity list unless it was built in the last few ticks. Server thread only; a call off-thread does nothing. */
+    public void refreshEntities() {
+        MinecraftServer server = minecraft();
+        if (!server.isSameThread()) {
+            return;
+        }
+        int tick = server.getTickCount();
+        if (observedAtTick >= 0 && tick - observedAtTick < REFRESH_TICKS && tick >= observedAtTick) {
+            return;
+        }
+        observedAtTick = tick;
+        AIPlayerEntity self = player();
+        List<Entity> observed = new ArrayList<>();
+        observed.add(self);
+        for (ItemEntity item : world().getEntitiesOfClass(ItemEntity.class, self.getBoundingBox().inflate(ENTITY_RANGE))) {
+            if (ObservableWorldQuery.canObserveEntity(self, item)) {
+                observed.add(item);
+            }
+        }
+        observedEntities = List.copyOf(observed);
     }
 
     @Override
