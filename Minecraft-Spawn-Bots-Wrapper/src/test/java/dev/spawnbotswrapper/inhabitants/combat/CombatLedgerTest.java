@@ -243,4 +243,27 @@ class CombatLedgerTest {
         ledger.tick(105);
         assertEquals(2, lines.size(), lines.toString());
     }
+
+    @Test
+    void aBurstFromAnEarlierServerClockIsDueAtOnceInsteadOfWaitingForTheTicksToCatchUp() {
+        // An event between SERVER_STOPPING and SERVER_STOPPED can recreate a ledger whose burst is stamped with the
+        // old server's tick (say 100000); the next server restarts at tick 0, so the burst can never age normally.
+        ledger.hit(100_000, hit(BOT, PLAYER, 5f, 15f), false);
+        ledger.tick(0);
+        assertEquals(1, lines.size(), "the stale burst must be written, not held for 100000 ticks: " + lines);
+        assertTrue(lines.get(0).contains("DuskRaven (inhabitant) hit Steve (player) 1 time for 5.0 damage"), lines.get(0));
+        assertEquals(0, ledger.pendingPairs());
+    }
+
+    @Test
+    void aStaleBurstAtTheHeadDoesNotBlockBurstsOfTheNewClockBehindIt() {
+        ledger.hit(100_000, hit(BOT, PLAYER, 5f, 15f), false);
+        ledger.hit(3, hit(ZOMBIE, BOT, 2f, 18f), false); // recorded on the new clock
+        ledger.tick(10);
+        assertEquals(1, lines.size(), lines.toString());
+        assertEquals(1, ledger.pendingPairs(), "the fresh burst still waits for its own window");
+        ledger.tick(103);
+        assertEquals(2, lines.size(), lines.toString());
+        assertEquals(0, ledger.pendingPairs());
+    }
 }

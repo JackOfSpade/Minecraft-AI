@@ -182,7 +182,9 @@ public final class CombatLedger {
         long window = Math.max(1, coalesceTicks.getAsInt());
         List<Burst> due = null;
         for (Burst b : pending.values()) {
-            if (now - b.firstTick >= window) {
+            // now < firstTick: the burst was recorded on another server clock (ticks restart at 0 on a new server),
+            // so it can never age normally; it is stale and due immediately.
+            if (now < b.firstTick || now - b.firstTick >= window) {
                 if (due == null) {
                     due = new ArrayList<>();
                 }
