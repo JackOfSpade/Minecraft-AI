@@ -104,6 +104,10 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    // Optional integration: VeinMiner ships this API jar-in-jar; we only hook it when it is loaded.
+    // modLocalRuntime puts it on dev runs (GameTests) without adding it to the published jar.
+    modCompileOnly "me.lucko:fabric-permissions-api:${project.fabric_permissions_api_version}"
+    modLocalRuntime "me.lucko:fabric-permissions-api:${project.fabric_permissions_api_version}"
 
     testImplementation platform('org.junit:junit-bom:6.1.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
