@@ -27,8 +27,6 @@ import net.minecraft.text.Text;
 
 /** Strict-survival proofs that executable inventory paths honor offhand resources. */
 public final class OffhandExecutionGameTests {
-    private static final String BATCH = "offhandExecutionStrict";
-
     @GameTest(environment = "minecraftai-gametest:offhand_execution_game_tests_raw33_offhand_diamond_pick_is_selected_and_breaks_obsidian", maxTicks = 260)
     public void raw33OffhandDiamondPickIsSelectedAndBreaksObsidian(TestContext context) {
         Fixture fixture = spawn(context, "OffhandObsidianPickGT", new BlockPos(4, 4, 4));

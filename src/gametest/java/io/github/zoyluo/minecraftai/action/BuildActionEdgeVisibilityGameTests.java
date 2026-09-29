@@ -26,8 +26,6 @@ import net.minecraft.text.Text;
 
 /** Physical strict-survival regressions for support faces exposed only at a reachable edge. */
 public final class BuildActionEdgeVisibilityGameTests {
-    private static final String BATCH = "buildActionEdgeVisibilityStrict";
-
     @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_support_center_and_face_center_may_be_beyond_reach_when_inset_is_legal", maxTicks = 40)
     public void supportCenterAndFaceCenterMayBeBeyondReachWhenInsetIsLegal(
             TestContext context) {

@@ -1495,17 +1495,6 @@ public final class MinecraftAiVerifySubcommand {
         return bot.getBlockPos();
     }
 
-    // No water within 12 blocks below the scenario's anchor column (the diagonal stepped stone dig would put the bot digging into water and drowning it if it's over a lake/aquifer —
-    // observed in a dig_down stall dump where all four sides were water).
-    private static boolean dryColumn(ServerWorld world, BlockPos top) {
-        for (int dy = 0; dy <= 12; dy++) {
-            if (!world.getFluidState(top.down(dy)).isEmpty()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     // If the spawn point is in a cave/underground, lift it to the natural surface (real players operate on the surface); if already on the surface, leave it in place.
     // Wall-enclosure/buried-alive scenarios must be surfaced first: building a wall in the y6 underground darkness would trigger DangerWatcher's "trapped in a death pit" life-saving teleport
     // (dark_trap_escape), which would directly override the real escape being tested (pillaring/digging through walls) (observed as nav_pillar_out aborted).

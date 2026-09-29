@@ -49,6 +49,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import net.minecraft.text.Text;
 import net.minecraft.entity.EquipmentSlot;
 
@@ -4491,182 +4492,76 @@ public final class MiningCheckpointMissionGameTests {
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsUndebitedDeclaredParent(
             TestContext context) {
-        String name = "CapacityUndebitedParentGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
-                    forged.put("mining.inventory_service_used", "false");
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_parent_false_bit");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "undebited capacity parent restored or reported the wrong reason: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
-                });
+        requireCapacityRestoreRejected(context, "CapacityUndebitedParentGT",
+                "gametest_capacity_parent_false_bit",
+                "undebited capacity parent restored or reported the wrong reason: ",
+                forged -> forged.put("mining.inventory_service_used", "false"));
     }
 
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsMissingDeclaredParent(
             TestContext context) {
-        String name = "CapacityMissingParentGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
-                    forged.keySet().removeIf(key -> key.startsWith("mining."));
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_parent_missing");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "missing capacity parent restored or reported the wrong reason: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
-                });
+        requireCapacityRestoreRejected(context, "CapacityMissingParentGT",
+                "gametest_capacity_parent_missing",
+                "missing capacity parent restored or reported the wrong reason: ",
+                forged -> forged.keySet().removeIf(key -> key.startsWith("mining.")));
     }
 
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsWatermarkAheadOfParent(
             TestContext context) {
-        String name = "CapacityWatermarkAheadGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
+        requireCapacityRestoreRejected(context, "CapacityWatermarkAheadGT",
+                "gametest_capacity_watermark_ahead",
+                "capacity watermark ahead of delivered restored or reported wrong: ",
+                forged -> {
                     int delivered = Integer.parseInt(
                             forged.getOrDefault("mining.delivered", "0"));
                     forged.put("capacity_parent_delivered",
                             String.valueOf(delivered + 1));
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_watermark_ahead");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "capacity watermark ahead of delivered restored or reported wrong: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
                 });
     }
 
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsWatermarkWithoutParent(
             TestContext context) {
-        String name = "CapacityWatermarkOrphanGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
-                    forged.remove("capacity_parent");
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_watermark_orphan");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "orphaned capacity watermark restored or reported wrong: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
-                });
+        requireCapacityRestoreRejected(context, "CapacityWatermarkOrphanGT",
+                "gametest_capacity_watermark_orphan",
+                "orphaned capacity watermark restored or reported wrong: ",
+                forged -> forged.remove("capacity_parent"));
     }
 
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRequiresWatermarkAtServiceBoundary(
             TestContext context) {
-        String name = "CapacityWatermarkBoundaryGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
+        requireCapacityRestoreRejected(context, "CapacityWatermarkBoundaryGT",
+                "gametest_capacity_watermark_boundary",
+                "capacity service restored with a stale delivered watermark: ",
+                forged -> {
                     forged.put("mining.delivered", "1");
                     forged.put("capacity_parent_delivered", "0");
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_watermark_boundary");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "capacity service restored with a stale delivered watermark: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
                 });
     }
 
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsStaleFaceAtServiceBoundary(
             TestContext context) {
-        String name = "CapacityFaceBoundaryGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
+        requireCapacityRestoreRejected(context, "CapacityFaceBoundaryGT",
+                "gametest_capacity_face_boundary",
+                "capacity service restored with a stale face watermark: ",
+                forged -> {
                     BlockPos face = decodePos(forged.get("mining.face"));
                     forged.put("capacity_parent_face", face.east().getX() + ","
                             + face.east().getY() + "," + face.east().getZ());
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_face_boundary");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "capacity service restored with a stale face watermark: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
                 });
     }
 
     @GameTest(maxTicks = 150)
     public void capacityServiceRestoreRejectsServiceCountAboveTarget(
             TestContext context) {
-        String name = "CapacityServiceCountAheadGT";
-        withRunningSmallRareCapacityService(context, name,
-                (bot, goal, runtime, checkpoint) -> {
-                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
-                    forged.put("capacity_parent_services_used", "8");
-                    TaskManager.INSTANCE.cancelIntentTasks(
-                            bot, "gametest_capacity_service_count_ahead");
-                    GoalExecutor.INSTANCE.unload(bot);
-                    GoalExecutor.INSTANCE.restoreRuntime(
-                            bot, withCheckpoint(runtime, forged));
-                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
-                    require(context,
-                            "mission_restore_incompatible_capacity_parent_checkpoint"
-                                    .equals(result.reason())
-                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
-                            "capacity parent restored with service count above target: "
-                                    + result.reason());
-                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-                    context.complete();
-                });
+        requireCapacityRestoreRejected(context, "CapacityServiceCountAheadGT",
+                "gametest_capacity_service_count_ahead",
+                "capacity parent restored with service count above target: ",
+                forged -> forged.put("capacity_parent_services_used", "8"));
     }
 
     @GameTest(maxTicks = 150)
@@ -6055,6 +5950,34 @@ public final class MiningCheckpointMissionGameTests {
                                 + checkpointSummary(checkpoint)));
             }
         });
+    }
+
+    /**
+     * Shared body of the capacity-service restore-rejection GameTests: forges the running capacity service's
+     * checkpoint with {@code forge}, restores it, and requires the incompatible-parent rejection (no active plan).
+     */
+    private static void requireCapacityRestoreRejected(TestContext context,
+                                                       String name,
+                                                       String cancelReason,
+                                                       String failurePrefix,
+                                                       Consumer<Map<String, String>> forge) {
+        withRunningSmallRareCapacityService(context, name,
+                (bot, goal, runtime, checkpoint) -> {
+                    Map<String, String> forged = new LinkedHashMap<>(checkpoint);
+                    forge.accept(forged);
+                    TaskManager.INSTANCE.cancelIntentTasks(bot, cancelReason);
+                    GoalExecutor.INSTANCE.unload(bot);
+                    GoalExecutor.INSTANCE.restoreRuntime(
+                            bot, withCheckpoint(runtime, forged));
+                    GoalResult result = GoalExecutor.INSTANCE.lastResult(bot).orElseThrow();
+                    require(context,
+                            "mission_restore_incompatible_capacity_parent_checkpoint"
+                                    .equals(result.reason())
+                                    && !GoalExecutor.INSTANCE.hasActivePlan(bot),
+                            failurePrefix + result.reason());
+                    AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
+                    context.complete();
+                });
     }
 
     private static void withRunningSmallRareCapacityService(
