@@ -105,9 +105,13 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
  */
 public final class OreDigPoiGameTests {
 
-    /** See {@link #wardenRiskAlwaysStops}'s javadoc: outside DangerWatcher's 10-block close-hostile-pressure
-     * envelope, inside the POI sensor's default 16-block perception radius. */
-    private static final int WARDEN_STANDOFF_BLOCKS = 12;
+    /** See {@link #wardenRiskAlwaysStops}'s javadoc: outside the combat layer's 17-block warden pressure range
+     * ({@code CombatCore.WARDEN_SONIC_BOOM_RANGE} + 2), so it needs a perception radius above the default 16. */
+    private static final int WARDEN_STANDOFF_BLOCKS = 19;
+    /** The perception radius the far-warden fixture runs with: the warden must be inside the POI sensor's radius. */
+    private static final int WARDEN_TEST_PERCEPTION_RADIUS = 22;
+    /** A warden inside {@code CombatCore}'s warden pressure range: real hostile pressure, so the bot evades. */
+    private static final int WARDEN_PRESSURE_STANDOFF_BLOCKS = 9;
 
     // ---------------------------------------------------------------------------------------------
     // Deterministic stop / notify (organic sensing)
@@ -199,18 +203,20 @@ public final class OreDigPoiGameTests {
      * checks {@code band == MANDATORY} before it ever calls {@code PoiRegistry.suppressed}, exactly as design
      * 6.4's "a DECLINED or STOPPED registry entry never suppresses a mandatory candidate" requires).
      *
-     * <p>The warden sits {@value #WARDEN_STANDOFF_BLOCKS} blocks from the bot: beyond {@code DangerWatcher}'s
-     * own {@code CombatCore.CLOSE_HOSTILE_PRESSURE_RANGE} (10 blocks) -- a Warden is neither a Creeper nor a
-     * ranged threat, so that close envelope is its only pressure range -- but well inside the POI sensor's
-     * default perception radius (16). A closer warden is real hostile pressure to the bot's own, entirely
-     * separate danger-response system regardless of AI being disabled, which would evade away and abandon the
-     * frozen mission task before a MANDATORY evaluation ever had a chance to run (discovered by this very test
-     * failing organically in real-server testing: the fixture, not {@code PoiScorer}/{@code PoiCoordinator},
-     * had put the warden too close).</p>
+     * <p>The warden sits {@value #WARDEN_STANDOFF_BLOCKS} blocks from the bot: beyond the combat layer's warden
+     * pressure range ({@code CombatCore.WARDEN_SONIC_BOOM_RANGE} 15 + 2 = 17 blocks) but inside the POI sensor's
+     * radius, which the fixture raises to {@value #WARDEN_TEST_PERCEPTION_RADIUS} for that (the default perception
+     * radius, 16, is smaller than the pressure range, so the two only overlap with a larger radius). A warden
+     * inside the pressure range is real hostile pressure to the bot's separate danger-response system regardless
+     * of AI being disabled: {@code DangerWatcher} evades and pauses the mission before a MANDATORY evaluation
+     * runs. That is the intended behaviour there and is pinned by
+     * {@link #wardenInsidePressureRangeEvadesInsteadOfPoiStop}; this test pins the other side: a warden the bot
+     * can see but is not under pressure from is still a mandatory stop.</p>
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_risk_always_stops", maxTicks = 900)
     public void wardenRiskAlwaysStops(GameTestHelper context) {
         Harness h = new Harness(context);
+        h.setPerceptionRadius(WARDEN_TEST_PERCEPTION_RADIUS);
         Room room = h.newRoom(20, -9, WARDEN_STANDOFF_BLOCKS + 1, -1, 1, 3);
         for (int x : new int[] {-8, -6, -4, -2, 2, 4, 6, 8}) {
             room.set(x, 0, 0, Blocks.RAIL);
@@ -286,6 +292,63 @@ public final class OreDigPoiGameTests {
             }
             h.require(p.tick - p.assignedAt < 800,
                     "the visible warden never produced a MANDATORY stop within the budget");
+        }));
+    }
+
+    /**
+     * The other half of {@link #wardenRiskAlwaysStops}: a live warden inside the combat layer's warden pressure
+     * range ({@value #WARDEN_PRESSURE_STANDOFF_BLOCKS} blocks, well inside the 17-block range) is hostile pressure
+     * and the intended answer is evasion, not a POI stop. {@code DangerWatcher} pauses the frozen mission under a
+     * SAFETY-origin {@code EvadeTask} for a HOSTILE threat; the mission is kept paused beneath it (evasion has
+     * priority over the notify-and-stop path, exactly as a fight or a fire would).
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_in_pressure_range_evades",
+            maxTicks = 900)
+    public void wardenInsidePressureRangeEvadesInsteadOfPoiStop(GameTestHelper context) {
+        Harness h = new Harness(context);
+        h.setPerceptionRadius(WARDEN_TEST_PERCEPTION_RADIUS);
+        Room room = h.newRoom(20, -9, WARDEN_PRESSURE_STANDOFF_BLOCKS + 1, -1, 1, 3);
+        AIPlayerEntity bot = h.spawn("PoiWardenNearGT", room, 0, 0);
+        h.enablePoi(bot, null);
+
+        BlockPos wardenFeet = room.at(WARDEN_PRESSURE_STANDOFF_BLOCKS, 0, 0);
+        Warden warden = EntityType.WARDEN.create(room.world, EntitySpawnReason.COMMAND);
+        h.require(warden != null, "could not create a warden fixture");
+        warden.setPersistenceRequired();
+        warden.setNoAi(true);
+        warden.snapTo(wardenFeet.getX() + 0.5D, wardenFeet.getY(), wardenFeet.getZ() + 0.5D, 180.0F, 0.0F);
+        room.world.addFreshEntity(warden);
+        h.onCleanup(warden::discard);
+
+        Progress p = new Progress();
+        Task[] mission = {null};
+        context.failIfEver(() -> h.guard(() -> {
+            if (h.done) {
+                return;
+            }
+            p.tick++;
+            if (p.assignedAt < 0) {
+                if (h.settle(bot, p)) {
+                    h.assertStrict(bot, "poi_warden_near");
+                    mission[0] = freeze(bot, TaskOrigin.Kind.MISSION, "gametest_poi_warden_near");
+                    p.assignedAt = p.tick;
+                }
+                return;
+            }
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof EvadeTask evade) {
+                h.require(evade.describe().startsWith("Evading HOSTILE"),
+                        "the evasion was for the wrong threat: " + evade.describe());
+                h.require(TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false),
+                        "the warden evasion was not a SAFETY-origin task");
+                h.require(TaskManager.INSTANCE.peekPaused(bot).orElse(null) == mission[0],
+                        "the mission was not kept paused beneath the warden evasion");
+                h.pass();
+                return;
+            }
+            h.require(p.tick - p.assignedAt < 400,
+                    "a warden inside the pressure range never made the bot evade; active="
+                            + (active == null ? "none" : active.name()));
         }));
     }
 
@@ -1800,6 +1863,7 @@ public final class OreDigPoiGameTests {
         final List<UUID> forced = new ArrayList<>();
         final List<Runnable> cleanups = new ArrayList<>();
         MiningAssistConfig restoreConfig;
+        MinecraftAiConfig restorePerception;
         boolean tpsOverridden;
         boolean done;
 
@@ -1832,6 +1896,32 @@ public final class OreDigPoiGameTests {
             bot.getFoodData().setFoodLevel(20);
             bot.getFoodData().setSaturation(5.0F);
             return bot;
+        }
+
+        /** Runs this test with a larger perception radius (restored by {@link #cleanup()}): the config has no
+         * setter, so this swaps the immutable singleton the way the sibling GameTests do. */
+        void setPerceptionRadius(int radius) {
+            MinecraftAiConfig config = MinecraftAiConfig.get();
+            if (restorePerception == null) {
+                restorePerception = config;
+            }
+            MinecraftAiConfig.Perception perception = config.perception();
+            installConfig(new MinecraftAiConfig(config.profile(), config.operatorCapabilities(), config.llm(),
+                    new MinecraftAiConfig.Perception(radius, perception.maxBlocks(), perception.maxEntities(),
+                            perception.maxItems(), perception.includeRawLists()),
+                    config.brain(), config.watchdog(), config.logging(), config.survival(), config.combat(),
+                    config.night(), config.mining(), config.goal(), config.nav(), config.pickup(),
+                    config.conversation(), config.storage()));
+        }
+
+        private static void installConfig(MinecraftAiConfig config) {
+            try {
+                java.lang.reflect.Field instance = MinecraftAiConfig.class.getDeclaredField("instance");
+                instance.setAccessible(true);
+                instance.set(null, config);
+            } catch (ReflectiveOperationException exception) {
+                throw new IllegalStateException("failed to install GameTest config", exception);
+            }
         }
 
         /** Installs a POI-mode config (design G.6-style, harnessOff=true) and force-enables one bot past it. */
@@ -1926,6 +2016,10 @@ public final class OreDigPoiGameTests {
             if (restoreConfig != null) {
                 MiningAssistRuntime.install(restoreConfig);
                 restoreConfig = null;
+            }
+            if (restorePerception != null) {
+                installConfig(restorePerception);
+                restorePerception = null;
             }
             if (tpsOverridden) {
                 MiningAssistRuntime.setTestTpsDegraded(null);
