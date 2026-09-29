@@ -171,6 +171,9 @@ public final class BotPlayerState {
         restore(player, failed, ACTIVE_EFFECTS, root, () ->
                 view.list(ACTIVE_EFFECTS, MobEffectInstance.CODEC)
                         .ifPresent(list -> {
+                            // Replace semantics like vanilla loading: whatever effects the bot currently carries are
+                            // dropped first, so applying twice (or onto a bot that already has effects) cannot merge.
+                            player.removeAllEffects();
                             for (MobEffectInstance effect : list) {
                                 player.addEffect(new MobEffectInstance(effect));
                             }

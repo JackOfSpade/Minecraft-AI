@@ -127,11 +127,17 @@ public final class BotPersistenceRestoreGameTests {
                 require(context, census(restored).equals(before),
                         "item census changed across restore: " + before + " -> " + census(restored));
 
-                // Restoring the same record a second time must be idempotent (nothing duplicated).
+                // Restoring the same record a second time must be idempotent (nothing duplicated), and the
+                // saved effects section replaces whatever effects the bot carries meanwhile (vanilla load semantics).
+                restored.addEffect(new MobEffectInstance(MobEffects.SPEED, 400, 0));
                 BotPersistence.applyInventory(restored, record.inventoryNbt());
                 BotPersistence.applyPlayerState(restored, record.playerStateNbt());
                 require(context, census(restored).equals(before),
                         "second restore duplicated or lost items: " + census(restored));
+                require(context, restored.getEffect(MobEffects.SPEED) == null
+                                && restored.getActiveEffects().size() == 1
+                                && restored.getEffect(MobEffects.RESISTANCE) != null,
+                        "effects were merged instead of replaced: " + restored.getActiveEffects());
             } finally {
                 AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
@@ -250,11 +256,19 @@ public final class BotPersistenceRestoreGameTests {
         return decoded.snapshot().bots().getFirst().bot();
     }
 
-    /** Item -> total count over main + equipment slots and the ender chest. */
+    /**
+     * Item -> total count over the 36 main slots, every equipment slot (armor + offhand, which live in the
+     * player's EntityEquipment rather than the main list since 1.21.5) and the ender chest. The equipment slots
+     * are read explicitly through getItemBySlot instead of relying on Inventory.getContainerSize() also
+     * exposing them, so "nothing duplicated or lost" provably covers armor and the offhand.
+     */
     private static Map<String, Integer> census(AIPlayerEntity bot) {
         Map<String, Integer> totals = new HashMap<>();
-        for (int slot = 0; slot < bot.getInventory().getContainerSize(); slot++) {
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
             add(totals, "inv:", bot.getInventory().getItem(slot));
+        }
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            add(totals, "equip:", bot.getItemBySlot(slot));
         }
         for (int slot = 0; slot < bot.getEnderChestInventory().getContainerSize(); slot++) {
             add(totals, "ender:", bot.getEnderChestInventory().getItem(slot));
