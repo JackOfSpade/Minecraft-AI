@@ -40,6 +40,7 @@ public class MinecraftAiMod implements ModInitializer {
         BotInventoryScreenHandler.initialize();
         // Optional: answers VeinMiner's "veinminer.use" permission (no for bots); a no-op without fabric-permissions-api.
         io.github.zoyluo.minecraftai.integration.PermissionsIntegration.registerIfPresent();
+        warnIfVeinMinerCanBeUsedByBots();
         MinecraftAiConfig config = MinecraftAiConfig.load();
         BotLogWriter.INSTANCE.start(config);
         BotLog.lifecycle("mod_loaded", "version", getModVersion());
@@ -101,6 +102,23 @@ public class MinecraftAiMod implements ModInitializer {
         });
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 MinecraftAiCommand.register(dispatcher, registryAccess));
+    }
+
+    /** Logged once at startup: VeinMiner without permissionRestricted lets bots vein-mine. Never throws. */
+    private static void warnIfVeinMinerCanBeUsedByBots() {
+        try {
+            FabricLoader loader = FabricLoader.getInstance();
+            boolean loaded = loader.isModLoaded(io.github.zoyluo.minecraftai.integration.VeinMinerConfigCheck.MOD_ID);
+            String settings = loaded
+                    ? io.github.zoyluo.minecraftai.integration.VeinMinerConfigCheck.readSettings(loader.getConfigDir())
+                    : null;
+            String warning = io.github.zoyluo.minecraftai.integration.VeinMinerConfigCheck.warning(loaded, settings);
+            if (warning != null) {
+                LOGGER.warn("[Minecraft-AI] {}", warning);
+            }
+        } catch (RuntimeException ignored) {
+            // A diagnostic must never stop the mod from loading.
+        }
     }
 
     private static String getModVersion() {

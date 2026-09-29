@@ -211,7 +211,7 @@ group "#c:ores" + "#minecraft:pickaxes", max chain 100, tool durability used per
 block, no sneak needed). Requires Fabric API and Fabric Language Kotlin (both already
 installed); bundles fabric-permissions-api. Config lives in config/Veinminer/
 (settings.json, blocks.json, groups.json; /veinminer settings|groups|toggle in game).
-Two profile-specific notes:
+Three profile-specific notes:
 - Its settings.json "autoUpdate" flag is never read: every launch it downloads the
   newest Modrinth file into config/Veinminer/update/ (never loaded, but pointless).
   This profile pre-creates config/Veinminer/update as a read-only FILE so those
@@ -225,6 +225,12 @@ Two profile-specific notes:
   Minecraft-AI build that contains the hook (deploy step). Without that build,
   permissionRestricted=true means nobody vein-mines (fabric-permissions-api defaults to
   "no"), and with permissionRestricted=false bots vein-mine too, so keep the two in step.
+- The Minecraft-AI mod answers TRUE ("yes") for HUMAN players on the "veinminer.use" node,
+  and that answer OVERRIDES other permission providers (e.g. a LuckPerms deny) for that one node
+  only (every other node is left alone). If a human must be denied vein-mining, do it with
+  VeinMiner's own settings/blocks, not with a permission plugin. When the veinminer mod is
+  loaded and config/Veinminer/settings.json lacks "permissionRestricted": true, the mod logs
+  one startup WARN (bots would vein-mine).
 
 (PvP BOT itself is listed under World Generation / Exploration above, since
 that is what it primarily adds; it is a gameplay/combat mod too.)
