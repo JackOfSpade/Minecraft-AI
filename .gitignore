@@ -87,3 +87,7 @@ reports/baselines/.pin.lock/
 reports/baselines/.pin.lock.stale.*
 reports/baselines/.staging.*
 reports/baselines/.index.*
+
+# GameTest harness outputs (C:\mcw\_tools\gt_filter.sh)
+gt_results*.txt
+gt_logs/
