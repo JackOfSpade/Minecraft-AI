@@ -24,14 +24,27 @@ public final class IntentController {
                                                           ControlOrigin origin,
                                                           String reason) {
         requireServerThread(bot);
-        return cancel(bot, origin, reason, IntentControlTransaction.Scope.CURRENT);
+        return cancel(bot, origin, reason, IntentControlTransaction.Scope.CURRENT, false);
     }
 
     public IntentControlTransaction.Outcome cancelAll(AIPlayerEntity bot,
                                                       ControlOrigin origin,
                                                       String reason) {
         requireServerThread(bot);
-        return cancel(bot, origin, reason, IntentControlTransaction.Scope.ALL);
+        return cancel(bot, origin, reason, IntentControlTransaction.Scope.ALL, false);
+    }
+
+    /**
+     * {@link #cancelAll} for a new player chat request: everything is replaced except a running
+     * SAFETY-origin task (a fight against a real threat), which keeps going until the threat is
+     * handled instead of being cancelled mid-fight. An explicit stop/hold (control phrases, tools,
+     * commands) still goes through {@link #cancelAll}/{@link #pause} and preempts it.
+     */
+    public IntentControlTransaction.Outcome cancelAllKeepingActiveSafety(AIPlayerEntity bot,
+                                                                         ControlOrigin origin,
+                                                                         String reason) {
+        requireServerThread(bot);
+        return cancel(bot, origin, reason, IntentControlTransaction.Scope.ALL, true);
     }
 
     public ReplaceResult replace(AIPlayerEntity bot,
@@ -41,7 +54,7 @@ public final class IntentController {
         requireServerThread(bot);
         Objects.requireNonNull(startReplacement, "startReplacement");
         IntentControlTransaction.Outcome cancellation = cancel(
-                bot, origin, reason, IntentControlTransaction.Scope.CURRENT);
+                bot, origin, reason, IntentControlTransaction.Scope.CURRENT, false);
         boolean replacementStarted;
         try {
             replacementStarted = Boolean.TRUE.equals(startReplacement.get());
@@ -50,7 +63,7 @@ public final class IntentController {
             // partial work, preserve the explicit queue, and rethrow so the caller reports failure.
             try {
                 cancel(bot, ControlOrigin.SYSTEM, reason + ":replacement_start_failed",
-                        IntentControlTransaction.Scope.CURRENT);
+                        IntentControlTransaction.Scope.CURRENT, false);
             } catch (RuntimeException cleanupFailure) {
                 replacementFailure.addSuppressed(cleanupFailure);
             }
@@ -157,10 +170,12 @@ public final class IntentController {
     private IntentControlTransaction.Outcome cancel(AIPlayerEntity bot,
                                                     ControlOrigin origin,
                                                     String reason,
-                                                    IntentControlTransaction.Scope scope) {
+                                                    IntentControlTransaction.Scope scope,
+                                                    boolean keepActiveSafety) {
         Objects.requireNonNull(origin, "origin");
         String normalizedReason = reason == null || reason.isBlank() ? origin.name().toLowerCase() : reason;
-        IntentControlTransaction.Port port = new MinecraftPort(bot, origin, normalizedReason);
+        IntentControlTransaction.Port port = new MinecraftPort(bot, origin, normalizedReason,
+                keepActiveSafety && TaskManager.INSTANCE.isActiveSafety(bot));
         return IntentControlTransaction.cancel(port, scope, origin.invalidatesDecision());
     }
 
@@ -179,8 +194,10 @@ public final class IntentController {
         private final AIPlayerEntity bot;
         private final ControlOrigin origin;
         private final String reason;
+        private final boolean keepSafety;
 
-        private MinecraftPort(AIPlayerEntity bot, ControlOrigin origin, String reason) {
+        private MinecraftPort(AIPlayerEntity bot, ControlOrigin origin, String reason, boolean keepSafety) {
+            this.keepSafety = keepSafety;
             this.bot = bot;
             this.origin = origin;
             this.reason = reason;
@@ -218,11 +235,16 @@ public final class IntentController {
 
         @Override
         public boolean cancelActiveAndPausedWork() {
-            return TaskManager.INSTANCE.cancelIntentTasks(bot, "cancelled:" + reason);
+            return keepSafety
+                    ? TaskManager.INSTANCE.cancelIntentTasksKeepingActiveSafety(bot, "cancelled:" + reason)
+                    : TaskManager.INSTANCE.cancelIntentTasks(bot, "cancelled:" + reason);
         }
 
         @Override
         public boolean stopActions() {
+            if (keepSafety) {
+                return false; // the kept SAFETY task owns the live actions (e.g. a fight in progress)
+            }
             boolean changed = bot.getActionPack().hasActiveActions();
             changed |= StuckWatcher.INSTANCE.reset(bot);
             bot.getActionPack().stopAll();

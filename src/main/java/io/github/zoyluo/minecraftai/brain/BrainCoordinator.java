@@ -146,8 +146,10 @@ public final class BrainCoordinator {
         boolean supersededDecision = conversation.decision.busy();
         // Companion-mode semantics: the newest player request is authoritative.  Cancel all
         // current and queued work before making a new plan, so a bot never quietly finishes an
-        // older request after the player has changed their mind.
-        IntentController.INSTANCE.cancelAll(
+        // older request after the player has changed their mind. The one exception is a running SAFETY task
+        // (a fight against a real threat): it is not cancelled mid-fight, the new request waits until the
+        // threat is handled (see ToolRegistry.assignLlm); an explicit stop/hold still preempts it.
+        IntentController.INSTANCE.cancelAllKeepingActiveSafety(
                 bot, IntentController.ControlOrigin.SYSTEM, "new_player_request");
         awaitingTask.remove(bot.getUUID());
         nextGoalWakeTick.remove(bot.getUUID());

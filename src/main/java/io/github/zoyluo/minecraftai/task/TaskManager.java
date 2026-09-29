@@ -158,10 +158,34 @@ public final class TaskManager {
 
     /** User-intent cancellation: clear active and paused work without creating a failure/replan. */
     public boolean cancelIntentTasks(AIPlayerEntity bot, String reason) {
+        return cancelIntentTasks(bot, reason, false);
+    }
+
+    /**
+     * Like {@link #cancelIntentTasks} but a currently active SAFETY-origin task (a fight, an
+     * evade, a shelter) keeps running: a new chat request must not cancel a combat mid-fight. All
+     * paused work beneath it is still cancelled (the request replaces it). Returns whether anything
+     * was cancelled.
+     */
+    public boolean cancelIntentTasksKeepingActiveSafety(AIPlayerEntity bot, String reason) {
+        return cancelIntentTasks(bot, reason, true);
+    }
+
+    /** True when the active task exists and was assigned with SAFETY authority. */
+    public boolean isActiveSafety(AIPlayerEntity bot) {
+        UUID uuid = bot.getUUID();
+        TaskOrigin origin = activeOrigins.get(uuid);
+        return active.containsKey(uuid) && origin != null && origin.safety();
+    }
+
+    private boolean cancelIntentTasks(AIPlayerEntity bot, String reason, boolean keepActiveSafety) {
         UUID uuid = bot.getUUID();
         bumpUserPauseEpoch(uuid);
-        Task current = active.remove(uuid);
-        activeOrigins.remove(uuid);
+        boolean keepActive = keepActiveSafety && isActiveSafety(bot);
+        Task current = keepActive ? null : active.remove(uuid);
+        if (!keepActive) {
+            activeOrigins.remove(uuid);
+        }
         ExecutionStack<Task> stack = executionStacks.remove(uuid);
         java.util.List<ExecutionStack.Frame<Task>> pausedFrames = stack == null ? java.util.List.of() : stack.drain();
         userPaused.remove(uuid);

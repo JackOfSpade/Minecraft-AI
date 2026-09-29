@@ -1141,6 +1141,10 @@ public final class ToolRegistry {
     }
 
     private static void assignLlm(AIPlayerEntity bot, Task task) {
+        if (TaskManager.INSTANCE.isActiveSafety(bot)) {
+            throw new SafetyTaskActiveException(
+                    TaskManager.INSTANCE.getActive(bot).map(Task::name).orElse("safety"));
+        }
         TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.LLM_TOOL, "llm_tool"));
     }
 
