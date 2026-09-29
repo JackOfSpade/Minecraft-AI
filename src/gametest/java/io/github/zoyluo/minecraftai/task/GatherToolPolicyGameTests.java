@@ -251,12 +251,13 @@ public final class GatherToolPolicyGameTests {
         AIPlayerEntity bot = fixture.bot();
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 6);
         runLogBootstrap(context, fixture, task, (hand, axe) -> {
-            // The bootstrap minimum is 3 logs, but a legitimate pickup miss (a log that popped away
-            // and had to be chased) can add a hand break, so the exact count is not an invariant;
-            // "never by hand once an axe is carried" is (enforced every tick in runLogBootstrap).
-            require(context, hand >= 1 && hand <= HAND_BREAK_SLACK,
-                    "bootstrap should break some logs (at least 1, sanity bound " + HAND_BREAK_SLACK
-                            + ") by hand, broke " + hand);
+            // The real bound is exact: with an empty inventory the axe needs 4 planks (crafting table) +
+            // 2 planks (sticks) + 3 planks (axe head) = 9 planks = 3 logs (4 planks each), and the bare-hand
+            // bootstrap breaks exactly those. A 4th hand break would be a lost drop (a pickup miss) that had
+            // to be replaced, which the bootstrap pickup (incl. the walk to the break cell) must prevent.
+            // "Never by hand once an axe is carried" is enforced every tick in runLogBootstrap.
+            require(context, hand == BOOTSTRAP_HAND_BREAKS,
+                    "bootstrap should break exactly " + BOOTSTRAP_HAND_BREAKS + " logs by hand, broke " + hand);
             require(context, axe >= 6,
                     "rest of the request should be gathered with the crafted axe, axe breaks=" + axe);
             require(context, InventoryAction.countItem(bot, Items.WOODEN_AXE) >= 1,
@@ -328,8 +329,11 @@ public final class GatherToolPolicyGameTests {
         }, false);
     }
 
-    /** Sanity ceiling for hand breaks in a gather bootstrap (minimum is 3; slack for pickup misses). */
-    private static final int HAND_BREAK_SLACK = 6;
+    /**
+     * Logs broken by bare hand when bootstrapping a wooden axe from an empty inventory: crafting table
+     * (4 planks) + sticks (2 planks) + axe head (3 planks) = 9 planks, 4 planks per log.
+     */
+    private static final int BOOTSTRAP_HAND_BREAKS = Math.ceilDiv(4 + 2 + 3, 4);
 
     /**
      * Shared driver for the log-bootstrap scenarios: plants a 2x3x2 block of oak logs three blocks
@@ -402,8 +406,8 @@ public final class GatherToolPolicyGameTests {
             if (afterTick != null) {
                 afterTick.accept(new int[] {handBreaks[0], axeBreaks[0]});
             }
-            require(context, handBreaks[0] <= HAND_BREAK_SLACK,
-                    "implausibly many logs broken by hand: " + handBreaks[0]);
+            require(context, handBreaks[0] <= BOOTSTRAP_HAND_BREAKS,
+                    "more logs broken by hand than the axe bootstrap needs: " + handBreaks[0]);
             require(context, handBreaks[0] + axeBreaks[0] <= maxTotalBroken,
                     "broke more logs than requested: hand=" + handBreaks[0] + " axe=" + axeBreaks[0]
                             + " max=" + maxTotalBroken);

@@ -304,6 +304,8 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupOrigin = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
+        bootstrapPickupOrigin = null;
+        bootstrapOriginApproachLogged = false;
         breaksCount = 0;
         pickupsCount = 0;
         pickupMissesTotal = 0;
