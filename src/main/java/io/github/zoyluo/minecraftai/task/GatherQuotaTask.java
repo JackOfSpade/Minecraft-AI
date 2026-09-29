@@ -89,6 +89,7 @@ public final class GatherQuotaTask extends AbstractTask {
         ENSURE_TOOL,
         HARVEST,
         PICKUP,
+        BOOTSTRAP_PICKUP,
         DEPOSIT,
         ROAM,
         EXPLORE,
@@ -135,6 +136,10 @@ public final class GatherQuotaTask extends AbstractTask {
     // earmarked for that craft and do not count toward the player's quota.
     private boolean bootstrapActive;
     private int bootstrapExcluded;
+    // break_blocks only: the bootstrap logs are broken by hand and must still be collected to craft the axe.
+    private int bootstrapPickupTicks;
+    private static final int BOOTSTRAP_PICKUP_TICKS = 100;
+    private int bootstrapPickupBaseline;
     private int searchRadius = SEARCH_RADIUS;
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
@@ -398,6 +403,7 @@ public final class GatherQuotaTask extends AbstractTask {
             case ENSURE_TOOL -> ensureTool(bot);
             case HARVEST -> harvest(bot);
             case PICKUP -> pickup(bot);
+            case BOOTSTRAP_PICKUP -> bootstrapPickup(bot);
             case DEPOSIT -> deposit(bot);
             case ROAM -> roamMove(bot);
             case EXPLORE -> exploreMove(bot);
@@ -1228,7 +1234,46 @@ public final class GatherQuotaTask extends AbstractTask {
                 "pos", cleared == null ? "unknown" : cleared.toShortString());
         clearPickupLedger();
         resetSurveyWatchdog();
-        phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
+        if (countSoFar >= targetCount) {
+            phase = Phase.DONE;
+        } else if (bootstrapActive) {
+            // Log bootstrap by hand: exact-break mode has no PICKUP phase (drops normally do not
+            // matter), but the axe is crafted from these very logs -- without collecting them
+            // GatherToolPolicy.bootstrapLogsByHand would never reach zero and every remaining log
+            // would be broken with the bare hand.
+            bootstrapPickupBaseline = countAccepted(bot);
+            bootstrapPickupTicks = BOOTSTRAP_PICKUP_TICKS;
+            bot.getActionPack().stopAll();
+            phase = Phase.BOOTSTRAP_PICKUP;
+        } else {
+            phase = Phase.SURVEY;
+        }
+    }
+
+    /**
+     * Exact-break log bootstrap only: collects the drop of the log just broken by hand (never
+     * touches {@code countSoFar}, which counts physical breaks here), then returns to SURVEY, where
+     * the next {@link #startHarvest} either breaks another bootstrap log or detours to craft the axe.
+     * A drop that cannot be collected within the window is simply given up on (the next break
+     * tries again); the exact-break quota is bounded regardless.
+     */
+    private void bootstrapPickup(AIPlayerEntity bot) {
+        HarvestCore.forcePickupNearbyAnyOf(bot, acceptItems);
+        boolean collected = countAccepted(bot) > bootstrapPickupBaseline;
+        if (!collected && --bootstrapPickupTicks > 0) {
+            var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
+            if (visibleDrop.isPresent()
+                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                HarvestCore.approachDropPhysically(bot, visibleDrop.get());
+            }
+            return;
+        }
+        if (!collected) {
+            BotLog.action(bot, name() + "_bootstrap_pickup_miss", "block", exactBreakTargetLabel);
+        }
+        bot.getActionPack().stopAll();
+        resetSurveyWatchdog();
+        phase = Phase.SURVEY;
     }
 
     private int defaultSearchRadius() {
@@ -1495,6 +1540,12 @@ public final class GatherQuotaTask extends AbstractTask {
                     "pos", targetPos.toShortString());
             phase = Phase.ENSURE_TOOL;
             return;
+        }
+        if (bootstrapActive) {
+            // An axe (or equivalent) arrived by another route mid-bootstrap (picked up, given,
+            // crafted elsewhere): the earmarked hand-broken logs are no longer reserved for a
+            // craft, so stop discounting them or absolute-quota progress is under-reported.
+            bootstrapActive = false;
         }
         doStartHarvest(bot);
     }

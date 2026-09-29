@@ -204,6 +204,76 @@ public final class GatherToolPolicyGameTests {
         // the request with it. Never roam/explore, never stop with missing_tool:axe.
         Fixture fixture = fixture(context, "GatherToolBootstrapGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 6);
+        runLogBootstrap(context, fixture, task, (hand, axe) -> {
+            // The bootstrap minimum is 3 logs, but a legitimate pickup miss (a log that popped away
+            // and had to be chased) can add a hand break, so the exact count is not an invariant;
+            // "never by hand once an axe is carried" is (enforced every tick in runLogBootstrap).
+            require(context, hand >= 1 && hand <= HAND_BREAK_SLACK,
+                    "bootstrap should break some logs (at least 1, sanity bound " + HAND_BREAK_SLACK
+                            + ") by hand, broke " + hand);
+            require(context, axe >= 6,
+                    "rest of the request should be gathered with the crafted axe, axe breaks=" + axe);
+            require(context, InventoryAction.countItem(bot, Items.WOODEN_AXE) >= 1,
+                    "did not keep the crafted wooden axe");
+            require(context, InventoryAction.countItem(bot, Items.OAK_LOG) >= 6,
+                    "bootstrap logs must not count toward the quota; expected >= 6 logs, had "
+                            + InventoryAction.countItem(bot, Items.OAK_LOG));
+        }, Integer.MAX_VALUE);
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_break_blocks_on_logs_bootstraps_axe_from_empty_inventory", maxTicks = 2000)
+    public void breakBlocksOnLogsBootstrapsAxeFromEmptyInventory(TestContext context) {
+        // break_blocks counts PHYSICAL blocks broken, so the bootstrap logs broken by hand are part
+        // of the requested 5 (they are not excluded like a gather quota's): at most 3 by hand, the
+        // remainder with the crafted axe, and never more than 5 logs broken in total.
+        Fixture fixture = fixture(context, "BreakBootstrapGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        GatherQuotaTask task = GatherQuotaTask.breakBlocks(Blocks.OAK_LOG, 5);
+        runLogBootstrap(context, fixture, task, (hand, axe) -> {
+            require(context, hand >= 1 && hand <= 3,
+                    "break_blocks bootstrap should break between 1 and 3 logs by hand, broke " + hand);
+            require(context, hand + axe == 5,
+                    "break_blocks must break exactly 5 logs in total: hand=" + hand + " axe=" + axe);
+            require(context, axe >= 2, "the rest of the 5 should be broken with the axe, axe breaks=" + axe);
+            require(context, InventoryAction.countItem(bot, Items.WOODEN_AXE) >= 1,
+                    "did not keep the crafted wooden axe");
+        }, 5);
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_break_blocks_with_carried_crafting_table_needs_fewer_hand_breaks", maxTicks = 2000)
+    public void breakBlocksWithCarriedCraftingTableNeedsFewerHandBreaks(TestContext context) {
+        // A carried crafting table removes the table's 4 planks from the bootstrap, so only the axe
+        // itself (3 planks + 2 sticks = 2 logs) has to come from bare-hand breaks: at most 2.
+        Fixture fixture = fixture(context, "BreakBootstrapTableGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
+        GatherQuotaTask task = GatherQuotaTask.breakBlocks(Blocks.OAK_LOG, 5);
+        runLogBootstrap(context, fixture, task, (hand, axe) -> {
+            require(context, hand >= 1 && hand <= 2,
+                    "with a carried crafting table at most 2 logs should be broken by hand, broke " + hand);
+            require(context, hand + axe == 5,
+                    "break_blocks must break exactly 5 logs in total: hand=" + hand + " axe=" + axe);
+            require(context, InventoryAction.countItem(bot, Items.WOODEN_AXE) >= 1,
+                    "did not craft and keep a wooden axe");
+        }, 5);
+    }
+
+    /** Sanity ceiling for hand breaks in a gather bootstrap (minimum is 3; slack for pickup misses). */
+    private static final int HAND_BREAK_SLACK = 6;
+
+    /**
+     * Shared driver for the log-bootstrap scenarios: plants a 2x3x2 block of oak logs three blocks
+     * east of the start, starts the task, and every tick enforces the invariant that matters --
+     * once a wooden axe is in the inventory no log is broken by hand (the equipped tool must be the
+     * axe) -- plus a sane ceiling on hand breaks, a ceiling on total logs broken, and "never roam".
+     * On completion it hands (handBreaks, axeBreaks) to {@code onComplete}, which adds the
+     * scenario-specific expectations.
+     */
+    private static void runLogBootstrap(TestContext context, Fixture fixture, GatherQuotaTask task,
+                                        java.util.function.BiConsumer<Integer, Integer> onComplete,
+                                        int maxTotalBroken) {
+        AIPlayerEntity bot = fixture.bot();
         java.util.List<BlockPos> treeCells = new java.util.ArrayList<>();
         for (int dx = 3; dx <= 4; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
@@ -214,14 +284,18 @@ public final class GatherToolPolicyGameTests {
                 }
             }
         }
-        require(context, bot.getInventory().isEmpty(), "fixture must start with an empty inventory");
+        boolean carriesTable = InventoryAction.countItem(bot, Items.CRAFTING_TABLE) > 0;
+        require(context, carriesTable || bot.getInventory().isEmpty(),
+                "fixture must start with an empty inventory (or only the crafting table)");
 
-        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 6);
         task.start(bot);
         AtomicBoolean sawEnsureTool = new AtomicBoolean();
         int[] previousRemaining = {treeCells.size()};
         int[] handBreaks = {0};
         int[] axeBreaks = {0};
+        // Whether a wooden axe was already carried when the previous tick ended: a log broken this
+        // tick with an axe carried since before it began must have been broken with that axe.
+        boolean[] axeCarriedBefore = {false};
 
         context.runAtEveryTick(() -> {
             tickOrFail(context, task, bot);
@@ -240,26 +314,26 @@ public final class GatherToolPolicyGameTests {
                     axeBreaks[0] += broken;
                 } else {
                     handBreaks[0] += broken;
+                    require(context, !axeCarriedBefore[0],
+                            "a log was broken by hand although a wooden axe was already in the inventory (main hand "
+                                    + bot.getMainHandStack() + ", hand breaks=" + handBreaks[0] + ")");
                 }
             }
             previousRemaining[0] = remaining;
-            require(context, handBreaks[0] <= 3,
-                    "broke more than the bootstrap minimum (3 logs) by hand: " + handBreaks[0]);
+            axeCarriedBefore[0] = InventoryAction.countItem(bot, Items.WOODEN_AXE) > 0;
+            require(context, handBreaks[0] <= HAND_BREAK_SLACK,
+                    "implausibly many logs broken by hand: " + handBreaks[0]);
+            require(context, handBreaks[0] + axeBreaks[0] <= maxTotalBroken,
+                    "broke more logs than requested: hand=" + handBreaks[0] + " axe=" + axeBreaks[0]
+                            + " max=" + maxTotalBroken);
             require(context, !task.describe().contains("phase=ROAM") && !task.describe().contains("phase=EXPLORE"),
                     "a tree right beside the bot should never require roaming: " + task.describe());
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, sawEnsureTool.get(), "task never detoured through the axe-crafting phase");
-            require(context, handBreaks[0] >= 1 && handBreaks[0] <= 3,
-                    "bootstrap should break between 1 and 3 logs by hand, broke " + handBreaks[0]);
-            require(context, axeBreaks[0] >= 6,
-                    "rest of the request should be gathered with the crafted axe, axe breaks=" + axeBreaks[0]);
-            require(context, InventoryAction.countItem(bot, Items.WOODEN_AXE) >= 1,
-                    "did not keep the crafted wooden axe");
-            require(context, InventoryAction.countItem(bot, Items.OAK_LOG) >= 6,
-                    "bootstrap logs must not count toward the quota; expected >= 6 logs, had "
-                            + InventoryAction.countItem(bot, Items.OAK_LOG));
+            require(context, sawEnsureTool.get() || carriesTable,
+                    "task never detoured through the axe-crafting phase");
+            onComplete.accept(handBreaks[0], axeBreaks[0]);
             finish(context, fixture);
         });
     }
