@@ -527,7 +527,11 @@ public final class ChatMemory {
                 older.add(entry);
             }
         }
-        State state = STATES.computeIfAbsent(botId, ignored -> new State());
+        boolean[] created = {false};
+        State state = STATES.computeIfAbsent(botId, ignored -> {
+            created[0] = true;
+            return new State();
+        });
         synchronized (state) {
             state.summary = decoded.summary();
             state.pending.clear();
@@ -535,8 +539,12 @@ public final class ChatMemory {
             while (state.pending.size() > HARD_MAX_PENDING) {
                 state.pending.removeFirst();
             }
-            state.inFlight = false;
-            state.lastAttemptMillis = Long.MIN_VALUE;
+            if (created[0]) {
+                // Only a brand-new State starts with a clean scheduler. An existing one may have a summary call in
+                // flight (or a recent attempt) that this restore must not forget, or a second call would start.
+                state.inFlight = false;
+                state.lastAttemptMillis = Long.MIN_VALUE;
+            }
         }
         ChatTranscript.restore(botId, fresh);
     }

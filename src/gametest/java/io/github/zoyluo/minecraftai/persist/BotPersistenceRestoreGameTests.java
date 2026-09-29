@@ -293,11 +293,28 @@ public final class BotPersistenceRestoreGameTests {
                 String recent = io.github.zoyluo.minecraftai.brain.ChatTranscript.renderRecentChat(restoredId);
                 require(context, recent.contains("filler line 39"),
                         "restored bot lost its recent chat tail: " + recent);
+                require(context, occurrences(recent, "filler line 39") == 1,
+                        "the recent chat tail is shown more than once after restore: " + recent);
+                // A second restore over a ring that already holds the same lines must not duplicate them.
+                io.github.zoyluo.minecraftai.brain.ChatMemory.restore(
+                        restoredId, record.conversationMemoryJson(), System.currentTimeMillis());
+                String again = io.github.zoyluo.minecraftai.brain.ChatTranscript.renderRecentChat(restoredId);
+                require(context, occurrences(again, "filler line 39") == 1
+                                && occurrences(again, "filler line 38") == 1,
+                        "a repeated restore duplicated the recent chat tail: " + again);
             } finally {
                 AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
             context.succeed();
         });
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     private static BotRecord capture(AIPlayerEntity bot, GameTestHelper context) {

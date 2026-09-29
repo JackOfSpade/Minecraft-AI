@@ -220,6 +220,43 @@ final class ChatMemoryTest {
     }
 
     @Test
+    void restoreDoesNotShowALineTwiceWhenTheRingAlreadyHoldsIt() {
+        long now = System.currentTimeMillis();
+        ChatTranscript.record(BOT, "Jack", "come with me", now - 60_000L);
+        ChatTranscript.record(BOT, "Moss (you)", "on my way", now - 30_000L);
+        String json = ChatMemory.encode(BOT, CFG);
+        // A live ring that already holds the same chat (restore without a prior clear) must not double up.
+        ChatMemory.restore(BOT, json, now);
+        assertEquals(2, ChatTranscript.snapshotForTest(BOT).size());
+        ChatTranscript.record(BOT, "Jack", "newer line", now - 1000L);
+        ChatMemory.restore(BOT, json, now);
+        List<ChatTranscript.Entry> ring = ChatTranscript.snapshotForTest(BOT);
+        assertEquals(3, ring.size());
+        assertEquals("come with me", ring.get(0).text(), "restored lines stay in front, oldest first");
+        assertEquals("newer line", ring.get(2).text());
+    }
+
+    @Test
+    void restoreKeepsARunningSummaryCallInsteadOfForgettingIt() {
+        ChatMemory.offerEvicted(BOT, lines(10, "x"));
+        List<Runnable> queued = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        ChatMemory.Transport stub = (s, u) -> {
+            calls.incrementAndGet();
+            return "n";
+        };
+        assertTrue(ChatMemory.summariseIfDue(BOT, CFG, stub, NOW, queued::add, null));
+        // A restore for a bot whose State already exists (call queued, not yet finished) must not reset the
+        // in-flight flag or the attempt time, or a second concurrent call would start.
+        String json = ChatMemory.encodeSnapshot("Notes", lines(10, "y"), List.of());
+        ChatMemory.restore(BOT, json, System.currentTimeMillis());
+        assertFalse(ChatMemory.summariseIfDue(BOT, CFG, stub, NOW + 1000L, queued::add, null),
+                "the call from before the restore is still running");
+        queued.forEach(Runnable::run);
+        assertEquals(1, calls.get());
+    }
+
+    @Test
     void recentChatOlderThanTheWindowBecomesPendingOnRestore() {
         long now = System.currentTimeMillis();
         String json = ChatMemory.encodeSnapshot("Notes",

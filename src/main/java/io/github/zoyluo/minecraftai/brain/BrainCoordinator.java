@@ -172,11 +172,14 @@ public final class BrainCoordinator {
         // it first, then record this instruction so later calls see it as history.
         String recentChat = ChatTranscript.renderRecentChat(bot.getUUID());
         ChatTranscript.recordPlayerLine(bot.getUUID(), senderName, text);
-        // The system context carries the conversation memory (older chat summary), read after the line above was
-        // recorded so lines it pushed out of the recent-chat window are already visible there.
+        // The conversation memory (older chat, other bots' lines, the model-written summary) is untrusted text: it
+        // travels in the user-message context next to the recent chat, labelled background only, and never in the
+        // system prompt. It is read after the line above was recorded so lines that pushed older ones out of the
+        // recent-chat window are already visible there.
         conversation.history.addFirst(ChatMessage.system(systemMessageText(bot, senderName)));
         summariseOlderChat(bot);
-        String recentChatBlock = recentChat.isEmpty() ? "" : recentChat + "\n\n";
+        String memoryBlock = memoryContextBlock(bot);
+        String recentChatBlock = memoryBlock + (recentChat.isEmpty() ? "" : recentChat + "\n\n");
 
         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
         conversation.lastPerceptionDigest = perceptionDigest(snapshot);
@@ -1380,11 +1383,22 @@ public final class BrainCoordinator {
         }
     }
 
-    /** The system prompt plus the bot's conversation memory block (empty when disabled or nothing is remembered). */
+    /**
+     * The system prompt. It never carries chat-derived text: the conversation memory holds verbatim player chat,
+     * other bots' tell_bot lines and a model-written summary, none of which may sit in the trusted system role.
+     */
     private static String systemMessageText(AIPlayerEntity bot, String speakingParty) {
-        String prompt = systemPrompt(bot.getGameProfile().name(), speakingParty);
+        return systemPrompt(bot.getGameProfile().name(), speakingParty);
+    }
+
+    /**
+     * The bot's conversation memory as a user-message context block ("" when disabled or nothing is remembered),
+     * followed by a blank line so it reads as its own paragraph. Its header labels it background only, never
+     * instructions.
+     */
+    static String memoryContextBlock(AIPlayerEntity bot) {
         String memory = ChatMemory.render(bot.getUUID(), MinecraftAiConfig.get().brain().memorySettings());
-        return memory.isEmpty() ? prompt : prompt + "\n\n" + memory;
+        return memory.isEmpty() ? "" : memory + "\n\n";
     }
 
     /**

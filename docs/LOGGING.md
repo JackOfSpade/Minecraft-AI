@@ -26,6 +26,23 @@ cannot be read counts as having bot activity, so an I/O error can never delete a
 are deleted outright. Both values are in the `logging` section of the config file; a missing or
 non-positive value falls back to the default.
 
+### Worst-case disk use
+
+Disk use is bounded by the number of sessions, not by bytes. In the worst case the retained sessions add up to
+
+    maxBotSessions x (size of one bot session)  +  (maxSessions - 1) x (size of one bot-less session)
+
+With the defaults that is 10 sessions with bot activity plus 2 small bot-less ones plus the session being
+written. The size of one session is **not** capped: every line is written twice (the session-wide `all.log` and
+the per-bot file under `by-bot/`), so a session takes roughly twice its log volume. `all.log` (and, with it,
+the per-bot files) is only rotated into `archive/` when it passes `logging.maxFileSizeMb` (default 50) or the date
+changes, and rotation only removes archive files older than `logging.maxBackups` days (default 30) inside the
+session that is being written; it never deletes anything from an older session. Measured with the diagnostic
+snapshot gate (below): a two-hour session with bots is about 5 MB of `all.log`, so about 10 MB on disk, and ten of them
+are about 100 MB. A runaway logging bug or a very long session is the only thing that can exceed this, and the
+bot-less sessions are tiny; lower `logging.maxBotSessions` (or `maxFileSizeMb`) to tighten the
+bound. There is deliberately no byte ceiling that would delete the newest session's evidence mid-play.
+
 The design deliberately avoids logging everything — it only records the information necessary to
 determine whether a given category of request completed normally. Log volume is inversely related
 to debugging cost: logging too much actually slows down investigation.

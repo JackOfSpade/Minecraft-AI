@@ -109,14 +109,23 @@ public final class ChatTranscript {
         }
     }
 
-    /** Puts restored lines (oldest first, all still inside the age window) back in front of the ring. */
+    /**
+     * Puts restored lines (oldest first, all still inside the age window) back in front of the ring. A restored
+     * line that is already in the ring (same label, text and timestamp: a bot restored while its live ring still
+     * holds the same chat) is dropped, so a restore never shows a line twice.
+     */
     static void restore(UUID botId, List<Entry> entries) {
         if (botId == null || entries == null || entries.isEmpty()) {
             return;
         }
         Deque<Entry> ring = RINGS.computeIfAbsent(botId, ignored -> new ArrayDeque<>());
         synchronized (ring) {
-            List<Entry> merged = new ArrayList<>(entries);
+            List<Entry> merged = new ArrayList<>();
+            for (Entry entry : entries) {
+                if (!ring.contains(entry) && !merged.contains(entry)) {
+                    merged.add(entry);
+                }
+            }
             merged.addAll(ring);
             ring.clear();
             ring.addAll(merged.subList(Math.max(0, merged.size() - MAX_LINES), merged.size()));
