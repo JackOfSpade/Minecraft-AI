@@ -300,6 +300,14 @@ public final class BoatFollowGameTests {
                 }
             }
         }
+        // The gametest world is a flat void-ish world below y=40: every slime chunk spawns slimes
+        // regardless of light, and one slain bot fails an otherwise correct test (seen live).  Keep
+        // the fixture monster-free instead of touching the global mob-spawning game rule.
+        net.minecraft.util.math.Box area = net.minecraft.util.math.Box.enclosing(
+                feet.add(-40, -10, -40), feet.add(LAKE_MAX_X + 40, 12, MAX_Z + 40));
+        context.runAtEveryTick(() -> world.getEntitiesByClass(net.minecraft.entity.mob.MobEntity.class, area,
+                mob -> mob instanceof net.minecraft.entity.mob.Monster)
+                .forEach(net.minecraft.entity.Entity::discard));
         return feet;
     }
 

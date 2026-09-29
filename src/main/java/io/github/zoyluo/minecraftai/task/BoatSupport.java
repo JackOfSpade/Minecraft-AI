@@ -37,8 +37,10 @@ final class BoatSupport {
     private static final int LAUNCH_SEARCH_DOWN = 6;
     private static final int LAUNCH_SEARCH_UP = 3;
     private static final int LAUNCH_SHORE_RADIUS = 3;
-    // Comfortably inside the 4.5-block block-interaction range used when the boat item is placed.
-    private static final double LAUNCH_REACH = 4.0D;
+    // Eye-to-water distance from the shore CELL CENTRE. The bot stops within 1.5 blocks of that
+    // centre and the boat item is placed only within the 4.5-block block-interaction range, so leave
+    // a real margin instead of picking spots that are reachable only from the exact centre.
+    private static final double LAUNCH_REACH = 3.4D;
 
     /**
      * Keep recipes species-specific.  A boat should be craftable from the logs/planks the bot
