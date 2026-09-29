@@ -124,7 +124,7 @@ are read in P0:
 | `sense.raysPerTick` | 40 | Collider rays per bot per tick (1..256). |
 | `sense.globalRaysPerTick` | 640 | Ray budget shared by all sweeping bots (1..4096). |
 | `sense.adaptiveThrottle` | true | Halve rays while the tick headroom latch is set. Off when deterministic. |
-| `sense.shadowLog` | true in `sense` mode | Band changes, sightings, session and cost lines. |
+| `sense.shadowLog` | true in every mode that senses (all but `off`) | Band changes, sightings, session and cost lines. |
 | `tick.startWorkMs`, `tick.abortWorkMs` | 38, 48 | Start and abort gates of the tick headroom. P0 only reads the headroom's ray-halving latch (halve above 44 ms of work per tick, re-arm below 40 ms), so these two keys have no visible effect until an acting phase uses the gates. |
 | `poi.enabled` | true | Shadow POI scoring on or off. |
 | `poi.cavernDimensions` | `["minecraft:overworld"]` | Dimensions where the open-cavern signal counts. |
