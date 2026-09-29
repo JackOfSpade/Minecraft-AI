@@ -14,7 +14,8 @@ import net.minecraft.server.MinecraftServer;
  *
  * <ul>
  *   <li>{@code LoginTimeoutMixin} (a {@code @ModifyConstant} in {@code ServerLoginPacketListenerImpl.tick}), and</li>
- *   <li>{@code MerchantEntityInvokerMixin} (an {@code @Invoker} on {@code AbstractVillager}, used by TradeTask).</li>
+ *   <li>{@code MerchantEntityInvokerMixin} (an {@code @Invoker} on {@code AbstractVillager}, used by TradeTask), and</li>
+ *   <li>{@code PhantomSpawnerHumansOnlyMixin} (a MixinExtras {@code @ModifyExpressionValue} on the {@code players()} call in {@code PhantomSpawner.tick}).</li>
  * </ul>
  *
  * <p>Everything is by class NAME (never {@code X.class} of a mixin: Mixin forbids referencing a mixin class directly), and the
@@ -24,6 +25,7 @@ public final class MixinTargetClassLoadGameTests {
     private static final String MIXIN_PACKAGE = "io.github.zoyluo.minecraftai.mixin.";
     private static final String LOGIN_LISTENER = "net.minecraft.server.network.ServerLoginPacketListenerImpl";
     private static final String ABSTRACT_VILLAGER = "net.minecraft.world.entity.npc.villager.AbstractVillager";
+    private static final String PHANTOM_SPAWNER = "net.minecraft.world.level.levelgen.PhantomSpawner";
 
     @GameTest(maxTicks = 20)
     public void loginTimeoutMixinTargetLoadsWithTheMixinApplied(GameTestHelper context) {
@@ -38,6 +40,14 @@ public final class MixinTargetClassLoadGameTests {
         Class<?> target = load(context, ABSTRACT_VILLAGER);
         require(context, Arrays.stream(target.getInterfaces()).anyMatch(i -> i.getName().equals(MIXIN_PACKAGE + "MerchantEntityInvokerMixin")),
                 "MerchantEntityInvokerMixin is not an interface of " + ABSTRACT_VILLAGER + ": the @Invoker was not applied");
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = 20)
+    public void phantomSpawnerMixinTargetLoadsWithTheMixinApplied(GameTestHelper context) {
+        Class<?> target = load(context, PHANTOM_SPAWNER);
+        require(context, Arrays.stream(target.getDeclaredMethods()).anyMatch(m -> m.getName().contains("minecraftai$skipBots")),
+                "PhantomSpawnerHumansOnlyMixin's @ModifyExpressionValue handler was not merged into " + PHANTOM_SPAWNER);
         context.succeed();
     }
 

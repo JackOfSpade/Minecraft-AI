@@ -38,6 +38,8 @@ public class MinecraftAiMod implements ModInitializer {
     @Override
     public void onInitialize() {
         BotInventoryScreenHandler.initialize();
+        // Optional: answers VeinMiner's "veinminer.use" permission (no for bots); a no-op without fabric-permissions-api.
+        io.github.zoyluo.minecraftai.integration.PermissionsIntegration.registerIfPresent();
         MinecraftAiConfig config = MinecraftAiConfig.load();
         BotLogWriter.INSTANCE.start(config);
         BotLog.lifecycle("mod_loaded", "version", getModVersion());

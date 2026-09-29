@@ -138,7 +138,12 @@ public final class SleepVoteGameTests {
      * runs over a {@link LocalChannel}, the channel type of a singleplayer client, so it counts as a human.
      */
     static ServerPlayer connectHuman(MinecraftServer server, ServerLevel world, BlockPos foot) {
-        GameProfile profile = new GameProfile(UUID.randomUUID(), "SleepVoteHuman");
+        return connectHuman(server, world, foot, "SleepVoteHuman");
+    }
+
+    /** As above under its own name, so concurrent tests can each have a distinct stand-in. */
+    static ServerPlayer connectHuman(MinecraftServer server, ServerLevel world, BlockPos foot, String name) {
+        GameProfile profile = new GameProfile(UUID.randomUUID(), name);
         CommonListenerCookie data = CommonListenerCookie.createInitial(profile, false);
         ServerPlayer player = new ServerPlayer(server, world, profile, data.clientInformation()) {
             @Override

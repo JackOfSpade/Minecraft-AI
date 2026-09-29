@@ -14,7 +14,8 @@
     "AIPlayerControlledBoatLogicalSideMixin",
     "AIPlayerControlledBoatPaddleMixin",
     "ServerCommonNetworkHandlerAccessorMixin",
-    "SleepManagerHumansOnlyMixin"
+    "SleepManagerHumansOnlyMixin",
+    "PhantomSpawnerHumansOnlyMixin"
   ],
   "client": [],
   "server": [],

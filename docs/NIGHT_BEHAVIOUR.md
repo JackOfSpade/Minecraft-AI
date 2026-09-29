@@ -13,6 +13,12 @@ exactly as vanilla among the humans. A player is a bot when it is an `AIPlayerEn
 over a netty `EmbeddedChannel` (the way fake-player mods fake a client; real players use a socket or a local
 channel). See `network/PlayerKind`. With no human online the vote never skips.
 
+Bots do not cause phantoms either. Phantoms spawn around a player whose "time since last rest" statistic is
+high, and a bot that never sleeps would pile that statistic up forever, so vanilla would spawn phantoms around
+the bot and they would attack the humans near it. `PhantomSpawnerHumansOnlyMixin` filters bots out of the
+player list `PhantomSpawner.tick` iterates (the same `PlayerKind` predicate as the sleep vote); humans keep
+exact vanilla behaviour and no statistic is edited. Phantoms that already exist are unaffected.
+
 ## Automatic lighting never happens on the surface
 
 Two reflexes in `DangerWatcher` light an idle bot's surroundings on their own when it carries torches:
