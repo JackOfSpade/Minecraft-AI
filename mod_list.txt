@@ -89,7 +89,28 @@ WORLD GENERATION / EXPLORATION
 | Towns & Towers       | 1.13.9         | 2026-09-27 |
 | Amplified Nether     | 1.2.13         | 2026-09-27 |
 | Nature's Compass     | 1.21.11-2.5.0-fabric | 2026-09-27 |
+| Streams Reflowing    | 2.14.1 (StreamsReflowing-1.21.11-fabric-2.14.1.jar) | 2026-09-29 |
 | PvP BOT (Fabric)     | 0.0.15         | 2026-09-27 |
+
+Streams Reflowing (https://modrinth.com/mod/streams-reflowing, Fabric build for exactly
+1.21.11, needs only Fabric API) adds terrain-following flowing streams, lakes at varying
+heights and river currents, plus bank styles/vegetation and water particles. It is
+configurable (config files appear after the first launch, including quality presets
+Potato..Max; lower the preset if exploration stutters with Tectonic + Terralith). Streams
+and lakes generate in NEW chunks only; particles and current effects also apply to
+existing water. Added 2026-09-29.
+
+"No oceans" (requested 2026-09-29): the No Oceans datapack
+(https://modrinth.com/datapack/no-oceans, 1.0) was NOT installed because it cannot work
+in this pack. It only overrides minecraft:overworld/continents, but Tectonic's overworld
+noise router reads minecraft:overworld/noise_router/continents ->
+tectonic:noise/full_continents and never that function, so the pack would silently do
+nothing. The same result is achieved with Tectonic's own setting instead:
+config/tectonic.json "continents.ocean_offset" changed from -0.8 to -0.1 (Tectonic's
+tooltip: above -0.45 no deep oceans, above -0.2 no oceans). Original file kept at
+<profile>/backups/config/tectonic.json.before-no-oceans. Applies to newly generated chunks
+only; already explored ocean chunks stay, and borders between old ocean chunks and new
+land can show abrupt walls. Set it back to -0.8 to restore oceans for future chunks.
 
 PvP BOT populates the world with bot enemies/allies; PvP BOT Inhabitants
 (this project's own addon, above) is what places them inside structures.
