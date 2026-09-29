@@ -773,19 +773,22 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     /**
-     * True once healing has genuinely stalled: no food remains to eat, health is still below
-     * max and vanilla natural regeneration cannot make up for it (hunger bar under 18, or the
-     * gamerule off). A bot that just ate its last item to a full hunger bar keeps healing on its
-     * own, so it holds sealed for as long as natural regeneration is actually running. That is
-     * not a promise to reach full health: every natural heal costs 6 exhaustion (about 1.5 hunger
-     * points), so with no food and no saturation the bar falls under 18 after roughly two hit
-     * points and the bot then IS stalled (rescue wait, or give up and fight from half health).
-     * Treating the full-bar phase as stalled made it cry for help, or give up at 50 percent and
-     * leave the shelter half healed, with a full hunger bar. This is a materially different condition from simply having reached full health with
-     * food merely not (or no longer) toppable back up to twenty -- see
-     * {@link #isRecoveredEnoughToExit}, which handles that case instead. Point 6 of the rescue
-     * contract: "ran out of food while still hurt" must be distinguished from "reached full
-     * health and happened to run out of food around the same time".
+     * The bot holds sealed while natural regeneration is actually running: one that just ate its last
+     * item to a full hunger bar keeps healing on its own. Healing has genuinely stalled (this returns
+     * true) only once no food remains to eat, health is still below max and vanilla natural
+     * regeneration cannot make up for it (hunger bar under 18, or the gamerule off).
+     *
+     * <p>Holding is not a promise to reach full health. Every natural heal costs 6 exhaustion (about
+     * 1.5 hunger points), so with no food and no saturation the bar falls under 18 after roughly two
+     * hit points and the bot then IS stalled (rescue wait, or give up and fight from half health).
+     * Treating the full-bar phase as stalled made it cry for help, or give up at 50 percent and leave
+     * the shelter half healed, with a full hunger bar.</p>
+     *
+     * <p>This is a materially different condition from simply having reached full health with food
+     * merely not (or no longer) toppable back up to twenty; see {@link #isRecoveredEnoughToExit}, which
+     * handles that case instead. Point 6 of the rescue contract: "ran out of food while still hurt"
+     * must be distinguished from "reached full health and happened to run out of food around the same
+     * time".</p>
      */
     static boolean isHealingStalledWithoutFood(float health,
                                                float maxHealth,
@@ -1205,8 +1208,15 @@ public final class EmergencyShelterTask extends AbstractTask {
         bot.getActionPack().stopAll();
     }
 
+    /**
+     * The exit has been open longer than {@code EXIT_LIMIT} under hostile pressure: stop waiting for a
+     * safe egress and take the best forced one. Every path into this method already carries a pending
+     * failure (only {@code beginExit} starts the exit clock, and it either records its own reason or
+     * runs after the environmental terminal was recorded), so the terminal reason stays the ROOT
+     * cause. The pressure timeout itself is visible as {@code force_pressure_exit=true} and the
+     * {@code shelter_pressure_exit_forced} log line, not as a competing terminal reason.
+     */
     private void beginForcedPressureExit(AIPlayerEntity bot) {
-        noteExitFailure("shelter_exit_pressure_timeout");
         forcePressureExit = true;
         pressuredEgress.clear();
 

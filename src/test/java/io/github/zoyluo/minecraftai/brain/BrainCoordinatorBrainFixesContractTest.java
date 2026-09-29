@@ -100,6 +100,24 @@ final class BrainCoordinatorBrainFixesContractTest {
     }
 
     @Test
+    void deferralAndFailureWakeWiringStaysInPlace() throws IOException {
+        String coordinator = read("brain/BrainCoordinator.java");
+
+        assertTrue(containsIgnoringWhitespace(coordinator,
+                        "if (conversation == null || !conversation.instructionChain.playerInstruction()) {"),
+                "only a round that belongs to a player instruction may be deferred");
+        assertTrue(containsIgnoringWhitespace(coordinator,
+                        "InstructionRoundEvaluator.withholdSayAfterAutonomousWake( withholdSayBeforeWake, true);"),
+                "a failure injected into a plan-only loop must keep the say withholding");
+        assertTrue(containsIgnoringWhitespace(coordinator, "InstructionRoundEvaluator.budgetEndWork(runtimeWork, pausedMission)"),
+                "the budget end must take work-active and the reset decision from the one helper");
+        assertTrue(containsIgnoringWhitespace(coordinator, "InstructionRoundEvaluator.budgetReportUnlessDeferred("),
+                "the deferred budget end must go through the pure helper");
+        assertTrue(coordinator.contains("If the player's request is still unfinished, "),
+                "the deferred re-wake must be conditional on the request still being unfinished");
+    }
+
+    @Test
     void theRequestStartedFlagIsNeverDerivedFromMereRunningWork() throws IOException {
         String coordinator = read("brain/BrainCoordinator.java");
 

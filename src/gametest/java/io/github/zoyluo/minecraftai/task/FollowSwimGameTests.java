@@ -496,7 +496,7 @@ public final class FollowSwimGameTests {
         return new Pond(feet, x0, x1, maxX, area);
     }
 
-    /** Force-loads the chunks under the pond/island; released by {@link GameTestChunkForcing} (see there). */
+    /** Force-loads the chunks under the pond/island; force-only, see {@link GameTestChunkForcing}. */
     private static void forceChunks(GameTestHelper context, BlockPos feet, int maxX) {
         GameTestChunkForcing.forceForTest(context,
                 (feet.getX() - 2) >> 4, (feet.getX() + maxX + 1) >> 4,

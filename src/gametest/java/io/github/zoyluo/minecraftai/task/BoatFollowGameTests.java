@@ -367,9 +367,9 @@ public final class BoatFollowGameTests {
 
     /**
      * Force-loads every chunk under the lake so the boats keep ticking (boats only tick and float in
-     * entity-ticking chunks). Release is handled by {@link GameTestChunkForcing}: never from a plain completion
-     * cleanup (that runs after the runner has already forced the NEXT test's structure chunks, and unforcing a
-     * shared chunk hangs that test), only for chunks outside every live structure.
+     * entity-ticking chunks). Force-only, see {@link GameTestChunkForcing}: the runner clears the chunks after the batch and a
+     * completion cleanup must never unforce them (it runs after the runner has forced the NEXT test's structure chunks,
+     * and unforcing a shared chunk hangs that test).
      */
     private static void forceLakeChunks(GameTestHelper context, BlockPos feet) {
         GameTestChunkForcing.forceForTest(context,

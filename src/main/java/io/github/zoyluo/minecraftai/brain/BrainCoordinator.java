@@ -810,8 +810,17 @@ public final class BrainCoordinator {
      * being lost: once the bot is idle again the brain is woken to start it
      * ({@link #maybeWakeForFailureOrGoal}) with a fresh call budget, and the budget end of the blocked
      * round stays silent (the request is deferred, not dropped).
+     *
+     * <p>Only a round that belongs to a player instruction is deferred: a blocked tool call in an
+     * autonomous wake (goal continuation, task-finished, failure) is not a player request, and
+     * replaying "the player's last request" for it would start an old instruction nobody just asked for.</p>
      */
     void deferRequestUntilSafetyEnds(AIPlayerEntity bot) {
+        BotConversation conversation = conversations.get(bot.getUUID());
+        if (conversation == null || !conversation.instructionChain.playerInstruction()) {
+            BotLog.comm(bot, "request_deferral_skipped", "reason", "not_a_player_instruction_round");
+            return;
+        }
         deferredRequests.put(bot.getUUID(), true);
     }
 
@@ -880,6 +889,7 @@ public final class BrainCoordinator {
         if (conversation.history.isEmpty()) {
             conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), "")));
         }
+        boolean withholdSayBeforeWake = conversation.withholdSayNextCall;
         conversation.withholdSayNextCall = false;
         // An autonomous wake starts a chain of its own: the last player instruction (never cleared) must
         // not be mistaken for the request of this chain if its budget ends.
@@ -891,6 +901,10 @@ public final class BrainCoordinator {
             InstructionRoundEvaluator.FailureWake failureWake = maybeInjectFailure(bot, conversation);
             if (failureWake == InstructionRoundEvaluator.FailureWake.INJECT) {
                 awaitingTask.remove(bot.getUUID());
+                // The failure report is a side job on an unfinished plan-only loop: the say withholding
+                // of that loop survives it (the report call itself ignores the flag, see submit).
+                conversation.withholdSayNextCall = InstructionRoundEvaluator.withholdSayAfterAutonomousWake(
+                        withholdSayBeforeWake, true);
                 trimHistory(conversation);
                 submit(bot, conversation, conversation.decision.beginEpoch(), true);
                 return true;
@@ -918,12 +932,16 @@ public final class BrainCoordinator {
             conversation.lastToolRoundPlanBlockedAction = false;
             PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
             conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-            String request = conversation.lastInstruction.isBlank()
-                    ? "the player's last request"
-                    : "the player's request: " + conversation.lastInstruction;
+            // The restarted request is a player instruction again (the wake above began an autonomous
+            // chain): a second block by a SAFETY task must be deferred again, not dropped.
+            conversation.instructionChain.beginPlayerInstruction();
+            String requestDetail = conversation.lastInstruction.isBlank()
+                    ? ""
+                    : " (the request was: " + conversation.lastInstruction + ")";
             conversation.history.add(ChatMessage.user(
-                    "The threat that blocked your request is handled. Start " + request
-                    + " now with the appropriate task tool. Do not tell the player about the delay again."
+                    "The threat that blocked your request is handled. If the player's request is still unfinished, "
+                    + "start it now with the appropriate task tool" + requestDetail
+                    + ". Do not tell the player about the delay again."
                     + "\n\nCurrent state:\n" + snapshot.toJson()));
             BotLog.comm(bot, "deferred_request_wake", "instruction", ActionDispatcher.chatLogText(conversation.lastInstruction));
             trimHistory(conversation);
@@ -1268,7 +1286,9 @@ public final class BrainCoordinator {
                 bot.getActionPack().hasActiveActions());
         // A paused mission protects the mission (no idle reset below), never the silence: the report
         // still depends only on whether THIS instruction started.
-        boolean workActive = runtimeWork || pausedMission;
+        InstructionRoundEvaluator.BudgetEndWork endWork =
+                InstructionRoundEvaluator.budgetEndWork(runtimeWork, pausedMission);
+        boolean workActive = endWork.workActive();
         BotLog.warn(LogCategory.COMM, bot, "model_call_budget_exhausted",
                 "calls_used", conversation.callBudget.callsUsed(),
                 "call_limit", conversation.callBudget.callsUsed() + conversation.callBudget.callsRemaining(),
@@ -1283,24 +1303,27 @@ public final class BrainCoordinator {
         // told to the player -- a dropped command with no word is the worst outcome.
         // The planner loop is over: a withheld say must not leak into a later wake-up call.
         conversation.withholdSayNextCall = false;
-        if (deferredRequests.containsKey(bot.getUUID())) {
-            // The request was blocked by a running SAFETY task and is kept for when the threat ends
-            // (maybeWakeForFailureOrGoal): it is deferred, not dropped, so no "could not start" apology.
-            BotLog.comm(bot, "budget_end_silent_request_deferred", "trigger", trigger);
-            return;
-        }
-        InstructionRoundEvaluator.BudgetReport report = InstructionRoundEvaluator.budgetReport(
+        // A request blocked by a running SAFETY task is kept for when the threat ends
+        // (maybeWakeForFailureOrGoal): it is deferred, not dropped, so no "could not start" apology now;
+        // the re-woken round reports at most once, on its own budget end.
+        boolean requestDeferred = deferredRequests.containsKey(bot.getUUID());
+        InstructionRoundEvaluator.BudgetReport report = InstructionRoundEvaluator.budgetReportUnlessDeferred(
+                requestDeferred,
+                InstructionRoundEvaluator.budgetReport(
                 conversation.budgetExhaustionReported,
                 workActive,
                 conversation.requestStarted,
                 conversation.instructionChain.playerInstruction() && !conversation.lastInstruction.isBlank(),
-                "automatic_wake".equals(trigger));
+                "automatic_wake".equals(trigger)));
         if (report == InstructionRoundEvaluator.BudgetReport.SILENT) {
+            if (requestDeferred) {
+                BotLog.comm(bot, "budget_end_silent_request_deferred", "trigger", trigger);
+            }
             return;
         }
         boolean requestNeverStarted = report == InstructionRoundEvaluator.BudgetReport.COULD_NOT_START;
         conversation.budgetExhaustionReported = true;
-        if (InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(runtimeWork, pausedMission)) {
+        if (endWork.resetToIdle()) {
             io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
             TaskManager.INSTANCE.resetToIdle(bot);
             bot.getActionPack().stopAll();

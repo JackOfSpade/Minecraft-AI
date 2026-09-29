@@ -140,15 +140,41 @@ final class InstructionRoundEvaluator {
     }
 
     /**
-     * Whether the end of the model-call budget may wipe the bot's runtime state (goal plan, task
-     * stack, actions). Running work protects it, and so does a mission that a safety task paused:
-     * resetting would destroy that paused cursor although DangerWatcher resumes it once the threat
-     * is gone. This only guards the state; whether the player is told anything is decided by
-     * {@link #budgetReport} from the request-started fact alone, so a paused mission never buys
-     * silence for an instruction that never started.
+     * A request that a running SAFETY task blocked is deferred, not dropped: the blocked round's budget
+     * end stays silent, whatever the report would otherwise be. The player is then told at most once,
+     * by the budget end of the re-woken round (which is no longer deferred and starts with the
+     * "already reported" flag cleared).
      */
-    static boolean shouldResetToIdleAtBudgetEnd(boolean runtimeWork, boolean pausedMission) {
-        return !runtimeWork && !pausedMission;
+    static BudgetReport budgetReportUnlessDeferred(boolean requestDeferred, BudgetReport report) {
+        return requestDeferred ? BudgetReport.SILENT : report;
+    }
+
+    /**
+     * What the end of the model-call budget does about the bot's runtime work. {@code workActive} is the
+     * work signal for the report and the log: running work, or a mission that a safety task paused.
+     * {@code resetToIdle} says whether the budget end may wipe the runtime state (goal plan, task stack,
+     * actions): running work protects it, and so does a paused mission -- resetting would destroy that
+     * paused cursor although DangerWatcher resumes it once the threat is gone. This only guards the
+     * state; whether the player is told anything is decided by {@link #budgetReport} from the
+     * request-started fact alone, so a paused mission never buys silence for an instruction that never
+     * started.
+     */
+    record BudgetEndWork(boolean workActive, boolean resetToIdle) {
+    }
+
+    static BudgetEndWork budgetEndWork(boolean runtimeWork, boolean pausedMission) {
+        boolean workActive = runtimeWork || pausedMission;
+        return new BudgetEndWork(workActive, !workActive);
+    }
+
+    /**
+     * The say-withholding flag after an autonomous wake begins. Every wake starts with the flag cleared,
+     * except a failure injected into an unfinished plan-only loop (the flag was set): that report is a
+     * side job on the loop, which must keep withholding say afterwards. Without this the flag would be
+     * cleared before the report and the {@link #nextWithholdSay} pass-through would preserve nothing.
+     */
+    static boolean withholdSayAfterAutonomousWake(boolean flagBeforeWake, boolean failureInjected) {
+        return failureInjected && flagBeforeWake;
     }
 
     /** What a pending task failure does when the brain wakes for it. */

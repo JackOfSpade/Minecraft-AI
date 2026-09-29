@@ -88,9 +88,9 @@ public class AIPlayerEntity extends ServerPlayer {
                         "blocking", this.isBlocking());
             }
             if (this.getHealth() <= 0.0F || !this.isAlive()) {
-                // die() ran inside super.hurtServer, before this hit was recorded: a same-key fatal hit
-                // (fire/lava) was folded into a run that only the removal flush would report, long after
-                // bot_death. Close the run now so the death-causing damage is logged with the death.
+                // die() has already run inside super.hurtServer. Closes any run left open by hits
+                // recorded after die() ran, so it is reported with the death (the fatal hit itself is
+                // already logged individually above) instead of by the removal flush long after bot_death.
                 logDamageSummary(damageLog.flush());
             }
         } catch (RuntimeException ignored) {

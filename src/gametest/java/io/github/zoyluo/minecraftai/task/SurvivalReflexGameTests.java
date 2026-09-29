@@ -181,6 +181,93 @@ public final class SurvivalReflexGameTests {
         });
     }
 
+    /**
+     * The DangerWatcher wiring itself (not just EatTask in isolation): a wounded bot whose regen is stalled is
+     * sent to eat with a safe-only pass. It carries rotten flesh FIRST and one carrot; food 15 + carrot 3 = 18
+     * still leaves the bar below 20, so a plain eat-to-full pass would go on to the rotten flesh. It must not.
+     */
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_regen_stall_wiring_eats_the_carrot_and_never_the_rotten_flesh", maxTicks = 500)
+    public void regenStallWiringEatsTheCarrotAndNeverTheRottenFlesh(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "CarrotOnlyGT", 20, 5, 640, 4);
+        bot.setHealth(12.0F);
+        bot.getFoodData().setFoodLevel(15);
+        bot.getFoodData().setSaturation(0.0F);
+        InventoryAction.giveItem(bot, new ItemStack(Items.ROTTEN_FLESH, 3));
+        InventoryAction.giveItem(bot, new ItemStack(Items.CARROT, 1));
+        boolean[] sawSafeOnlyEat = {false};
+        int[] settledTicks = {0};
+        context.failIfEver(() -> {
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof EatTask eat) {
+                require(context, eat.isSafeFoodOnly(), "the regen-stall top-up is not a safe-food-only EatTask");
+                sawSafeOnlyEat[0] = true;
+            }
+            require(context, InventoryAction.countItem(bot, Items.ROTTEN_FLESH) == 3,
+                    "the regen-stall top-up ate rotten flesh");
+            if (sawSafeOnlyEat[0] && InventoryAction.countItem(bot, Items.CARROT) == 0
+                    && !(active instanceof EatTask)) {
+                require(context, bot.getFoodData().getFoodLevel() >= DangerWatcher.REGEN_FOOD_LEVEL,
+                        "the carrot did not raise the food bar: " + bot.getFoodData().getFoodLevel());
+                // The pass is over: hold on for a while to prove nothing goes back for the rotten flesh.
+                if (++settledTicks[0] >= 60) {
+                    despawnAndComplete(context, bot);
+                }
+            }
+        });
+    }
+
+    /**
+     * Emergency healing (hp at or below the retreat threshold, food not full) may still eat hunger-only food as
+     * a last resort, but never food that poisons: pufferfish, spider eye and poisonous potato are not food at
+     * all for automatic eating.
+     */
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_low_hp_bot_never_eats_poison_food_but_eats_rotten_flesh", maxTicks = 400)
+    public void lowHpBotNeverEatsPoisonFoodButEatsRottenFlesh(GameTestHelper context) {
+        net.minecraft.world.item.Item[] poison = {Items.PUFFERFISH, Items.SPIDER_EYE, Items.POISONOUS_POTATO};
+        AIPlayerEntity[] poisoned = new AIPlayerEntity[poison.length];
+        for (int index = 0; index < poison.length; index++) {
+            poisoned[index] = spawnOnPlatform(context, "PoisonOnly" + index + "GT", 20 + index * 20, 5, 680, 4);
+            poisoned[index].setHealth(5.0F);
+            poisoned[index].getFoodData().setFoodLevel(10);
+            poisoned[index].getFoodData().setSaturation(0.0F);
+            InventoryAction.giveItem(poisoned[index], new ItemStack(poison[index], 4));
+            require(context, InventoryAction.isPoisonFood(new ItemStack(poison[index])), poison[index] + " is not poison food");
+            require(context, InventoryAction.findFoodSlot(poisoned[index]) < 0, poison[index] + " counted as food");
+        }
+        require(context, !InventoryAction.isPoisonFood(new ItemStack(Items.ROTTEN_FLESH))
+                        && !InventoryAction.isPoisonFood(new ItemStack(Items.CHICKEN))
+                        && !InventoryAction.isPoisonFood(new ItemStack(Items.BREAD)),
+                "hunger-only or safe food classified as poison");
+        AIPlayerEntity hungerOnly = spawnOnPlatform(context, "RottenLastResortGT", 80, 5, 680, 4);
+        hungerOnly.setHealth(5.0F);
+        hungerOnly.getFoodData().setFoodLevel(10);
+        hungerOnly.getFoodData().setSaturation(0.0F);
+        InventoryAction.giveItem(hungerOnly, new ItemStack(Items.ROTTEN_FLESH, 4));
+        AIPlayerEntity[] all = new AIPlayerEntity[poison.length + 1];
+        System.arraycopy(poisoned, 0, all, 0, poison.length);
+        all[poison.length] = hungerOnly;
+        int[] ticks = {0};
+        int[] settled = {0};
+        context.failIfEver(() -> {
+            for (int index = 0; index < poison.length; index++) {
+                AIPlayerEntity bot = poisoned[index];
+                require(context, !(TaskManager.INSTANCE.getActive(bot).orElse(null) instanceof EatTask),
+                        "a low-hp bot with only " + poison[index] + " started eating it");
+                require(context, InventoryAction.countItem(bot, poison[index]) == 4 && bot.getFoodData().getFoodLevel() == 10,
+                        "a low-hp bot with only " + poison[index] + " ate it");
+            }
+            boolean ate = InventoryAction.countItem(hungerOnly, Items.ROTTEN_FLESH) < 4
+                    || hungerOnly.getFoodData().getFoodLevel() > 10;
+            if (ate) {
+                if (++settled[0] >= 100) {
+                    despawnAndComplete(context, all);
+                }
+            } else {
+                require(context, ++ticks[0] < 250, "the low-hp bot never ate its last-resort rotten flesh");
+            }
+        });
+    }
+
     // ---- 2: dark-trap reflex ----
 
     @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_bot_under_tree_canopy_at_noon_is_not_dark_trapped", maxTicks = 1500)

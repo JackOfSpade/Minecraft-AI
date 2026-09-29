@@ -169,16 +169,48 @@ public final class InventoryAction {
         return remaining;
     }
 
-    // Harmful/side-effect foods: raw chicken (30% chance of poisoning), rotten flesh, pufferfish, spider eye, poisonous potato -- only fall back to these when nothing else is edible.
+    // Harmful/side-effect foods: raw chicken (30% chance of hunger), rotten flesh, pufferfish, spider eye, poisonous potato -- only fall back to these when nothing else is edible. Poison-inflicting ones are never eaten at all, see isPoisonFood.
     private static final java.util.Set<Item> HARMFUL_FOODS = java.util.Set.of(
             Items.CHICKEN, Items.ROTTEN_FLESH, Items.PUFFERFISH, Items.SPIDER_EYE, Items.POISONOUS_POTATO);
+
+    /**
+     * Whether eating {@code stack} can inflict poison or wither (pufferfish, spider eye, poisonous
+     * potato, or any modded/component food whose consume effects apply them). Read from the item's own
+     * consume effects instead of a hard-coded list. Poison is never worth eating automatically, even as
+     * a last resort at low health; hunger-only foods (rotten flesh, raw chicken) are not poison.
+     */
+    public static boolean isPoisonFood(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        net.minecraft.world.item.component.Consumable consumable = stack.get(DataComponents.CONSUMABLE);
+        if (consumable == null) {
+            return false;
+        }
+        for (net.minecraft.world.item.consume_effects.ConsumeEffect effect : consumable.onConsumeEffects()) {
+            if (effect instanceof net.minecraft.world.item.consume_effects.ApplyStatusEffectsConsumeEffect apply) {
+                for (net.minecraft.world.effect.MobEffectInstance instance : apply.effects()) {
+                    if (instance.getEffect().is(net.minecraft.world.effect.MobEffects.POISON)
+                            || instance.getEffect().is(net.minecraft.world.effect.MobEffects.WITHER)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Food the bot may ever eat automatically: it has a food value and never inflicts poison/wither. */
+    public static boolean isEatableFood(ItemStack stack) {
+        return !stack.isEmpty() && stack.has(DataComponents.FOOD) && !isPoisonFood(stack);
+    }
 
     public static int findFoodSlot(AIPlayerEntity player) {
         Inventory inventory = player.getInventory();
         int harmfulSlot = -1;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
             ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) {
+            if (!isEatableFood(stack)) {
                 continue;
             }
             if (HARMFUL_FOODS.contains(stack.getItem())) {
@@ -191,7 +223,7 @@ public final class InventoryAction {
         }
         boolean harmfulOffhand = false;
         ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
-        if (!offHandStack.isEmpty() && offHandStack.has(DataComponents.FOOD)) {
+        if (isEatableFood(offHandStack)) {
             if (HARMFUL_FOODS.contains(offHandStack.getItem())) {
                 harmfulOffhand = true;
             } else {
@@ -233,7 +265,7 @@ public final class InventoryAction {
     }
 
     private static boolean isSafeFood(ItemStack stack) {
-        return !stack.isEmpty() && stack.has(DataComponents.FOOD) && !HARMFUL_FOODS.contains(stack.getItem());
+        return isEatableFood(stack) && !HARMFUL_FOODS.contains(stack.getItem());
     }
 
     public static Map<String, Integer> summarize(AIPlayerEntity player) {

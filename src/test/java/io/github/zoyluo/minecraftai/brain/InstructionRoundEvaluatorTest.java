@@ -162,11 +162,14 @@ final class InstructionRoundEvaluatorTest {
     void aPausedMissionKeepsItsCursorButNeverBuysSilenceForAnUnstartedInstruction() {
         // finishCallBudget counts a paused mission as work for the report (workActive = runtime work OR paused),
         // and as a reason not to reset; only the request-started fact decides what the player hears.
-        assertFalse(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(false, true),
+        assertFalse(InstructionRoundEvaluator.budgetEndWork(false, true).resetToIdle(),
                 "a paused mission's cursor must survive the budget end");
-        assertFalse(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(true, false));
-        assertFalse(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(true, true));
-        assertTrue(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(false, false));
+        assertFalse(InstructionRoundEvaluator.budgetEndWork(true, false).resetToIdle());
+        assertFalse(InstructionRoundEvaluator.budgetEndWork(true, true).resetToIdle());
+        assertTrue(InstructionRoundEvaluator.budgetEndWork(false, false).resetToIdle());
+        assertTrue(InstructionRoundEvaluator.budgetEndWork(false, true).workActive(), "a paused mission counts as work for the report");
+        assertTrue(InstructionRoundEvaluator.budgetEndWork(true, false).workActive());
+        assertFalse(InstructionRoundEvaluator.budgetEndWork(false, false).workActive());
 
         boolean workActiveBecauseOfPausedMission = true;
         assertEquals(BudgetReport.COULD_NOT_START,
@@ -287,5 +290,59 @@ final class InstructionRoundEvaluatorTest {
         // A new player instruction re-arms it.
         chain.beginPlayerInstruction();
         assertTrue(chain.playerInstruction());
+    }
+
+    // ---- deferred (SAFETY-blocked) requests: the player hears at most one budget-end report --------
+
+    @Test
+    void aDeferredRequestsBudgetEndIsSilentAndTheReWokenRoundReportsExactlyOnce() {
+        // Round 1: the model's task tool was blocked by a running SAFETY task; the request is deferred.
+        // Whatever the ordinary report would be (the instruction never started), the player hears nothing yet.
+        BudgetReport ordinary = InstructionRoundEvaluator.budgetReport(false, false, false, true, false);
+        assertEquals(BudgetReport.COULD_NOT_START, ordinary);
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReportUnlessDeferred(true, ordinary));
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReportUnlessDeferred(true,
+                InstructionRoundEvaluator.budgetReport(false, false, true, true, false)));
+        // The deferred silence never marks the round as reported, so the re-woken round (no longer deferred,
+        // fresh budget) can still tell the player once if it too never starts ...
+        BudgetReport reWoken = InstructionRoundEvaluator.budgetReportUnlessDeferred(false, ordinary);
+        assertEquals(BudgetReport.COULD_NOT_START, reWoken);
+        // ... and only once: after that report the flag is set and every later budget end is silent.
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReportUnlessDeferred(false,
+                InstructionRoundEvaluator.budgetReport(true, false, false, true, false)));
+    }
+
+    @Test
+    void theBudgetEndWorkHelperReturnsTheReportSignalAndTheResetDecisionTogether() {
+        InstructionRoundEvaluator.BudgetEndWork idle = InstructionRoundEvaluator.budgetEndWork(false, false);
+        assertFalse(idle.workActive());
+        assertTrue(idle.resetToIdle());
+        InstructionRoundEvaluator.BudgetEndWork paused = InstructionRoundEvaluator.budgetEndWork(false, true);
+        assertTrue(paused.workActive());
+        assertFalse(paused.resetToIdle(), "a paused mission's cursor must survive the budget end");
+        InstructionRoundEvaluator.BudgetEndWork running = InstructionRoundEvaluator.budgetEndWork(true, false);
+        assertTrue(running.workActive());
+        assertFalse(running.resetToIdle());
+        // workActive and the reset decision can never disagree (no reset while work is active).
+        for (boolean runtime : new boolean[]{false, true}) {
+            for (boolean pausedMission : new boolean[]{false, true}) {
+                InstructionRoundEvaluator.BudgetEndWork state =
+                        InstructionRoundEvaluator.budgetEndWork(runtime, pausedMission);
+                assertEquals(!state.workActive(), state.resetToIdle());
+            }
+        }
+    }
+
+    @Test
+    void aFailureWakeKeepsThePlanOnlyLoopsSayWithholding() {
+        // A failure injected into an unfinished plan-only loop (the flag was set) keeps the flag ...
+        assertTrue(InstructionRoundEvaluator.withholdSayAfterAutonomousWake(true, true));
+        // ... and the failure-report round then leaves it alone (nextWithholdSay pass-through).
+        assertTrue(InstructionRoundEvaluator.nextWithholdSay(
+                InstructionRoundEvaluator.withholdSayAfterAutonomousWake(true, true), true, false));
+        // Every other wake starts with the flag cleared.
+        assertFalse(InstructionRoundEvaluator.withholdSayAfterAutonomousWake(true, false));
+        assertFalse(InstructionRoundEvaluator.withholdSayAfterAutonomousWake(false, true));
+        assertFalse(InstructionRoundEvaluator.withholdSayAfterAutonomousWake(false, false));
     }
 }

@@ -50,6 +50,11 @@ public final class EatTask extends AbstractTask {
         return new EatTask(true);
     }
 
+    /** Whether this pass refuses harmful last-resort food (the regen-stall top-up). */
+    boolean isSafeFoodOnly() {
+        return safeFoodOnly;
+    }
+
     @Override
     public String name() {
         return "eat";

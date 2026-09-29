@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
@@ -428,7 +427,7 @@ public final class ResupplyTask extends AbstractTask {
     private static Item firstFood(Container inventory) {
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && stack.has(DataComponents.FOOD)) {
+            if (InventoryAction.isEatableFood(stack)) {
                 return stack.getItem();
             }
         }

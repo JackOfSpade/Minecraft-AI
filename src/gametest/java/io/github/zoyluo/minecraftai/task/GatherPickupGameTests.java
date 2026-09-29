@@ -389,6 +389,13 @@ public final class GatherPickupGameTests {
             }
             require(context, InventoryAction.countItem(bot, Items.OAK_LOG) == 1,
                     "the hidden drop was not collected before the bootstrap pickup ended: " + task.describe());
+            // Collected is not enough: prove it came from the origin sweep (or at least the known-cell
+            // approach), not from chasing a visible drop.
+            java.util.List<String> lines = SensingArena.botLog(bot.getGameProfile().name());
+            require(context, lines != null, "the per-bot log is unavailable, so the sweep cannot be proven");
+            require(context, lines.stream().anyMatch(line -> line.contains("event=gather_bootstrap_origin_sweep")
+                            || line.contains("event=gather_bootstrap_origin_approach")),
+                    "the hidden drop was collected without any origin sweep/approach being logged");
             finish(context, fixture);
         });
     }

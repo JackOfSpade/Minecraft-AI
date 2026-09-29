@@ -84,6 +84,8 @@ public final class FollowTask extends AbstractTask {
     // waits at its bank and re-plans on the normal schedule, and tells the player so once until it next arrives.
     private boolean noRouteAnnounced;
     private int noRouteNotices;
+    // Non-genuine failed re-plans in a row (see FollowNoRoute.RepeatedFailures): repeated ones get a generic notice.
+    private final FollowNoRoute.RepeatedFailures repeatedFailures = new FollowNoRoute.RepeatedFailures();
     // Where the followed player stood when the resolved goal collapsed onto the bot's own cell (see
     // followLand): the hold is re-evaluated as soon as they move rather than after a full REPATH_TICKS.
     private BlockPos holdTargetPos;
@@ -153,6 +155,7 @@ public final class FollowTask extends AbstractTask {
         waiting = false;
         repathBackoff = false;
         noRouteAnnounced = false;
+        repeatedFailures.reset();
         holdTargetPos = null;
         nextHoldReevalTick = 0;
         boatFollow = null;
@@ -362,6 +365,7 @@ public final class FollowTask extends AbstractTask {
             pack.stopNavigation();
             waiting = true;
             noRouteAnnounced = false;
+            repeatedFailures.reset();
             stuckRecovery.reset(bot, elapsed);
             return;
         }
@@ -431,6 +435,7 @@ public final class FollowTask extends AbstractTask {
             if (!path.isFailed()) {
                 // A route exists again: a later loss of it is a new no-route episode worth announcing.
                 noRouteAnnounced = false;
+                repeatedFailures.reset();
                 if (pack.activePathGoal() != null && pack.activePathGoal().equals(bot.blockPosition())) {
                     // The goal resolved onto the very cell the bot stands in (the nearest standable
                     // cell to the stand-off point IS this one): a zero-length route that "completes"
@@ -468,6 +473,7 @@ public final class FollowTask extends AbstractTask {
                             "verified", verdict.reason(),
                             "to", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
                     pack.startWalkTo(standNear.getCenter());
+                    repeatedFailures.reset();
                     repathBackoff = false;
                     waiting = false;
                     return;
@@ -481,7 +487,12 @@ public final class FollowTask extends AbstractTask {
             repathBackoff = true;
             waiting = true;
             if (FollowNoRoute.isGenuine(path.reason())) {
-                announceNoRoute(bot, standNear, path.reason());
+                repeatedFailures.reset();
+                announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.messageFor(path.reason()));
+            } else if (repeatedFailures.recordFailure(elapsed)) {
+                // Budget/transient failures alone say nothing definite, but a follower that keeps failing to
+                // plan for 10+ seconds owes the player one honest, generic line.
+                announceNoRoute(bot, standNear, path.reason(), FollowNoRoute.GENERIC_MESSAGE);
             }
             return;
         }
@@ -494,11 +505,11 @@ public final class FollowTask extends AbstractTask {
     /**
      * No route to the player and no verified straight walk: the bot stays dry where it is (it swims only to follow
      * a player who is themselves in the water), keeps re-planning on the normal schedule, and says so once per
-     * episode. Only called for a genuine no-route result ({@link FollowNoRoute}); a transient or budget failure
-     * (search limit, timeout, no start cell) does not claim there is no dry way, and the flag is re-armed when a
-     * route is found again.
+     * episode, either with a specific line for a genuine no-route / no-standing-place result or, after repeated
+     * transient failures, with a generic one ({@link FollowNoRoute}). The flag is re-armed when a route is found
+     * again or the bot arrives.
      */
-    private void announceNoRoute(AIPlayerEntity bot, BlockPos standNear, String reason) {
+    private void announceNoRoute(AIPlayerEntity bot, BlockPos standNear, String reason, String message) {
         if (noRouteAnnounced) {
             return;
         }
@@ -507,9 +518,9 @@ public final class FollowTask extends AbstractTask {
         BotLog.action(bot, "follow_no_dry_route",
                 "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.blockPosition()),
                 "stand_near", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear),
-                "reason", reason);
-        BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
-                "I can't find a dry way to you from here, so I'll wait here and keep looking.");
+                "reason", reason,
+                "failures_in_a_row", repeatedFailures.failures());
+        BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot", message);
     }
 
     /**

@@ -47,7 +47,7 @@ public final class GameTestCleanupSelfTests {
         if (farChunkForcedByEarlierScenario) {
             require(context, !context.getLevel().getForceLoadedChunks()
                             .contains(ChunkPos.asLong(FAR_CHUNK, FAR_CHUNK)),
-                    "a chunk force-loaded by the previous self-test outlived its test (leaked force-loading)");
+                    "a chunk force-loaded by the previous self-test outlived its batch (the runner no longer clears force-loaded chunks)");
         }
         STARTED.incrementAndGet();
         GameTestInfo info = GameTestCleanup.infoOf(context);
@@ -90,7 +90,8 @@ public final class GameTestCleanupSelfTests {
         int[] throwing = {0};
         GameTestListener boom = GameTestCleanup.onceListener((info, runner) -> {
             throwing[0]++;
-            throw new IllegalStateException("cleanup failure must not escape into the runner's tick loop");
+            throw new IllegalStateException("EXPECTED by GameTestCleanupSelfTests (deliberate throw): "
+                    + "a cleanup failure must be logged and swallowed, not escape into the runner's tick loop");
         });
         boom.testFailed(null, null);
         boom.testFailed(null, null);

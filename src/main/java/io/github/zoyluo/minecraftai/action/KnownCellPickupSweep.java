@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.HashSet;
@@ -79,8 +80,21 @@ public final class KnownCellPickupSweep {
         }
         if (bot.blockPosition().equals(target)) {
             if (targetIsFirst) {
-                // Same physical handling as the plain approach: nudge toward the remembered cell.
+                // Same physical handling as the plain approach: nudge toward the remembered cell. The
+                // approach re-resolves its stand cell every call, so when the terrain changed under the
+                // dwell it starts a route (or a descent) instead of nudging: that is a move, not a dwell.
+                BlockPos before = bot.blockPosition();
                 HarvestCore.approachKnownPickupCell(bot, origin);
+                if (!before.equals(bot.blockPosition())
+                        || !bot.getActionPack().isPathExecutorIdle()
+                        || !bot.getActionPack().isWalkToIdle()) {
+                    BotLog.action(bot, "pickup_sweep_first_cell_reapproach",
+                            "origin", origin.toShortString(),
+                            "from", before.toShortString(),
+                            "to", bot.blockPosition().toShortString());
+                    retire();
+                    return Step.MOVING;
+                }
             } else if (target.equals(origin)) {
                 bot.getActionPack().stopMovement();
             } else {
