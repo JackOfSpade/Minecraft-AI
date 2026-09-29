@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.goal;
 
+import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -32,7 +33,7 @@ public final class GoalPlannerChainedCraftingGameTests {
                 null);
 
         require(context, plan.success(), "unresolved: " + plan.unresolved());
-        int logs = firstIndex(plan.steps(), GoalStep.Kind.GATHER, null, null);
+        int logs = firstLogGather(plan.steps());
         int table = firstIndex(plan.steps(), GoalStep.Kind.CRAFT, Items.CRAFTING_TABLE, null);
         int woodenPick = firstIndex(plan.steps(), GoalStep.Kind.CRAFT, Items.WOODEN_PICKAXE, null);
         int stone = firstIndex(plan.steps(), GoalStep.Kind.MINE, null, Blocks.STONE);
@@ -46,6 +47,17 @@ public final class GoalPlannerChainedCraftingGameTests {
         require(context, plan.steps().get(finalCraft).count() >= 2,
                 "the final craft must cover the requested two pickaxes");
         context.complete();
+    }
+
+    /** Gather steps name the concrete log they collect (e.g. oak_log), so match any log item. */
+    private static int firstLogGather(List<GoalStep> steps) {
+        for (int index = 0; index < steps.size(); index++) {
+            GoalStep step = steps.get(index);
+            if (step.kind() == GoalStep.Kind.GATHER && RecipeRegistry.LOGS.contains(step.item())) {
+                return index;
+            }
+        }
+        return -1;
     }
 
     private static int firstIndex(List<GoalStep> steps,

@@ -13,6 +13,7 @@
       "io.github.zoyluo.minecraftai.gametest.MinecraftAiDeterministicGameTests",
       "io.github.zoyluo.minecraftai.command.MinecraftAiVerifyFailFastGameTests",
       "io.github.zoyluo.minecraftai.goal.GoalPlannerMiningGameTests",
+      "io.github.zoyluo.minecraftai.goal.GoalPlannerChainedCraftingGameTests",
       "io.github.zoyluo.minecraftai.goal.DeathRecoveryMissionGameTests",
       "io.github.zoyluo.minecraftai.goal.MiningCheckpointMissionGameTests",
       "io.github.zoyluo.minecraftai.brain.ToolRegistryMiningGameTests",
