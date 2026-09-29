@@ -232,7 +232,7 @@ public final class SurvivalReflexGameTests {
             poisoned[index].getFoodData().setSaturation(0.0F);
             InventoryAction.giveItem(poisoned[index], new ItemStack(poison[index], 4));
             require(context, InventoryAction.isPoisonFood(new ItemStack(poison[index])), poison[index] + " is not poison food");
-            require(context, InventoryAction.findFoodSlot(poisoned[index]) < 0, poison[index] + " counted as food");
+            require(context, !InventoryAction.hasFood(poisoned[index]), poison[index] + " counted as food");
         }
         require(context, !InventoryAction.isPoisonFood(new ItemStack(Items.ROTTEN_FLESH))
                         && !InventoryAction.isPoisonFood(new ItemStack(Items.CHICKEN))

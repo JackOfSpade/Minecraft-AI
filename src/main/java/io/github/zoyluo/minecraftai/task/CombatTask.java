@@ -662,7 +662,7 @@ public final class CombatTask extends AbstractTask {
             phase = Phase.ACQUIRE;
             return;
         }
-        if (!eating && InventoryAction.findFoodSlot(bot) >= 0) {
+        if (!eating && InventoryAction.hasFood(bot)) {
             bot.getActionPack().stopAll();
             ActionResult result = EatAction.startEating(bot);
             eating = !result.isFailed();

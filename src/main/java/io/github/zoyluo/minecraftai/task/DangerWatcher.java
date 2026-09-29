@@ -226,7 +226,7 @@ public final class DangerWatcher {
         }
         // Fire and powder-snow self-rescue, right behind lava: burning costs about a heart a second (the
         // lava exit alone leaves fifteen seconds of it), and a bot sunk in powder snow cannot walk or path out.
-        if (maybeSelfRescue(server, bot, active)) {
+        if (maybeSelfRescue(server, bot, active, threat)) {
             return true;
         }
         // CreateObsidianTask deliberately works near a pool and independently enforces dry,
@@ -521,7 +521,14 @@ public final class DangerWatcher {
      * assigned). Both are SAFETY tasks; ordinary work is paused and resumed afterwards, a running safety
      * owner is replaced in place. Deliberately skipped while lava escape or a sealed shelter/barricade runs.
      */
-    private boolean maybeSelfRescue(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
+    private boolean maybeSelfRescue(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
+                                    Optional<Threat> threat) {
+        // At critical health with a factual melee hostile in range the fight decides first: neither a running
+        // rescue keeps the controls (the threat handling below pauses it, see shouldPreserveActiveWork, and it
+        // resumes afterwards) nor does a new one start (it would just be paused again on the next scan).
+        if (threat.isPresent() && shouldFightBeforeRescue(bot, threat.get())) {
+            return false;
+        }
         if (active.isPresent() && (active.get() instanceof FireExtinguishTask
                 || active.get() instanceof PowderSnowEscapeTask)) {
             return true; // the running rescue owns the controls; both are bounded by their own timeouts
@@ -553,8 +560,26 @@ public final class DangerWatcher {
         return false;
     }
 
+    /**
+     * Whether a critical-health bot must deal with an observed hostile before a fire / powder-snow rescue: the
+     * bot is at or below the retreat health, the threat is a live, observed hostile, and it is inside the
+     * pressure envelope (it can actually reach the bot). A distant or unseen mob never preempts a rescue.
+     */
+    static boolean shouldFightBeforeRescue(AIPlayerEntity bot, Threat threat) {
+        return isHostileBacked(threat)
+                && bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
+                && ObservableWorldQuery.canObserveEntity(bot, threat.entity())
+                && CombatCore.isWithinHostilePressureEnvelope(bot, threat.entity());
+    }
+
+    /** Depth beyond which a rescue replaces a running safety task instead of stacking another paused frame. */
+    private static final int MAX_PAUSED_FRAMES_FOR_RESCUE = 4;
+
     private static void startSelfRescue(AIPlayerEntity bot, Optional<Task> active, Task rescue, String why) {
-        if (active.isPresent() && shouldPreserveActiveWork(bot)) {
+        // Ordinary work is always paused. A running SAFETY task (a fight, an evade) is paused too rather than
+        // replaced, so it resumes once the rescue is over; only a deep pause stack falls back to replacing it.
+        if (active.isPresent() && (shouldPreserveActiveWork(bot)
+                || TaskManager.INSTANCE.pausedDepth(bot) < MAX_PAUSED_FRAMES_FOR_RESCUE)) {
             TaskManager.INSTANCE.pauseFor(bot, why);
         }
         TaskManager.INSTANCE.assign(bot, rescue, TaskOrigin.safety(why));
@@ -601,7 +626,7 @@ public final class DangerWatcher {
         // not jump that recovery boundary merely because a pick happened to be selected.
         if (EmergencyShelterTask.hasPendingCleanup(bot)
                 && bot.getFoodData().getFoodLevel() < 20
-                && InventoryAction.findFoodSlot(bot) >= 0) {
+                && InventoryAction.hasFood(bot)) {
             return false;
         }
         if (TaskManager.INSTANCE.isUserPaused(bot) && !criticalStarvation) {
@@ -668,7 +693,7 @@ public final class DangerWatcher {
             // no prey nearby. Fixes "repeatedly resupplying for wheat and failing instead of hunting
             // when hungry".
             if (bot.getFoodData().getFoodLevel() <= survival.hungerEatThreshold()
-                    && InventoryAction.findFoodSlot(bot) < 0
+                    && !InventoryAction.hasFood(bot)
                     && !HuntTask.hasPreyNearby(bot)) {
                 task = ResupplyTask.food();
             }
@@ -746,7 +771,7 @@ public final class DangerWatcher {
         if (now < nextEatAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
-        if (InventoryAction.findFoodSlot(bot) < 0) {
+        if (!InventoryAction.hasFood(bot)) {
             // Layer 2 hunger chain: no food at all -> if huntable animals are nearby, actively hunt them for raw meat instead of just waiting to starve.
             if (huntForFood(server, bot, active)) {
                 return true;
@@ -1346,6 +1371,13 @@ public final class DangerWatcher {
      * origins remain preservable so a missing origin cannot silently destroy user work.
      */
     private static boolean shouldPreserveActiveWork(AIPlayerEntity bot) {
+        // A fire / powder-snow rescue is safety work but not disposable: preempted by a critical fight it is
+        // paused so it resumes (the condition it fixes is still there), never replaced and forgotten.
+        if (TaskManager.INSTANCE.getActive(bot)
+                .filter(task -> task instanceof FireExtinguishTask || task instanceof PowderSnowEscapeTask)
+                .isPresent()) {
+            return true;
+        }
         return TaskManager.INSTANCE.activeOrigin(bot)
                 .map(origin -> !origin.safety())
                 .orElse(true);
@@ -1412,7 +1444,7 @@ public final class DangerWatcher {
     private static boolean isHealingEatTransaction(AIPlayerEntity bot) {
         return bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
                 && bot.getFoodData().getFoodLevel() < 20
-                && InventoryAction.findFoodSlot(bot) >= 0;
+                && InventoryAction.hasFood(bot);
     }
 
     private static boolean isHostilePressure(Threat threat) {

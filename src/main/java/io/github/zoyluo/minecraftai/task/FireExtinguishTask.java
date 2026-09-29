@@ -87,17 +87,21 @@ public final class FireExtinguishTask extends AbstractTask {
     protected void onAbort(AIPlayerEntity bot) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
+        // Aborted (preempted, cancelled, the bot died or is being despawned): the placed source is still there.
+        recoverPlacedWater(bot, "aborted");
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > MAX_ELAPSED) {
             miner.cancel(bot);
+            recoverPlacedWater(bot, "timeout");
             fail("fire_extinguish_timeout");
             return;
         }
         if (bot.isInLava()) {
             // LavaEscapeTask owns lava contact; hand back rather than fight it for the controls.
+            recoverPlacedWater(bot, "in_lava");
             fail("fire_extinguish_in_lava");
             return;
         }
@@ -166,6 +170,7 @@ public final class FireExtinguishTask extends AbstractTask {
             }
         }
         if (walkTarget == null && elapsed > 20) {
+            recoverPlacedWater(bot, "no_means");
             fail("fire_extinguish_no_means");
         }
     }
@@ -174,6 +179,7 @@ public final class FireExtinguishTask extends AbstractTask {
     private void pickUpWater(AIPlayerEntity bot) {
         if (placedSource == null || pickupTries++ >= PICKUP_RETRY_LIMIT) {
             BotLog.danger(bot, "fire_extinguish_pickup_abandoned", "tries", pickupTries);
+            recoverPlacedWater(bot, "pickup_abandoned");
             complete();
             return;
         }
@@ -195,6 +201,35 @@ public final class FireExtinguishTask extends AbstractTask {
                     "hp", (int) bot.getHealth(), "how", "bucket_water_recovered");
             complete();
         }
+    }
+
+    /**
+     * One best-effort attempt to take the water this task placed at the feet back, on every exit that is not the
+     * normal PICKUP path (timeout, abort, death, despawn, lava, no means). A dead or removed bot cannot use a
+     * bucket, and a source that is out of reach or no longer visible cannot be filled: in those cases the water
+     * is left and that is logged ({@code fire_extinguish_water_left}) rather than silently forgotten. Idempotent:
+     * the placed cell is forgotten after the attempt.
+     */
+    private void recoverPlacedWater(AIPlayerEntity bot, String why) {
+        BlockPos source = placedSource;
+        if (source == null) {
+            return;
+        }
+        placedSource = null;
+        String outcome;
+        if (!bot.isAlive() || bot.isRemoved()) {
+            outcome = "bot_gone";
+        } else if (!bot.level().getFluidState(source).is(FluidTags.WATER)) {
+            return; // the water is already gone (flowed away, or someone took it)
+        } else {
+            ActionResult result = BucketAction.fillWaterSource(bot, source);
+            if (result.isSuccess()) {
+                BotLog.danger(bot, "fire_extinguish_water_recovered", "at", source.toShortString(), "why", why);
+                return;
+            }
+            outcome = result.reason();
+        }
+        BotLog.danger(bot, "fire_extinguish_water_left", "at", source.toShortString(), "why", why, "reason", outcome);
     }
 
     // ---- observation-gated scans (shared with the DangerWatcher trigger) ----

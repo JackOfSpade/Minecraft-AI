@@ -23,7 +23,7 @@ public final class EatTask extends AbstractTask {
      * cancelled and retried once, then the pass ends as stuck.
      */
     static final int EAT_WATCHDOG_TICKS = 140;
-    private static final int MAX_WATCHDOG_RETRIES = 1;
+    static final int MAX_WATCHDOG_RETRIES = 1;
     // Eat-to-full: keep taking bites until the food bar is 20, not just one item. Bounding the
     // number of bites (rather than only a flat tick count) keeps the task's overall budget scaled
     // to how much work it actually has to do -- one bite for a near-full bar, several for an
@@ -120,7 +120,7 @@ public final class EatTask extends AbstractTask {
     }
 
     private void find(AIPlayerEntity bot) {
-        boolean noFood = safeFoodOnly ? !InventoryAction.hasSafeFood(bot) : InventoryAction.findFoodSlot(bot) < 0;
+        boolean noFood = safeFoodOnly ? !InventoryAction.hasSafeFood(bot) : !InventoryAction.hasFood(bot);
         if (noFood) {
             // No food at all: on the very first bite this is a real failure. Once at least one
             // bite has already landed (hunger already improved, or a stack was consumed), running
@@ -146,8 +146,9 @@ public final class EatTask extends AbstractTask {
 
     private void waitForFinish(AIPlayerEntity bot) {
         waitTicks++;
-        if (isEatWatchdogExpired(waitTicks, bot.isUsingItem())) {
-            if (watchdogRetries < MAX_WATCHDOG_RETRIES) {
+        WatchdogAction watchdog = watchdogDecision(waitTicks, bot.isUsingItem(), watchdogRetries);
+        if (watchdog != WatchdogAction.NONE) {
+            if (watchdog == WatchdogAction.RETRY) {
                 watchdogRetries++;
                 BotLog.action(bot, "eat_watchdog_retry", "wait_ticks", waitTicks, "food", bot.getFoodData().getFoodLevel());
                 bot.stopUsingItem();
@@ -176,6 +177,27 @@ public final class EatTask extends AbstractTask {
                 finishOnTimeoutOrFailure("eat_not_consumed");
             }
         }
+    }
+
+    /** What the eating watchdog does on this tick. */
+    enum WatchdogAction {
+        /** The bite is fine (or already over). */
+        NONE,
+        /** Stuck: cancel the bite and start it again. */
+        RETRY,
+        /** Stuck again after the retry budget is spent: end the pass as stuck. */
+        GIVE_UP
+    }
+
+    /**
+     * The watchdog's whole decision, pure: nothing until the bite is stuck past the deadline, then one retry per
+     * budget unit ({@link #MAX_WATCHDOG_RETRIES}), then give up.
+     */
+    static WatchdogAction watchdogDecision(int waitTicks, boolean usingItem, int retriesSoFar) {
+        if (!isEatWatchdogExpired(waitTicks, usingItem)) {
+            return WatchdogAction.NONE;
+        }
+        return retriesSoFar < MAX_WATCHDOG_RETRIES ? WatchdogAction.RETRY : WatchdogAction.GIVE_UP;
     }
 
     /** Whether a bite that is still in the using-item state after {@code waitTicks} ticks is stuck. */

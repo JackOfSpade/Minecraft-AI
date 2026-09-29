@@ -141,7 +141,7 @@ final class ShelterCleanupTask extends AbstractTask {
             if (bot.getFoodData().getFoodLevel() >= 20) {
                 return false;
             }
-            if (InventoryAction.findFoodSlot(bot) < 0) {
+            if (!InventoryAction.hasFood(bot)) {
                 // Keep the debt untouched.  DangerWatcher can resupply/hunt; cleanup must not
                 // trade the bot's remaining healing window for one more dirt block.  More
                 // importantly, do not remain as the active low-priority task: that would

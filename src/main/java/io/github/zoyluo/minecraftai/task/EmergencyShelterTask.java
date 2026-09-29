@@ -675,7 +675,7 @@ public final class EmergencyShelterTask extends AbstractTask {
      * @return true when tickHold must stop for this tick (still waiting, or a give-up exit began)
      */
     private boolean tickFoodRescueState(AIPlayerEntity bot) {
-        boolean hasFoodAvailable = InventoryAction.findFoodSlot(bot) >= 0;
+        boolean hasFoodAvailable = InventoryAction.hasFood(bot);
         if (waitingForRescue && hasFoodAvailable) {
             waitingForRescue = false;
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
@@ -710,7 +710,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (holdEatTask == null) {
             if (!shouldStartHoldEating(
                     bot.getHealth(), bot.getFoodData().getFoodLevel())
-                    || InventoryAction.findFoodSlot(bot) < 0) {
+                    || !InventoryAction.hasFood(bot)) {
                 return false;
             }
             holdEatTask = new EatTask();
@@ -769,7 +769,7 @@ public final class EmergencyShelterTask extends AbstractTask {
 
     private static boolean isRecoveredEnoughToExit(AIPlayerEntity bot) {
         return isRecoveredEnoughToExit(bot.getHealth(), bot.getMaxHealth(),
-                bot.getFoodData().getFoodLevel(), InventoryAction.findFoodSlot(bot) >= 0);
+                bot.getFoodData().getFoodLevel(), InventoryAction.hasFood(bot));
     }
 
     /**

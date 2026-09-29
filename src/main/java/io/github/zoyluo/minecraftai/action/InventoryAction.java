@@ -221,10 +221,23 @@ public final class InventoryAction {
     /**
      * The slot of the food to eat next, or -1. Picks by {@link FoodPolicy#choose}: cheap food that fits the
      * hunger gap before valuable food, the golden apple only in a low-health emergency, hunger-only food
-     * (raw chicken, rotten flesh) last. An offhand pick is promoted into the main inventory first.
+     * (raw chicken, rotten flesh) last. An offhand pick is promoted into the main inventory first, so this is
+     * an ACTION helper for {@link EatAction}; a caller that only asks "is there food to eat?" must use
+     * {@link #hasFood} (no promotion, no inventory change).
      */
     public static int findFoodSlot(AIPlayerEntity player) {
         return chooseFood(player, false);
+    }
+
+    /**
+     * Side-effect-free "is there food the bot would eat right now?" predicate: exactly the choice
+     * {@link #findFoodSlot} would make, without promoting an offhand stack or touching the inventory.
+     * Health dependent by design (it mirrors the eat decision): a golden apple counts only while health is at
+     * or below the emergency threshold ({@code combat.retreatHp}), so a bot carrying nothing but golden apples
+     * reports no food at full health and food when it is in danger.
+     */
+    public static boolean hasFood(AIPlayerEntity player) {
+        return pickFood(player, false) != null;
     }
 
     /** Like {@link #findFoodSlot} but never falls back to harmful food and never to an emergency-only apple. */
@@ -233,6 +246,15 @@ public final class InventoryAction {
     }
 
     private static int chooseFood(AIPlayerEntity player, boolean safeOnly) {
+        FoodPolicy.Option chosen = pickFood(player, safeOnly);
+        if (chosen == null) {
+            return -1;
+        }
+        return chosen.id() == OFFHAND_OPTION ? promoteOffhandSlot(player, 0).orElse(-1) : chosen.id();
+    }
+
+    /** The food decision itself, with no side effect (see {@link #hasFood}). */
+    private static FoodPolicy.Option pickFood(AIPlayerEntity player, boolean safeOnly) {
         java.util.List<FoodPolicy.Option> options = new java.util.ArrayList<>();
         Inventory inventory = player.getInventory();
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
@@ -241,12 +263,8 @@ public final class InventoryAction {
         addFoodOption(options, OFFHAND_OPTION, player.getItemBySlot(EquipmentSlot.OFFHAND), safeOnly);
         boolean emergency = !safeOnly && player.getHealth()
                 <= io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp();
-        FoodPolicy.Option chosen = FoodPolicy.choose(
+        return FoodPolicy.choose(
                 options, FoodPolicy.hungerGap(player.getFoodData().getFoodLevel()), emergency);
-        if (chosen == null) {
-            return -1;
-        }
-        return chosen.id() == OFFHAND_OPTION ? promoteOffhandSlot(player, 0).orElse(-1) : chosen.id();
     }
 
     private static void addFoodOption(java.util.List<FoodPolicy.Option> options, int id, ItemStack stack,

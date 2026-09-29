@@ -304,7 +304,7 @@ public final class ResupplyTask extends AbstractTask {
             note = result.reason();
             return false;
         }
-        return InventoryAction.findFoodSlot(bot) >= 0;
+        return InventoryAction.hasFood(bot);
     }
 
     private void startCrafting(AIPlayerEntity bot) {
@@ -362,7 +362,7 @@ public final class ResupplyTask extends AbstractTask {
             return;
         }
         if (eatTask == null) {
-            if (InventoryAction.findFoodSlot(bot) < 0) {
+            if (!InventoryAction.hasFood(bot)) {
                 BotLog.warn(LogCategory.TASK, bot, "resupply_no_food_to_eat");
                 fail("no_supply");
                 return;
@@ -390,7 +390,7 @@ public final class ResupplyTask extends AbstractTask {
     private boolean alreadySatisfied(AIPlayerEntity bot) {
         return switch (need) {
             case TOOL -> equipUsableTool(bot);
-            case FOOD -> InventoryAction.findFoodSlot(bot) >= 0;
+            case FOOD -> InventoryAction.hasFood(bot);
         };
     }
 

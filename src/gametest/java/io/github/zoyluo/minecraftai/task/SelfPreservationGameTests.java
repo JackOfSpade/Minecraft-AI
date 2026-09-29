@@ -48,7 +48,7 @@ public final class SelfPreservationGameTests {
         InventoryAction.giveItem(reserveOnly, new ItemStack(Items.ENCHANTED_GOLDEN_APPLE, 1));
         InventoryAction.giveItem(reserveOnly, new ItemStack(Items.CHORUS_FRUIT, 3));
         InventoryAction.giveItem(reserveOnly, new ItemStack(Items.SUSPICIOUS_STEW, 1));
-        require(context, InventoryAction.findFoodSlot(reserveOnly) < 0
+        require(context, !InventoryAction.hasFood(reserveOnly)
                         && InventoryAction.findSafeFoodSlot(reserveOnly) < 0
                         && !InventoryAction.hasSafeFood(reserveOnly),
                 "reserve food counted as ordinary food for a healthy bot");
@@ -180,6 +180,107 @@ public final class SelfPreservationGameTests {
             require(context, bot.isAlive() && bot.getHealth() > 0.0F, "the bot burned to death in the fire block");
             if (world.getBlockState(feet).isAir()) {
                 require(context, sawTask[0], "the fire block vanished without the fire reflex punching it");
+                cleanUp(bot);
+                context.succeed();
+            }
+        });
+    }
+
+    /**
+     * The water the fire reflex placed at the feet is taken back even when the task ends without its normal
+     * pick-up path: here it is aborted (a preempting request, despawn, death all end the same way) right after the
+     * water went down, and the source must be gone with the bucket full again.
+     */
+    @GameTest(environment = "minecraftai-gametest:self_preservation_game_tests_fire_reflex_water_is_recovered_after_an_aborted_extinguish", maxTicks = 500)
+    public void fireReflexWaterIsRecoveredAfterAnAbortedExtinguish(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "AbortBurnerGT", 20, 5, 330, 4);
+        InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET, 1));
+        BlockPos feet = bot.blockPosition();
+        ServerLevel world = context.getLevel();
+        bot.setRemainingFireTicks(300);
+        int[] abortedAt = {-1};
+        context.failIfEver(() -> {
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            require(context, bot.isAlive() && bot.getHealth() > 0.0F, "the burning bot died");
+            if (abortedAt[0] < 0) {
+                boolean placed = InventoryAction.countItem(bot, Items.BUCKET) > 0
+                        && InventoryAction.countItem(bot, Items.WATER_BUCKET) == 0
+                        && world.getFluidState(feet).isSource();
+                if (placed && active instanceof FireExtinguishTask) {
+                    // The fire is put out first so the watcher does not start a second reflex, then the task
+                    // is aborted before its own PICKUP phase ever ran.
+                    bot.setRemainingFireTicks(0);
+                    TaskManager.INSTANCE.abort(bot);
+                    abortedAt[0] = (int) context.getTick();
+                    require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1
+                                    && InventoryAction.countItem(bot, Items.BUCKET) == 0,
+                            "the abort left the bucket empty: water=" + InventoryAction.countItem(bot, Items.WATER_BUCKET)
+                                    + " empty=" + InventoryAction.countItem(bot, Items.BUCKET));
+                    require(context, !world.getFluidState(feet).isSource(),
+                            "the placed water source was left in the world after the abort");
+                }
+                return;
+            }
+            if (context.getTick() - abortedAt[0] >= 40) {
+                require(context, world.getFluidState(feet).isEmpty() && world.getFluidState(feet.above()).isEmpty(),
+                        "leftover water around the feet: " + world.getFluidState(feet));
+                require(context, InventoryAction.countItem(bot, Items.WATER_BUCKET) == 1,
+                        "the water bucket was not returned");
+                cleanUp(bot);
+                context.succeed();
+            }
+        });
+    }
+
+    /**
+     * A burning bot standing under a roof (no rain reaches it) with no water in reach walks out to a cell the
+     * rain does reach: findWaterOrRain offers an observed, standable, rained-on cell that is not under the roof,
+     * and the fire goes out there.
+     */
+    @GameTest(environment = "minecraftai-gametest:self_preservation_game_tests_burning_bot_under_aroof_walks_out_into_the_rain", maxTicks = 600)
+    public void burningBotUnderARoofWalksOutIntoTheRain(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "RainWalkerGT", 20, 5, 390, 8);
+        ServerLevel world = context.getLevel();
+        BlockPos feet = bot.blockPosition();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                world.setBlock(feet.offset(dx, 3, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        world.setWeatherParameters(0, 6000, true, false);
+        world.setRainLevel(1.0F);
+        io.github.zoyluo.minecraftai.gametest.GameTestCleanup.whenFinished(context, () -> {
+            world.setWeatherParameters(6000, 0, false, false);
+            world.setRainLevel(0.0F);
+        });
+        boolean[] ignited = {false};
+        boolean[] sawTask = {false};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive() && bot.getHealth() > 0.0F, "the burning bot died");
+            if (context.getTick() < 5) {
+                return;
+            }
+            if (!ignited[0]) {
+                require(context, world.isRainingAt(feet.offset(4, 1, 0)),
+                        "fixture: it is not raining at the open cell (biome or weather): raining=" + world.isRaining());
+                require(context, !world.isRainingAt(feet.above()), "fixture: the roof does not shelter the bot");
+                bot.setRemainingFireTicks(300);
+                var candidate = FireExtinguishTask.findWaterOrRain(bot);
+                require(context, candidate.isPresent(), "no rain candidate was offered to the burning bot");
+                BlockPos cell = candidate.get();
+                require(context, world.isRainingAt(cell.above()) && !world.getFluidState(cell).is(net.minecraft.tags.FluidTags.WATER),
+                        "the candidate is not a rained-on dry cell: " + cell);
+                require(context, Math.abs(cell.getX() - feet.getX()) > 2 || Math.abs(cell.getZ() - feet.getZ()) > 2,
+                        "the candidate is under the roof: " + cell);
+                ignited[0] = true;
+                return;
+            }
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            sawTask[0] |= active instanceof FireExtinguishTask;
+            if (!bot.isOnFire()) {
+                require(context, sawTask[0], "the fire went out without the fire reflex");
+                require(context, world.isRainingAt(bot.blockPosition().above()),
+                        "the bot was put out but not by walking into the rain: " + bot.blockPosition());
                 cleanUp(bot);
                 context.succeed();
             }
