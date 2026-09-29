@@ -59,7 +59,8 @@
       "io.github.zoyluo.minecraftai.task.FollowTaskGameTests",
       "io.github.zoyluo.minecraftai.pathfinding.GoalSnapGameTests",
       "io.github.zoyluo.minecraftai.task.BoatFollowGameTests",
-      "io.github.zoyluo.minecraftai.task.FollowSwimGameTests"
+      "io.github.zoyluo.minecraftai.task.FollowSwimGameTests",
+      "io.github.zoyluo.minecraftai.task.FollowAroundPondGameTests"
     ]
   },
   "depends": {
