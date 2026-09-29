@@ -28,6 +28,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -683,7 +684,8 @@ public final class EmergencyShelterTask extends AbstractTask {
                     "health", bot.getHealth(), "food", bot.getFoodData().getFoodLevel());
             return false; // let the ordinary eating primitive pick it up later this same tick
         }
-        if (!isHealingStalledWithoutFood(bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable)) {
+        if (!isHealingStalledWithoutFood(bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable,
+                canRegenerateNaturally(bot))) {
             return false;
         }
         if (shouldAbandonRescueWaitAndFight(bot.getHealth(), bot.getMaxHealth())) {
@@ -771,15 +773,34 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     /**
-     * True once healing has genuinely stalled: no food remains to eat and health is still below
-     * max. This is a materially different condition from simply having reached full health with
+     * True once healing has genuinely stalled: no food remains to eat, health is still below
+     * max and vanilla natural regeneration cannot make up for it (hunger bar under 18, or the
+     * gamerule off). A bot that just ate its last item to a full hunger bar keeps healing on its
+     * own and must simply hold until it is back at full health: treating it as stalled made it
+     * cry for help, or give up at 50 percent and leave the shelter half healed, with a full hunger
+     * bar. This is a materially different condition from simply having reached full health with
      * food merely not (or no longer) toppable back up to twenty -- see
      * {@link #isRecoveredEnoughToExit}, which handles that case instead. Point 6 of the rescue
      * contract: "ran out of food while still hurt" must be distinguished from "reached full
      * health and happened to run out of food around the same time".
      */
-    static boolean isHealingStalledWithoutFood(float health, float maxHealth, boolean hasFoodAvailable) {
-        return !hasFoodAvailable && health < maxHealth;
+    static boolean isHealingStalledWithoutFood(float health,
+                                               float maxHealth,
+                                               boolean hasFoodAvailable,
+                                               boolean canRegenerate) {
+        return !hasFoodAvailable && health < maxHealth && !canRegenerate;
+    }
+
+    /** Vanilla natural regeneration needs a hunger bar of at least 18 (and the gamerule on). */
+    static final int NATURAL_REGENERATION_FOOD_LEVEL = 18;
+
+    static boolean canRegenerateNaturally(int foodLevel, boolean naturalRegenerationRule) {
+        return naturalRegenerationRule && foodLevel >= NATURAL_REGENERATION_FOOD_LEVEL;
+    }
+
+    private static boolean canRegenerateNaturally(AIPlayerEntity bot) {
+        return canRegenerateNaturally(bot.getFoodData().getFoodLevel(),
+                bot.level().getGameRules().get(GameRules.NATURAL_HEALTH_REGENERATION));
     }
 
     /**

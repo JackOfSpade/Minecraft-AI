@@ -45,11 +45,23 @@ class EmergencyShelterEatingPolicyTest {
     // Point 6b: "ran out of food while still hurt" must be a distinct signal from "already full".
     @Test
     void healingStallsOnlyWhenFoodIsGoneAndHealthIsStillShortOfMax() {
-        assertTrue(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, false));
-        assertFalse(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, true),
+        assertTrue(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, false, false));
+        assertFalse(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, true, false),
                 "food is still available, so healing has not actually stalled yet");
-        assertFalse(EmergencyShelterTask.isHealingStalledWithoutFood(20.0F, 20.0F, false),
+        assertFalse(EmergencyShelterTask.isHealingStalledWithoutFood(20.0F, 20.0F, false, false),
                 "6a: already at full health is the normal case, not a stall");
+        assertFalse(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, false, true),
+                "a bot that ate its last item to a full hunger bar still regenerates: it holds, it does not"
+                        + " cry for help or give up at half health");
+    }
+
+    // Vanilla natural regeneration needs a hunger bar of 18 or more and the gamerule on.
+    @Test
+    void naturalRegenerationNeedsHungerEighteenAndTheGamerule() {
+        assertTrue(EmergencyShelterTask.canRegenerateNaturally(20, true));
+        assertTrue(EmergencyShelterTask.canRegenerateNaturally(18, true));
+        assertFalse(EmergencyShelterTask.canRegenerateNaturally(17, true));
+        assertFalse(EmergencyShelterTask.canRegenerateNaturally(20, false));
     }
 
     // Point 6's 50%-HP exception: give up waiting and fight once at/above half health, otherwise
