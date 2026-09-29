@@ -49,6 +49,22 @@ public final class CraftTask extends AbstractTask {
     private final BlockMiner tableReclaimMiner = new BlockMiner();
     private int reclaimTicks;
 
+    // Placement relocation: when no acceptable placement cell exists around the bot's current
+    // stance (e.g. every horizontal neighbour is a torch/solid block and the one open cell has no
+    // visible support face -- observed live: a bot standing at its own dig-down staircase entrance
+    // gave up instantly with place_crafting_table_failed: support_face_not_visible even though open,
+    // legal placement space existed a few blocks away), walk to a nearby reachable stance instead of
+    // failing immediately. Mirrors DigDownTask's own entry-relocation search (bounded candidate list,
+    // walk-only startSurfacePathTo, no pillaring/digging).
+    private static final int TABLE_PLACEMENT_RELOCATION_RADIUS = 6;
+    private static final int TABLE_PLACEMENT_RELOCATION_LIMIT = 200; // 10s: generous for a <=6-block local search
+    private List<BlockPos> tablePlacementRelocationCandidates;
+    private int tablePlacementRelocationIndex;
+    private BlockPos tablePlacementRelocationTarget;
+    private int tablePlacementRelocationStartElapsed;
+    private int tablePlacementRelocationAttempts;
+    private String tablePlacementRelocationLastFailure = "";
+
     /**
      * Bounds RECLAIMING_TABLE. Must clear BlockMiner's own 200-tick mining ceiling with room to
      * spare for the pickup delay and walk-over that follow, so the miner's own cap always has a
@@ -87,6 +103,7 @@ public final class CraftTask extends AbstractTask {
         phase = Phase.PLANNING;
         selfPlacedTablePos = null;
         reclaimTicks = 0;
+        resetTablePlacementRelocation();
     }
 
     @Override
@@ -133,6 +150,7 @@ public final class CraftTask extends AbstractTask {
     private void ensureTable(AIPlayerEntity bot) {
         if (WorkshopLocator.hasNearbyCraftingTable(bot)) {
             phase = Phase.CRAFTING;
+            resetTablePlacementRelocation();
             return;
         }
         OptionalInt tableSlot = InventoryAction.findItem(bot, Items.CRAFTING_TABLE);
@@ -140,12 +158,25 @@ public final class CraftTask extends AbstractTask {
             fail("need: minecraft:crafting_table x1");
             return;
         }
-        BlockPos placePos = adjacentAir(bot);
-        if (placePos == null) {
-            fail("no_place_for_crafting_table");
+        if (tablePlacementRelocationTarget != null) {
+            tickTablePlacementRelocation(bot, tableSlot.getAsInt());
             return;
         }
-        InventoryAction.equipFromSlot(bot, tableSlot.getAsInt());
+        BlockPos placePos = adjacentAir(bot);
+        if (placePos == null) {
+            // No acceptable cell around the current stance (e.g. every horizontal neighbour is
+            // blocked and the one open cell has no visible support face) -- try walking to a
+            // nearby reachable stance instead of giving up immediately.
+            if (!startNextTablePlacementRelocation(bot)) {
+                fail("place_crafting_table_failed:no_reachable_placement");
+            }
+            return;
+        }
+        placeTableAt(bot, tableSlot.getAsInt(), placePos);
+    }
+
+    private void placeTableAt(AIPlayerEntity bot, int tableSlot, BlockPos placePos) {
+        InventoryAction.equipFromSlot(bot, tableSlot);
         // A real jump-arc/fall landing can leave the server-side onGround bit stale for one tick
         // even though the bot's current cell is a genuine, collision-verified stand (the same
         // clientless fake-player quirk AcquireWaterTask's ascent placements already account for).
@@ -164,6 +195,114 @@ public final class CraftTask extends AbstractTask {
         // whole plan finishes instead of permanently donating it to the world.
         selfPlacedTablePos = placePos;
         phase = Phase.CRAFTING;
+        resetTablePlacementRelocation();
+    }
+
+    private void resetTablePlacementRelocation() {
+        tablePlacementRelocationCandidates = null;
+        tablePlacementRelocationIndex = 0;
+        tablePlacementRelocationTarget = null;
+        tablePlacementRelocationAttempts = 0;
+        tablePlacementRelocationLastFailure = "";
+    }
+
+    /**
+     * Walk-only (no digging, no pillaring), bounded local search for a stance from which an
+     * acceptable placement cell exists. Candidates are every standable cell within {@link
+     * #TABLE_PLACEMENT_RELOCATION_RADIUS} blocks of the bot's current position, nearest first.
+     * Mirrors DigDownTask's own entry-relocation search.
+     */
+    private boolean startNextTablePlacementRelocation(AIPlayerEntity bot) {
+        if (tablePlacementRelocationCandidates == null) {
+            tablePlacementRelocationCandidates = nearbyStandableStances(bot);
+            tablePlacementRelocationIndex = 0;
+        }
+        while (tablePlacementRelocationIndex < tablePlacementRelocationCandidates.size()) {
+            BlockPos candidate = tablePlacementRelocationCandidates.get(tablePlacementRelocationIndex++);
+            tablePlacementRelocationAttempts++;
+            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
+                tablePlacementRelocationLastFailure = "candidate_became_unavailable";
+                continue;
+            }
+            ActionResult result = bot.getActionPack().startSurfacePathTo(candidate);
+            if (result.isFailed()) {
+                tablePlacementRelocationLastFailure = result.reason();
+                continue;
+            }
+            BlockPos resolved = bot.getActionPack().activePathGoal();
+            if (resolved == null || !resolved.equals(candidate)) {
+                bot.getActionPack().stopAll();
+                tablePlacementRelocationLastFailure = "endpoint_not_exact";
+                continue;
+            }
+            tablePlacementRelocationTarget = candidate;
+            tablePlacementRelocationStartElapsed = elapsed;
+            BotLog.action(bot, "craft_table_placement_relocation_path",
+                    "to", candidate.toShortString(), "attempt", tablePlacementRelocationAttempts);
+            return true;
+        }
+        bot.getActionPack().stopAll();
+        BotLog.warn(LogCategory.TASK, bot, "craft_table_placement_relocation_exhausted",
+                "attempted", tablePlacementRelocationAttempts, "last", tablePlacementRelocationLastFailure);
+        return false;
+    }
+
+    private void tickTablePlacementRelocation(AIPlayerEntity bot, int tableSlot) {
+        if (elapsed - tablePlacementRelocationStartElapsed > TABLE_PLACEMENT_RELOCATION_LIMIT) {
+            bot.getActionPack().stopAll();
+            fail("place_crafting_table_failed:no_reachable_placement");
+            return;
+        }
+        BlockPos current = bot.getBlockPos();
+        if (current.equals(tablePlacementRelocationTarget)) {
+            bot.getActionPack().stopAll();
+            tablePlacementRelocationTarget = null;
+            BlockPos placePos = adjacentAir(bot);
+            if (placePos != null) {
+                placeTableAt(bot, tableSlot, placePos);
+                return;
+            }
+            // Arrived, but this stance's own candidate placement cell turned out unacceptable
+            // (e.g. the geometry changed) -- keep searching the remaining candidates.
+            if (!startNextTablePlacementRelocation(bot)) {
+                fail("place_crafting_table_failed:no_reachable_placement");
+            }
+            return;
+        }
+        if (bot.getActionPack().isPathExecutorIdle()) {
+            tablePlacementRelocationLastFailure = "path_ended_before_target";
+            tablePlacementRelocationTarget = null;
+            if (!startNextTablePlacementRelocation(bot)) {
+                fail("place_crafting_table_failed:no_reachable_placement");
+            }
+        }
+    }
+
+    /** Every standable cell within {@link #TABLE_PLACEMENT_RELOCATION_RADIUS} blocks, nearest first. */
+    private static List<BlockPos> nearbyStandableStances(AIPlayerEntity bot) {
+        BlockPos origin = bot.getBlockPos();
+        int radius = TABLE_PLACEMENT_RELOCATION_RADIUS;
+        long radiusSquared = (long) radius * radius;
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    long distSq = (long) dx * dx + (long) dy * dy + (long) dz * dz;
+                    if (distSq > radiusSquared) {
+                        continue;
+                    }
+                    BlockPos candidate = origin.add(dx, dy, dz).toImmutable();
+                    if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
+                        candidates.add(candidate);
+                    }
+                }
+            }
+        }
+        candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));
+        return candidates;
     }
 
     private void craftNext(AIPlayerEntity bot) {
@@ -451,13 +590,22 @@ public final class CraftTask extends AbstractTask {
      * behind -- can have its own hitbox clip a horizontal neighbour without ever changing {@code
      * bot.getBlockPos()}, so this candidate scan must reject exactly that overlap itself instead of
      * confidently choosing a cell vanilla's {@code World.canPlace} will then fail.
+     *
+     * <p>Finally, the cell must also have a support face {@link BuildAction#placeBlockAt} would
+     * actually accept -- the SAME visible/in-reach support-face predicate placeBlockAt itself uses
+     * (see {@link BuildAction#canAcceptPlacementAt}). Without this, a geometrically "open" cell
+     * with no visible support anywhere around it (e.g. the single open neighbour is the hole above
+     * a dig-down staircase entrance, with no floor below it and every horizontal neighbour blocked)
+     * would still be picked here only to fail placement with support_face_not_visible every time --
+     * exactly the live bug this guards against.
      */
     private static boolean isOpenPlacementCell(AIPlayerEntity bot, BlockPos candidate) {
         var candidateBox = new net.minecraft.util.math.Box(candidate);
         return ObservableWorldQuery.canObserveCell(bot, candidate)
                 && bot.getEntityWorld().getBlockState(candidate).isAir()
                 && bot.getEntityWorld().isSpaceEmpty(bot, candidateBox)
-                && !bot.getBoundingBox().intersects(candidateBox);
+                && !bot.getBoundingBox().intersects(candidateBox)
+                && BuildAction.canAcceptPlacementAt(bot, candidate);
     }
 
     private static String describeIngredient(RecipeRegistry.Ingredient ingredient, int count) {

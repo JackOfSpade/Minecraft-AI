@@ -117,6 +117,42 @@ public final class BuildAction {
         return Math.min(Math.max(1, perceptionRadius), interactionRange);
     }
 
+    /**
+     * Whether {@link #placeBlockAt} would find an acceptable support at {@code pos} -- the SAME
+     * visible/in-reach support-face predicate placeBlockAt itself uses ({@link
+     * #visibleSupportFaceHit} + {@code canInteractWithBlockAt}), without any world mutation or
+     * requiring an item in hand. Lets a caller (e.g. CraftTask's placement-candidate search) filter
+     * candidate cells down to ones BuildAction would actually accept, instead of only checking
+     * "open air" and then discovering support_face_not_visible after already committing to a cell.
+     */
+    public static boolean canAcceptPlacementAt(AIPlayerEntity player, BlockPos pos) {
+        double reach = player.getBlockInteractionRange();
+        double sampleRange = exactPlacementSampleRange(
+                MinecraftAiConfig.get().perception().radius(), reach);
+        BlockPos below = pos.down();
+        if (hasAcceptableSupportFace(player, below, Direction.UP, sampleRange)) {
+            return true;
+        }
+        for (Direction direction : Direction.values()) {
+            BlockPos against = pos.offset(direction.getOpposite());
+            if (against.equals(below)) {
+                continue;
+            }
+            if (hasAcceptableSupportFace(player, against, direction, sampleRange)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasAcceptableSupportFace(AIPlayerEntity player,
+                                                     BlockPos against,
+                                                     Direction face,
+                                                     double sampleRange) {
+        return visibleSupportFaceHit(player, against, face, sampleRange) != null
+                && player.canInteractWithBlockAt(against, 0.0D);
+    }
+
     static ActionResult preferPlacementFailure(ActionResult current, ActionResult candidate) {
         if (candidate == null || !candidate.isFailed()) {
             return current;
