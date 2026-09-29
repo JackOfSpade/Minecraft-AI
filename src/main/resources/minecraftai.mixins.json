@@ -14,6 +14,7 @@
     "AIPlayerControlledBoatLogicalSideMixin",
     "AIPlayerControlledBoatPaddleMixin",
     "ServerCommonNetworkHandlerAccessorMixin",
+    "TrapDoorBlockTypeInvokerMixin",
     "SleepManagerHumansOnlyMixin",
     "PhantomSpawnerHumansOnlyMixin",
     "ChunkMapVisibleChunksAccessorMixin",

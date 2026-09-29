@@ -63,8 +63,9 @@ import org.slf4j.Logger;
  * <p>The probe process ({@code Rig.ProbeProcess}) is an ordinary {@code IBaritoneProcess} that always asks for
  * {@code REQUEST_PAUSE}, so Baritone never plans a path but counts as busy and therefore drives the bot. A listener on the
  * game event handler answers {@code SprintStateEvent} from the SPRINT key (the role {@code PathExecutor} plays for real
- * movements), so the bridge's sprint rules (forward input, food, wall hit) are what the sprint trials exercise. This
- * class lives in the {@code task} package only to renew {@link NavSafetyNet}'s swim lease in the water trials.
+ * movements), so the bridge's sprint rules (forward input, food, wall hit) are what the sprint trials exercise.
+ * The water trials declare the route swim-permitted ({@link BaritoneRegistry#setWaterAllowed}) so the driver leases the bot to Baritone
+ * against the drowning safety net every driven tick, the way a swim route does.
  */
 public final class BaritoneInputPhysicsProbeGameTests {
     private static final Logger LOG = LogUtils.getLogger();
@@ -534,6 +535,13 @@ public final class BaritoneInputPhysicsProbeGameTests {
                     new AABB(rig.origin).inflate(64.0D))) {
                 m.discard();
             }
+            // The food-level-3 trial makes the bot critically hungry, and the safety net then starts a hunt as soon as it sees
+            // prey within 64 blocks of it (a natural cow or pig in the far-away test chunks): its stop_all hands the bot back to the
+            // legacy executor, which drops the (temporary) probe process, so the trial never finishes. No prey, no hunt.
+            for (net.minecraft.world.entity.animal.Animal prey : rig.level.getEntitiesOfClass(net.minecraft.world.entity.animal.Animal.class,
+                    new AABB(rig.origin).inflate(100.0D))) {
+                prey.discard();
+            }
             if (rig.error != null) {
                 rig.level.getGameRules().set(GameRules.SPAWN_MONSTERS, rig.originalSpawnMonsters, rig.level.getServer());
                 AIPlayerManager.INSTANCE.despawn(ctx.getLevel().getServer(), botName);
@@ -886,8 +894,12 @@ public final class BaritoneInputPhysicsProbeGameTests {
                 double vanilla = Math.max(0.0D, h - 3.0D);
                 double landY = end.postY - rig.origin.getY();
                 rig.expect(rig.bot.onGround() && Math.abs(landY) < 0.01D, "did not settle on the floor y=" + f(landY));
-                rig.expect(h < 5 || maxFall > h * 0.5D, "the fall distance was not tracked (max " + f(maxFall) + " for a " + h + " block fall)");
-                rig.expect(damage >= vanilla - 0.01D && damage <= vanilla + 1.01D, "fall damage " + damage + " vs vanilla " + vanilla);
+                // The driver's own fall check must run (a ServerPlayer only checks falls on a client move packet): the distance is
+                // accumulated while airborne (also for the 3-block fall, whose damage is 0 with or without a check) and reset on
+                // landing, and the damage is vanilla's, exactly.
+                rig.expect(maxFall > h * 0.8D, "the fall distance was not tracked (max " + f(maxFall) + " for a " + h + " block fall)");
+                rig.expect(rig.bot.fallDistance == 0.0D, "the fall distance was not reset on landing: " + f(rig.bot.fallDistance));
+                rig.expect(Math.abs(damage - vanilla) <= 0.01D, "fall damage " + damage + " vs vanilla " + vanilla);
                 return "height=" + h + " landTick=" + landTick + " airborneTicks=" + airborne
                         + " maxFallDistanceSeen=" + f(maxFall) + " damage=" + damage
                         + " vanillaDamageForSeenFall=" + vanilla + " finalY=" + f(landY)
@@ -1213,7 +1225,7 @@ public final class BaritoneInputPhysicsProbeGameTests {
                 pool.accept(rig);
                 rig.teleport(0.5D, 0.0D, -1.5D, 0.0F);
             }, (rig, t) -> {
-                NavSafetyNet.INSTANCE.renewFollowSwim(rig.bot);
+                BaritoneRegistry.INSTANCE.setWaterAllowed(rig.bot, true);
                 if (t >= 100) {
                     return true;
                 }
@@ -1233,7 +1245,7 @@ public final class BaritoneInputPhysicsProbeGameTests {
             pool.accept(rig);
             rig.teleport(0.5D, -4.0D, 4.5D, 0.0F);
         }, (rig, t) -> {
-            NavSafetyNet.INSTANCE.renewFollowSwim(rig.bot);
+            BaritoneRegistry.INSTANCE.setWaterAllowed(rig.bot, true);
             double y = rig.bot.getY() - rig.origin.getY();
             if (t >= 90 || (y > -0.6D && t > 2)) {
                 return true;
@@ -1254,7 +1266,7 @@ public final class BaritoneInputPhysicsProbeGameTests {
             pool.accept(rig);
             rig.teleport(0.5D, -1.0D, 4.5D, 180.0F);
         }, (rig, t) -> {
-            NavSafetyNet.INSTANCE.renewFollowSwim(rig.bot);
+            BaritoneRegistry.INSTANCE.setWaterAllowed(rig.bot, true);
             double y = rig.bot.getY() - rig.origin.getY();
             double z = rig.bot.getZ() - rig.origin.getZ();
             if (t >= 120 || (rig.bot.onGround() && y > -0.05D && z < 0.6D && t > 3)) {

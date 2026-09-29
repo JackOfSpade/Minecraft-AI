@@ -4,6 +4,7 @@ import baritone.api.BaritoneAPI;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mixin.TrapDoorBlockTypeInvokerMixin;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
@@ -11,9 +12,7 @@ import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.BlockTags;
@@ -82,8 +81,6 @@ public final class BaritoneBreakPlacePolicy {
             Blocks.DAYLIGHT_DETECTOR, Blocks.COMPOSTER, Blocks.CAULDRON, Blocks.WATER_CAULDRON, Blocks.LAVA_CAULDRON,
             Blocks.POWDER_SNOW_CAULDRON, Blocks.RESPAWN_ANCHOR, Blocks.DRAGON_EGG, Blocks.CAKE);
 
-    /** Verdict cache per block (the rule reads the block's default state only); "" = breakable, otherwise the reason. */
-    private static final Map<Block, String> BREAK_VERDICT = new ConcurrentHashMap<>();
 
     private BaritoneBreakPlacePolicy() {
     }
@@ -106,7 +103,7 @@ public final class BaritoneBreakPlacePolicy {
      * state only, so it is a property of the kind of block (the cost model asks it for every block it looks at).
      */
     public static String breakDenialOf(Block block) {
-        String verdict = BREAK_VERDICT.computeIfAbsent(block, BaritoneBreakPlacePolicy::computeBreakDenial);
+        String verdict = BreakVerdictCache.BLOCKS.verdict(block, BaritoneBreakPlacePolicy::computeBreakDenial);
         return verdict.isEmpty() ? null : verdict;
     }
 
@@ -202,8 +199,8 @@ public final class BaritoneBreakPlacePolicy {
         if (seen != null) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, against, seen, detail);
         }
-        if (isOpenable(support)) {
-            return Decision.ALLOWED; // a wooden door, a trapdoor, a fence gate: the click opens it
+        if (opensOnClick(support, bot.isSecondaryUseActive())) {
+            return Decision.ALLOWED; // a wooden door, a trapdoor, a fence gate: the click opens it, whatever the hand holds
         }
         if (!(held.getItem() instanceof BlockItem)) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, against, "not_a_block_item", detail);
@@ -220,13 +217,23 @@ public final class BaritoneBreakPlacePolicy {
         return Decision.ALLOWED;
     }
 
-    private static boolean isOpenable(BlockState state) {
+    /**
+     * Whether a right click on {@code state} opens it: a door or trapdoor whose {@code BlockSetType} lets a hand open it (never
+     * iron), or a fence gate, and only while the bot is not sneaking. A sneaking player holding an item uses the item on the
+     * block instead of the block (vanilla {@code ServerPlayerGameMode#useItemOn}), which for a non-block item would be an item
+     * use the policy never allowed; so a sneaking click gets no open allowance and falls through to the placement rules, which
+     * refuse it (a door, trapdoor or gate is never a support for a placement).
+     */
+    static boolean opensOnClick(BlockState state, boolean sneaking) {
+        if (sneaking) {
+            return false;
+        }
         Block block = state.getBlock();
         if (block instanceof DoorBlock door) {
             return door.type().canOpenByHand();
         }
-        if (block instanceof TrapDoorBlock) {
-            return block != Blocks.IRON_TRAPDOOR;
+        if (block instanceof TrapDoorBlock trapDoor) {
+            return ((TrapDoorBlockTypeInvokerMixin) trapDoor).minecraftai$type().canOpenByHand();
         }
         return block instanceof FenceGateBlock;
     }

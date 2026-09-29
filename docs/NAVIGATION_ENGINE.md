@@ -1,7 +1,7 @@
 # Navigation engine switch (`nav.engine`)
 
-Status: P1 of `docs/NAVIGATION_BARITONE_PLAN.md`. The default is `legacy`; nothing changes for a player until the Baritone
-engine has been shown to be at least as good (P2/P3).
+Status: built (P1 of `docs/NAVIGATION_BARITONE_PLAN.md`). The default is `legacy`; nothing changes for a player until the Baritone
+engine has been shown to be at least as good on the obstacle courses (P2), which is also when the default is flipped.
 
 ## Config
 

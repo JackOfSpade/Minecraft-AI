@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai;
 
+import io.github.zoyluo.minecraftai.baritone.BreakVerdictCache;
 import io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.brain.ChatCaptureListener;
@@ -22,6 +23,7 @@ import io.github.zoyluo.minecraftai.task.BotTickCoordinator;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.CommonLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
@@ -74,6 +76,10 @@ public class MinecraftAiMod implements ModInitializer {
         AIPayloads.register();
         MinecraftAiServerNetworking.INSTANCE.register();
 
+        // The Baritone break policy caches a verdict per block from tag membership: drop it when the server starts and when tags
+        // are loaded or reloaded (BreakVerdictCache names no Baritone type, so this stays free with the legacy engine).
+        ServerLifecycleEvents.SERVER_STARTING.register(server -> BreakVerdictCache.invalidate());
+        CommonLifecycleEvents.TAGS_LOADED.register((registries, client) -> BreakVerdictCache.invalidate());
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             BotLog.lifecycle("server_started", "motd", server.getMotd());
             RuntimeLifecycleCoordinator.INSTANCE.onServerStarted(server, config);

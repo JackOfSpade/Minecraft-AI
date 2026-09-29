@@ -93,7 +93,6 @@ matching and `BaritoneVendorIntegrityTest` and the generator's `verify` fail on 
 `tools/baritone/vendor-import.sh`, which reads blobs with `git cat-file` (bytes exactly as committed) and takes the hashes from the
 object database, never from the files: the manifest is upstream's hash, not ours. The same holds inside this repository:
 `third_party/baritone` must not go through an editor or a tool that normalises line endings.
-editor that normalises line endings.
 
 `third_party/baritone/UPSTREAM.md` is the only file of the vendor directory that is not upstream's. It is tracked despite the
 repository's `*.md` ignore rule (there is an explicit exception in `.gitignore`); `vendor-import.sh` keeps it and you update it by hand.
@@ -188,11 +187,27 @@ measured and the expected value. When a Minecraft or Baritone upgrade moves one 
 * **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache` (its region packer and saver
   are two daemon threads per dimension); nothing closes it when the last bot goes away. With `chunkCaching` off it only holds
   waypoints and empty region files.
-* Which navigation calls go through Baritone (the `navigation.engine` switch, follow and move adapters, the water safety-net lease) and
-  the survival rules for driven breaks and placements are the integration stages that build on this layer; see
-  `docs/NAVIGATION_BARITONE_PLAN.md`.
-* **Policy per bot.** Baritone reads `Baritone.settings()` live (a global, see `BaritoneAPI.getSettings()`); per-bot rules
-  (strict-survival, protected blocks) belong in a `CalculationContext` subclass, not in mutated global settings.
+* **Restoring the capabilities that are switched off** (parkour, water-bucket falls, vines, the on-disk chunk cache) is planned with the
+  obstacle-course comparison of legacy against Baritone (phase P2 of `docs/NAVIGATION_BARITONE_PLAN.md`), each under its own tests,
+  before the default of `nav.engine` is flipped.
+* **Policy per bot.** Baritone reads `Baritone.settings()` live (a global, see `BaritoneAPI.getSettings()`), so everything that
+  differs per bot goes through the player context (patches 0014 and 0015: `allowBreak`, `allowPlace`, `allowScanningProcess`),
+  never through mutated global settings. Anything new that must differ per bot follows the same route.
+
+### Built on top of this layer (no longer open)
+
+* **The `nav.engine` switch** (`legacy` by default, `baritone`): ordinary walks, surface walks, follow (`GoalNear`) and swim routes are
+  executed by Baritone behind `ActionPack`, everything else stays on the legacy navigator; Baritone is bootstrapped lazily and
+  fail-soft (a link or init failure falls back to legacy for the session). See `docs/NAVIGATION_ENGINE.md`.
+* **Follow and move adapters** (`BaritoneNavigator`, `NavEngineSelector`): the legacy result vocabulary (`IN_PROGRESS`,
+  `GOAL_UNREACHABLE`, `lastRouteOutcome()`), synchronous admission through one inline budgeted search, one writer of the bot's
+  movement at a time.
+* **The water lease.** A swim route (`BaritoneRegistry.setWaterAllowed`) leases the bot to Baritone against the drowning safety net
+  for as long as Baritone drives it (`NavSafetyNet.renewBaritoneWater`, refused once the air is low).
+* **The survival rules** of the next section (`BaritoneBreakPlacePolicy` and friends), with the pack-compat GameTest harness that
+  runs the GameTests next to the mods of the real profile.
+
+Plan, status and next phases: `docs/NAVIGATION_BARITONE_PLAN.md`.
 
 ## Strict-survival rules (what Baritone must not do, and how that is enforced)
 
@@ -204,16 +219,32 @@ and fed into Baritone's planning; every refusal is a `baritone_refused` line in 
 |---|---|
 | break a block (`clickBlock`, `onPlayerDamageBlock`) | only natural terrain (stone family, dirt, sand, gravel, ores, leaves, small plants) that is observable (`ObservableWorldQuery`) and only if the bot's `BaritonePolicy` allows breaking. Never a block entity (chest, furnace, bed, spawner, sign, barrel ...), a crafting table or other utility block, a fluid, a dangerous block, bedrock, or anything that is not natural terrain (planks, glass, bricks, iron doors: player builds). A placed cobblestone cannot be told from a natural one, as for a player |
 | plan a route | the block-level part of the rule is installed as `Settings.blocksToDisallowBreaking` (a hash-cached view, `BaritoneBreakPlacePolicy.installPlanningRules`), so searches plan around protected blocks (or report no path) instead of planning through them and being vetoed at execution. `allowBreakAnyway` is emptied |
-| place a block / click a block (`processRightClickBlock`) | the support face must pass the legacy perception proof (`BuildAction.supportFaceRefusal`: in reach, in perception range, an eye ray strikes exactly that face); only Baritone's throwaway blocks (`acceptableThrowawayItems`); only if the policy allows placing; never against a chest, bed, crafting table, door, lever ... The same click may open a wooden door, trapdoor or fence gate |
+| place a block / click a block (`processRightClickBlock`) | the support face must pass the legacy perception proof (`BuildAction.supportFaceRefusal`: in reach, in perception range, an eye ray strikes exactly that face); only Baritone's throwaway blocks (`acceptableThrowawayItems`); only if the policy allows placing; never against a chest, bed, crafting table, door, lever ... The same click may open a door or trapdoor whose `BlockSetType` lets a hand open it (never iron) or a fence gate, but only while the bot is not sneaking: a sneaking bot with an item in hand would use the item instead of the block, so that click gets no allowance and is refused like any other non-throwaway use |
 | use an item without a block (`processRightClick`) | refused unless in `BaritoneBreakPlacePolicy.USE_ITEM_ALLOWLIST`, which is empty (water bucket, ender pearl, food ... are all refused) |
 | move inventory items (`windowClick`) | refused unless `allowInventory` is on (`BaritoneSettings` keeps it off) and then only a hotbar swap in the bot's own inventory |
 | scan the world for targets (`MineProcess`, `GetToBlockProcess`, `FarmProcess`, `ExploreProcess`, `BuilderProcess`) | **do not start** (patch 0015, `ServerPlayerContext.allowScanningProcess`) unless the bot holds the hidden-scan privilege (`PrivilegedCapability.HIDDEN_BLOCK_SCAN`, never in strict survival). They find ores, crops and blocks by reading every loaded chunk, i.e. X-ray |
+
+**Decision: the break whitelist is natural terrain only (kept on purpose).** Two consequences are intended and documented here so
+nobody "fixes" them by widening the list:
+
+* **Logs are never breakable by Baritone.** A route through a forest goes around the trees, and a log cabin, a fence of logs or a
+  wooden tower is protected without having to tell it from a natural tree. Wood for the bots comes from the gather tasks (legacy
+  actions, their own tool and tree rules), not from Baritone opening a way.
+* **Player-built cobblestone, dirt and other "natural-looking" blocks cannot be told from natural ones**, exactly like for a player
+  who digs through a wall of cobblestone. The rule is about the kind of block, not about who placed it (`BaritoneEdits` and the mod's
+  own placement ledger are not consulted, and must not become a way to learn what is "player built"). Everything that is clearly
+  made (planks, glass, bricks, wool, iron doors, fences, stairs ...) or that stores or does something stays protected.
+
+The verdict per block kind is cached (`BreakVerdictCache`); it is computed from tag membership, so the cache is dropped when the server
+starts and on every tag load or `/reload` (`MinecraftAiMod`), and not only on the first use.
 
 **The X-ray rule for callers:** Baritone only ever receives coordinate goals (`GoalBlock`, `GoalNear`, `GoalTwoBlocks`, `GoalXZ`, `GoalYLevel`, or
 `BaritoneGoals.composite` of those) built from targets the mod's observation layer produced. `BaritoneGoals` is the door: `setGoal`
 refuses every other goal type, `mineAt(bot, pos)` refuses a target the bot cannot observe right now (`target_not_observed`), one that
 is not breakable, or a bot that may not break. Never call `getMineProcess()`, `getGetToBlockProcess()`, `getFarmProcess()`,
-`getExploreProcess()` or `getBuilderProcess()` from mod code, and do not scan with `getWorldScanner()` to choose a target. Known
+`getExploreProcess()` or `getBuilderProcess()` from mod code, and do not scan with `getWorldScanner()` to choose a target. This is enforced, not just
+asked: `BaritoneSurvivalContractTest` scans all of `src/main` and fails when any of those accessors appears outside `BaritoneDriver`, whose
+busy check may only read `.isActive()`. Known
 limits: a search plans over the loaded chunks like the legacy navigator (it does not reveal ore, but a route can pass through an
 unseen cave); Baritone's placement chooses its own support face, and a face refused at execution (say next to a chest) is not
 planned around.

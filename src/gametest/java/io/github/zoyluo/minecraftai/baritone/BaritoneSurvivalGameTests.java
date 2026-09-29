@@ -327,6 +327,48 @@ public final class BaritoneSurvivalGameTests {
         s.finish();
     }
 
+    /** The top face of a closed bottom-half trapdoor (3/16 high). */
+    private static BlockHitResult trapdoorTop(BlockPos trapdoor) {
+        return new BlockHitResult(new Vec3(trapdoor.getX() + 0.5D, trapdoor.getY() + 0.1875D, trapdoor.getZ() + 0.5D), Direction.UP, trapdoor, false);
+    }
+
+    /**
+     * A click that opens a trapdoor is allowed for whatever the hand holds, but only from a bot that is not sneaking (a sneaking
+     * player with an item in hand uses the item, not the block) and only for a trapdoor a hand can open: the wooden and the
+     * copper one open, the iron one is a refused use of the pickaxe.
+     */
+    @GameTest(maxTicks = 200)
+    public void clickOpensHandTrapdoorsOnlyFromANonSneakingBotAndNeverIron(GameTestHelper context) {
+        Small s = Small.begin(context, "SurvTrapGT", 4);
+        s.giveHand(new ItemStack(Items.STONE_PICKAXE, 1));
+        ServerPlayerController controller = s.controller();
+        BlockPos wooden = s.at(1, 0, 0);
+        BlockPos iron = s.at(2, 0, 0);
+        BlockPos copper = s.at(3, 0, 0);
+        s.world.setBlock(wooden, Blocks.OAK_TRAPDOOR.defaultBlockState(), Block.UPDATE_ALL);
+        s.world.setBlock(iron, Blocks.IRON_TRAPDOOR.defaultBlockState(), Block.UPDATE_ALL);
+        s.world.setBlock(copper, Blocks.COPPER_TRAPDOOR.defaultBlockState(), Block.UPDATE_ALL);
+        var open = net.minecraft.world.level.block.state.properties.BlockStateProperties.OPEN;
+
+        s.bot.setShiftKeyDown(true);
+        require(context, s.bot.isSecondaryUseActive(), "the test bot is not sneaking");
+        expectRefused(context, s, controller, trapdoorTop(wooden), "not_a_block_item");
+        require(context, !s.world.getBlockState(wooden).getValue(open), "a sneaking click opened the trapdoor");
+        s.bot.setShiftKeyDown(false);
+
+        expectRefused(context, s, controller, trapdoorTop(iron), "not_a_block_item");
+        require(context, !s.world.getBlockState(iron).getValue(open), "an iron trapdoor opened by hand");
+
+        InteractionResult result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, trapdoorTop(wooden));
+        require(context, result.consumesAction() && s.world.getBlockState(wooden).getValue(open),
+                "the click did not open the wooden trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
+        result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, trapdoorTop(copper));
+        require(context, result.consumesAction() && s.world.getBlockState(copper).getValue(open),
+                "the click did not open the copper trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
+        require(context, BaritoneEdits.of(s.bot.getUUID(), BaritoneEdits.Kind.PLACE).isEmpty(), "opening a trapdoor was recorded as a placement");
+        s.finish();
+    }
+
     @GameTest(maxTicks = 200)
     public void itemUseWithoutABlockAndInventoryMovesAreRefused(GameTestHelper context) {
         Small s = Small.begin(context, "SurvUseGT", 4);
