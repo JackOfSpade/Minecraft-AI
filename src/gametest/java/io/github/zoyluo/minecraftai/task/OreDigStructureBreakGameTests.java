@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BlockMiner;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -70,15 +71,18 @@ public final class OreDigStructureBreakGameTests {
         expected.put(Blocks.COBWEB, "not_natural_terrain");
         expected.put(Blocks.OAK_LOG, "not_natural_terrain");
         expected.put(Blocks.OBSIDIAN, "not_natural_terrain");
+        expected.put(Blocks.ICE, "ice_releases_water");
+        expected.put(Blocks.FROSTED_ICE, "ice_releases_water");
         // Natural terrain: allowed (null).
         List<Block> natural = List.of(Blocks.STONE, Blocks.GRANITE, Blocks.DIORITE, Blocks.ANDESITE, Blocks.TUFF, Blocks.DEEPSLATE,
                 Blocks.COBBLESTONE, Blocks.COBBLED_DEEPSLATE, Blocks.SANDSTONE, Blocks.RED_SANDSTONE, Blocks.SAND, Blocks.RED_SAND,
                 Blocks.GRAVEL, Blocks.DIRT, Blocks.GRASS_BLOCK, Blocks.CLAY, Blocks.MUD, Blocks.TERRACOTTA, Blocks.ORANGE_TERRACOTTA,
-                Blocks.BROWN_TERRACOTTA, Blocks.ICE, Blocks.PACKED_ICE, Blocks.BLUE_ICE, Blocks.SNOW_BLOCK, Blocks.DRIPSTONE_BLOCK,
+                Blocks.BROWN_TERRACOTTA, Blocks.PACKED_ICE, Blocks.BLUE_ICE, Blocks.SNOW_BLOCK, Blocks.DRIPSTONE_BLOCK,
                 Blocks.CALCITE, Blocks.SMOOTH_BASALT, Blocks.BASALT, Blocks.BLACKSTONE, Blocks.NETHERRACK, Blocks.SOUL_SAND, Blocks.SOUL_SOIL,
                 Blocks.CRIMSON_NYLIUM, Blocks.WARPED_NYLIUM, Blocks.END_STONE, Blocks.AMETHYST_BLOCK, Blocks.SCULK, Blocks.OAK_LEAVES,
                 Blocks.SHORT_GRASS, Blocks.COAL_ORE, Blocks.IRON_ORE, Blocks.DEEPSLATE_DIAMOND_ORE, Blocks.NETHER_GOLD_ORE,
-                Blocks.ANCIENT_DEBRIS, Blocks.GLOWSTONE);
+                Blocks.ANCIENT_DEBRIS, Blocks.GLOWSTONE, Blocks.RAW_IRON_BLOCK, Blocks.RAW_COPPER_BLOCK, Blocks.DEEPSLATE_IRON_ORE,
+                Blocks.DEEPSLATE_COPPER_ORE);
         List<String> wrong = new ArrayList<>();
         for (Map.Entry<Block, String> entry : expected.entrySet()) {
             String verdict = BreakRule.denialOf(entry.getKey());
@@ -109,12 +113,13 @@ public final class OreDigStructureBreakGameTests {
         BlockPos target = arena.cell(0, 0, -2);
         List<Block> structure = List.of(Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS, Blocks.CHISELED_STONE_BRICKS,
                 Blocks.STONE_SLAB, Blocks.OAK_PLANKS, Blocks.INFESTED_STONE, Blocks.INFESTED_STONE_BRICKS, Blocks.BRICKS, Blocks.GLASS,
-                Blocks.WHITE_WOOL, Blocks.OAK_STAIRS, Blocks.CHEST, Blocks.COBWEB);
+                Blocks.WHITE_WOOL, Blocks.OAK_STAIRS, Blocks.CHEST, Blocks.COBWEB, Blocks.ICE, Blocks.OBSIDIAN);
         BlockMiner refuser = new BlockMiner();
         for (Block block : structure) {
             arena.world.setBlock(target, block.defaultBlockState(), Block.UPDATE_ALL);
             require(context, !NeighborEnumerator.isMineable(arena.world, target), "the path search may dig through " + block);
-            refuser.begin(bot, target, false, true);
+            refuser.naturalTerrainOnly(true);
+            refuser.begin(bot, target, false);
             BlockMiner.Status status = refuser.tick(bot);
             require(context, status == BlockMiner.Status.FAILED && refuser.failureReason().startsWith("break_refused:"),
                     block + " was not refused: " + status + " " + refuser.failureReason());
@@ -129,8 +134,8 @@ public final class OreDigStructureBreakGameTests {
         plain.cancel(bot);
 
         List<Block> natural = List.of(Blocks.SANDSTONE, Blocks.TERRACOTTA, Blocks.ORANGE_TERRACOTTA, Blocks.DEEPSLATE, Blocks.TUFF, Blocks.DRIPSTONE_BLOCK,
-                Blocks.SOUL_SAND, Blocks.BASALT, Blocks.SMOOTH_BASALT, Blocks.PACKED_ICE, Blocks.CALCITE, Blocks.COBBLESTONE, Blocks.NETHERRACK,
-                Blocks.OAK_LEAVES);
+                Blocks.SOUL_SAND, Blocks.BASALT, Blocks.SMOOTH_BASALT, Blocks.PACKED_ICE, Blocks.BLUE_ICE, Blocks.CALCITE, Blocks.COBBLESTONE, Blocks.NETHERRACK,
+                Blocks.OAK_LEAVES, Blocks.RAW_IRON_BLOCK, Blocks.RAW_COPPER_BLOCK);
         BlockMiner miner = new BlockMiner();
         int[] index = {0};
         int[] tick = {0};
@@ -146,7 +151,8 @@ public final class OreDigStructureBreakGameTests {
             if (!began[0]) {
                 arena.world.setBlock(target, block.defaultBlockState(), Block.UPDATE_ALL);
                 require(context, NeighborEnumerator.isMineable(arena.world, target), "the path search may not dig through " + block);
-                miner.begin(bot, target, false, true);
+                miner.naturalTerrainOnly(true);
+                miner.begin(bot, target, false);
                 began[0] = true;
             }
             BlockMiner.Status status = miner.tick(bot);
@@ -180,7 +186,7 @@ public final class OreDigStructureBreakGameTests {
                     "the dig ended as " + task.state() + ": " + task.failureReason());
             int layers = clearedLayers(arena, cells);
             arena.require(now < 1600, "OreDig dug only " + layers + " of " + lane.size() + " layers of natural blocks in " + now + " ticks");
-            if (layers >= 5) {
+            if (layers >= lane.size()) { // every layer: a dig that stops at the fifth is a dig that gave up on a kind of block
                 arena.finish(bot);
             }
         });
@@ -337,6 +343,85 @@ public final class OreDigStructureBreakGameTests {
                 BlockPos pos = queue.get(next[0]);
                 pack.startMining(pos, Direction.SOUTH);
                 running[0] = true;
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The route executor's dig-through steps: the same destroy delay, the same rule at execution
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /**
+     * A dig route (the legacy executor's DIG_THROUGH steps, which tick their own sub-miners) through a corridor of stone: the
+     * cells open one after the other, and between two breaks lies the break time plus vanilla's five tick destroy delay (before,
+     * the route chained its breaks back to back).
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_route_dig_through_waits_five_ticks_between_breaks", maxTicks = 1000)
+    public void routeDigThroughWaitsFiveTicksBetweenBreaks(GameTestHelper context) {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
+        List<BlockPos> cells = buildLane(arena, List.of(Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE,
+                Blocks.STONE, Blocks.STONE));
+        AIPlayerEntity bot = arena.spawn("RouteDelayGT", arena.cell(0, 0, 0));
+        bot.getInventory().setItem(0, new ItemStack(Items.IRON_PICKAXE));
+        bot.getInventory().setSelectedSlot(0);
+        float perTick = Blocks.STONE.defaultBlockState().getDestroyProgress(bot, arena.world, cells.get(0));
+        int work = 0;
+        for (float progress = 0.0F; progress < 1.0F; progress += perTick) {
+            work++;
+        }
+        arena.require(work >= 3, "the stone is not a multi-tick break with this tool: " + work + " ticks");
+        int workTicks = work;
+        ActionResult started = bot.getActionPack().startDigPathTo(arena.cell(0, 0, -6));
+        arena.require(started.isInProgress(), "the dig route was not accepted: " + started.status() + " " + started.reason());
+        Map<BlockPos, Long> brokenAt = new LinkedHashMap<>();
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            arena.require(now < 950, "the dig route did not finish: broken=" + brokenAt.size() + " at " + bot.position());
+            for (BlockPos cell : cells) {
+                if (!brokenAt.containsKey(cell) && arena.world.getBlockState(cell).isAir()) {
+                    brokenAt.put(cell.immutable(), arena.world.getGameTime());
+                }
+            }
+            if (bot.getActionPack().isPathExecutorIdle() && brokenAt.size() >= 6) {
+                List<Long> times = new ArrayList<>(brokenAt.values());
+                java.util.Collections.sort(times);
+                for (int i = 1; i < times.size(); i++) {
+                    long gap = times.get(i) - times.get(i - 1);
+                    arena.require(gap >= workTicks + 4, "break " + (i + 1) + " came " + gap + " ticks after the previous one; " + workTicks
+                            + " ticks of work plus the 5 tick delay expected: " + times);
+                }
+                arena.finish(bot);
+            }
+        });
+    }
+
+    /**
+     * A structure block that appears in the route's way after it was planned is not dug: the executor checks the shared rule at the
+     * moment it is about to break a cell (before, only the plan did) and replans around it.
+     */
+    @GameTest(environment = "minecraftai-gametest:ore_dig_structure_break_game_tests_route_dig_through_refuses_structure_that_appeared_after_planning", maxTicks = 700)
+    public void routeDigThroughRefusesStructureThatAppearedAfterPlanning(GameTestHelper context) {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 6, 8, 6);
+        List<BlockPos> cells = buildLane(arena, List.of(Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE, Blocks.STONE,
+                Blocks.STONE, Blocks.STONE));
+        AIPlayerEntity bot = arena.spawn("RouteRefuseGT", arena.cell(0, 0, 0));
+        bot.getInventory().setItem(0, new ItemStack(Items.IRON_PICKAXE));
+        bot.getInventory().setSelectedSlot(0);
+        ActionResult started = bot.getActionPack().startDigPathTo(arena.cell(0, 0, -6));
+        arena.require(started.isInProgress(), "the dig route was not accepted: " + started.status() + " " + started.reason());
+        BlockPos feetWall = arena.cell(0, 0, -3);
+        BlockPos headWall = arena.cell(0, 1, -3);
+        arena.world.setBlock(feetWall, Blocks.STONE_BRICKS.defaultBlockState(), Block.UPDATE_ALL);
+        arena.world.setBlock(headWall, Blocks.STONE_BRICKS.defaultBlockState(), Block.UPDATE_ALL);
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            arena.require(arena.world.getBlockState(feetWall).is(Blocks.STONE_BRICKS) && arena.world.getBlockState(headWall).is(Blocks.STONE_BRICKS),
+                    "the route broke the structure block that appeared in its way at tick " + now);
+            if (now >= 600) {
+                arena.require(arena.world.getBlockState(cells.get(0)).isAir(), "the route did nothing: the control (it digs the first cell) failed");
+                arena.finish(bot);
             }
         });
     }

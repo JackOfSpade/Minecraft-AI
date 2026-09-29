@@ -95,7 +95,7 @@ public final class HostEnvironment {
      * The tool a host's players really break a block with. Upstream prices a break with the fastest tool on the hotbar, because
      * its own auto-tool equips that one; a host that equips by its own policy (which may keep a valuable pickaxe for the ores that
      * need it and wear a cheap one on stone) asks Baritone to price with the same tool, so a break takes as long as the plan says.
-     * Only a cost model asks ({@code ToolSet(player, true)}), and it may do so on any thread after {@link #snapshot}.
+     * Only a cost model asks ({@code ToolSet(player, true, snapshotNow)}), and it may do so on any thread after {@link #snapshot}: a model made for another thread takes the snapshot when it is created, a model for the game thread only on its first break-time query (most models never price a break, so most copy no inventory).
      */
     public interface ToolPolicy {
         /** A private copy of what {@code player} carries. Called on the game thread when a cost model is created. */

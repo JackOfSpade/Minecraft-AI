@@ -14,7 +14,9 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.monster.skeleton.Skeleton;
 import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.projectile.arrow.Arrow;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -189,6 +191,83 @@ public final class BotFallAndKnockbackGameTests {
     }
 
     // ------------------------------------------------------------------------------------------------------------
+    // teleports are not falls
+    // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * A bot that is teleported while it has fall distance (a safety-net climb, a dark-trap surfacing, a panel recall, a respawn of a
+     * bot killed in mid-air) must not be charged for the fall on its next grounded tick: nothing in vanilla's teleport path clears
+     * the distance, and a bot now takes vanilla fall damage. Each trial drops the bot from twelve blocks, teleports it to the
+     * floor once it has fallen at least six (a phantom fall of 6+ blocks costs 3+ hit points), and requires full health and a
+     * zero fall distance afterwards. Both teleport shapes the callers use (the 7-argument teleportTo of every safety move, and the
+     * 3-argument one).
+     */
+    @GameTest(maxTicks = 900)
+    public void aTeleportedBotTakesNoPhantomFallDamage(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos origin = slab(context, 22, 15);
+        AIPlayerEntity bot = spawn(context, "BotTpFall", origin);
+        double floorY = origin.getY();
+        String[] shapes = {"teleportTo_7_args", "teleportTo_3_args"};
+        int[] trial = {-1};
+        int[] phaseTick = {0};
+        boolean[] teleported = {false};
+        List<String> report = new ArrayList<>();
+        int[] tick = {0};
+        context.onEachTick(() -> {
+            tick[0]++;
+            if (tick[0] < LOADED_AFTER_TICKS) {
+                return;
+            }
+            if (trial[0] >= 0) {
+                phaseTick[0]++;
+                if (!teleported[0]) {
+                    if (bot.fallDistance >= 6.0D && !bot.onGround()) {
+                        double distance = bot.fallDistance;
+                        if (trial[0] == 0) {
+                            bot.teleportTo(world, origin.getX() + 0.5D, floorY, origin.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+                        } else {
+                            bot.teleportTo(origin.getX() + 0.5D, floorY, origin.getZ() + 0.5D);
+                        }
+                        teleported[0] = true;
+                        phaseTick[0] = 0;
+                        report.add(shapes[trial[0]] + " fell " + distance);
+                        if (bot.fallDistance != 0.0D) {
+                            fail(context, shapes[trial[0]] + ": the teleport left a fall distance of " + bot.fallDistance);
+                        }
+                    } else if (phaseTick[0] > 100) {
+                        fail(context, shapes[trial[0]] + ": the bot never built up a fall (" + bot.fallDistance + ", ground " + bot.onGround() + ")");
+                    }
+                } else if (phaseTick[0] >= 12) {
+                    if (bot.getHealth() < bot.getMaxHealth() - 0.01F || bot.fallDistance != 0.0D) {
+                        fail(context, shapes[trial[0]] + ": a teleported bot was charged for the fall: health " + bot.getHealth() + ", fall distance "
+                                + bot.fallDistance + "\n" + report);
+                    }
+                    trial[0] = -1;
+                }
+            }
+            if (trial[0] == -1) {
+                int next = report.size();
+                if (next >= shapes.length) {
+                    AIPlayerManager.INSTANCE.despawn(world.getServer(), bot.getGameProfile().name());
+                    context.succeed();
+                    return;
+                }
+                bot.getActionPack().stopAll();
+                bot.invulnerableTime = 0;
+                bot.setHealth(bot.getMaxHealth());
+                bot.getFoodData().setFoodLevel(17);
+                bot.getFoodData().setSaturation(0.0F);
+                put(bot, world, origin.getX() + 0.5D, floorY + 12, origin.getZ() + 0.5D);
+                bot.setOnGround(false);
+                trial[0] = next;
+                phaseTick[0] = 0;
+                teleported[0] = false;
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
     // knockback
     // ------------------------------------------------------------------------------------------------------------
 
@@ -257,6 +336,74 @@ public final class BotFallAndKnockbackGameTests {
                 fail(context, v.label() + ": the bot's knockback differs from a vanilla mob's\n" + report);
             }
         });
+    }
+
+    /**
+     * The push of a hit by a projectile is the same code path for every living target (LivingEntity.hurtServer knocks back from the
+     * direction of the arrow), and nothing restores a ServerPlayer's velocity on it as Player.causeExtraKnockback does for melee. The
+     * geometry of the melee test: an arrow shot by a skeleton comes from 1.5 blocks south; a control zombie and then the bot are hit
+     * by it in turn, and the velocities right after the hit must be equal. Also with knockback resistance.
+     */
+    @GameTest(maxTicks = 500)
+    public void arrowKnockbackOfABotMatchesAVanillaMob(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos origin = slab(context, 4, 6);
+        double botX = origin.getX() + 0.5D;
+        double botZ = origin.getZ() + 0.5D;
+        AIPlayerEntity target = spawn(context, "BotArrowTarget", origin);
+        List<String> report = new ArrayList<>();
+        boolean[] resistance = {false, true};
+        int[] tick = {0};
+        context.onEachTick(() -> {
+            tick[0]++;
+            int slot = tick[0] - LOADED_AFTER_TICKS;
+            if (slot < 0 || slot % 12 != 0) {
+                return;
+            }
+            int index = slot / 12;
+            if (index >= resistance.length) {
+                AIPlayerManager.INSTANCE.despawn(world.getServer(), target.getGameProfile().name());
+                context.succeed();
+                return;
+            }
+            double resist = resistance[index] ? 0.5D : 0.0D;
+            Zombie control = zombie(world, botX + 6.0D, origin.getY(), botZ);
+            control.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(resist);
+            Vec3 mobVelocity = arrowHit(world, control);
+            control.discard();
+            target.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(resist);
+            put(target, world, botX, origin.getY(), botZ);
+            Vec3 botVelocity = arrowHit(world, target);
+            String line = String.format("BOTARROWKB|resistance=%.1f|bot=(%.4f,%.4f,%.4f)|vanillaMob=(%.4f,%.4f,%.4f)", resist,
+                    botVelocity.x, botVelocity.y, botVelocity.z, mobVelocity.x, mobVelocity.y, mobVelocity.z);
+            System.out.println(line);
+            report.add(line);
+            if (mobVelocity.horizontalDistance() < 0.1D || mobVelocity.z <= 0.0D) {
+                fail(context, "the control mob was not knocked back by the arrow, the test is broken: " + line);
+            }
+            if (botVelocity.subtract(mobVelocity).length() > 0.02D) {
+                fail(context, "the bot's arrow knockback differs from a vanilla mob's\n" + report);
+            }
+        });
+    }
+
+    /** One hit of an arrow shot by a skeleton, from 1.5 blocks south of the victim (flying +z); returns the victim's velocity right after. */
+    private static Vec3 arrowHit(ServerLevel world, LivingEntity victim) {
+        victim.invulnerableTime = 0;
+        victim.setHealth(victim.getMaxHealth());
+        Skeleton skeleton = EntityType.SKELETON.create(world, EntitySpawnReason.COMMAND);
+        skeleton.setNoAi(true);
+        skeleton.setSilent(true);
+        skeleton.snapTo(victim.getX(), victim.getY(), victim.getZ() - 8.0D, 0.0F, 0.0F);
+        Arrow arrow = EntityType.ARROW.create(world, EntitySpawnReason.COMMAND);
+        arrow.setOwner(skeleton);
+        arrow.snapTo(victim.getX(), victim.getY() + 1.0D, victim.getZ() - 1.5D, 0.0F, 0.0F);
+        arrow.setDeltaMovement(0.0D, 0.0D, 1.6D);
+        victim.hurtServer(world, world.damageSources().arrow(arrow, skeleton), 2.0F);
+        Vec3 velocity = victim.getDeltaMovement();
+        skeleton.discard();
+        arrow.discard();
+        return velocity;
     }
 
     /** Knockback resistance 0.5 for the resistant variants (set as the base value: an armour item only counts from the next tick), else 0. */

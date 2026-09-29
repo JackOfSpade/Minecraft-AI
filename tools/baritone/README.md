@@ -65,7 +65,7 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0013-cancel-before-start` | AbstractNodeCostSearch | `cancelRequested` is volatile and no longer reset when `calculate()` starts, so a search cancelled while it waits for a worker (bounded pool: it can wait) is dropped instead of running to its timeout |
 | `0014-per-player-break-place-permission` | IPlayerContext, CalculationContext, MineProcess, PathExecutor, MovementParkour | `IPlayerContext` gets defaulted `allowBreak()`/`allowPlace()` (the global `Settings` values); the cost model, mine process and executor ask the player context, so one bot can be allowed to place or break and another not (`Settings` is one object for the JVM) |
 | `0015-scanning-process-permission` | IPlayerContext, MineProcess, GetToBlockProcess, FarmProcess, ExploreProcess, BuilderProcess | `IPlayerContext.allowScanningProcess(name)` (default true): the processes that pick their targets by scanning loaded chunks ask it before they start and do nothing when refused (see "Strict-survival rules" below) |
-| `0016-tool-policy-host-hook` | ToolSet, CalculationContext | a cost model prices a break with the tool the host says it will really equip (`HostEnvironment.ToolPolicy`, judged on a snapshot of the inventory taken on the game thread when the cost model is created), not with the fastest tool on the hotbar; no policy set = upstream behaviour (see "Tools" below) |
+| `0016-tool-policy-host-hook` | ToolSet, CalculationContext | a cost model prices a break with the tool the host says it will really equip (`HostEnvironment.ToolPolicy`, judged on a snapshot of the inventory taken on the game thread when the cost model is created) (a model for another thread snapshots when created, one for the game thread only on its first break-time query, so the per-tick sprint and bucket checks copy no inventory), not with the fastest tool on the hotbar; no policy set = upstream behaviour (see "Tools" below) |
 
 ## Excluded from the build (see `exclude.txt`)
 
@@ -257,11 +257,14 @@ permission are refused and a legal one is not; item use and inventory moves; sca
 
 **One break rule for both engines.** The rule is `mining/BreakRule` (no Baritone type, so the legacy engine runs without any Baritone
 class): `BaritoneBreakPlacePolicy` asks it for every click and for the cost model, and the legacy diggers ask it too
-(`BlockMiner` in its natural-terrain-only mode, which `OreDigTask` uses for all its channel, detour and branch-leg breaks;
-`NeighborEnumerator.isMineable`, the path search's dig-through rule, and through it `FollowDigOut`; the ore digger's tunnel step
-and stair choice reject a structure block as a boundary of the tunnel). The legacy diggers enforce the categories they had no rule
-for (`BreakRule.legacyDenialOf`: structure, infested, block entity, not natural); bedrock, fluids and dangerous blocks keep their
-existing dedicated handling there. Expect more detours and "no route" inside structures: that is intended. Pointed dripstone stays
+(`BlockMiner` in its natural-terrain-only mode, which `OreDigTask` sets for its channel, detour and branch-leg breaks, target ore included, so a refused block is a boundary of the tunnel; the one exemption is clearing a block that re-occupied the bot's own body cells, which is explicit in the code and logged with `natural_only=false`, because refusing could strand a bot embedded in a block;
+`NeighborEnumerator.isMineable`, the path search's dig-through rule, and through it `FollowDigOut`; `PathExecutor`'s DIG_THROUGH steps re-check the rule when they are about to break a cell (a refused cell replans around it) and tick their sub-miners through `ActionPack.tickBreak`, the one home of vanilla's 5 tick destroy delay; the ore digger's tunnel step
+and stair choice reject a structure block as a boundary of the tunnel). Both engines agree on every verdict except three
+categories the legacy code handles itself (`BreakRule.legacyDenialOf` leaves them out: unbreakable blocks, fluids, dangerous blocks,
+which keep their dedicated handling and failure reasons there; Baritone enforces all of them). Decisions: obsidian is not natural
+terrain (too slow to tunnel; the obsidian missions break it through their own explicit path); plain ice is refused (breaking it leaves a
+water source that floods the tunnel; packed and blue ice are dug); the raw iron and raw copper blocks of a large ore vein are
+natural. Expect more detours and "no route" inside structures: that is intended. Pointed dripstone stays
 refused (`Standability.isDangerous`), infested blocks are refused whatever they look like (a stronghold's silverfish nest cannot be
 told apart from outside).
 
@@ -275,11 +278,11 @@ A break made by Baritone is priced and executed with the mod's own tool policy (
 * `ServerPlayerController#clickBlock` calls `ToolSelector.equipBestTool(bot, state, false)` once when a break starts (never per tick: a
   running break keeps its tool, `MiningController.driven`). `false` = a sword is never a mining tool (leaves, cobweb).
 * Cost model: `BaritoneToolPolicy` (patch 0016) answers "which stack will break this block" from the same pure chooser
-  (`ToolSelector.choose`) on a copy of the inventory made on the server thread when the cost model is created, so a planned break
+  (`ToolSelector.choose`) on a copy of the inventory made on the server thread (when a cost model for a search thread is created; a model for the server thread copies it on its first break-time query, and most never price a break), so a planned break
   takes as long as the real one and a movement does not time out (the stone pickaxe is slower than the iron one).
 * The follower's look: `FollowTask.faceTarget` leaves the head alone while a Baritone route runs (Baritone owns yaw and pitch;
   pitching at the player put the pitch back before every click and a follower could never break the lower block of a wall).
 
 Break/place cadence: Baritone keeps vanilla's break delay (patch 0006, `blockBreakSpeed`); the legacy `ActionPack` waits five ticks
-after a multi-tick break (vanilla's `destroyDelay`; an instant break sets none). The placement cadence (`rightClickDelay` = 4) lives
+after a multi-tick break (vanilla's `destroyDelay`; an instant break sets none), for `ActionPack`'s own mining and for `PathExecutor`'s DIG_THROUGH sub-miners alike (`ActionPack.tickBreak`). The placement cadence (`rightClickDelay` = 4) lives
 in `BuildAction` and is not changed here.

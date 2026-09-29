@@ -26,6 +26,7 @@ class PrivilegedBoundarySourceTest {
     void directTeleportsStayInsideReviewedAdapters() throws IOException {
         Set<String> expected = Set.of(
                 "action/ActionPack.java",
+                "entity/AIPlayerEntity.java", // only the super delegation of the teleport overrides that end a fall (no teleport of its own)
                 "manager/AIPlayerManager.java",
                 "mode/FakePlayerMotion.java",
                 "network/MinecraftAiServerNetworking.java",
@@ -37,6 +38,10 @@ class PrivilegedBoundarySourceTest {
                 "A new direct teleport requires an explicit capability or lifecycle-adapter review");
 
         for (Map.Entry<String, String> entry : matches.entrySet()) {
+            if (entry.getKey().equals("entity/AIPlayerEntity.java")) {
+                assertTrue(!entry.getValue().replace("super.teleportTo(", "").contains(".teleportTo("), "AIPlayerEntity only delegates to super");
+                continue;
+            }
             if (entry.getKey().equals("manager/AIPlayerManager.java")
                     || entry.getKey().equals("mode/FakePlayerMotion.java")) {
                 continue;

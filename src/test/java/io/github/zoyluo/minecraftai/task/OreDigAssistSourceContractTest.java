@@ -58,7 +58,7 @@ class OreDigAssistSourceContractTest {
         assertEquals(1, count(source, "if (miningTarget)"));
         assertEquals(1, count(source, "if (miningVein)"));
         assertEquals(1, count(source, "BlockPos found = nearestOre(bot, world)"));
-        assertEquals(1, count(source, "miner.begin(bot, pos, true, true)"));
+        assertEquals(1, count(source, "miner.begin(bot, pos, true)"));
         assertEquals(10, count(source, "failMissingMiningChannelTool(bot)"));
         assertEquals(3, count(source, "startPathTo("));
         assertEquals(4, count(source, "startDigPathTo("));

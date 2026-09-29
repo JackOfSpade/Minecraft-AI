@@ -17,6 +17,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Relative;
+import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.entity.player.Player;
 
 public class AIPlayerEntity extends ServerPlayer {
@@ -124,8 +126,8 @@ public class AIPlayerEntity extends ServerPlayer {
      *
      * <p>Runs at most once per tick: the Baritone driver checks in its own step (before the PlayerUpdate POST event, as the client's
      * packet precedes it) and marks the tick, so a driven bot is never charged twice. Not for a passenger (the vehicle's own physics
-     * decide) and not for a dead bot. A teleport ({@code FakePlayerMotion}, safety moves) happens outside the physics tick measured here
-     * and clears the fall distance itself.</p>
+     * decide) and not for a dead bot. A teleport (FakePlayerMotion, safety moves, recall, respawn) is not a fall: see {@link #teleportTo}, which clears the fall distance
+     * and marks the tick checked.</p>
      */
     private void checkFallDamageOnce() {
         if (this.fallChecked) {
@@ -136,6 +138,42 @@ public class AIPlayerEntity extends ServerPlayer {
             return;
         }
         this.doCheckFallDamage(this.getX() - this.tickFromX, this.getY() - this.tickFromY, this.getZ() - this.tickFromZ, this.onGround());
+    }
+
+    // A teleport is not a fall. Nothing in vanilla's teleport path clears the fall distance (a real player's client resets it with its
+    // own movement packet), and a bot now takes vanilla fall damage, so a bot moved while it had fall distance (a safety-net climb,
+    // a respawn of a bot killed in mid-air, a panel recall, a dark-trap surfacing) would be charged for the fall it never finished on
+    // its next grounded tick, and the jump itself would be measured as a fall of that many blocks. Overridden here, once, for every
+    // caller: the fall is over, and this tick's fall check is not to measure the jump.
+
+    @Override
+    public boolean teleportTo(ServerLevel level, double x, double y, double z, java.util.Set<Relative> relatives,
+                              float yaw, float pitch, boolean resetCamera) {
+        boolean moved = super.teleportTo(level, x, y, z, relatives, yaw, pitch, resetCamera);
+        if (moved) {
+            fallEndedByTeleport();
+        }
+        return moved;
+    }
+
+    @Override
+    public void teleportTo(double x, double y, double z) {
+        super.teleportTo(x, y, z);
+        fallEndedByTeleport();
+    }
+
+    @Override
+    public ServerPlayer teleport(TeleportTransition transition) {
+        ServerPlayer moved = super.teleport(transition);
+        if (moved != null) {
+            fallEndedByTeleport();
+        }
+        return moved;
+    }
+
+    private void fallEndedByTeleport() {
+        this.resetFallDistance();
+        this.fallChecked = true;
     }
 
     /** The Baritone driver has run this tick's fall check (with its own measured movement); the bot's tick must not run it again. */

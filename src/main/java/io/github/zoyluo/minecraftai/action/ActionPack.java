@@ -931,27 +931,34 @@ public final class ActionPack {
         player.setJumping(false);
     }
 
+    /**
+     * Ticks one break controller under vanilla's destroyDelay: after a break that took more than one tick a client waits five ticks
+     * (continueDestroyBlock returns early while the counter runs) before it starts on the next block. A bot that chained breaks back
+     * to back would dig faster than any player, so the next controller does nothing (IN_PROGRESS) until that delay is over. An
+     * instant break (hardness 0, or a tool that mines the block in the first tick) sets no delay, as in vanilla. The ONE place
+     * the delay lives: {@link #tickMining} and the route executor's dig-through sub-miners both tick through here.
+     */
+    public ActionResult tickBreak(MiningController controller) {
+        if (player.level().getGameTime() < nextBreakAt) {
+            return ActionResult.IN_PROGRESS;
+        }
+        ActionResult result = controller.tick(this);
+        if (result.isSuccess() && controller.elapsedTicks() > 1) {
+            nextBreakAt = player.level().getGameTime() + DESTROY_DELAY_TICKS + 1L;
+        }
+        return result;
+    }
+
     private void tickMining() {
         if (mining == null) {
             return;
         }
-        // Vanilla's destroyDelay: after a break that took more than one tick a client waits five ticks (continueDestroyBlock returns
-        // early while the counter runs) before it starts on the next block. A bot that chained breaks back to back would dig
-        // faster than any player, so the next controller does nothing until that delay is over. An instant break (hardness 0, or
-        // a tool that mines the block in the first tick) sets no delay, as in vanilla.
-        if (player.level().getGameTime() < nextBreakAt) {
-            return;
-        }
-
-        ActionResult result = mining.tick(this);
+        ActionResult result = tickBreak(mining);
         if (result.isInProgress()) {
             return;
         }
 
         if (result.isSuccess()) {
-            if (mining.elapsedTicks() > 1) {
-                nextBreakAt = player.level().getGameTime() + DESTROY_DELAY_TICKS + 1L;
-            }
             // Auditable break record (see docs/LOGGING.md "Auditing a gather"): block is captured
             // BEFORE the break by MiningController, so this reports what was actually destroyed
             // even though the world cell is air by now.

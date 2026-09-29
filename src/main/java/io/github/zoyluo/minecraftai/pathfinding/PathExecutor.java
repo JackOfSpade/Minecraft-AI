@@ -13,6 +13,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
+import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import java.util.List;
 import java.util.Objects;
@@ -313,15 +314,34 @@ public final class PathExecutor {
         return ActionResult.IN_PROGRESS;
     }
 
+    /**
+     * Execution-time check of the mod-wide natural-terrain rule for a cell this route is about to break: the plan (NeighborEnumerator)
+     * applied it, but the world may have changed since (a placed block, a falling block), and the legacy diggers must agree with
+     * Baritone about what is a wall. Null when the cell may be dug; else the typed reason, which replans around the cell.
+     * Unbreakable blocks, fluids and dangerous blocks keep their own handling (BreakRule#legacyDenialOf).
+     */
+    private static String digRefusal(ActionPack pack, BlockPos pos) {
+        String denial = BreakRule.legacyDenialOf(pack.player().level().getBlockState(pos));
+        if (denial == null) {
+            return null;
+        }
+        BotLog.path(pack.player(), "dig_through_refused", "pos", LogFields.pos(pos), "reason", denial);
+        return "break_refused:" + denial;
+    }
+
     private ActionResult tickDigThrough(ActionPack pack, Node next) {
         if (!digWalking) {
             if (subMiner == null) {
+                String refused = digRefusal(pack, next.pos());
+                if (refused != null) {
+                    return handleStuck(pack, refused);
+                }
                 Direction face = faceFromPlayer(pack, next.pos());
                 LookAction.lookAtBlock(pack.player(), next.pos(), face);
                 subMiner = new MiningController(next.pos(), face);
             }
             BlockPos miningPos = subMiner.pos();
-            ActionResult mine = subMiner.tick(pack);
+            ActionResult mine = pack.tickBreak(subMiner); // the same vanilla destroy delay as ActionPack.tickMining
             if (mine.isFailed()) {
                 return handleStuck(pack, "dig_failed: " + mine.reason());
             }
@@ -352,6 +372,11 @@ public final class PathExecutor {
             BlockPos headPos = next.pos().above();
             if (!pack.player().level().getBlockState(headPos)
                     .getCollisionShape(pack.player().level(), headPos).isEmpty()) {
+                String headRefused = digRefusal(pack, headPos);
+                if (headRefused != null) {
+                    subMiner = null;
+                    return handleStuck(pack, headRefused);
+                }
                 Direction headFace = faceFromPlayer(pack, headPos);
                 LookAction.lookAtBlock(pack.player(), headPos, headFace);
                 subMiner = new MiningController(headPos, headFace);

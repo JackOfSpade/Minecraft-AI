@@ -26,10 +26,11 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p><b>What a bot digs</b> is a whitelist driven by block tags, so it follows data packs and other mods instead of a list of
  * names: the world generator's stone ({@code base_stone_overworld}/{@code base_stone_nether}, {@code stone_ore_replaceables},
  * {@code deepslate_ore_replaceables}: stone, granite, diorite, andesite, tuff, deepslate, netherrack, basalt, blackstone), soil and
- * sand ({@code dirt}, {@code sand}), terracotta (the badlands bands, plain terracotta), ice and nylium, the nether's wart blocks,
+ * sand ({@code dirt}, {@code sand}), terracotta (the badlands bands, plain terracotta), packed and blue ice (never plain ice) and nylium, the nether's wart blocks,
  * leaves and the small plants that grow in the way ({@code replaceable}), every ore ({@code c:ores}, the vanilla ore tags and any
  * {@code *_ore}), the common tag {@code c:stones} (modded stone) and a short list of terrain blocks no tag covers (gravel, clay,
- * snow, sandstone, soul sand and soil, dripstone, calcite, smooth basalt, amethyst, sculk, end stone, glowstone, ancient debris).
+ * snow, sandstone, soul sand and soil, dripstone, calcite, smooth basalt, amethyst, sculk, end stone, glowstone, ancient debris,
+ * and the raw iron and raw copper blocks of a large ore vein).
  * Cobblestone stays: a bot cannot tell a placed cobblestone from a natural one, exactly like a player.</p>
  *
  * <p><b>What it never digs</b>, before any tag is consulted: unbreakable blocks, fluids, block entities (chests, furnaces, beds,
@@ -39,6 +40,8 @@ import net.minecraft.world.level.block.state.BlockState;
  * smooth (except smooth basalt) stone, slabs, stairs, walls, planks, fences, doors, wool, glass, concrete, rails, lanterns and so
  * on. Infested blocks are refused whatever they look like: a silverfish nest inside a stronghold's wall is exactly what a bot
  * cannot tell from the outside, and a natural infested vein is rare enough to walk around.</p>
+ *
+ * <p><b>The two engines agree</b> on every verdict except three categories the legacy code handles itself and that {@link #legacyDenialOf} therefore leaves to it (unbreakable blocks, fluids, and the blocks the navigation code calls dangerous: pointed dripstone stays refused by that danger rule); Baritone enforces those three through this class too. The one deliberate exemption of a legacy digger is OreDig's clearing of a block that re-occupied the bot's own body cells.</p>
  *
  * <p>The verdict is a property of the kind of block (its default state), cached in {@link BreakVerdictCache#BLOCKS}; the cache is
  * dropped on server start and whenever tags load, because tags are data. Safe on any thread.</p>
@@ -72,7 +75,8 @@ public final class BreakRule {
             Blocks.SANDSTONE, Blocks.RED_SANDSTONE, Blocks.TERRACOTTA, Blocks.SOUL_SAND, Blocks.SOUL_SOIL,
             Blocks.CALCITE, Blocks.DRIPSTONE_BLOCK, Blocks.SMOOTH_BASALT, Blocks.AMETHYST_BLOCK, Blocks.BUDDING_AMETHYST,
             Blocks.AMETHYST_CLUSTER, Blocks.LARGE_AMETHYST_BUD, Blocks.MEDIUM_AMETHYST_BUD, Blocks.SMALL_AMETHYST_BUD,
-            Blocks.SCULK, Blocks.SCULK_VEIN, Blocks.GLOWSTONE, Blocks.ANCIENT_DEBRIS);
+            Blocks.SCULK, Blocks.SCULK_VEIN, Blocks.GLOWSTONE, Blocks.ANCIENT_DEBRIS,
+            Blocks.RAW_IRON_BLOCK, Blocks.RAW_COPPER_BLOCK);
 
     private BreakRule() {
     }
@@ -139,6 +143,9 @@ public final class BreakRule {
         if (isStructureMaterial(state, block)) {
             return "structure_block";
         }
+        if (block == Blocks.ICE || block == Blocks.FROSTED_ICE) {
+            return "ice_releases_water"; // breaking it leaves a water source: it would flood the tunnel
+        }
         return naturalTerrain(state, block) ? "" : "not_natural_terrain";
     }
 
@@ -171,7 +178,8 @@ public final class BreakRule {
                 || state.is(BlockTags.SAND)
                 || state.is(BlockTags.TERRACOTTA)
                 || state.is(BlockTags.BADLANDS_TERRACOTTA)
-                || state.is(BlockTags.ICE)
+                || block == Blocks.PACKED_ICE
+                || block == Blocks.BLUE_ICE
                 || state.is(BlockTags.NYLIUM)
                 || state.is(BlockTags.WART_BLOCKS)
                 || state.is(BlockTags.LEAVES)

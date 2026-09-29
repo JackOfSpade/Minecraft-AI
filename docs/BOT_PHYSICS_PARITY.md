@@ -13,8 +13,12 @@ bots immune to them. Bots are survival-legal and must not cheat, so both are now
 * **Fix.** `AIPlayerEntity.tick` records where the tick began and, after the physics tick (`super.tick()` and `doTick()`), calls
   `doCheckFallDamage` with the tick's movement and `onGround()`, exactly what the move-packet handler does. It runs on every tick, at most
   once: the Baritone driver (`BaritoneDriver.afterPhysics`, step 6) does the same check for a driven bot and marks the tick
-  (`markFallChecked`), so nothing is charged twice. Not applied to a passenger (the vehicle decides) or a dead bot. Teleports done by
-  `FakePlayerMotion` and the safety moves happen outside that measured tick and clear `fallDistance` themselves. Everything else
+  (`markFallChecked`), so nothing is charged twice. Not applied to a passenger (the vehicle decides) or a dead bot. A teleport is not a fall: nothing in vanilla's teleport
+  path clears `fallDistance` (a real client resets it with its own move packet), so `AIPlayerEntity` overrides `teleportTo` (both shapes)
+  and `teleport(TeleportTransition)` to reset it and to mark the tick's fall check as done (otherwise the jump itself is measured as a
+  fall). One place for every caller: `NavSafetyNet` (suffocation climb-up, drowning), `DangerWatcher` dark-trap surfacing,
+  `GatherQuotaTask` surfacing, the panel RECALL / TO_AI teleports, `AIPlayerManager` respawn (a bot killed in mid-air is revived with no
+  distance) and `FakePlayerMotion`. Everything else
   (block landed on, feather falling, armour, honey, hay, water, the 60 tick "client not loaded" protection of a fake connection) is vanilla's.
 * **Numbers.** `ceil(distance - 3)` hit points: 0 / 2 / 5 / 9 for a fall of 3 / 5 / 8 / 12 blocks. The planner's `nav.maxSafeFall` (3) is
   therefore damage free and is now a real safety bound; nothing in the planner, `FollowTask`, `DescendToY`, `DigDown` or `EmergencyShelter`
@@ -22,6 +26,14 @@ bots immune to them. Bots are survival-legal and must not cheat, so both are now
 * **Tests.** `BotFallAndKnockbackGameTests.botsTakeVanillaFallDamageWhenWalkedOrPushedOffALedge` (legacy `startWalkTo` and a plain velocity
   push, 3/5/8/12 blocks) and `BaritoneInputPhysicsProbeGameTests.fallLandingAndDamage` (Baritone driven, exact damage, so no double count).
   On a branch without the fix the first one fails: a 5 block walk off a ledge cost 0 hit points instead of 2.
+  `BotFallAndKnockbackGameTests.aTeleportedBotTakesNoPhantomFallDamage`: a bot that has fallen 6+ blocks and is then teleported (both
+  `teleportTo` shapes) keeps full health and a zero fall distance. A Baritone-driven tick followed by a legacy tick in one game tick
+  (driver hand-over) cannot count twice or miss: the driver marks the tick (`markFallChecked`) and `checkFallDamageOnce` is a no-op
+  when marked; that is pinned by `BotPhysicsParityContractTest` and exercised by `BaritoneInputPhysicsProbeGameTests.fallLandingAndDamage`.
+* **Side effects of the live `FALLING` threat.** `DangerWatcher`'s `FALLING` threat (LOW severity) can now really fire, because
+  `fallDistance` grows. Two short-lived effects: it blocks `canResumePausedWork` while the bot is airborne (paused work resumes on
+  the landing tick), and a `CombatTask` whose top threat is `FALLING` skips its combat branch for that tick (the bot is mid-air and cannot
+  fight anyway; the next grounded tick resumes it). Neither lasts beyond the fall.
 
 ## Knockback
 
@@ -37,5 +49,9 @@ bots immune to them. Bots are survival-legal and must not cheat, so both are now
 * **Tests.** `BotFallAndKnockbackGameTests.meleeKnockbackOfABotMatchesAVanillaMob`: a plain player hit, a sprint hit, a zombie hit and both
   with knockback resistance 0.5 push a bot exactly as they push a control zombie in the same geometry (0.4 up, 0.4 away; 0.7 for the sprint
   hit; 0.2 with resistance 0.5).
+  `BotFallAndKnockbackGameTests.arrowKnockbackOfABotMatchesAVanillaMob`: a skeleton's arrow (the damage source of a projectile hit, from the
+  same geometry, also with resistance 0.5) pushes a bot exactly as it pushes a control zombie. A real flight is not simulated: the
+  knockback is applied in `LivingEntity.hurtServer` from the position of the arrow, the same call for every target, so the hit call is
+  the whole path.
 
 The GameTests report `BOTFALL|...` and `BOTKB|...` lines on stdout with the measured values.

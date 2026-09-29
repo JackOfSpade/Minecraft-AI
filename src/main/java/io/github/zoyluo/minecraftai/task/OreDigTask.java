@@ -1743,9 +1743,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         bot.getActionPack().stopAll();
         if (!blocked.equals(blockedBodyRecoveryTarget)
                 || miner.target() == null || !miner.target().equals(blocked)) {
+            // EXEMPT from natural-only, on purpose: this clears a block that re-occupied the bot's own body cells (a falling
+            // block, a placed block); refusing could leave the bot embedded in it, so whatever the block is, it must go.
+            miner.naturalTerrainOnly(false);
             miner.begin(bot, blocked);
             blockedBodyRecoveryTarget = blocked.immutable();
             BotLog.danger(bot, "ore_dig_blocked_body_clear",
+                    "natural_only", false,
                     "at", feet.toShortString(),
                     "blocked", blocked.toShortString(),
                     "block", BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
@@ -4347,7 +4351,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private BlockMiner.Status beginMine(AIPlayerEntity bot, BlockPos pos) {
         bot.getActionPack().stopMovement(); // Mutual exclusion: mining the ore block itself stops approach pathfinding (the executor's DIG_THROUGH and BlockMiner don't compete for control)
-        miner.begin(bot, pos, true, true); // channel tool policy, natural terrain only (the shared BreakRule)
+        miner.naturalTerrainOnly(true); // natural terrain only (the shared BreakRule); begin keeps the mode
+        miner.begin(bot, pos, true);
         return miner.tick(bot);
     }
 

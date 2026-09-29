@@ -54,16 +54,6 @@ public final class BlockMiner {
 
     /** OreDig may opt into lowest-sufficient pickaxe selection; the default remains unchanged. */
     public void begin(AIPlayerEntity bot, BlockPos pos, boolean miningChannelToolPolicy) {
-        begin(bot, pos, miningChannelToolPolicy, false);
-    }
-
-    /**
-     * As above, and with {@code naturalTerrainOnly} the miner refuses a target that is not natural terrain by the mod-wide
-     * {@link BreakRule} (the rule Baritone's break policy uses too): the ore digger's channel rock, detours and branch legs are
-     * never structure or player-build blocks. The refusal is a {@code FAILED} with {@code break_refused:<reason>}, before a
-     * tool is equipped or a swing started.
-     */
-    public void begin(AIPlayerEntity bot, BlockPos pos, boolean miningChannelToolPolicy, boolean naturalTerrainOnly) {
         if (pos != null && pos.equals(target) && started) {
             return; // Same block, keep mining — never reset (this was the exact root cause of the #9 hang)
         }
@@ -73,8 +63,18 @@ public final class BlockMiner {
         this.sinceTick = 0;
         this.started = false;
         this.miningChannelToolPolicy = miningChannelToolPolicy;
-        this.naturalTerrainOnly = naturalTerrainOnly;
         this.failureReason = "";
+    }
+
+    /**
+     * Sets, for the targets this miner is given from now on, whether it refuses a target that is not natural terrain by the
+     * mod-wide {@link BreakRule} (the rule Baritone's break policy uses too): the ore digger's channel rock, detours and branch
+     * legs are never structure or player-build blocks. The refusal is a {@code FAILED} with {@code break_refused:<reason>},
+     * before a tool is equipped or a swing started. It is a mode of the miner, separate from {@code begin} (whose shapes the
+     * source contracts pin): it survives {@code begin} and is cleared by {@link #cancel}.
+     */
+    public void naturalTerrainOnly(boolean on) {
+        this.naturalTerrainOnly = on;
     }
 
     public BlockPos target() {
