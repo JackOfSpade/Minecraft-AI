@@ -40,7 +40,7 @@ public final class BaritonePlanningGameTests {
 
     @GameTest(maxTicks = 200)
     public void plansAroundTwoHighWallThroughItsGap(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritoneWallGT", 8, 40, 8);
+        Scenario s = Scenario.begin(context, "BaritoneWallGT", 1);
         // A bedrock wall (unbreakable, so digging is not an option) two blocks high across x=+3, open for z=+3..+7.
         for (int dz = -RADIUS; dz <= 2; dz++) {
             fill(s.world, s.feet, 3, dz, Blocks.BEDROCK, 0, 1);
@@ -62,7 +62,7 @@ public final class BaritonePlanningGameTests {
 
     @GameTest(maxTicks = 200)
     public void plansOneBlockStepWithSingleAscend(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritoneStepGT", 8, 40, 8);
+        Scenario s = Scenario.begin(context, "BaritoneStepGT", 2);
         // A one-block-high plateau from x=+3 on: stone in the cell that used to be air, so the floor is one block higher.
         for (int dx = 3; dx <= RADIUS; dx++) {
             for (int dz = -RADIUS; dz <= RADIUS; dz++) {
@@ -84,7 +84,7 @@ public final class BaritonePlanningGameTests {
 
     @GameTest(maxTicks = 200)
     public void plansAroundPitTooDeepToFallInto(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritonePitGT", 8, 40, 8);
+        Scenario s = Scenario.begin(context, "BaritonePitGT", 3);
         // A 2-wide pit four blocks deep (one more than the bots' safe fall of 3) across x=+3..+4 for z=-7..+3, floor at -5.
         for (int dx = 3; dx <= 4; dx++) {
             for (int dz = -RADIUS; dz <= 3; dz++) {
@@ -106,7 +106,7 @@ public final class BaritonePlanningGameTests {
 
     @GameTest(maxTicks = 200)
     public void doesNotEnterPitThatSpansTheWholeWidth(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritoneDeepPitGT", 8, 40, 8);
+        Scenario s = Scenario.begin(context, "BaritoneDeepPitGT", 4);
         for (int dx = 3; dx <= 4; dx++) {
             for (int dz = -RADIUS; dz <= RADIUS; dz++) {
                 carvePit(s.world, s.feet, dx, dz, 4);
@@ -124,7 +124,7 @@ public final class BaritonePlanningGameTests {
 
     @GameTest(maxTicks = 200)
     public void plansThroughClosedWoodenDoor(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritoneDoorGT", 8, 40, 8);
+        Scenario s = Scenario.begin(context, "BaritoneDoorGT", 5);
         // A full-width bedrock wall at x=+3, three high, with one closed oak door in it at z=0.
         for (int dz = -RADIUS; dz <= RADIUS; dz++) {
             fill(s.world, s.feet, 3, dz, Blocks.BEDROCK, 0, 2);
@@ -139,28 +139,29 @@ public final class BaritonePlanningGameTests {
             require(context, plan.movements().equals(List.of("MovementTraverse", "MovementTraverse", "MovementTraverse",
                             "MovementTraverse", "MovementTraverse", "MovementTraverse")),
                     "six plain walks were expected (the door is opened by the walk), got " + plan.movements());
+            require(context, plan.estimatedTicks() < 60.0, "a walk through a wooden door should cost about 30 ticks, got " + plan.estimatedTicks());
         });
     }
 
     @GameTest(maxTicks = 200)
-    public void doesNotPlanThroughClosedIronDoor(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritoneIronDoorGT", 8, 40, 8);
+    public void breaksThroughClosedIronDoorAtHighCost(GameTestHelper context) {
+        Scenario s = Scenario.begin(context, "BaritoneIronDoorGT", 6);
         for (int dz = -RADIUS; dz <= RADIUS; dz++) {
             fill(s.world, s.feet, 3, dz, Blocks.BEDROCK, 0, 2);
         }
         placeClosedDoor(s.world, s.feet.offset(3, 0, 0), Blocks.IRON_DOOR.defaultBlockState());
         s.plan(new GoalBlock(s.feet.offset(6, 0, 0)), plan -> {
-            require(context, !plan.reachesGoal(), "a path through a closed iron door was planned: " + plan.movements());
-            if (plan.path() != null) {
-                require(context, plan.path().positions().stream().allMatch(p -> p.getX() < s.feet.getX() + 3),
-                        "the partial path goes through the iron door: " + plan.path().positions());
-            }
+            // An iron door cannot be opened by hand, but it can be broken (slowly, with bare hands): the only way through, so
+            // the plan exists and it is priced accordingly, an order of magnitude above the wooden door that is simply walked through.
+            require(context, plan.reachesGoal(), "iron door: " + plan.type());
+            require(context, plan.path().positions().contains(new BetterBlockPos(s.feet.offset(3, 0, 0))), "the path does not go through the door cell");
+            require(context, plan.estimatedTicks() >= 200.0, "breaking an iron door barehanded is expensive, got " + plan.estimatedTicks() + " ticks");
         });
     }
 
     @GameTest(maxTicks = 200)
     public void plansThroughStripOfWater(GameTestHelper context) {
-        Scenario s = Scenario.begin(context, "BaritoneWaterGT", 8, 40, 8);
+        Scenario s = Scenario.begin(context, "BaritoneWaterGT", 7);
         // Two-deep water across x=+2..+4 (the floor cell and the cell above it), bedrock sides are the platform's ring.
         for (int dx = 2; dx <= 4; dx++) {
             for (int dz = -RADIUS; dz <= RADIUS; dz++) {
@@ -203,9 +204,12 @@ public final class BaritonePlanningGameTests {
             this.baritone = baritone;
         }
 
-        static Scenario begin(GameTestHelper context, String name, int x, int y, int z) {
+        static Scenario begin(GameTestHelper context, String name, int layer) {
             ServerLevel world = context.getLevel();
-            BlockPos feet = context.absolutePos(new BlockPos(x, y, z));
+            // Every test in a batch runs at the same time in a structure 13 blocks from the next, and a 17x17 course is wider than that,
+            // so each course gets its own horizontal slab of the world (12 blocks apart, taller than any course) instead of a place beside
+            // the others: no course can overwrite another's terrain while it is being searched.
+            BlockPos feet = context.absolutePos(new BlockPos(8, 40 + 12 * layer, 8));
             BaritoneServerGameTests.preparePlatform(world, feet, RADIUS);
             // Seal the platform: bedrock ring, four high, so a path can only be the one the test builds.
             for (int d = -RADIUS - 1; d <= RADIUS + 1; d++) {
@@ -232,7 +236,7 @@ public final class BaritonePlanningGameTests {
                 try {
                     BaritonePlanner.Plan plan = future.join();
                     System.out.println("BARITONE_PLAN scenario=" + name + " type=" + plan.type() + " moves=" + plan.movements().size()
-                            + " nodes=" + plan.nodesConsidered() + " search_ms=" + plan.searchMillis() + " queue_ms=" + plan.queueMillis()
+                            + " nodes=" + plan.nodesConsidered() + " est_ticks=" + Math.round(plan.estimatedTicks()) + " search_ms=" + plan.searchMillis() + " queue_ms=" + plan.queueMillis()
                             + " path=" + plan.movements());
                     require(context, plan.type() != PathCalculationResult.Type.EXCEPTION
                             && plan.type() != PathCalculationResult.Type.CANCELLATION, "search ended with " + plan.type());

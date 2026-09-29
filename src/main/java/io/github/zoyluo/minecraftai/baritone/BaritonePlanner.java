@@ -68,6 +68,12 @@ public final class BaritonePlanner {
             return result.getPath().orElse(null);
         }
 
+        /** Baritone's own estimate of the ticks the whole path takes (walking, breaking and placing included); 0 without a path. */
+        public double estimatedTicks() {
+            IPath path = path();
+            return path == null ? 0.0 : path.ticksRemainingFrom(0);
+        }
+
         public int nodesConsidered() {
             IPath path = path();
             return path == null ? 0 : path.getNumNodesConsidered();
