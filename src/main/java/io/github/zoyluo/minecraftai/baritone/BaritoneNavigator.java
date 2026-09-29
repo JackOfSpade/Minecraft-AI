@@ -79,6 +79,9 @@ public final class BaritoneNavigator {
         BaritoneSettings.applyNavLimits();
         warmUp(baritone, bot);
         NavRoute.Options options = route.options();
+        // What a refused start puts back: the permission of the route that is still running (a re-target that fails leaves it running),
+        // or walk-only when nothing runs, so a refused start never leaves a bot that just failed to route with the new route's break/place rights.
+        BaritonePolicy previousPolicy = registry.isBusy(bot) ? registry.policy(bot) : BaritonePolicy.WALK_ONLY;
         registry.setPolicy(bot, policyOf(options));
         registry.setWaterAllowed(bot, options.allowWater());
         // The route's permissions and its water rule shape the admission search itself (Baritone's cost model reads them), so they
@@ -123,13 +126,14 @@ public final class BaritoneNavigator {
             return Admission.ok();
         } finally {
             if (!accepted) {
-                abandonStart(bot);
+                abandonStart(bot, previousPolicy);
             }
         }
     }
 
-    /** A start that was refused or failed: the route's water rule, its swim permission and its lease are taken back. */
-    private static void abandonStart(AIPlayerEntity bot) {
+    /** A start that was refused or failed: the route's break/place permission, its water rule, its swim permission and its lease are taken back. */
+    private static void abandonStart(AIPlayerEntity bot, BaritonePolicy previousPolicy) {
+        BaritoneRegistry.INSTANCE.setPolicy(bot, previousPolicy);
         releaseRoute(bot.getUUID());
         BaritoneRegistry.INSTANCE.setWaterAllowed(bot, false);
         NavSafetyNet.INSTANCE.clearBaritoneWater(bot);

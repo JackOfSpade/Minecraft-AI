@@ -11,6 +11,7 @@ import io.github.zoyluo.minecraftai.action.MiningController;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -450,6 +451,84 @@ public final class BaritoneNavigationGameTests {
                     require(context, false, "hand-over stalled in phase " + phase[0] + " at " + c.bot.position());
                 }
             } catch (RuntimeException failure) {
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
+                throw failure;
+            }
+        });
+    }
+
+    /**
+     * A linkage failure that escapes a Baritone call in the middle of a driven tick (the seam raises a {@link NoClassDefFoundError}
+     * exactly where Baritone would): the bot's tick completes (the server does not die of it), Baritone is retired for the session
+     * and every instance torn down, and the bot's next order is carried out by the legacy executor, which gets the bot in the
+     * same tick the driver gave up.
+     */
+    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_a_linkage_failure_inside_adriven_tick_retires_baritone_and_the_bot_continues_legacy", maxTicks = 500)
+    public void aLinkageFailureInsideADrivenTickRetiresBaritoneAndTheBotContinuesLegacy(GameTestHelper context) {
+        Course c = Course.begin(context, "NavFaultGT", 0, -2, 30, 4);
+        c.snapshot();
+        ActionPack pack = c.bot.getActionPack();
+        BlockPos far = c.feet.offset(26, 0, 0);
+        BlockPos legacyGoal = c.feet.offset(10, 0, 2);
+        c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(far, 1));
+        // Whatever happens, neither the fault nor the failure flag is left behind for the tests that follow.
+        context.runAfterDelay(480, () -> {
+            BaritoneDriver.testFault = null;
+            NavEngineSelector.clearFailureForTests();
+        });
+        int[] phase = {0};
+        int[] ticks = {0};
+        int[] driven = {0};
+        context.onEachTick(() -> {
+            ticks[0]++;
+            try {
+                switch (phase[0]) {
+                    case 0 -> {
+                        if (BaritoneRegistry.INSTANCE.isBusy(c.bot)) {
+                            driven[0]++;
+                        }
+                        if (driven[0] == 12) {
+                            require(context, NavEngineSelector.baritoneActive(), "fixture: Baritone is not active");
+                            BaritoneDriver.testFault = where -> {
+                                if (where.equals("after_physics")) {
+                                    throw new NoClassDefFoundError("baritone/pathing/movement/MovementHelper");
+                                }
+                            };
+                            phase[0] = 1;
+                        }
+                    }
+                    case 1 -> {
+                        if (NavEngineSelector.baritoneFailed()) {
+                            BaritoneDriver.testFault = null;
+                            require(context, c.bot.isAlive() && !c.bot.isRemoved(), "the bot did not survive the failing tick");
+                            require(context, !NavEngineSelector.baritoneActive(), "Baritone is still active after a linkage failure");
+                            require(context, BaritoneRegistry.INSTANCE.find(c.bot.getUUID()) == null, "the instance outlived the failure");
+                            require(context, !BaritoneRegistry.INSTANCE.isBusy(c.bot), "Baritone still drives the bot");
+                            ActionResult started = pack.startPathTo(legacyGoal);
+                            require(context, started.isInProgress() && !pack.hasBaritoneRoute() && !pack.isPathExecutorIdle(),
+                                    "the legacy executor did not take the order: " + started.status() + " " + started.reason());
+                            phase[0] = 2;
+                        }
+                    }
+                    case 2 -> {
+                        require(context, BaritoneRegistry.INSTANCE.size() == 0, "something created a Baritone instance after the failure");
+                        if (pack.isPathExecutorIdle()) {
+                            require(context, c.bot.position().distanceTo(Vec3.atBottomCenterOf(legacyGoal)) < 1.6,
+                                    "the legacy route ended at " + c.bot.position());
+                            phase[0] = 3;
+                            NavEngineSelector.clearFailureForTests();
+                            AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
+                            context.succeed();
+                        }
+                    }
+                    default -> { }
+                }
+                if (ticks[0] > 450 && phase[0] < 3) {
+                    require(context, false, "the failure course stalled in phase " + phase[0] + " at " + c.bot.position());
+                }
+            } catch (RuntimeException failure) {
+                BaritoneDriver.testFault = null;
+                NavEngineSelector.clearFailureForTests();
                 AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), c.name);
                 throw failure;
             }

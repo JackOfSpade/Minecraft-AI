@@ -285,6 +285,13 @@ public final class FollowTask extends AbstractTask {
      * arrived the bot turns to face them completely.
      */
     private static void faceTarget(AIPlayerEntity bot, ServerPlayer target) {
+        if (bot.getActionPack().hasBaritoneRoute()) {
+            // A Baritone route owns the aim, yaw AND pitch (single writer, see BaritoneDriver): it looks where the next break or door
+            // click needs it to, often steeply down at the lower block of a two-high dig. Pitching the head at the player here, at the
+            // end of the tick, put the pitch back before Baritone's next click, so the click never landed on the block it aimed at
+            // (a follower that could dig the upper block of a wall and then stood at its lower block for ever).
+            return;
+        }
         boolean steering = !bot.getActionPack().isPathExecutorIdle() || !bot.getActionPack().isWalkToIdle();
         if (steering) {
             LookAction.lookPitchAt(bot, target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D));

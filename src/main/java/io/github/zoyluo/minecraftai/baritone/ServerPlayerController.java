@@ -4,6 +4,7 @@ import baritone.api.utils.IPlayerController;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.MiningController;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
@@ -131,8 +132,13 @@ public final class ServerPlayerController implements IPlayerController {
         if (!BaritoneBreakPlacePolicy.checkBreak(bot.get(), loc).allowed()) {
             return false;
         }
+        AIPlayerEntity self = bot.get();
+        BlockState target = self.level().getBlockState(loc);
+        // The tool is chosen here, once, when the break starts, by the mod's own policy (never per tick: a running break keeps
+        // its tool, see MiningController#driven). Baritone's own auto-tool is off (BaritoneSettings: assumeExternalAutoTool).
+        ToolSelector.equipBestTool(self, target, false);
         mining = MiningController.driven(loc, face);
-        checkedState = bot.get().level().getBlockState(loc);
+        checkedState = target;
         return step();
     }
 

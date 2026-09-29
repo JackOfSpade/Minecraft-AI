@@ -1,4 +1,4 @@
-package io.github.zoyluo.minecraftai.baritone;
+package io.github.zoyluo.minecraftai.mining;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

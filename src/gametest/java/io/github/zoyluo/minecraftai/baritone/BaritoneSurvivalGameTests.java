@@ -247,7 +247,7 @@ public final class BaritoneSurvivalGameTests {
         BlockPos visible = s.at(1, 0, -3);
         BlockPos hidden = s.at(3, 0, -3);
         BlockPos[] protectedCells = {bed, chest, table, planks, glass, spawner, bedrock};
-        String[] expected = {"block_entity", "block_entity", "protected_block", "not_natural_terrain", "not_natural_terrain", "block_entity", "unbreakable"};
+        String[] expected = {"block_entity", "block_entity", "protected_block", "structure_block", "structure_block", "block_entity", "unbreakable"};
         Map<BlockPos, BlockState> before = s.remember(List.of(protectedCells));
         before.putAll(s.remember(List.of(hidden)));
         ServerPlayerController controller = s.controller();
@@ -366,6 +366,47 @@ public final class BaritoneSurvivalGameTests {
         require(context, result.consumesAction() && s.world.getBlockState(copper).getValue(open),
                 "the click did not open the copper trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
         require(context, BaritoneEdits.of(s.bot.getUUID(), BaritoneEdits.Kind.PLACE).isEmpty(), "opening a trapdoor was recorded as a placement");
+        s.finish();
+    }
+
+    /**
+     * Vanilla ({@code ServerPlayerGameMode#useItemOn}) lets the held item win over the block only for a player who is sneaking AND
+     * holds something in either hand. A sneaking bot with both hands empty still opens a hand trapdoor and a door; the same bot with
+     * something in its off hand only uses that item, which for the policy is a refused click.
+     */
+    @GameTest(maxTicks = 200)
+    public void aSneakingBotWithBothHandsEmptyStillOpensAHandTrapdoorAndDoor(GameTestHelper context) {
+        Small s = Small.begin(context, "SurvSneakEmptyGT", 4);
+        s.giveHand(ItemStack.EMPTY);
+        ServerPlayerController controller = s.controller();
+        BlockPos trapdoor = s.at(1, 0, 0);
+        BlockPos door = s.at(3, 0, 0);
+        s.world.setBlock(trapdoor, Blocks.OAK_TRAPDOOR.defaultBlockState(), Block.UPDATE_ALL);
+        var open = net.minecraft.world.level.block.state.properties.BlockStateProperties.OPEN;
+        var half = net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF;
+        BlockState lower = Blocks.OAK_DOOR.defaultBlockState().setValue(net.minecraft.world.level.block.DoorBlock.FACING, Direction.EAST)
+                .setValue(half, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER);
+        s.world.setBlock(door, lower, Block.UPDATE_ALL);
+        s.world.setBlock(door.above(), lower.setValue(half, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER), Block.UPDATE_ALL);
+
+        s.bot.setShiftKeyDown(true);
+        require(context, s.bot.isSecondaryUseActive(), "the test bot is not sneaking");
+        require(context, s.bot.getMainHandItem().isEmpty() && s.bot.getOffhandItem().isEmpty(), "the hands are not empty");
+        // An item in the OFF hand makes the item win, so the click is a refused use of an empty main hand.
+        s.bot.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.STONE_PICKAXE));
+        expectRefused(context, s, controller, trapdoorTop(trapdoor), "not_a_block_item");
+        require(context, !s.world.getBlockState(trapdoor).getValue(open), "a sneaking click with an item in the off hand opened the trapdoor");
+        s.bot.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+
+        InteractionResult result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, trapdoorTop(trapdoor));
+        require(context, result.consumesAction() && s.world.getBlockState(trapdoor).getValue(open),
+                "a sneaking bot with both hands empty did not open the trapdoor: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
+        // a closed door facing east is a 3/16 plate on the west edge of its cell: the bot (west of it) looks at its west face
+        BlockHitResult doorHit = new BlockHitResult(new Vec3(door.getX(), door.getY() + 0.5D, door.getZ() + 0.5D), Direction.WEST, door, false);
+        result = controller.processRightClickBlock(s.bot, s.world, InteractionHand.MAIN_HAND, doorHit);
+        require(context, result.consumesAction() && s.world.getBlockState(door).getValue(net.minecraft.world.level.block.DoorBlock.OPEN),
+                "a sneaking bot with both hands empty did not open the door: " + result + " " + BaritoneRefusals.of(s.bot.getUUID()));
+        require(context, BaritoneEdits.of(s.bot.getUUID(), BaritoneEdits.Kind.PLACE).isEmpty(), "opening was recorded as a placement");
         s.finish();
     }
 

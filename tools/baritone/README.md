@@ -65,6 +65,7 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0013-cancel-before-start` | AbstractNodeCostSearch | `cancelRequested` is volatile and no longer reset when `calculate()` starts, so a search cancelled while it waits for a worker (bounded pool: it can wait) is dropped instead of running to its timeout |
 | `0014-per-player-break-place-permission` | IPlayerContext, CalculationContext, MineProcess, PathExecutor, MovementParkour | `IPlayerContext` gets defaulted `allowBreak()`/`allowPlace()` (the global `Settings` values); the cost model, mine process and executor ask the player context, so one bot can be allowed to place or break and another not (`Settings` is one object for the JVM) |
 | `0015-scanning-process-permission` | IPlayerContext, MineProcess, GetToBlockProcess, FarmProcess, ExploreProcess, BuilderProcess | `IPlayerContext.allowScanningProcess(name)` (default true): the processes that pick their targets by scanning loaded chunks ask it before they start and do nothing when refused (see "Strict-survival rules" below) |
+| `0016-tool-policy-host-hook` | ToolSet, CalculationContext | a cost model prices a break with the tool the host says it will really equip (`HostEnvironment.ToolPolicy`, judged on a snapshot of the inventory taken on the game thread when the cost model is created), not with the fastest tool on the hotbar; no policy set = upstream behaviour (see "Tools" below) |
 
 ## Excluded from the build (see `exclude.txt`)
 
@@ -217,9 +218,9 @@ and fed into Baritone's planning; every refusal is a `baritone_refused` line in 
 
 | Baritone does | Rule |
 |---|---|
-| break a block (`clickBlock`, `onPlayerDamageBlock`) | only natural terrain (stone family, dirt, sand, gravel, ores, leaves, small plants) that is observable (`ObservableWorldQuery`) and only if the bot's `BaritonePolicy` allows breaking. Never a block entity (chest, furnace, bed, spawner, sign, barrel ...), a crafting table or other utility block, a fluid, a dangerous block, bedrock, or anything that is not natural terrain (planks, glass, bricks, iron doors: player builds). A placed cobblestone cannot be told from a natural one, as for a player |
+| break a block (`clickBlock`, `onPlayerDamageBlock`) | only natural terrain by the mod-wide `BreakRule` (a tag-driven whitelist: every kind of stone incl. tuff, deepslate, basalt, sandstone, terracotta, ice, dripstone, soul sand, sculk, dirt, sand, gravel, ores incl. `c:ores`, `c:stones` modded stone, leaves, small plants) that is observable (`ObservableWorldQuery`) and only if the bot's `BaritonePolicy` allows breaking. Never a block entity (chest, furnace, bed, spawner, sign, barrel ...), a crafting table or other utility block, a fluid, a dangerous block, bedrock, or anything that is not natural terrain (planks, glass, wool, concrete, the brick family incl. cracked/mossy/chiseled stone bricks, slabs, stairs, walls, doors: structures and player builds), and infested blocks. A placed cobblestone cannot be told from a natural one, as for a player |
 | plan a route | the block-level part of the rule is installed as `Settings.blocksToDisallowBreaking` (a hash-cached view, `BaritoneBreakPlacePolicy.installPlanningRules`), so searches plan around protected blocks (or report no path) instead of planning through them and being vetoed at execution. `allowBreakAnyway` is emptied |
-| place a block / click a block (`processRightClickBlock`) | the support face must pass the legacy perception proof (`BuildAction.supportFaceRefusal`: in reach, in perception range, an eye ray strikes exactly that face); only Baritone's throwaway blocks (`acceptableThrowawayItems`); only if the policy allows placing; never against a chest, bed, crafting table, door, lever ... The same click may open a door or trapdoor whose `BlockSetType` lets a hand open it (never iron) or a fence gate, but only while the bot is not sneaking: a sneaking bot with an item in hand would use the item instead of the block, so that click gets no allowance and is refused like any other non-throwaway use |
+| place a block / click a block (`processRightClickBlock`) | the support face must pass the legacy perception proof (`BuildAction.supportFaceRefusal`: in reach, in perception range, an eye ray strikes exactly that face); only Baritone's throwaway blocks (`acceptableThrowawayItems`); only if the policy allows placing; never against a chest, bed, crafting table, door, lever ... The same click may open a door or trapdoor whose `BlockSetType` lets a hand open it (never iron) or a fence gate, unless the item wins over the block (vanilla `useItemOn`: a sneaking bot with something in either hand would use the item instead of the block, so that click gets no allowance and is refused like any other non-throwaway use; a sneaking bot with both hands empty still opens it) |
 | use an item without a block (`processRightClick`) | refused unless in `BaritoneBreakPlacePolicy.USE_ITEM_ALLOWLIST`, which is empty (water bucket, ender pearl, food ... are all refused) |
 | move inventory items (`windowClick`) | refused unless `allowInventory` is on (`BaritoneSettings` keeps it off) and then only a hotbar swap in the bot's own inventory |
 | scan the world for targets (`MineProcess`, `GetToBlockProcess`, `FarmProcess`, `ExploreProcess`, `BuilderProcess`) | **do not start** (patch 0015, `ServerPlayerContext.allowScanningProcess`) unless the bot holds the hidden-scan privilege (`PrivilegedCapability.HIDDEN_BLOCK_SCAN`, never in strict survival). They find ores, crops and blocks by reading every loaded chunk, i.e. X-ray |
@@ -253,3 +254,32 @@ Tests: `BaritoneSurvivalGameTests` (routes around a bed, chest, crafting table a
 control that is broken through; no break and no route when the only way is through protected blocks; the controller refuses each protected
 block, an unseen stone and a policy that forbids breaking; placements with a hidden, out-of-reach or interactive support, a wrong item or no
 permission are refused and a legal one is not; item use and inventory moves; scanning processes refuse to start; a goal on an unobserved ore is refused and on a visible ore is carried out).
+
+**One break rule for both engines.** The rule is `mining/BreakRule` (no Baritone type, so the legacy engine runs without any Baritone
+class): `BaritoneBreakPlacePolicy` asks it for every click and for the cost model, and the legacy diggers ask it too
+(`BlockMiner` in its natural-terrain-only mode, which `OreDigTask` uses for all its channel, detour and branch-leg breaks;
+`NeighborEnumerator.isMineable`, the path search's dig-through rule, and through it `FollowDigOut`; the ore digger's tunnel step
+and stair choice reject a structure block as a boundary of the tunnel). The legacy diggers enforce the categories they had no rule
+for (`BreakRule.legacyDenialOf`: structure, infested, block entity, not natural); bedrock, fluids and dangerous blocks keep their
+existing dedicated handling there. Expect more detours and "no route" inside structures: that is intended. Pointed dripstone stays
+refused (`Standability.isDangerous`), infested blocks are refused whatever they look like (a stronghold's silverfish nest cannot be
+told apart from outside).
+
+## Tools
+
+A break made by Baritone is priced and executed with the mod's own tool policy (`ToolSelector`), not with Baritone's auto-tool
+(which takes the fastest tool of the hotbar and spends an iron or diamond pickaxe on stone):
+
+* `BaritoneSettings`: `assumeExternalAutoTool=true` (Baritone never touches the selected slot; `autoTool` stays on because the cost
+  model keys on it), `useSwordToMine=false`, `itemSaver=true`.
+* `ServerPlayerController#clickBlock` calls `ToolSelector.equipBestTool(bot, state, false)` once when a break starts (never per tick: a
+  running break keeps its tool, `MiningController.driven`). `false` = a sword is never a mining tool (leaves, cobweb).
+* Cost model: `BaritoneToolPolicy` (patch 0016) answers "which stack will break this block" from the same pure chooser
+  (`ToolSelector.choose`) on a copy of the inventory made on the server thread when the cost model is created, so a planned break
+  takes as long as the real one and a movement does not time out (the stone pickaxe is slower than the iron one).
+* The follower's look: `FollowTask.faceTarget` leaves the head alone while a Baritone route runs (Baritone owns yaw and pitch;
+  pitching at the player put the pitch back before every click and a follower could never break the lower block of a wall).
+
+Break/place cadence: Baritone keeps vanilla's break delay (patch 0006, `blockBreakSpeed`); the legacy `ActionPack` waits five ticks
+after a multi-tick break (vanilla's `destroyDelay`; an instant break sets none). The placement cadence (`rightClickDelay` = 4) lives
+in `BuildAction` and is not changed here.

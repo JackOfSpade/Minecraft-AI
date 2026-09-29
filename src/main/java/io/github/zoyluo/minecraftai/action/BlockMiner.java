@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.BreakRule;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -42,6 +43,8 @@ public final class BlockMiner {
     private int sinceTick;
     private boolean started;
     private boolean miningChannelToolPolicy;
+    /** Refuse (fail with {@code break_refused:<reason>}) a target the shared {@link BreakRule} denies for the legacy diggers ({@link BreakRule#legacyDenialOf}). */
+    private boolean naturalTerrainOnly;
     private String failureReason = "";
 
     /** Start mining a new target block (if it's the same as the current target and already mining, don't interrupt or reset progress). */
@@ -51,6 +54,16 @@ public final class BlockMiner {
 
     /** OreDig may opt into lowest-sufficient pickaxe selection; the default remains unchanged. */
     public void begin(AIPlayerEntity bot, BlockPos pos, boolean miningChannelToolPolicy) {
+        begin(bot, pos, miningChannelToolPolicy, false);
+    }
+
+    /**
+     * As above, and with {@code naturalTerrainOnly} the miner refuses a target that is not natural terrain by the mod-wide
+     * {@link BreakRule} (the rule Baritone's break policy uses too): the ore digger's channel rock, detours and branch legs are
+     * never structure or player-build blocks. The refusal is a {@code FAILED} with {@code break_refused:<reason>}, before a
+     * tool is equipped or a swing started.
+     */
+    public void begin(AIPlayerEntity bot, BlockPos pos, boolean miningChannelToolPolicy, boolean naturalTerrainOnly) {
         if (pos != null && pos.equals(target) && started) {
             return; // Same block, keep mining — never reset (this was the exact root cause of the #9 hang)
         }
@@ -60,6 +73,7 @@ public final class BlockMiner {
         this.sinceTick = 0;
         this.started = false;
         this.miningChannelToolPolicy = miningChannelToolPolicy;
+        this.naturalTerrainOnly = naturalTerrainOnly;
         this.failureReason = "";
     }
 
@@ -97,6 +111,16 @@ public final class BlockMiner {
             failureReason = "target_is_fluid";
             target = null;
             return Status.FAILED;
+        }
+        // Structure and player-build blocks are not channel rock: refuse before any swing (the shared rule, see BreakRule).
+        if (naturalTerrainOnly) {
+            String denial = BreakRule.legacyDenialOf(targetState);
+            if (denial != null) {
+                bot.getActionPack().stopMining();
+                failureReason = "break_refused:" + denial;
+                target = null;
+                return Status.FAILED;
+            }
         }
         sinceTick++;
         if (sinceTick > MINE_TIMEOUT_TICKS) {
@@ -154,6 +178,7 @@ public final class BlockMiner {
         started = false;
         sinceTick = 0;
         miningChannelToolPolicy = false;
+        naturalTerrainOnly = false;
     }
 
     /** The direction from the bot's eyes toward the block's center, used as the breaking face (snapped to the dominant axis). Just needs to roughly face the block; doesn't need to be exact. */

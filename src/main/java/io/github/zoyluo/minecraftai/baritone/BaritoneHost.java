@@ -63,6 +63,7 @@ public final class BaritoneHost {
         // Block drops are learned from the server's own loot tables; Baritone's fallback (a private registry-only level) reloads
         // every data-pack registry and cannot run inside a Fabric server.
         HostEnvironment.setLootLevel(server::overworld);
+        HostEnvironment.setToolPolicy(BaritoneToolPolicy.INSTANCE); // a break is priced with the tool the bot will really equip
         if (configured) {
             return;
         }

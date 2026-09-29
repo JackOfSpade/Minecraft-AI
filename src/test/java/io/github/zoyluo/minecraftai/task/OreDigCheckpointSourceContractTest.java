@@ -366,7 +366,7 @@ class OreDigCheckpointSourceContractTest {
                 "src/main/java/io/github/zoyluo/minecraftai/action/ToolSelector.java"));
         String checkpointSource = Files.readString(CHECKPOINT_SOURCE);
 
-        assertTrue(oreDig.contains("miner.begin(bot, pos, true)"),
+        assertTrue(oreDig.contains("miner.begin(bot, pos, true, true)"),
                 "OreDig must explicitly opt into mining-channel tool conservation");
         assertTrue(miner.contains("public void begin(AIPlayerEntity bot, BlockPos pos) {\n        begin(bot, pos, false);"),
                 "generic BlockMiner callers must retain the original tool policy");

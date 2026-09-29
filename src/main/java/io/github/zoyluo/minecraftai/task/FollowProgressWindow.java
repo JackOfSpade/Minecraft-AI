@@ -7,7 +7,8 @@ package io.github.zoyluo.minecraftai.task;
  * back-off, so the follower neither spins in place for the whole route deadline nor restarts the same route at once.
  *
  * <p>This is the Baritone-route counterpart of {@code FollowStuckRecovery}, which watches the legacy executor's real position; a
- * bot that moves (a long detour around a wall) is making progress even while it gets no closer. Pure (numbers only).</p>
+ * bot that moves (a long detour around a wall) is making progress even while it gets no closer. The best distance survives a
+ * re-arm by movement, so only a real approach resets the "closer" test. Pure (numbers only).</p>
  */
 final class FollowProgressWindow {
     /** Ticks without progress after which the route is abandoned (five seconds). */
@@ -42,7 +43,10 @@ final class FollowProgressWindow {
         double dx = x - anchorX;
         double dz = z - anchorZ;
         if (dx * dx + dz * dz >= MOVED * MOVED) {
-            arm(now, distance, x, z);
+            // Moving is progress (a detour around a wall gets no closer for a while), but it does not forget how close the bot has
+            // been: only a real approach (CLOSER_BY nearer than the best distance so far) counts as closing in, so a bot that wanders
+            // back and forth is not credited with an approach it made once.
+            arm(now, Math.min(bestDistance, distance), x, z);
             return false;
         }
         return now - sinceTick >= WINDOW_TICKS;

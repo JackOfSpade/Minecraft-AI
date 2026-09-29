@@ -56,6 +56,10 @@ public final class ActionPack {
 
     private WalkToController walkTo;
     private MiningController mining;
+    /** Vanilla client destroyDelay: ticks a finished multi-tick break makes the next one wait (see {@link #tickMining}). */
+    static final int DESTROY_DELAY_TICKS = 5;
+    /** Game time before which the running mining controller does nothing (the post-break delay); 0 when none. */
+    private long nextBreakAt;
     private PathExecutor pathExecutor;
     private PathRequestIdentity lastPathRequest;
     private PathRequestIdentity activePathRequest;
@@ -931,6 +935,13 @@ public final class ActionPack {
         if (mining == null) {
             return;
         }
+        // Vanilla's destroyDelay: after a break that took more than one tick a client waits five ticks (continueDestroyBlock returns
+        // early while the counter runs) before it starts on the next block. A bot that chained breaks back to back would dig
+        // faster than any player, so the next controller does nothing until that delay is over. An instant break (hardness 0, or
+        // a tool that mines the block in the first tick) sets no delay, as in vanilla.
+        if (player.level().getGameTime() < nextBreakAt) {
+            return;
+        }
 
         ActionResult result = mining.tick(this);
         if (result.isInProgress()) {
@@ -938,6 +949,9 @@ public final class ActionPack {
         }
 
         if (result.isSuccess()) {
+            if (mining.elapsedTicks() > 1) {
+                nextBreakAt = player.level().getGameTime() + DESTROY_DELAY_TICKS + 1L;
+            }
             // Auditable break record (see docs/LOGGING.md "Auditing a gather"): block is captured
             // BEFORE the break by MiningController, so this reports what was actually destroyed
             // even though the world cell is air by now.

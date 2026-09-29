@@ -5,6 +5,7 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.util.ItemStackUtil;
+import java.util.List;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -30,6 +31,15 @@ public final class ToolSelector {
     }
 
     public static Selection equipBestTool(AIPlayerEntity player, BlockState state) {
+        return equipBestTool(player, state, true);
+    }
+
+    /**
+     * As {@link #equipBestTool(AIPlayerEntity, BlockState)}; with {@code swordsMine} false a sword is never chosen to break a
+     * block (it would be worn down for nothing on leaves, and is no digging tool otherwise): it counts like an empty hand. This
+     * is the rule of a driver that digs whatever is in its way (Baritone's {@code useSwordToMine=false}).
+     */
+    public static Selection equipBestTool(AIPlayerEntity player, BlockState state, boolean swordsMine) {
         if (state.isAir() || state.getBlock() instanceof LiquidBlock) {
             // Nothing to dig (a gap between dig steps, or a fluid cell): scoring every stack against air
             // ties them all, which picked a plank stack and made the hotbar ping-pong between steps.
@@ -38,48 +48,14 @@ public final class ToolSelector {
         }
         Inventory inventory = player.getInventory();
         int currentSlot = inventory.getSelectedSlot();
-        ItemStack currentStack = inventory.getNonEquipmentItems().get(currentSlot);
-        float currentScore = score(currentStack, state);
-        int bestSlot = currentSlot;
-        int bestOffhandSlot = -1;
-        ItemStack bestStack = currentStack;
-        float bestScore = currentScore;
-        int bestHandSafety = softBlockHandSafety(currentStack, state);
+        Choice choice = choose(inventory.getNonEquipmentItems(), currentSlot,
+                player.getItemBySlot(EquipmentSlot.OFFHAND), state, swordsMine);
+        int bestSlot = choice.slot();
+        ItemStack bestStack = choice.stack();
+        float bestScore = choice.score();
 
-        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
-            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            // Only an empty hotbar slot can be selected as an executable empty hand. Empty storage
-            // slots are not candidates because equipFromSlot deliberately rejects them.
-            if (stack.isEmpty() && !Inventory.isHotbarSlot(slot)) {
-                continue;
-            }
-            float candidateScore = score(stack, state);
-            int candidateHandSafety = softBlockHandSafety(stack, state);
-            if (isBetterCandidate(candidateScore, candidateHandSafety,
-                    bestScore, bestHandSafety)) {
-                bestScore = candidateScore;
-                bestHandSafety = candidateHandSafety;
-                bestSlot = slot;
-                bestOffhandSlot = -1;
-                bestStack = stack;
-            }
-        }
-        ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
-        if (!offHandStack.isEmpty()) {
-            float candidateScore = score(offHandStack, state);
-            int candidateHandSafety = softBlockHandSafety(offHandStack, state);
-            if (isBetterCandidate(candidateScore, candidateHandSafety,
-                    bestScore, bestHandSafety)) {
-                bestScore = candidateScore;
-                bestHandSafety = candidateHandSafety;
-                bestSlot = -1;
-                bestOffhandSlot = 0;
-                bestStack = offHandStack;
-            }
-        }
-
-        if (bestOffhandSlot >= 0) {
-            int promoted = InventoryAction.promoteOffhandSlot(player, bestOffhandSlot)
+        if (choice.offhand()) {
+            int promoted = InventoryAction.promoteOffhandSlot(player, 0)
                     .orElse(-1);
             int hotbar = promoted < 0 ? -1 : InventoryAction.equipFromSlot(player, promoted);
             ItemStack equipped = hotbar >= 0
@@ -103,6 +79,61 @@ public final class ToolSelector {
         }
         return new Selection(false, currentSlot, bestStack, bestScore);
     }
+
+    /** The tool decision over a set of stacks: the slot of the main list, or the off hand. Slot {@code currentSlot} means "keep the hand". */
+    public record Choice(int slot, boolean offhand, ItemStack stack, float score) {
+    }
+
+    /**
+     * The pure part of {@link #equipBestTool}: which stack breaks {@code state} best, by the mod's tool policy (a tool that can
+     * harvest the block beats one that cannot, the cheapest renewable tier among those that can, an empty hand or a non-melee
+     * stack for blocks that need no tool, a nearly broken tool never). Reads the stacks only, so a caller may run it on a
+     * snapshot of an inventory (Baritone's cost model does, on a worker thread).
+     */
+    public static Choice choose(List<ItemStack> main, int currentSlot, ItemStack offhand, BlockState state, boolean swordsMine) {
+        ItemStack currentStack = main.get(currentSlot);
+        float currentScore = score(currentStack, state, swordsMine);
+        if (!swordsMine && currentStack.is(ItemTags.SWORDS)) {
+            currentScore -= 0.002F; // a sword that is only in hand by chance yields to any other stack on a tie (cobweb: nothing beats the bare hand)
+        }
+        int bestSlot = currentSlot;
+        boolean bestOffhand = false;
+        ItemStack bestStack = currentStack;
+        float bestScore = currentScore;
+        int bestHandSafety = softBlockHandSafety(currentStack, state);
+
+        for (int slot = 0; slot < main.size(); slot++) {
+            ItemStack stack = main.get(slot);
+            // Only an empty hotbar slot can be selected as an executable empty hand. Empty storage
+            // slots are not candidates because equipFromSlot deliberately rejects them.
+            if (stack.isEmpty() && !Inventory.isHotbarSlot(slot)) {
+                continue;
+            }
+            float candidateScore = score(stack, state, swordsMine);
+            int candidateHandSafety = softBlockHandSafety(stack, state);
+            if (isBetterCandidate(candidateScore, candidateHandSafety,
+                    bestScore, bestHandSafety)) {
+                bestScore = candidateScore;
+                bestHandSafety = candidateHandSafety;
+                bestSlot = slot;
+                bestOffhand = false;
+                bestStack = stack;
+            }
+        }
+        if (!offhand.isEmpty()) {
+            float candidateScore = score(offhand, state, swordsMine);
+            int candidateHandSafety = softBlockHandSafety(offhand, state);
+            if (isBetterCandidate(candidateScore, candidateHandSafety,
+                    bestScore, bestHandSafety)) {
+                bestScore = candidateScore;
+                bestSlot = -1;
+                bestOffhand = true;
+                bestStack = offhand;
+            }
+        }
+        return new Choice(bestSlot, bestOffhand, bestStack, bestScore);
+    }
+
 
     /**
      * OreDig channel policy: use the lowest healthy pickaxe tier that can harvest the block, but
@@ -225,6 +256,13 @@ public final class ToolSelector {
             return 2;
         }
         return stack.is(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem ? 0 : 1;
+    }
+
+    private static float score(ItemStack stack, BlockState state, boolean swordsMine) {
+        if (!swordsMine && stack.is(ItemTags.SWORDS)) {
+            return score(ItemStack.EMPTY, state); // a sword is no digging tool: it counts like an empty hand
+        }
+        return score(stack, state);
     }
 
     private static float score(ItemStack stack, BlockState state) {

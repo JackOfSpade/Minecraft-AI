@@ -19,9 +19,11 @@ import java.util.function.Supplier;
  *       throws a linkage-type failure (a class that cannot load or initialise: a mixin or remap problem in some modpack, a
  *       missing library, a static initialiser that throws) it logs once, marks Baritone unavailable for the session and answers
  *       with the fallback. Any other exception is logged and answers with the fallback for that request only.</li>
- *   <li>{@link #baritoneLive()} is the cheap "has Baritone been initialised by us at all" flag. Hooks that run for every bot on
- *       every tick or on every lifecycle event ask it first, so with the legacy engine no {@code baritone.*} class is even
- *       loaded by them.</li>
+ *   <li>{@link #baritoneActive()} is the cheap "Baritone was initialised by us and has not been given up on" flag ({@link #baritoneLive()}
+ *       alone only says it was initialised). Hooks that run for every bot on every tick or on every lifecycle event go through it:
+ *       {@link #hook} runs a Baritone-side action and {@link #query} asks a question, both only while it is true and both
+ *       containing a failure ({@link #handleFailure}), so with the legacy engine no {@code baritone.*} class is even loaded by
+ *       them, and a Baritone that failed once is never touched again.</li>
  * </ul>
  *
  * <p>Nothing here names a Baritone type.</p>

@@ -1,0 +1,77 @@
+The cost model prices a break with the tool the host says it will really equip (HostEnvironment.ToolPolicy, judged on a snapshot of the inventory taken when the cost model is created) instead of the fastest tool on the hotbar. A host that sets no policy keeps upstream's behaviour.
+
+diff --git a/src/main/java/baritone/pathing/movement/CalculationContext.java b/src/main/java/baritone/pathing/movement/CalculationContext.java
+index c726367..af30da7 100644
+--- a/src/main/java/baritone/pathing/movement/CalculationContext.java
++++ b/src/main/java/baritone/pathing/movement/CalculationContext.java
+@@ -99,7 +99,7 @@ public class CalculationContext {
+         this.world = baritone.getPlayerContext().world();
+         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
+         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+-        this.toolSet = new ToolSet(player);
++        this.toolSet = new ToolSet(player, true);
+         this.hasThrowaway = baritone.getPlayerContext().allowPlace() && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
+         this.hasWaterBucket = Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
+         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
+diff --git a/src/main/java/baritone/utils/ToolSet.java b/src/main/java/baritone/utils/ToolSet.java
+index 799547b..6009980 100644
+--- a/src/main/java/baritone/utils/ToolSet.java
++++ b/src/main/java/baritone/utils/ToolSet.java
+@@ -18,6 +18,7 @@
+ package baritone.utils;
+ 
+ import baritone.Baritone;
++import baritone.api.utils.HostEnvironment;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.component.DataComponents;
+ import net.minecraft.tags.ItemTags;
+@@ -60,6 +61,13 @@ public class ToolSet {
+ 
+     private final Player player;
+ 
++    /**
++     * The host's own tool policy and the snapshot of the player's inventory it works on, both null unless this set was made for
++     * a cost model ({@code new ToolSet(player, true)}): see {@link HostEnvironment.ToolPolicy}.
++     */
++    private final HostEnvironment.ToolPolicy hostPolicy;
++    private final Object hostSnapshot;
++
+     /**
+      * Used for evaluating the material cost of a tool.
+      * see {@link #getMaterialCost(ItemStack)}
+@@ -75,8 +83,19 @@ public class ToolSet {
+     );
+ 
+     public ToolSet(Player player) {
++        this(player, false);
++    }
++
++    /**
++     * @param hostSnapshot whether to ask the host's {@link HostEnvironment#toolPolicy() tool policy} (if it has one) for a snapshot of the
++     *                     inventory and to price breaks with the tool it says will really be used. A cost model asks for it; a set
++     *                     that is only made to pick a slot does not.
++     */
++    public ToolSet(Player player, boolean hostSnapshot) {
+         breakStrengthCache = new HashMap<>();
+         this.player = player;
++        this.hostPolicy = hostSnapshot ? HostEnvironment.toolPolicy() : null;
++        this.hostSnapshot = hostPolicy == null ? null : hostPolicy.snapshot(player);
+ 
+         if (Baritone.settings().considerPotionEffects.value) {
+             double amplifier = potionAmplifier();
+@@ -188,6 +207,15 @@ public class ToolSet {
+      * @return A double containing the destruction ticks with the best tool
+      */
+     private double getBestDestructionTime(Block b) {
++        if (hostPolicy != null) {
++            // The host equips the tool itself (its policy may prefer a cheaper tier than the fastest one), so the break is priced with
++            // that tool and not with the fastest one on the hotbar.
++            BlockState state = b.defaultBlockState();
++            ItemStack chosen = hostPolicy.toolFor(hostSnapshot, state);
++            if (chosen != null) {
++                return calculateSpeedVsBlock(chosen, state) * avoidanceMultiplier(b);
++            }
++        }
+         ItemStack stack = player.getInventory().getItem(getBestSlot(b, false, true));
+         return calculateSpeedVsBlock(stack, b.defaultBlockState()) * avoidanceMultiplier(b);
+     }

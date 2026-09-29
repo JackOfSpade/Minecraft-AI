@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.pathfinding;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -10,8 +11,6 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class NeighborEnumerator {
@@ -295,6 +294,12 @@ public final class NeighborEnumerator {
                 pos.immutable(), p -> OreScan.observeDangerFluid(bot, p));
     }
 
+    /**
+     * Whether a bot may dig this cell as part of a route: natural terrain by the mod-wide {@link BreakRule} (the rule Baritone's
+     * break policy uses too), and none of the cells nobody digs whatever they are (unbreakable, block entities, fluids,
+     * dangerous blocks). A structure or player-build block (stone bricks, slabs, planks, an infested block ...) is a wall of the
+     * route, so a search goes around it or reports no route.
+     */
     public static boolean isMineable(ServerLevel world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.getDestroySpeed(world, pos) < 0.0F || world.getBlockEntity(pos) != null) {
@@ -303,20 +308,6 @@ public final class NeighborEnumerator {
         if (!state.getFluidState().isEmpty() || Standability.isDangerous(state)) {
             return false;
         }
-        // The ore block itself is mineable (paired with the goal exemption: the target ore cell needs to be reachable on the path; OreScan also covers modded _ore suffixes).
-        if (io.github.zoyluo.minecraftai.mining.OreScan.isOreBlock(state.getBlock())) {
-            return true;
-        }
-        return state.is(BlockTags.STONE_ORE_REPLACEABLES)
-                || state.is(BlockTags.DEEPSLATE_ORE_REPLACEABLES)
-                || state.is(BlockTags.DIRT)
-                || state.is(Blocks.STONE)
-                || state.is(Blocks.COBBLESTONE)
-                || state.is(Blocks.GRANITE)
-                || state.is(Blocks.DIORITE)
-                || state.is(Blocks.ANDESITE)
-                || state.is(Blocks.SAND)
-                || state.is(Blocks.RED_SAND)
-                || state.is(Blocks.GRAVEL);
+        return BreakRule.isBreakable(state);
     }
 }

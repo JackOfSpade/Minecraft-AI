@@ -55,7 +55,7 @@ public class AIPlayerEntity extends ServerPlayer {
         try {
             // While a Baritone process drives this bot it writes the inputs (before the physics tick below, like a client's
             // input handling) and aims; the legacy executor is idle and writes nothing. See BaritoneDriver.
-            // (Nothing Baritone-shaped is even loaded until an instance exists: NavEngineSelector.baritoneLive().)
+            // (Nothing Baritone-shaped is even loaded until an instance exists: the hooks below start with NavEngineSelector.baritoneActive().)
             boolean baritoneDrives = baritoneBeforePhysics();
             super.tick();
             this.doTick();
@@ -94,17 +94,21 @@ public class AIPlayerEntity extends ServerPlayer {
         }
     }
 
-    /** The driver hook after the physics tick, for a bot the hook before it reported as driven (same containment). */
+    /**
+     * The driver hook after the physics tick, for a bot the hook before it reported as driven (same containment). If the hook did not
+     * complete (it failed, or the bot was no longer driven) or Baritone was retired by the failure, the legacy executor takes this
+     * tick over in the same tick: nobody else would advance its mining, walk or route bookkeeping until the next one.
+     */
     private void baritoneAfterPhysics() {
-        if (!NavEngineSelector.baritoneActive()) {
-            checkFallDamageOnce();
-            this.actionPack.onUpdate();
-            return;
+        boolean completed = false;
+        if (NavEngineSelector.baritoneActive()) {
+            try {
+                completed = BaritoneDriver.afterPhysics(this);
+            } catch (Throwable failure) {
+                NavEngineSelector.handleFailure("baritone_after_physics", failure);
+            }
         }
-        try {
-            BaritoneDriver.afterPhysics(this);
-        } catch (Throwable failure) {
-            NavEngineSelector.handleFailure("baritone_after_physics", failure);
+        if (!completed || !NavEngineSelector.baritoneActive()) {
             checkFallDamageOnce();
             this.actionPack.onUpdate();
         }

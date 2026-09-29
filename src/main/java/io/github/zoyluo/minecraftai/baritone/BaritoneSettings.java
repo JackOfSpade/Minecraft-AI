@@ -45,6 +45,15 @@ public final class BaritoneSettings {
         settings.allowInventory.value = false;
         BaritoneBreakPlacePolicy.installPlanningRules();
 
+        // -- Tools: the mod's own policy picks the tool (ToolSelector, once when a break starts: ServerPlayerController#clickBlock),
+        // never Baritone's. Its auto-tool takes the fastest tool of the hotbar, which spends an iron or diamond pickaxe on stone; with
+        // assumeExternalAutoTool it does not touch the selected slot at all (autoTool stays on, because the cost model keys on it), the
+        // cost model prices breaks with the tool the policy will pick (BaritoneToolPolicy, patch 0016), a sword is never a mining tool
+        // (leaves, cobweb) and a tool close to breaking is left alone.
+        settings.assumeExternalAutoTool.value = true;
+        settings.useSwordToMine.value = false;
+        settings.itemSaver.value = true;
+
         // -- No world cache: a bot only ever plans over chunks that are loaded right now, and the cached-chunk machinery
         // (a packer thread and 512x512 region files per dimension) would give it knowledge of terrain it cannot currently observe.
         settings.chunkCaching.value = false;

@@ -37,8 +37,8 @@ public final class MiningController {
 
     /**
      * A break run for a movement driver that owns the bot's aim and its hotbar (Baritone): it has already turned the bot toward
-     * the block, checked with its own ray that the block is what the bot is looking at, and selected the tool its cost model
-     * priced the break with. Re-aiming at the face center here would fight the driver's rotation every tick, and re-selecting
+     * the block, checked with its own ray that the block is what the bot is looking at, and equipped the tool (the mod's tool policy,
+     * ToolSelector, which its cost model prices the break with too). Re-aiming at the face center here would fight the driver's rotation every tick, and re-selecting
      * by this class's own tool score could swap the tool under it, so a driven controller does neither; everything else (the
      * vanilla START/STOP/ABORT handshake, progress, reach, timeout, cache invalidation, the assist hook) is identical.
      */

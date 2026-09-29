@@ -32,6 +32,23 @@ class FollowProgressWindowTest {
     }
 
     @Test
+    void movingReArmsTheWindowButDoesNotForgetTheBestDistance() {
+        FollowProgressWindow window = new FollowProgressWindow();
+        window.stalled(0, 10.0, 0, 0);
+        assertFalse(window.stalled(50, 12.0, 5, 0), "moved five blocks: re-armed, the best distance stays 10");
+        // 10.5 is nearer than the 12 of the re-arm but nowhere near the 10 the bot had before: not an approach, the window runs on
+        assertFalse(window.stalled(60, 10.5, 4, 0));
+        assertTrue(window.stalled(150, 10.5, 4, 0), "no real closing progress for the window since the re-arm at tick 50");
+        // a real approach (a block nearer than the best distance) still resets it
+        FollowProgressWindow approach = new FollowProgressWindow();
+        approach.stalled(0, 10.0, 0, 0);
+        approach.stalled(50, 12.0, 5, 0);
+        assertFalse(approach.stalled(60, 8.9, 4, 0), "closer than 10 by more than a block");
+        assertFalse(approach.stalled(150, 8.9, 4, 0));
+        assertTrue(approach.stalled(160, 8.9, 4, 0));
+    }
+
+    @Test
     void clearingRearmsAndAnUnarmedWindowNeverReportsStalled() {
         FollowProgressWindow window = new FollowProgressWindow();
         window.stalled(0, 10.0, 0, 0);

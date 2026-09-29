@@ -46,6 +46,21 @@ public final class BaritoneDriver {
     }
 
     /**
+     * Test seam (GameTests only): a fault raised from inside a driven tick, exactly where a Baritone call would raise it, to prove
+     * the containment of {@link #beforePhysics}/{@link #afterPhysics} (a {@link NoClassDefFoundError} retires Baritone for the session
+     * and the bot carries on with the legacy executor in the same tick). Receives the phase name ({@code before_physics},
+     * {@code after_physics}). Always null in production.
+     */
+    static volatile java.util.function.Consumer<String> testFault;
+
+    private static void injectTestFault(String phase) {
+        java.util.function.Consumer<String> fault = testFault;
+        if (fault != null) {
+            fault.accept(phase);
+        }
+    }
+
+    /**
      * Runs steps 1-3 for the bot and reports whether Baritone owns its movement this tick. When it does the caller must skip
      * every legacy input write for the tick. Server thread only. Never throws: a failing Baritone tick (any Throwable but a VM error) cancels Baritone for the
      * bot (and is logged) instead of taking the bot's tick, and the server's, down with it.
@@ -66,6 +81,7 @@ public final class BaritoneDriver {
         try {
             entry.bot = bot;
             entry.context.refreshEntities();
+            injectTestFault("before_physics");
             baritone.getGameEventHandler().onTick(nextTick(EventState.PRE));
             if (busy(baritone)) {
                 if (!wasDriven) {
@@ -100,16 +116,19 @@ public final class BaritoneDriver {
 
     /**
      * Runs steps 4-7 for a bot that {@link #beforePhysics} reported as driven. Server thread only; never throws (see above).
+     * Returns whether the steps ran to the end: false when the bot is no longer driven or a step failed (contained, and logged),
+     * in which case the caller lets the legacy executor take the rest of the tick.
      */
-    public static void afterPhysics(AIPlayerEntity bot) {
+    public static boolean afterPhysics(AIPlayerEntity bot) {
         BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
         if (entry == null || !entry.driven) {
-            return;
+            return false;
         }
         IBaritone baritone = entry.baritone;
         try {
             // 4. The look target of this tick becomes the bot's rotation. LookBehavior writes yRot/xRot only; 5. the head and
             // the body follow the way LookAction turns a bot, so what other players see and what the legacy aim reads agree.
+            injectTestFault("after_physics");
             baritone.getGameEventHandler().onPlayerUpdate(new PlayerUpdateEvent(EventState.PRE));
             LookAction.setYawPitch(bot, bot.getYRot(), bot.getXRot());
             // 6. ServerPlayer only checks falls when a client's move packet arrives; a bot has none, so this is what the packet does:
@@ -128,8 +147,10 @@ public final class BaritoneDriver {
             // The navigator seam's per-tick check (arrival, failure, timeout, water rule) while this bot is driven; a bot that is
             // not driven gets the same check from ActionPack.onUpdate.
             bot.getActionPack().onBaritoneTick();
+            return true;
         } catch (Throwable failure) {
             tickFailed(bot, "baritone_post_tick_failed", "post_tick_failed", failure);
+            return false;
         }
     }
 

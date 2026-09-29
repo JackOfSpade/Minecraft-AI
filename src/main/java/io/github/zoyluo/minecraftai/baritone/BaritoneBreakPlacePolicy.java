@@ -3,12 +3,12 @@ package io.github.zoyluo.minecraftai.baritone;
 import baritone.api.BaritoneAPI;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.mining.OreScan;
+import io.github.zoyluo.minecraftai.mining.BreakRule;
+import io.github.zoyluo.minecraftai.mining.BreakVerdictCache;
 import io.github.zoyluo.minecraftai.mixin.TrapDoorBlockTypeInvokerMixin;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,12 +21,9 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -37,13 +34,13 @@ import net.minecraft.world.phys.BlockHitResult;
  * inventory move, and {@link ServerPlayerContext} asks it before a process that scans the world may start. A refusal is a typed
  * reason, an entry in {@link BaritoneRefusals} and a {@code baritone_refused} line in the bot's log; the action does not happen.
  *
- * <p><b>Breaking.</b> A bot breaks natural terrain and nothing else: stone, dirt, sand, gravel, ores, leaves and the small plants
- * that grow in the way ({@link #naturalTerrain}). Everything a player made or put down (planks, glass, wool, bricks, iron doors,
- * fences ...), everything that stores or does something (any block with a block entity: chests, furnaces, beds, signs, spawners,
- * banners, barrels, hoppers ...; crafting tables and the like), every fluid, every dangerous block and bedrock stays. This is the
- * same idea as the legacy digger's whitelist ({@code NeighborEnumerator.isMineable}) with the natural leaves and plants added; the
- * bot has no way to tell a placed cobblestone from a natural one, exactly like a player. The block must also be observable
- * ({@link ObservableWorldQuery}: the strict-survival rays; a privileged profile sees through), which a block Baritone is
+ * <p><b>Breaking.</b> A bot breaks natural terrain and nothing else, by the mod-wide {@link BreakRule} that the legacy diggers
+ * ({@code OreDigTask}, {@code NeighborEnumerator}, {@code FollowDigOut}) use too: a tag-driven whitelist of what a world generator
+ * puts down (stone of every kind, soil, sand, terracotta, ice, ores, leaves and the small plants that grow in the way ...), with
+ * everything a player or a structure made or put down (planks, glass, wool, bricks, slabs, doors ...), everything that stores or
+ * does something (any block with a block entity, crafting tables and the like), every fluid, every dangerous block and bedrock
+ * staying. The bot has no way to tell a placed cobblestone from a natural one, exactly like a player. The block must also be
+ * observable ({@link ObservableWorldQuery}: the strict-survival rays; a privileged profile sees through), which a block Baritone is
  * looking at always is, and the bot's break permission ({@link BaritonePolicy}) must allow it.</p>
  *
  * <p><b>Planning.</b> {@link #installPlanningRules} hands the block-level part of the same rule to Baritone's cost model
@@ -74,13 +71,8 @@ public final class BaritoneBreakPlacePolicy {
     /** The processes that scan loaded chunks for targets; see {@link #allowScanningProcess}. */
     public static final Set<String> SCANNING_PROCESSES = Set.of("mine", "get_to_block", "farm", "explore", "build");
 
-    /** Things whose use is the point of a right click, so a placement against them would not place anything. */
-    private static final Set<Block> USE_INTERACTIVE = Set.of(
-            Blocks.CRAFTING_TABLE, Blocks.CARTOGRAPHY_TABLE, Blocks.SMITHING_TABLE, Blocks.FLETCHING_TABLE, Blocks.LOOM,
-            Blocks.STONECUTTER, Blocks.GRINDSTONE, Blocks.LEVER, Blocks.NOTE_BLOCK, Blocks.REPEATER, Blocks.COMPARATOR,
-            Blocks.DAYLIGHT_DETECTOR, Blocks.COMPOSTER, Blocks.CAULDRON, Blocks.WATER_CAULDRON, Blocks.LAVA_CAULDRON,
-            Blocks.POWDER_SNOW_CAULDRON, Blocks.RESPAWN_ANCHOR, Blocks.DRAGON_EGG, Blocks.CAKE);
-
+    /** Things whose use is the point of a right click, so a placement against them would not place anything (shared with the break rule). */
+    private static final Set<Block> USE_INTERACTIVE = BreakRule.USE_INTERACTIVE;
 
     private BaritoneBreakPlacePolicy() {
     }
@@ -99,60 +91,16 @@ public final class BaritoneBreakPlacePolicy {
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
-     * Block-level rule, safe on any thread: null if a bot may break blocks of this kind, else why not. Reads the block's default
+     * Block-level rule, safe on any thread: null if a bot may break blocks of this kind, else why not. It is the mod-wide
+     * {@link BreakRule}, shared with the legacy diggers, and reads the block's default
      * state only, so it is a property of the kind of block (the cost model asks it for every block it looks at).
      */
     public static String breakDenialOf(Block block) {
-        String verdict = BreakVerdictCache.BLOCKS.verdict(block, BaritoneBreakPlacePolicy::computeBreakDenial);
-        return verdict.isEmpty() ? null : verdict;
+        return BreakRule.denialOf(block);
     }
 
     public static boolean isBreakable(BlockState state) {
         return state.isAir() || breakDenialOf(state.getBlock()) == null;
-    }
-
-    private static String computeBreakDenial(Block block) {
-        BlockState state = block.defaultBlockState();
-        if (state.isAir()) {
-            return "";
-        }
-        if (state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO) < 0.0F) {
-            return "unbreakable";
-        }
-        if (block instanceof LiquidBlock || !state.getFluidState().isEmpty()) {
-            return "fluid";
-        }
-        if (state.hasBlockEntity()) {
-            return "block_entity";
-        }
-        if (state.is(BlockTags.BEDS) || USE_INTERACTIVE.contains(block) || state.is(BlockTags.ANVIL)) {
-            return "protected_block";
-        }
-        if (Standability.isDangerous(state)) {
-            return "dangerous_block";
-        }
-        return naturalTerrain(state) ? "" : "not_natural_terrain";
-    }
-
-    /** Terrain a world generator puts down and a bot may dig through. */
-    private static boolean naturalTerrain(BlockState state) {
-        Block block = state.getBlock();
-        return state.is(BlockTags.BASE_STONE_OVERWORLD)
-                || state.is(BlockTags.BASE_STONE_NETHER)
-                || state.is(BlockTags.STONE_ORE_REPLACEABLES)
-                || state.is(BlockTags.DEEPSLATE_ORE_REPLACEABLES)
-                || state.is(BlockTags.DIRT)
-                || state.is(BlockTags.SAND)
-                || state.is(BlockTags.LEAVES)
-                || state.is(BlockTags.REPLACEABLE)
-                || block == Blocks.COBBLESTONE
-                || block == Blocks.GRAVEL
-                || block == Blocks.CLAY
-                || block == Blocks.SNOW_BLOCK
-                || block == Blocks.END_STONE
-                || block == Blocks.CALCITE
-                || block == Blocks.DRIPSTONE_BLOCK
-                || OreScan.isOreBlock(block);
     }
 
     /**
@@ -199,7 +147,7 @@ public final class BaritoneBreakPlacePolicy {
         if (seen != null) {
             return refuse(bot, BaritoneRefusals.Op.PLACE, against, seen, detail);
         }
-        if (opensOnClick(support, bot.isSecondaryUseActive())) {
+        if (opensOnClick(support, itemUseWinsOverBlock(bot))) {
             return Decision.ALLOWED; // a wooden door, a trapdoor, a fence gate: the click opens it, whatever the hand holds
         }
         if (!(held.getItem() instanceof BlockItem)) {
@@ -219,13 +167,14 @@ public final class BaritoneBreakPlacePolicy {
 
     /**
      * Whether a right click on {@code state} opens it: a door or trapdoor whose {@code BlockSetType} lets a hand open it (never
-     * iron), or a fence gate, and only while the bot is not sneaking. A sneaking player holding an item uses the item on the
-     * block instead of the block (vanilla {@code ServerPlayerGameMode#useItemOn}), which for a non-block item would be an item
-     * use the policy never allowed; so a sneaking click gets no open allowance and falls through to the placement rules, which
-     * refuse it (a door, trapdoor or gate is never a support for a placement).
+     * iron), or a fence gate, unless {@code itemUseWins}. Vanilla ({@code ServerPlayerGameMode#useItemOn}) lets the item win over
+     * the block only for a player who is sneaking <em>and</em> holds something in either hand; such a click uses the item on the
+     * block, which for a non-block item would be an item use the policy never allowed, so it gets no open allowance and falls
+     * through to the placement rules, which refuse it (a door, trapdoor or gate is never a support for a placement). A sneaking
+     * player with both hands empty still opens the door, exactly like in vanilla.
      */
-    static boolean opensOnClick(BlockState state, boolean sneaking) {
-        if (sneaking) {
+    static boolean opensOnClick(BlockState state, boolean itemUseWins) {
+        if (itemUseWins) {
             return false;
         }
         Block block = state.getBlock();
@@ -236,6 +185,11 @@ public final class BaritoneBreakPlacePolicy {
             return ((TrapDoorBlockTypeInvokerMixin) trapDoor).minecraftai$type().canOpenByHand();
         }
         return block instanceof FenceGateBlock;
+    }
+
+    /** Vanilla's {@code isSecondaryUseActive() && (main hand or off hand not empty)}: the item is used on the block instead of the block. */
+    static boolean itemUseWinsOverBlock(AIPlayerEntity bot) {
+        return bot.isSecondaryUseActive() && (!bot.getMainHandItem().isEmpty() || !bot.getOffhandItem().isEmpty());
     }
 
     private static boolean isUseInteractive(BlockState state) {
@@ -299,9 +253,15 @@ public final class BaritoneBreakPlacePolicy {
         BaritoneAPI.getSettings().blocksToDisallowBreaking.value = new DeniedBlocks();
     }
 
-    /** The blocks a bot must not break, as a list Baritone can query ({@code contains}) and iterate. */
+    /**
+     * The blocks a bot must not break, as a list Baritone can query ({@code contains}) and iterate. The iterable snapshot is tied
+     * to the verdict cache's generation: after a tag reload it is built again instead of listing the old tags' verdicts.
+     */
     private static final class DeniedBlocks extends AbstractList<Block> {
-        private volatile List<Block> all;
+        private record Snapshot(int generation, List<Block> blocks) {
+        }
+
+        private volatile Snapshot snapshot;
 
         @Override
         public boolean contains(Object o) {
@@ -319,17 +279,19 @@ public final class BaritoneBreakPlacePolicy {
         }
 
         private List<Block> all() {
-            List<Block> list = all;
-            if (list == null) {
+            int generation = BreakVerdictCache.BLOCKS.generation();
+            Snapshot current = snapshot;
+            if (current == null || current.generation() != generation) {
                 List<Block> built = new ArrayList<>();
                 for (Block block : BuiltInRegistries.BLOCK) {
                     if (breakDenialOf(block) != null) {
                         built.add(block);
                     }
                 }
-                all = list = List.copyOf(built);
+                current = new Snapshot(generation, List.copyOf(built)); // the generation read BEFORE the build: a reload during it makes this stale
+                snapshot = current;
             }
-            return list;
+            return current.blocks();
         }
     }
 

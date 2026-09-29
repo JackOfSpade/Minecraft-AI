@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.baritone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -97,9 +98,19 @@ class BaritoneSurvivalContractTest {
         throw new AssertionError("unbalanced braces after offset " + from);
     }
 
+    /** The only conditions a refusal test may have in front of the policy call: nothing, or the typed-player guard of windowClick. */
+    private static final java.util.Set<String> KNOWN_GUARDS = java.util.Set.of("!", "!(player instanceof AIPlayerEntity self) || !");
+
+    /** The only bodies of a refusal branch: leave the entry (in the form its return type needs), aborting a running break first. */
+    private static final java.util.Set<String> KNOWN_REFUSALS = java.util.Set.of(
+            "return;", "return false;", "return InteractionResult.FAIL;",
+            "mining.abort(self); mining = null; hitting = false; return false;");
+
     /**
-     * Every use of {@code call} in {@code method} is a refusal test ({@code if (... !call(...).allowed())}) whose block leaves
-     * the method ({@code return}), so a controller entry cannot ask the policy and then act on a refusal anyway.
+     * Every use of {@code call} in {@code method} is a refusal test of a KNOWN shape, {@code if (<guard>call(...).allowed())} with
+     * one of {@link #KNOWN_GUARDS}, whose block is one of {@link #KNOWN_REFUSALS} (it leaves the entry): a controller entry cannot
+     * ask the policy and then act on a refusal anyway, and a new shape (a refusal that logs and carries on, a condition that only
+     * sometimes refuses) fails here until it is reviewed and added on purpose.
      */
     private static void assertRefusalEndsTheEntry(String method, String call, int expectedUses) {
         int uses = 0;
@@ -107,15 +118,32 @@ class BaritoneSurvivalContractTest {
             uses++;
             String before = method.substring(Math.max(0, at - 120), at);
             int ifAt = before.lastIndexOf("if (");
-            assertTrue(ifAt >= 0 && before.substring(ifAt).endsWith("!"), call + " must be tested as `if (... !" + call + "...allowed())`");
-            int allowed = method.indexOf(".allowed()", at);
+            assertTrue(ifAt >= 0, call + " must be tested as `if (<guard>" + call + "...allowed())`");
+            String guard = before.substring(ifAt + "if (".length());
+            assertTrue(KNOWN_GUARDS.contains(guard), call + ": unknown refusal guard `" + guard + "`, known: " + KNOWN_GUARDS);
+            int close = method.indexOf(".allowed())", at);
             int open = method.indexOf('{', at);
-            assertTrue(allowed > 0 && allowed < open, call + ": the decision's allowed() is what the if tests");
-            String refusalBranch = block(method, at);
-            assertTrue(refusalBranch.contains("return"), call + ": a refusal must return, the branch was " + refusalBranch);
+            assertTrue(close > 0 && close < open && method.substring(close + ".allowed())".length(), open).isBlank(),
+                    call + ": the `if` must test exactly the decision's allowed()");
+            String refusalBranch = block(method, at).replaceAll("\\s+", " ").replaceAll("^\\{ | \\}$", "");
+            assertTrue(KNOWN_REFUSALS.contains(refusalBranch), call + ": unknown refusal branch `" + refusalBranch + "`, known: " + KNOWN_REFUSALS);
         }
         assertEquals(expectedUses, uses, call + " uses in the method");
     }
+
+    @Test
+    void anUnknownRefusalShapeIsRejectedByTheContractCheck() {
+        assertRefusalEndsTheEntry("void m() { if (!BaritoneBreakPlacePolicy.checkBreak(x, y).allowed()) { return false; } }",
+                "BaritoneBreakPlacePolicy.checkBreak(", 1);
+        for (String bad : new String[] {
+                "void m() { if (flag || !BaritoneBreakPlacePolicy.checkBreak(x, y).allowed()) { return false; } }", // extra condition
+                "void m() { if (!BaritoneBreakPlacePolicy.checkBreak(x, y).allowed()) { log(); } }", // refusal that carries on
+                "void m() { if (!BaritoneBreakPlacePolicy.checkBreak(x, y).allowed()) { log(); return false; } }", // extra statement
+                "void m() { if (!BaritoneBreakPlacePolicy.checkBreak(x, y).allowed() && flag) { return false; } }"}) { // partial test
+            assertThrows(AssertionError.class, () -> assertRefusalEndsTheEntry(bad, "BaritoneBreakPlacePolicy.checkBreak(", 1), bad);
+        }
+    }
+
 
     @Test
     void everyControllerEntryReturnsOnARefusal() throws IOException {
@@ -135,13 +163,17 @@ class BaritoneSurvivalContractTest {
     }
 
     @Test
-    void theClickAllowanceForOpeningNeedsANonSneakingBotAndTheBlockSetType() throws IOException {
+    void theClickAllowanceForOpeningNeedsTheBlockToWinAndTheBlockSetType() throws IOException {
         String policy = read("baritone/BaritoneBreakPlacePolicy.java");
-        assertTrue(policy.contains("opensOnClick(support, bot.isSecondaryUseActive())"), "a sneaking click does not get the open allowance");
+        assertTrue(policy.contains("opensOnClick(support, itemUseWinsOverBlock(bot))"), "the item-wins case does not get the open allowance");
         String opens = body(policy, "static boolean opensOnClick(");
-        assertTrue(opens.contains("if (sneaking) {\n            return false;"), "sneaking is refused first");
+        assertTrue(opens.contains("if (itemUseWins) {\n            return false;"), "an item that wins over the block is refused first");
         assertTrue(opens.contains("door.type().canOpenByHand()") && opens.contains("minecraftai$type().canOpenByHand()"),
                 "doors and trapdoors both ask the BlockSetType, not a block identity");
+        // Vanilla (ServerPlayerGameMode#useItemOn): sneaking only makes the item win when a hand holds something.
+        String wins = body(policy, "static boolean itemUseWinsOverBlock(");
+        assertTrue(wins.contains("bot.isSecondaryUseActive() && (!bot.getMainHandItem().isEmpty() || !bot.getOffhandItem().isEmpty())"),
+                "a sneaking bot with both hands empty still opens the door");
         assertTrue(!policy.contains("IRON_TRAPDOOR"), "no identity test against a specific trapdoor");
         assertTrue(Files.readString(Path.of("src/main/resources/minecraftai.mixins.json")).contains("TrapDoorBlockTypeInvokerMixin"));
     }
@@ -149,13 +181,18 @@ class BaritoneSurvivalContractTest {
     @Test
     void theBreakVerdictCacheIsDroppedOnServerStartAndOnEveryTagLoad() throws IOException {
         String policy = read("baritone/BaritoneBreakPlacePolicy.java");
-        assertTrue(policy.contains("BreakVerdictCache.BLOCKS.verdict(") && !policy.contains("ConcurrentHashMap"), "no policy-private static cache");
+        assertTrue(policy.contains("return BreakRule.denialOf(block);") && !policy.contains("ConcurrentHashMap"), "no policy-private static cache");
+        String rule = read("mining/BreakRule.java");
+        assertTrue(rule.contains("BreakVerdictCache.BLOCKS.verdict("), "the shared rule reads the shared cache");
+        assertTrue(!rule.contains("import baritone.") && !rule.contains("minecraftai.baritone."), "the shared rule imports no Baritone type");
         String mod = read("MinecraftAiMod.java");
         assertTrue(mod.contains("ServerLifecycleEvents.SERVER_STARTING.register(server -> BreakVerdictCache.invalidate())"));
         assertTrue(mod.contains("CommonLifecycleEvents.TAGS_LOADED.register((registries, client) -> BreakVerdictCache.invalidate())"));
-        String cache = read("baritone/BreakVerdictCache.java");
+        String cache = read("mining/BreakVerdictCache.java");
         assertTrue(!cache.contains("import baritone.") && !cache.contains("BaritoneBreakPlacePolicy."),
                 "the lifecycle hook reaches no Baritone class");
+        // The planning list Baritone iterates is a snapshot of these verdicts, so it follows the cache's generation.
+        assertTrue(policy.contains("BreakVerdictCache.BLOCKS.generation()"), "the denied-block list is rebuilt after a tag reload");
     }
 
     /** Baritone's world-scanning processes and scanner: they know where an ore is without having seen it (an X-ray). */

@@ -1,6 +1,6 @@
 package io.github.zoyluo.minecraftai;
 
-import io.github.zoyluo.minecraftai.baritone.BreakVerdictCache;
+import io.github.zoyluo.minecraftai.mining.BreakVerdictCache;
 import io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.brain.ChatCaptureListener;

@@ -12,6 +12,7 @@ import io.github.zoyluo.minecraftai.action.WalkToController;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mining.BreakRule;
 import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
@@ -3758,6 +3759,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                                TunnelIntent intent,
                                                BlockPos obstruction,
                                                BlockPos factualRear) {
+        // Only natural terrain is channel rock (the shared BreakRule, the one Baritone's policy uses too): a structure or
+        // player-build block (stone bricks, slabs, planks, an infested block ...) is a boundary of the tunnel, not something to
+        // open. A target ore is always natural, so this never stops the ore itself.
+        String denial = BreakRule.legacyDenialOf(world.getBlockState(obstruction));
+        if (denial != null) {
+            rejectObservedTunnelBoundary(bot, world, goal, intent, "break_refused:" + denial, obstruction, factualRear);
+            return;
+        }
         if (intent == TunnelIntent.TARGET_APPROACH
                 && OreScan.adjacentHazard(bot, obstruction)
                 == OreScan.Observation.OBSERVED_PRESENT) {
@@ -4066,6 +4075,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     && supportState.getCollisionShape(world, support)
                     .max(Direction.Axis.Y) > 0.0D;
             if (supported
+                    && isDiggableBody(world, ahead, ahead.above(), next)
                     && !isLava(world, next) && !isLava(world, support)
                     && !isLava(world, ahead) && !isLava(world, ahead.above())
                     && !isWater(world, next) && !isWater(world, support)
@@ -4074,6 +4084,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
         }
         return null;
+    }
+
+    /** Whether every solid cell among {@code cells} is natural terrain the shared {@link BreakRule} lets a bot dig. */
+    private static boolean isDiggableBody(ServerLevel world, BlockPos... cells) {
+        for (BlockPos cell : cells) {
+            var state = world.getBlockState(cell);
+            if (!state.getCollisionShape(world, cell).isEmpty() && BreakRule.legacyDenialOf(state) != null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isLava(ServerLevel world, BlockPos pos) {
@@ -4326,7 +4347,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private BlockMiner.Status beginMine(AIPlayerEntity bot, BlockPos pos) {
         bot.getActionPack().stopMovement(); // Mutual exclusion: mining the ore block itself stops approach pathfinding (the executor's DIG_THROUGH and BlockMiner don't compete for control)
-        miner.begin(bot, pos, true);
+        miner.begin(bot, pos, true, true); // channel tool policy, natural terrain only (the shared BreakRule)
         return miner.tick(bot);
     }
 
@@ -4813,6 +4834,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         if (state.getDestroySpeed(world, pos) < 0.0F || world.getBlockEntity(pos) != null) {
             return false;
+        }
+        if (BreakRule.legacyDenialOf(state) != null) {
+            return false; // structure / player-build material is not branch rock (the shared rule Baritone uses too)
         }
         return !state.requiresCorrectToolForDrops() || ToolTier.canHarvestWithInventory(bot, state);
     }
