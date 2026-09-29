@@ -824,6 +824,16 @@ public final class BrainCoordinator {
         deferredRequests.put(bot.getUUID(), true);
     }
 
+    /** Test seam: marks the bot's current model-call chain as belonging to a player instruction (or not). */
+    public void setPlayerInstructionChainForTest(AIPlayerEntity bot, boolean playerInstruction) {
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
+        if (playerInstruction) {
+            conversation.instructionChain.beginPlayerInstruction();
+        } else {
+            conversation.instructionChain.beginAutonomousWake();
+        }
+    }
+
     /** Test seam: whether a blocked request is waiting for the SAFETY task to end. */
     public boolean isRequestDeferredForTest(AIPlayerEntity bot) {
         return Boolean.TRUE.equals(deferredRequests.get(bot.getUUID()));

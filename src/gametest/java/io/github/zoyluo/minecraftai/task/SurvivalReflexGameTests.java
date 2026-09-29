@@ -372,6 +372,15 @@ public final class SurvivalReflexGameTests {
         TaskManager.INSTANCE.assign(bot, fight, TaskOrigin.safety("gametest_fight"));
         var dispatcher = new io.github.zoyluo.minecraftai.brain.ActionDispatcher(new io.github.zoyluo.minecraftai.brain.ToolRegistry());
         try {
+            // An autonomous wake's blocked call is not a player request: it is blocked but never deferred.
+            io.github.zoyluo.minecraftai.brain.BrainCoordinator.INSTANCE.setPlayerInstructionChainForTest(bot, false);
+            var autonomous = dispatcher.dispatch(bot, List.of(
+                    new io.github.zoyluo.minecraftai.brain.ChatToolCall("call_0", "eat", "{}")));
+            require(context, autonomous.get(0).content().contains("safety_task_active"),
+                    "the autonomous tool call was not blocked: " + autonomous.get(0).content());
+            require(context, !io.github.zoyluo.minecraftai.brain.BrainCoordinator.INSTANCE.isRequestDeferredForTest(bot),
+                    "a blocked call of an autonomous wake was deferred as if it were a player request");
+            io.github.zoyluo.minecraftai.brain.BrainCoordinator.INSTANCE.setPlayerInstructionChainForTest(bot, true);
             var results = dispatcher.dispatch(bot, List.of(
                     new io.github.zoyluo.minecraftai.brain.ChatToolCall("call_1", "eat", "{}")));
             require(context, results.size() == 1, "expected one tool result, got " + results.size());
