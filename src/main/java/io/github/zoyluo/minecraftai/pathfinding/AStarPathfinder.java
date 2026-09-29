@@ -21,6 +21,12 @@ public final class AStarPathfinder {
     private static final int DEFAULT_MAX_NODES = 10_000;
     private static final long DEFAULT_MAX_MILLIS = 50L;
     private static final int MAX_CACHE_ENTRIES = 256;
+    // Goal-snap window/fallback bounds -- see resolveEndpoint's goal branch and
+    // Standability.findNearestStandableForGoal's header.
+    private static final int GOAL_NEAR_HORIZONTAL_RADIUS = 8;
+    private static final int GOAL_NEAR_VERTICAL_DOWN = 4;
+    private static final int GOAL_NEAR_VERTICAL_UP = 3;
+    private static final int GOAL_DEEP_VERTICAL_DOWN = 24;
     private static final long SUCCESS_CACHE_MILLIS = 2_000L;
     private static final long FAILURE_CACHE_MILLIS = 5_000L;
     // Cross-bot cache-reuse note (bot identity is deliberately NOT part of CacheKey below):
@@ -283,15 +289,36 @@ public final class AStarPathfinder {
         if (allowDig && !startPoint && isDiggableColumn(requested)) {
             return requested;
         }
-        Optional<BlockPos> snapped = Standability.findNearestStandable(world, requested, 8, 128, 32);
+        if (startPoint) {
+            // The bot's own current position really can be at the bottom of a shaft it just dug;
+            // finding where it ACTUALLY is standing means searching its own column deeply before
+            // ever relocating it sideways. Unchanged from before this fix.
+            Optional<BlockPos> snapped = Standability.findNearestStandable(world, requested, 8, 128, 32);
+            if (snapped.isEmpty()) {
+                return null;
+            }
+            BotLog.path(null, "findpath_start_snapped",
+                    "from", LogFields.pos(requested),
+                    "to", LogFields.pos(snapped.get()));
+            return snapped.get();
+        }
+        // A goal is offered by a caller that generally only knows an XZ (or a followed entity's
+        // feet) -- see GOAL_NEAR_HORIZONTAL_RADIUS et al.'s header on Standability for the
+        // 2026-09-28 evidence this two-phase snap was written against (a surface goal resolving
+        // into the bot's own old mining staircase, and the same bug's water counterpart resolving
+        // onto a lake bed).
+        Optional<Standability.SnappedGoal> snapped = Standability.findNearestStandableForGoal(
+                world, requested,
+                GOAL_NEAR_HORIZONTAL_RADIUS, GOAL_NEAR_VERTICAL_DOWN, GOAL_NEAR_VERTICAL_UP,
+                GOAL_DEEP_VERTICAL_DOWN);
         if (snapped.isEmpty()) {
             return null;
         }
-        BotLog.path(null,
-                startPoint ? "findpath_start_snapped" : "findpath_goal_snapped",
+        BotLog.path(null, "findpath_goal_snapped",
                 "from", LogFields.pos(requested),
-                "to", LogFields.pos(snapped.get()));
-        return snapped.get();
+                "to", LogFields.pos(snapped.get().pos()),
+                "phase", snapped.get().phase());
+        return snapped.get().pos();
     }
 
     // Goal cell "becomes standable once dug out": both the foot and head positions are (diggable solid OR already passable), with no fluid -- after digging through it becomes a legal standing position.

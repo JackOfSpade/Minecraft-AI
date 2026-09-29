@@ -30,6 +30,24 @@ final class FollowRecoverySourceContractTest {
     }
 
     @Test
+    void landFollowKeepsTheWiderStopDistanceAndNeverAbortsAStandingOrder() throws IOException {
+        String follow = read("task/FollowTask.java");
+        String tools = read("brain/ToolRegistry.java");
+
+        assertTrue(follow.contains("private static final double STOP_DISTANCE = 3.0D;"));
+        assertTrue(follow.contains("distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK"),
+                "arrival threshold must keep the one-sided slack");
+        assertTrue(follow.contains("stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)"),
+                "follow must own its stall recovery instead of letting StuckWatcher abort it");
+        assertTrue(follow.contains("stuckRecovery.consumeForcedRepath()"));
+        assertTrue(follow.contains("private static final double SWIM_STOP_DISTANCE = 3.5D;"),
+                "swim distance is unchanged by the land stop-distance change");
+        assertFalse(follow.contains("startSurfacePathTo"),
+                "follow must not run a second surface-first search on every repath");
+        assertTrue(tools.contains("keeping roughly 3-5 blocks of distance"));
+    }
+
+    @Test
     void cancelledShelterHandsOffOnlyItsOwnedDoorwayToFollow() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
         String follow = read("task/FollowTask.java");

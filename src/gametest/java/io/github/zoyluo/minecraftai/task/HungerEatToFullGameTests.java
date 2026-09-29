@@ -32,7 +32,7 @@ public final class HungerEatToFullGameTests {
     public void lowHungerPausesFollowEatsToFullThenResumes(TestContext context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "HungerFollowerGT", 2);
         AIPlayerEntity target = spawnOnPlatform(context, "HungerFollowTargetGT", 2);
-        // Well inside FollowTask's 2.0-block STOP_DISTANCE from the start, so the bot never has to
+        // Well inside FollowTask's 3.0-block STOP_DISTANCE from the start, so the bot never has to
         // path anywhere and settles into "waiting" (ActionPack idle) on the very first tick, rather
         // than sitting exactly on the stop-distance boundary -- which can stall the repath decision
         // and trip the unrelated StuckWatcher safety abort after 200 ticks.

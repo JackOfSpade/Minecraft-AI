@@ -23,12 +23,25 @@ import java.util.Optional;
  * is followed through bounded verified swim steps without launching a boat.
  */
 public final class FollowTask extends AbstractTask {
-    private static final double STOP_DISTANCE = 2.0D;
+    // +1 block from the previous 2.0: players reported the bot settling uncomfortably close.
+    // Swim/boat distances below are unaffected -- a trailing boat or swimmer already keeps a
+    // wider berth for its own steering/collision reasons unrelated to this personal-space call.
+    private static final double STOP_DISTANCE = 3.0D;
     private static final double MAX_DIRECT_FALLBACK_DISTANCE = 12.0D;
     private static final int REPATH_TICKS = 40;
     private static final double SWIM_STOP_DISTANCE = 3.5D;
     private static final int SWIM_REPATH_TICKS = 30;
     private static final double BOAT_TURN_ONLY_ANGLE = 82.0D;
+    // A block-snapped bot cannot always land at exactly STOP_DISTANCE: standNear floors to a
+    // BlockPos, and the followed player's own continuous (non-integer) position means the real
+    // entity-to-entity distance at that cell is only ever approximately STOP_DISTANCE. Without
+    // slack, a cell whose true distance is a hair above STOP_DISTANCE (observed at exactly
+    // integer separations, e.g. player and bot aligned on one axis) never satisfies the strict
+    // arrival check, so the bot re-plans an already-arrived, zero-length route forever -- the
+    // real GameTest fixture for this exact shape caught it. Slack is one-sided (an arrival check
+    // only, not the offset above), so the bot still settles close to STOP_DISTANCE and never
+    // closer than STOP_DISTANCE - 0 (this only ever widens the accepted far edge).
+    private static final double STOP_ARRIVAL_SLACK = 0.5D;
 
     private final String targetName;
     private int nextRepathTick;
@@ -41,6 +54,7 @@ public final class FollowTask extends AbstractTask {
     private boolean repathBackoff;
     private BoatFollowTask boatFollow;
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
+    private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
 
     public FollowTask(String targetName) {
         this.targetName = FollowTargetResolver.normalize(targetName);
@@ -76,6 +90,7 @@ public final class FollowTask extends AbstractTask {
         repathBackoff = false;
         boatFollow = null;
         shelterExitDebtRepayer.reset(bot);
+        stuckRecovery.reset(bot, elapsed);
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
     }
 
@@ -214,10 +229,27 @@ public final class FollowTask extends AbstractTask {
 
     private void followLand(AIPlayerEntity bot, ServerPlayerEntity target) {
         double distance = bot.distanceTo(target);
-        if (distance <= STOP_DISTANCE) {
+        if (distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {
             bot.getActionPack().stopMovement();
             waiting = true;
+            stuckRecovery.reset(bot, elapsed);
             return;
+        }
+        // A standing follow order must survive path/goal-resolution quirks that report bogus
+        // "success" without the bot's real position ever changing (see FollowStuckRecovery's
+        // header). This runs before -- and, while active, instead of -- the ordinary repath
+        // logic below; StuckWatcher never sees a frozen sample because isWaiting() stays true for
+        // every tick this owns.
+        if (stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)) {
+            waiting = true;
+            return;
+        }
+        // Recovery may have just decided this specific tick needs an immediate fresh repath
+        // (see FollowStuckRecovery's forced-replan window) rather than either handling the tick
+        // itself or waiting for the ordinary schedule below -- honour that by pulling the
+        // schedule forward instead of adding a second, parallel path-triggering codepath.
+        if (stuckRecovery.consumeForcedRepath()) {
+            nextRepathTick = elapsed;
         }
         boolean pathIdle = bot.getActionPack().isPathExecutorIdle();
         boolean walkIdle = bot.getActionPack().isWalkToIdle();
@@ -235,6 +267,11 @@ public final class FollowTask extends AbstractTask {
         // idle on its own (a short leg toward a close, moving target often finishes well before
         // nextRepathTick) -- unless we're deliberately backing off a just-failed distant search.
         if (elapsed >= nextRepathTick || (pathIdle && walkIdle && !repathBackoff)) {
+            // One ordinary search per repath. A goal that used to resolve down into the bot's own
+            // old mining staircase (2026-09-28 session log) is fixed at the source, in goal
+            // resolution (AStarPathfinder.resolveEndpoint / Standability.findNearestStandableForGoal:
+            // nearby cell first, then a bounded fluid-refusing deep fallback), so no second
+            // "surface-first" search is layered on top here.
             ActionResult path = bot.getActionPack().startPathTo(standNear);
             nextRepathTick = elapsed + REPATH_TICKS;
             if (!path.isFailed()) {
