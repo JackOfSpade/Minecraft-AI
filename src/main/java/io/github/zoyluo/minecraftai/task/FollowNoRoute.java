@@ -61,14 +61,16 @@ final class FollowNoRoute {
     }
 
     /**
-* Counts consecutive NON-genuine failed re-plans (an unstandable goal included) and says when a notice is     * due: at least {@link #REPEATED_FAILURES_BEFORE_NOTICE} of them, spanning at least     * {@link #REPEATED_FAILURE_SPAN_TICKS}.
+     * Counts consecutive NON-genuine failed re-plans (an unstandable goal included) and says when a notice is
+     * due: at least {@link #REPEATED_FAILURES_BEFORE_NOTICE} of them, spanning at least
+     * {@link #REPEATED_FAILURE_SPAN_TICKS}.
      * Any successful route, arrival or genuine failure ends the streak. Pure (no game objects).
      */
     static final class RepeatedFailures {
         private int failures;
         private int firstFailureTick;
 
-        /** Records one non-genuine failed re-plan at {@code tick}; true when the generic notice is now due. */
+        /** Records one non-genuine failed re-plan at {@code tick}; true when a notice is now due. */
         boolean recordFailure(int tick) {
             if (failures == 0) {
                 firstFailureTick = tick;

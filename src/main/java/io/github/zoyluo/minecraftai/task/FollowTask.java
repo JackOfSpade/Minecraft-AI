@@ -505,9 +505,9 @@ public final class FollowTask extends AbstractTask {
     /**
      * No route to the player and no verified straight walk: the bot stays dry where it is (it swims only to follow
      * a player who is themselves in the water), keeps re-planning on the normal schedule, and says so once per
-     * episode, either with a specific line for a genuine no-route / no-standing-place result or, after repeated
-     * transient failures, with a generic one ({@link FollowNoRoute}). The flag is re-armed when a route is found
-     * again or the bot arrives.
+     * episode: a specific line at once for a genuine no-route result, or, after repeated failures, the specific
+     * no-standing-place line for a persistently unstandable goal and a generic line for the rest
+     * ({@link FollowNoRoute}). The flag is re-armed when a route is found again or the bot arrives.
      */
     private void announceNoRoute(AIPlayerEntity bot, BlockPos standNear, String reason, String message) {
         if (noRouteAnnounced) {
