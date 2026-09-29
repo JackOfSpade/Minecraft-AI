@@ -225,6 +225,7 @@ INVENTORY / UI / QOL
 | YetAnotherConfigLib (YACL) | 3.8.2+1.21.11-fabric  | 2026-09-27 |
 | Stackable Potions  | 1.0.0+1.21.11-fabric           | 2026-09-28 |
 | Stackable          | 2.0.5 (fabric-1.21.11)         | 2026-09-28 |
+| Infinite Inventory | 2.0.0 (infinite-inventory-2.0.0-mc1.21.jar) | 2026-09-29 |
 
 Stackable Potions (by CursedFlames) makes potions of every type stack to 16.
 Requires only Fabric API (already installed). Added 2026-09-28.
@@ -235,6 +236,15 @@ stack limits (configurable, up to 2.147B on this version range); it does not
 touch potions itself, complementary to Stackable Potions above rather than
 overlapping with it. Requires only Fabric API (already installed).
 Added 2026-09-28. https://modrinth.com/mod/stackable127
+
+Infinite Inventory (by robsterad, https://modrinth.com/mod/infinite-inventory-mod)
+adds a secondary inventory overlay that stores any item in any quantity next to the
+vanilla inventory, which stays untouched (shift-click moves items into it; click
+takes a stack back; search and sorting; binds in its Mod Menu settings). Needed on
+client and server. Requires Fabric API, Mod Menu and Cloth Config (all already
+installed); declares Minecraft ~1.21.8, which covers 1.21.11. Its only mixins are
+client-side inventory-screen hooks, so the Minecraft-AI bots' inventories are
+unaffected. Added 2026-09-29.
 
 --------------------------------------------------------------------------
 REQUIRED LIBRARIES / DEPENDENCIES
