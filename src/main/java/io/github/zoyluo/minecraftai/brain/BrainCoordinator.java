@@ -84,6 +84,10 @@ public final class BrainCoordinator {
     // FLOW-2: set true once the brain assigns a long-running task; after the task ends the
     // idle-watcher uses this to auto-wake the brain to decide the next step (no human nudge needed).
     private final Map<UUID, Boolean> awaitingTask = new ConcurrentHashMap<>();
+    // The player's request was blocked because a SAFETY task (a fight, an evade) was running
+    // (see ToolRegistry.assignLlm). It is not lost: when the threat is handled and the bot is idle,
+    // the brain is woken to start it (maybeWakeForFailureOrGoal). Cleared by any newer intent.
+    private final Map<UUID, Boolean> deferredRequests = new ConcurrentHashMap<>();
     private ToolRegistry toolRegistry = new ToolRegistry();
     private ActionDispatcher dispatcher = new ActionDispatcher(toolRegistry);
     private AsyncDecisionExecutor executor;
@@ -153,6 +157,7 @@ public final class BrainCoordinator {
                 bot, IntentController.ControlOrigin.SYSTEM, "new_player_request");
         awaitingTask.remove(bot.getUUID());
         nextGoalWakeTick.remove(bot.getUUID());
+        deferredRequests.remove(bot.getUUID());
         DecisionLease lease = conversation.decision.beginEpoch();
         // A fresh instruction also gets a fresh LLM context. This avoids old tool calls and
         // goals biasing the planner toward a request the player has already replaced.
@@ -777,6 +782,7 @@ public final class BrainCoordinator {
         manualModes.remove(bot.getUUID());
         awaitingTask.remove(bot.getUUID());
         nextGoalWakeTick.remove(bot.getUUID());
+        deferredRequests.remove(bot.getUUID());
         BotRuntimeOptions.INSTANCE.clear(bot);
         ChatTranscript.clear(bot.getUUID());
         BotLog.comm(bot, "conversation_reset");
@@ -795,7 +801,23 @@ public final class BrainCoordinator {
     public boolean clearIntentWakeSources(AIPlayerEntity bot) {
         boolean awaitingCleared = awaitingTask.remove(bot.getUUID()) != null;
         boolean wakeTickCleared = nextGoalWakeTick.remove(bot.getUUID()) != null;
-        return awaitingCleared || wakeTickCleared;
+        boolean deferredCleared = deferredRequests.remove(bot.getUUID()) != null;
+        return awaitingCleared || wakeTickCleared || deferredCleared;
+    }
+
+    /**
+     * A model tool was blocked because a SAFETY task is running. The request is remembered instead of
+     * being lost: once the bot is idle again the brain is woken to start it
+     * ({@link #maybeWakeForFailureOrGoal}) with a fresh call budget, and the budget end of the blocked
+     * round stays silent (the request is deferred, not dropped).
+     */
+    void deferRequestUntilSafetyEnds(AIPlayerEntity bot) {
+        deferredRequests.put(bot.getUUID(), true);
+    }
+
+    /** Test seam: whether a blocked request is waiting for the SAFETY task to end. */
+    public boolean isRequestDeferredForTest(AIPlayerEntity bot) {
+        return Boolean.TRUE.equals(deferredRequests.get(bot.getUUID()));
     }
 
     /** Test-only seam (mirrors {@code PoiAdvisor.setTestTransport}/{@code MiningAssistRuntime.
@@ -846,7 +868,8 @@ public final class BrainCoordinator {
         // FLOW-2: the idle-watcher only calls this method when there is no active task, so
         // awaiting=true means "the task the brain assigned has already finished".
         boolean taskJustFinished = Boolean.TRUE.equals(awaitingTask.get(bot.getUUID()));
-        if (!hasFailure && !shouldWakeForGoal(bot, hasGoal) && !taskJustFinished) {
+        boolean requestDeferred = Boolean.TRUE.equals(deferredRequests.get(bot.getUUID()));
+        if (!hasFailure && !shouldWakeForGoal(bot, hasGoal) && !taskJustFinished && !requestDeferred) {
             return false;
         }
         ensureConfigured();
@@ -878,6 +901,34 @@ public final class BrainCoordinator {
                 awaitingTask.remove(bot.getUUID());
                 return false;
             }
+        }
+        if (requestDeferred) {
+            // The threat that blocked the player's request is handled and the bot is idle: start it now.
+            // The blocked round usually spent the instruction's call budget, so the retry gets a fresh
+            // one. The player was already told about the delay (or, if the model stayed silent, hears
+            // the plan when it starts): the model must not announce the delay a second time.
+            deferredRequests.remove(bot.getUUID());
+            awaitingTask.remove(bot.getUUID());
+            conversation.callBudget.beginPlayerInstruction(0);
+            conversation.budgetExhaustionReported = false;
+            conversation.lastToolRoundFailureCount = 0;
+            conversation.requestStarted = false;
+            conversation.failureReportCall = false;
+            conversation.lastToolRoundMissingRequiredAction = false;
+            conversation.lastToolRoundPlanBlockedAction = false;
+            PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
+            conversation.lastPerceptionDigest = perceptionDigest(snapshot);
+            String request = conversation.lastInstruction.isBlank()
+                    ? "the player's last request"
+                    : "the player's request: " + conversation.lastInstruction;
+            conversation.history.add(ChatMessage.user(
+                    "The threat that blocked your request is handled. Start " + request
+                    + " now with the appropriate task tool. Do not tell the player about the delay again."
+                    + "\n\nCurrent state:\n" + snapshot.toJson()));
+            BotLog.comm(bot, "deferred_request_wake", "instruction", ActionDispatcher.chatLogText(conversation.lastInstruction));
+            trimHistory(conversation);
+            submit(bot, conversation, conversation.decision.beginEpoch());
+            return true;
         }
         if (conversation.callBudget.exhausted()) {
             finishCallBudget(bot, conversation, "automatic_wake");
@@ -919,6 +970,7 @@ public final class BrainCoordinator {
         manualModes.clear();
         nextGoalWakeTick.clear();
         awaitingTask.clear();
+        deferredRequests.clear();
         ChatTranscript.clearAll();
     }
 
@@ -1231,6 +1283,12 @@ public final class BrainCoordinator {
         // told to the player -- a dropped command with no word is the worst outcome.
         // The planner loop is over: a withheld say must not leak into a later wake-up call.
         conversation.withholdSayNextCall = false;
+        if (deferredRequests.containsKey(bot.getUUID())) {
+            // The request was blocked by a running SAFETY task and is kept for when the threat ends
+            // (maybeWakeForFailureOrGoal): it is deferred, not dropped, so no "could not start" apology.
+            BotLog.comm(bot, "budget_end_silent_request_deferred", "trigger", trigger);
+            return;
+        }
         InstructionRoundEvaluator.BudgetReport report = InstructionRoundEvaluator.budgetReport(
                 conversation.budgetExhaustionReported,
                 workActive,

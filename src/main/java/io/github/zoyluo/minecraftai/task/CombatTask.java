@@ -731,7 +731,6 @@ public final class CombatTask extends AbstractTask {
         return isImmediatePressure(bot, entity);
     }
 
-
     private void endDefensiveEngagement(AIPlayerEntity bot, String reason, BlockPos observed) {
         finishRangedLoadout(bot);
         bot.getActionPack().stopAll();

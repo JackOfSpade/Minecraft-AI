@@ -716,7 +716,10 @@ public final class DangerWatcher {
                     : shelterCleanupRecovery ? "shelter_cleanup_hunger: " + foodLevel
                     : "hunger: " + foodLevel);
         }
-        TaskManager.INSTANCE.assign(bot, new EatTask(), healingEmergency || critical
+        // A top-up that exists only because regen is stalled must never fall back to harmful food.
+        boolean regenStallOnly = regenStall && foodLevel > survival.hungerEatThreshold()
+                && !healingEmergency && !shelterCleanupRecovery;
+        TaskManager.INSTANCE.assign(bot, regenStallOnly ? EatTask.safeFoodOnly() : new EatTask(), healingEmergency || critical
                 ? TaskOrigin.safety(healingEmergency ? "low_health_heal" : "critical_hunger")
                 : TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND,
                         shelterCleanupRecovery ? "shelter_cleanup_hunger" : "eat"));
@@ -1343,11 +1346,13 @@ public final class DangerWatcher {
     /**
      * Wounded (below max health) with a food bar too low for natural regeneration and food to eat.
      * Pure of any safety context; the caller adds the hostile-pressure and safety-task gates.
+     * Only SAFE food counts (never the last-resort harmful food such as rotten flesh or
+     * pufferfish), and the check is side-effect free (no offhand promotion, no logging).
      */
     static boolean isRegenStall(AIPlayerEntity bot) {
         return bot.getHealth() < bot.getMaxHealth()
                 && bot.getFoodData().getFoodLevel() < REGEN_FOOD_LEVEL
-                && InventoryAction.findFoodSlot(bot) >= 0;
+                && InventoryAction.hasSafeFood(bot);
     }
 
     private static boolean isSafetyTaskActive(AIPlayerEntity bot, Optional<Task> active) {

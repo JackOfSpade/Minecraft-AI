@@ -22,6 +22,12 @@ public final class EatTask extends AbstractTask {
     // empty one -- while still failing closed instead of looping forever if something is wrong.
     private static final int MAX_ITEMS_PER_PASS = 12;
 
+    /**
+     * When set, only non-harmful food is ever eaten (no last-resort rotten flesh/pufferfish...).
+     * Used by the wounded-regen-stall top-up, which must never poison a wounded bot.
+     */
+    private final boolean safeFoodOnly;
+
     private Phase phase = Phase.FINDING;
     private int startingFoodLevel;
     private int startingStackCount;
@@ -30,6 +36,19 @@ public final class EatTask extends AbstractTask {
     private int itemElapsed;
     /** Bites successfully consumed so far this task instance. */
     private int itemsConsumed;
+
+    public EatTask() {
+        this(false);
+    }
+
+    private EatTask(boolean safeFoodOnly) {
+        this.safeFoodOnly = safeFoodOnly;
+    }
+
+    /** An eat-to-full pass that stops instead of falling back to harmful food. */
+    public static EatTask safeFoodOnly() {
+        return new EatTask(true);
+    }
 
     @Override
     public String name() {
@@ -86,7 +105,8 @@ public final class EatTask extends AbstractTask {
     }
 
     private void find(AIPlayerEntity bot) {
-        if (InventoryAction.findFoodSlot(bot) < 0) {
+        boolean noFood = safeFoodOnly ? !InventoryAction.hasSafeFood(bot) : InventoryAction.findFoodSlot(bot) < 0;
+        if (noFood) {
             // No food at all: on the very first bite this is a real failure. Once at least one
             // bite has already landed (hunger already improved, or a stack was consumed), running
             // out of suitable food mid-pass is an ordinary stopping point, not a failure.
@@ -98,7 +118,7 @@ public final class EatTask extends AbstractTask {
     }
 
     private void startEating(AIPlayerEntity bot) {
-        ActionResult result = EatAction.startEating(bot);
+        ActionResult result = EatAction.startEating(bot, safeFoodOnly);
         if (result.isFailed()) {
             finishOnTimeoutOrFailure(result.reason());
             return;

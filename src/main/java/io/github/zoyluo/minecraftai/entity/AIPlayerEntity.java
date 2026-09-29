@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.entity;
 
 import com.mojang.authlib.GameProfile;
 import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
@@ -86,6 +87,12 @@ public class AIPlayerEntity extends ServerPlayer {
                         "hp", before + "->" + this.getHealth(),
                         "blocking", this.isBlocking());
             }
+            if (this.getHealth() <= 0.0F || !this.isAlive()) {
+                // die() ran inside super.hurtServer, before this hit was recorded: a same-key fatal hit
+                // (fire/lava) was folded into a run that only the removal flush would report, long after
+                // bot_death. Close the run now so the death-causing damage is logged with the death.
+                logDamageSummary(damageLog.flush());
+            }
         } catch (RuntimeException ignored) {
             // Logging must never affect combat resolution.
         }
@@ -132,6 +139,7 @@ public class AIPlayerEntity extends ServerPlayer {
         } catch (RuntimeException ignored) {
             // Logging must never affect removal.
         }
+        EquipAction.forgetArmorLog(this.getUUID());
         super.remove(reason);
     }
 

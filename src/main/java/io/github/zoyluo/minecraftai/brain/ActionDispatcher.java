@@ -103,6 +103,7 @@ public final class ActionDispatcher {
             BotLog.action(bot, "tool_dispatch", "tool", call.name(), "args", sanitizedArguments(call.name(), args));
             return definition.handler().invoke(bot, args);
         } catch (SafetyTaskActiveException exception) {
+            BrainCoordinator.INSTANCE.deferRequestUntilSafetyEnds(bot);
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.COMM, bot, "tool_blocked_by_safety_task", "tool", call.name());
             return new ToolDefinition.ToolResult(false, "blocked: " + exception.getMessage());
         } catch (IllegalArgumentException exception) {

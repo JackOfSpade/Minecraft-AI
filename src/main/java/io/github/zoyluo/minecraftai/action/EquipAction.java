@@ -82,6 +82,11 @@ public final class EquipAction {
     private static final Map<java.util.UUID, Map<EquipmentSlot, ArmorLogged>> LAST_ARMOR_LOGGED =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Drops the per-bot armor-log dedup state (called when the bot entity is removed) so the map cannot leak. */
+    public static void forgetArmorLog(java.util.UUID botId) {
+        LAST_ARMOR_LOGGED.remove(botId);
+    }
+
     private record ArmorLogged(Item item, int tick) {
     }
 

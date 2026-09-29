@@ -204,6 +204,38 @@ public final class InventoryAction {
         return harmfulOffhand ? promoteOffhandSlot(player, 0).orElse(-1) : -1;
     }
 
+    /**
+     * Whether the bot carries any food that is not on the {@link #HARMFUL_FOODS} list, in the main
+     * inventory or the offhand. Side-effect free: unlike {@link #findFoodSlot} it never promotes
+     * the offhand stack and never logs, so it is safe to call from pure predicates every scan.
+     */
+    public static boolean hasSafeFood(AIPlayerEntity player) {
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+            if (isSafeFood(stack)) {
+                return true;
+            }
+        }
+        return isSafeFood(player.getItemBySlot(EquipmentSlot.OFFHAND));
+    }
+
+    /** Like {@link #findFoodSlot} but never falls back to harmful food (returns -1 instead). */
+    public static int findSafeFoodSlot(AIPlayerEntity player) {
+        Inventory inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (isSafeFood(inventory.getNonEquipmentItems().get(slot))) {
+                return slot;
+            }
+        }
+        if (isSafeFood(player.getItemBySlot(EquipmentSlot.OFFHAND))) {
+            return promoteOffhandSlot(player, 0).orElse(-1);
+        }
+        return -1;
+    }
+
+    private static boolean isSafeFood(ItemStack stack) {
+        return !stack.isEmpty() && stack.has(DataComponents.FOOD) && !HARMFUL_FOODS.contains(stack.getItem());
+    }
+
     public static Map<String, Integer> summarize(AIPlayerEntity player) {
         Map<String, Integer> summary = new LinkedHashMap<>();
         var inventory = player.getInventory();

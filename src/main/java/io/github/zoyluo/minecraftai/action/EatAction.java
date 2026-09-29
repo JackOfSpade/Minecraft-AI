@@ -8,7 +8,12 @@ public final class EatAction {
     }
 
     public static ActionResult startEating(AIPlayerEntity player) {
-        int slot = InventoryAction.findFoodSlot(player);
+        return startEating(player, false);
+    }
+
+    /** {@code safeOnly}: never eat harmful food (rotten flesh, spider eye, ...) even as a last resort. */
+    public static ActionResult startEating(AIPlayerEntity player, boolean safeOnly) {
+        int slot = safeOnly ? InventoryAction.findSafeFoodSlot(player) : InventoryAction.findFoodSlot(player);
         if (slot < 0) {
             return ActionResult.failed("no_food");
         }
