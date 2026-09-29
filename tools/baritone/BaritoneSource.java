@@ -54,6 +54,7 @@ public final class BaritoneSource {
     private static boolean threeWay;
     private static boolean skipVerify;
     private static boolean keepRepo;
+    private static boolean force;
 
     public static void main(String[] args) throws Exception {
         String command = "generate";
@@ -71,6 +72,7 @@ public final class BaritoneSource {
                 case "--3way" -> threeWay = true;
                 case "--no-verify" -> skipVerify = true;
                 case "--keep-repo" -> keepRepo = true;
+                case "--force" -> force = true;
                 default -> fail("unknown option " + rest.get(i));
             }
         }
@@ -140,6 +142,7 @@ public final class BaritoneSource {
 
     private static void generate(boolean report) throws Exception {
         if (!skipVerify) verify();
+        refuseToDestroyAuthoringWork();
         deleteTree(out);
         Files.createDirectories(out);
 
@@ -166,6 +169,16 @@ public final class BaritoneSource {
         git("commit", "-q", "--allow-empty", "-m", OVERLAY_COMMIT, "-m", "tools/baritone/overlay");
 
         applyPatches(listPatches(), report);
+    }
+
+    /** generate starts from scratch; do not silently throw away edits or commits someone is preparing for export. */
+    private static void refuseToDestroyAuthoringWork() throws Exception {
+        if (force || !Files.isDirectory(out.resolve(".git"))) return;
+        Result status = run(out, Map.of(), "git", List.of("status", "--porcelain"));
+        if (status.ok && !status.output.isBlank()) {
+            fail(out + " holds uncommitted work (a --keep-repo tree being edited). Commit and `export` it, use another --out for the "
+                    + "authoring tree, or pass --force to discard it.");
+        }
     }
 
     /**

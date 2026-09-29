@@ -162,6 +162,38 @@ class BaritoneSourceGeneratorTest {
         assertEquals(expectedTree, Files.readString(b));
     }
 
+    @Test
+    void generateRefusesToDiscardUncommittedAuthoringWork() throws Exception {
+        Files.writeString(patches.resolve("0001-x-two.patch"), patchXTo(1, 2));
+        assertEquals(0, run("generate", "--keep-repo").exit);
+        Path b = out.resolve("src/main/java/p/B.java");
+        Files.writeString(b, Files.readString(b) + "// my edit\n");
+
+        Run refused = generate();
+        assertEquals(2, refused.exit, refused.output);
+        assertTrue(refused.output.contains("uncommitted work"), refused.output);
+        assertTrue(Files.readString(b).contains("// my edit"), "the edit must still be there");
+
+        Run forced = run("generate", "--force");
+        assertEquals(0, forced.exit, forced.output);
+        assertFalse(Files.readString(b).contains("// my edit"));
+    }
+
+    @Test
+    void resumeAppliesThePatchesThatAreStillMissingAfterAFixedConflict() throws Exception {
+        Files.writeString(patches.resolve("0001-x-two.patch"), patchXTo(1, 2));
+        Files.writeString(patches.resolve("0002-x-three.patch"), patchXTo(9, 3)); // wrong expectation: fails
+        Run stopped = run("generate", "--keep-repo");
+        assertEquals(2, stopped.exit, stopped.output);
+        assertTrue(Files.readString(out.resolve("src/main/java/p/B.java")).contains("int x = 2;"), "0001 stays applied");
+
+        Files.writeString(patches.resolve("0002-x-three.patch"), patchXTo(2, 3)); // the developer fixed the patch
+        Run resumed = run("resume");
+        assertEquals(0, resumed.exit, resumed.output);
+        assertTrue(Files.readString(out.resolve("src/main/java/p/B.java")).contains("int x = 3;"), resumed.output);
+        assertTrue(Files.exists(out.resolve(".git")), "resume keeps the history for export");
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
 
     private static String patchXTo(int from, int to) {

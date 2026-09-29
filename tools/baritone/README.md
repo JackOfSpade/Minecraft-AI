@@ -73,9 +73,9 @@ Upstream's schematic *formats* (`.schematic`, `.schem`, `.litematic` files) are 
 ## Working on the patches
 
 ```
-tools/baritone/apply.sh generate --keep-repo   # build/baritone-src becomes a git repo: 'upstream', 'overlay', one commit per patch
-cd build/baritone-src && <edit> && git add -A && git commit -m 0012-some-concern -m "why"   # subject = patch name
-tools/baritone/apply.sh export                 # rewrites tools/baritone/patches from those commits
+tools/baritone/apply.sh generate --keep-repo --out build/baritone-work   # a git repo: 'upstream', 'overlay', one commit per patch
+cd build/baritone-work && <edit> && git add -A && git commit -m 0012-some-concern -m "why"   # subject = patch name
+tools/baritone/apply.sh export --out build/baritone-work   # rewrites tools/baritone/patches from those commits
 ```
 
 To change an existing patch, commit a `fixup!` (or `git rebase -i` it) in that repo before `export`. A new file that has no
@@ -84,9 +84,9 @@ upstream counterpart goes to `overlay/`, not into a patch.
 ## Upgrading Baritone
 
 1. `tools/baritone/vendor-import.sh <baritone clone> <tag or commit>`; update `third_party/baritone/UPSTREAM.md`.
-2. `tools/baritone/apply.sh generate --3way --keep-repo`. Exclusion entries that no longer match, and patches that do not apply,
-   fail with the name. A conflicting patch is left as conflict markers in `build/baritone-src`; resolve, commit with the patch
-   name as subject, then `tools/baritone/apply.sh resume --3way`.
+2. `tools/baritone/apply.sh generate --3way --keep-repo --out build/baritone-work`. Exclusion entries that no longer match, and patches that do not apply,
+   fail with the name. A conflicting patch is left as conflict markers in `build/baritone-work`; resolve, commit with the patch
+   name as subject, then `tools/baritone/apply.sh resume --3way --out build/baritone-work`, then `export --out build/baritone-work`.
 3. The generator ends with a scan for `net.minecraft.client`, `com.mojang.blaze3d` and `Minecraft.getInstance()`; each hit names
    file and line of *new* client usage upstream introduced. Extend a patch (or `exclude.txt` + an overlay stub), commit, `export`.
 4. `./gradlew compileBaritoneJava baritoneTest test runGameTest` and the navigation GameTests.
