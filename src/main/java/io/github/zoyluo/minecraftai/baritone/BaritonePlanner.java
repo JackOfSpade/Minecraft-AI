@@ -145,12 +145,42 @@ public final class BaritonePlanner {
         return future;
     }
 
+    /**
+     * Runs one search on the calling (server) thread and returns its result: the admission check of a route request, which
+     * callers need answered in the same tick ("can the bot get there at all?") before they commit to it. Uses the same
+     * snapshot-backed context as {@link #plan}; the budget is the caller's, and small (a few tens of milliseconds): a goal that
+     * is far away answers with a partial path ({@code SUCCESS_SEGMENT}), which is enough to know the bot can start moving.
+     * Does not touch {@link #IN_FLIGHT} (nothing else can run for the bot while this call holds the server thread).
+     */
+    public static Plan planNow(IBaritone baritone, Goal goal, long primaryTimeoutMs, long failureTimeoutMs) {
+        IPlayerContext ctx = baritone.getPlayerContext();
+        if (!ctx.minecraft().isSameThread()) {
+            throw new IllegalStateException("BaritonePlanner.planNow must be called on the server thread");
+        }
+        CalculationContext calc = new CalculationContext(baritone, true);
+        BetterBlockPos start = ctx.playerFeet();
+        AbstractNodeCostSearch finder = new AStarPathFinder(start, start.x, start.y, start.z, goal,
+                new Favoring(ctx, null, calc), calc);
+        long startedAt = System.nanoTime();
+        PathCalculationResult result = finder.calculate(primaryTimeoutMs, failureTimeoutMs);
+        long endedAt = System.nanoTime();
+        List<String> movements = result.getPath()
+                .map(path -> path.movements().stream().map(m -> m.getClass().getSimpleName()).toList())
+                .orElse(List.of());
+        return new Plan(result, (endedAt - startedAt) / 1_000_000L, 0L, movements);
+    }
+
     /** Cancels the instance's queued or running plan, if any. Safe from any thread. */
     public static void cancel(IBaritone baritone) {
         AbstractNodeCostSearch running = IN_FLIGHT.remove(baritone);
         if (running != null) {
             running.cancel();
         }
+    }
+
+    /** Whether {@code baritone}'s instance has a search queued or running. */
+    public static boolean isInFlight(IBaritone baritone) {
+        return IN_FLIGHT.containsKey(baritone);
     }
 
     /** Plans currently queued or running (all bots). */

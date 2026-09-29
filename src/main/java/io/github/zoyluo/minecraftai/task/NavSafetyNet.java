@@ -75,6 +75,11 @@ public final class NavSafetyNet {
     // ashore to survive.
     private final Map<UUID, Integer> waterRescueSince = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> followSwimLeaseUntil = new ConcurrentHashMap<>();
+    // The Baritone counterpart of the follow swim lease: renewed on every tick Baritone drives a bot along a route that is
+    // allowed to go through water (BaritoneDriver), so the bot is not treated as a drowning rescue case while it swims the
+    // segment Baritone planned. Same guards as the follow lease: a few ticks long, void as soon as the air gets low.
+    private final Map<UUID, Integer> baritoneWaterLeaseUntil = new ConcurrentHashMap<>();
+    private static final int BARITONE_WATER_LEASE_TICKS = 6;
     private static final int WATER_RESCUE_TELEPORT_AFTER = 200; // Still not out of the water after 10s -> force a teleport
     // xPerf-NAVSAFE-01 / detour-refactor-navsafetynet-water-search-cost: findPhysicalWaterEscape
     // (a full BFS over up to ~36k cells) and findNearestBreathableStandable (a full triple-nested
@@ -124,6 +129,7 @@ public final class NavSafetyNet {
         waterRescueShore.remove(id);
         waterRescueSince.remove(id);
         followSwimLeaseUntil.remove(id);
+        baritoneWaterLeaseUntil.remove(id);
         waterEscapeCache.remove(id);
         breathableStandableCache.remove(id);
     }
@@ -133,6 +139,7 @@ public final class NavSafetyNet {
         waterRescueShore.clear();
         waterRescueSince.clear();
         followSwimLeaseUntil.clear();
+        baritoneWaterLeaseUntil.clear();
         waterEscapeCache.clear();
         breathableStandableCache.clear();
     }
@@ -169,6 +176,41 @@ public final class NavSafetyNet {
     /** Clears the narrow FollowTask swim lease on cancellation or any non-swim transition. */
     void clearFollowSwim(AIPlayerEntity bot) {
         followSwimLeaseUntil.remove(bot.getUUID());
+    }
+
+    /**
+     * Leases the bot to Baritone for a few ticks: it is driving the bot along a route that may go through water, so the water
+     * crisis machine below does not take the bot over (its rescue steps would move a swimming bot off Baritone's path and
+     * fight it for the position). Called by {@code BaritoneDriver} on every driven tick of a swim-permitted route; not a general
+     * opt-out: the lease is refused (and any rescue in progress carries on) once the air is at the surfacing threshold.
+     */
+    public void renewBaritoneWater(AIPlayerEntity bot) {
+        if (bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+            clearBaritoneWater(bot);
+            return;
+        }
+        baritoneWaterLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + BARITONE_WATER_LEASE_TICKS);
+        waterRescueShore.remove(bot.getUUID());
+        waterRescueSince.remove(bot.getUUID());
+    }
+
+    /** Ends the Baritone water lease: the drive ended (arrived, cancelled, taken over, bot removed) or the route no longer swims. */
+    public void clearBaritoneWater(AIPlayerEntity bot) {
+        baritoneWaterLeaseUntil.remove(bot.getUUID());
+    }
+
+    /** Whether the bot is currently leased to Baritone for a water crossing (for tests and logs). */
+    public boolean hasBaritoneWaterLease(AIPlayerEntity bot) {
+        return hasBaritoneWaterLease(bot, bot.level().getServer().getTickCount());
+    }
+
+    private boolean hasBaritoneWaterLease(AIPlayerEntity bot, int currentTick) {
+        Integer until = baritoneWaterLeaseUntil.get(bot.getUUID());
+        if (until == null || until < currentTick || bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+            baritoneWaterLeaseUntil.remove(bot.getUUID());
+            return false;
+        }
+        return true;
     }
 
     private boolean hasFollowSwimLease(AIPlayerEntity bot, int currentTick) {
@@ -214,6 +256,10 @@ public final class NavSafetyNet {
         if (hasFollowSwimLease(bot, server.getTickCount())) {
             // The lease is renewed only by an active FollowTask and only above the safety oxygen
             // threshold.  Once air falls, the normal branch below immediately resumes rescue.
+            return false;
+        }
+        if (hasBaritoneWaterLease(bot, server.getTickCount())) {
+            // Baritone is driving this bot through water on a route that was allowed to (same oxygen rule as above).
             return false;
         }
         boolean inCrisis = waterRescueShore.containsKey(bot.getUUID());

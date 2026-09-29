@@ -8,6 +8,7 @@ import io.github.zoyluo.minecraftai.baritone.BaritoneDriver;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
@@ -44,7 +45,8 @@ public class AIPlayerEntity extends ServerPlayer {
         try {
             // While a Baritone process drives this bot it writes the inputs (before the physics tick below, like a client's
             // input handling) and aims; the legacy executor is idle and writes nothing. See BaritoneDriver.
-            boolean baritoneDrives = BaritoneDriver.beforePhysics(this);
+            // (Nothing Baritone-shaped is even loaded until an instance exists: NavEngineSelector.baritoneLive().)
+            boolean baritoneDrives = NavEngineSelector.baritoneLive() && BaritoneDriver.beforePhysics(this);
             super.tick();
             this.doTick();
             if (baritoneDrives) {

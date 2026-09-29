@@ -1,11 +1,17 @@
 package io.github.zoyluo.minecraftai.action;
 
+import io.github.zoyluo.minecraftai.baritone.BaritoneNavigator;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
+import io.github.zoyluo.minecraftai.navigation.NavEngine;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavOutcome;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
+import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
@@ -56,6 +62,10 @@ public final class ActionPack {
     private BlockPos activePathGoal;
     private int nextPathfindTick;
     private final SnapRepeatGuard physicalSnapGuard = new SnapRepeatGuard();
+    // The route Baritone executes for this pack (engine=baritone), and how the previous one ended. Never set with the legacy
+    // engine; nothing below touches a Baritone class while it is null.
+    private NavRoute route;
+    private NavOutcome lastRouteOutcome;
 
     public ActionPack(AIPlayerEntity player) {
         this.player = player;
@@ -71,7 +81,19 @@ public final class ActionPack {
      * Baritone and releases the inputs it wrote. Releasing (stop, zero, false) never takes the bot.
      */
     private void claim(String why) {
-        BaritoneRegistry.INSTANCE.preempt(player, why);
+        releaseBaritone(why);
+    }
+
+    /**
+     * Whatever Baritone is doing for this bot stops: the route this pack started (recorded as cancelled) or, for a caller that
+     * drives Baritone directly, its goal and path. Nothing Baritone-related is touched while Baritone has never been initialised.
+     */
+    private void releaseBaritone(String why) {
+        if (route != null) {
+            cancelBaritoneRoute(why);
+        } else if (NavEngineSelector.baritoneLive()) {
+            BaritoneRegistry.INSTANCE.preempt(player, why);
+        }
     }
 
     /**
@@ -140,6 +162,7 @@ public final class ActionPack {
     /** Starts a direct walk with a caller-defined horizontal arrival tolerance. */
     public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {
         claim("walk_to");
+        logEngine("walk_to", BlockPos.containing(target), NavEngine.LEGACY, "straight_line_walk");
         clearActivePathExecutor();
         this.walkTo = new WalkToController(target, arrivalThreshold);
         this.mining = null;
@@ -161,6 +184,7 @@ public final class ActionPack {
      */
     public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {
         claim("dig_path_to");
+        logEngine("dig_path_to", goal, NavEngine.LEGACY, "dig_approach");
         int reserve = Math.max(0, protectedStoneLikeReserve);
         int now = player.level().getServer().getTickCount();
         BlockPos immutableGoal = goal.immutable();
@@ -262,6 +286,12 @@ public final class ActionPack {
                                      boolean allowDigFallback,
                                      int protectedStoneLikeReserve,
                                      PathExecutor.RouteContract routeContract) {
+        // Engine seam: with nav.engine=baritone an ordinary walk (not a contract route) is Baritone's. A null answer means
+        // "not routed" (legacy engine, contract route, or Baritone failed to initialise) and the legacy code below carries on.
+        ActionResult routed = routeOnBaritone("path_to", goal, canPillar, allowDigFallback, protectedStoneLikeReserve, routeContract);
+        if (routed != null) {
+            return routed;
+        }
         claim("path_to");
         int reserve = Math.max(0, protectedStoneLikeReserve);
         int now = player.level().getServer().getTickCount();
@@ -358,7 +388,197 @@ public final class ActionPack {
     }
 
     public BlockPos activePathGoal() {
+        if (route != null) {
+            settleRoute();
+            if (route != null) {
+                return route.resolvedGoal() != null ? route.resolvedGoal() : route.target();
+            }
+        }
         return activePathGoal;
+    }
+
+    // ==================== Navigator seam (nav.engine = baritone) ====================
+
+    /** Failure reason of {@link #startApproachTo} when the Baritone engine is not the one answering requests. */
+    public static final String ENGINE_NOT_BARITONE = "engine_not_baritone";
+
+    /**
+     * Routes an ordinary walk to Baritone. Returns null when the request is not Baritone's (legacy engine, a contract-bound
+     * route, Baritone unavailable) and the caller runs the legacy navigator; otherwise the same answer the legacy code would give:
+     * {@code IN_PROGRESS}, {@code failed("pathfinding_failed: GOAL_UNREACHABLE")} or {@code failed(PATHFINDING_THROTTLED)}.
+     *
+     * <p>Routing table (docs/NAVIGATION_BARITONE_PLAN.md): ordinary walks and surface-only walks are Baritone's (surface-only:
+     * no breaking, no placing); contract routes, dig approaches, straight-line walks and one-cell safety moves stay legacy.</p>
+     */
+    private ActionResult routeOnBaritone(String kind, BlockPos goal, boolean canPillar, boolean allowDigFallback,
+                                         int protectedStoneLikeReserve, PathExecutor.RouteContract routeContract) {
+        if (routeContract.constrained()) {
+            logEngine(kind, goal, NavEngine.LEGACY, "contract_route");
+            return null;
+        }
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            logEngine(kind, goal, NavEngine.LEGACY, NavEngineSelector.baritoneFailed() ? "baritone_unavailable" : "engine_legacy");
+            return null;
+        }
+        int reserve = Math.max(0, protectedStoneLikeReserve);
+        // A caller that keeps a stone reserve must not have it spent on pillars/bridges by a planner that cannot see the reserve.
+        NavRoute.Options options = NavRouteRules.optionsFor(allowDigFallback, canPillar, reserve, player.isInWater());
+        NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, options, kind, serverTick());
+        PathRequestIdentity identity = new PathRequestIdentity(goal, canPillar, allowDigFallback, reserve, routeContract);
+        return NavEngineSelector.attempt(player.getUUID(), kind, () -> startBaritoneRoute(request, identity, true), () -> null);
+    }
+
+    /**
+     * Baritone-only: walk until within {@code radius} blocks of {@code target} (a {@code GoalNear}: no stand-off cell, no goal
+     * snapping); what follow and approach use. Not throttled (the caller has its own schedule).
+     *
+     * @param refresh    re-target the route that is already running without another admission search on the server thread
+     * @param allowBreak whether breaking through an obstacle is allowed as a last resort when there is no way around
+     * @return {@link #ENGINE_NOT_BARITONE} failure when the engine is not (or no longer) Baritone: the caller uses its legacy walk
+     */
+    public ActionResult startApproachTo(BlockPos target, int radius, boolean refresh, boolean allowBreak) {
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            return ActionResult.failed(ENGINE_NOT_BARITONE);
+        }
+        NavRoute.Options options = new NavRoute.Options(allowBreak, false, player.isInWater());
+        NavRoute request = new NavRoute(NavRoute.Shape.NEAR, target, radius, options, "approach", serverTick());
+        boolean admit = !(refresh && route != null);
+        return NavEngineSelector.attempt(player.getUUID(), "approach", () -> startBaritoneRoute(request, null, admit),
+                () -> ActionResult.failed(ENGINE_NOT_BARITONE));
+    }
+
+    /**
+     * Baritone-only: a walk that may cross water (the route is leased against the drowning safety net for as long as Baritone
+     * drives it). No breaking, no placing.
+     */
+    public ActionResult startSwimRouteTo(BlockPos goal) {
+        if (!NavEngineSelector.baritoneSelectedFor(player.getUUID())) {
+            return ActionResult.failed(ENGINE_NOT_BARITONE);
+        }
+        NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, NavRoute.Options.SWIM, "swim_route", serverTick());
+        return NavEngineSelector.attempt(player.getUUID(), "swim_route", () -> startBaritoneRoute(request, null, true),
+                () -> ActionResult.failed(ENGINE_NOT_BARITONE));
+    }
+
+    private ActionResult startBaritoneRoute(NavRoute request, PathRequestIdentity identity, boolean admit) {
+        int now = serverTick();
+        if (identity != null && identity.equals(lastPathRequest) && now < nextPathfindTick) {
+            logEngine(request.label(), request.target(), NavEngine.BARITONE, "throttled");
+            return ActionResult.failed(PATHFINDING_THROTTLED);
+        }
+        // Single writer: whatever the legacy executor was doing is dropped before Baritone is asked to move the bot.
+        if (pathExecutor != null || walkTo != null || mining != null || forward != 0.0F || strafing != 0.0F
+                || sneaking || sprinting || jumping || jumpTicks > 0) {
+            yieldToBaritone();
+        }
+        NavRoute previous = route;
+        BaritoneNavigator.Admission admission = BaritoneNavigator.start(player, request, admit);
+        if (!admission.accepted()) {
+            if (previous != null) {
+                cancelBaritoneRoute("rejected_request");
+            }
+            if (identity != null) {
+                lastPathRequest = identity;
+                nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            }
+            logEngine(request.label(), request.target(), NavEngine.BARITONE, "rejected: " + admission.failure());
+            return ActionResult.failed(admission.failure());
+        }
+        double dx = request.target().getX() + 0.5D - player.getX();
+        double dz = request.target().getZ() + 0.5D - player.getZ();
+        request.setDeadlineTick(now + NavRouteRules.deadlineTicks(Math.sqrt(dx * dx + dz * dz)));
+        route = request;
+        if (identity != null) {
+            lastPathRequest = identity;
+            nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
+        }
+        logEngine(request.label(), request.target(), NavEngine.BARITONE,
+                previous == null ? "started" : "regoal" + (admit ? "" : "_no_admission"));
+        return ActionResult.IN_PROGRESS;
+    }
+
+    /** How the last Baritone route of this pack ended, or null if none has yet. */
+    public NavOutcome lastRouteOutcome() {
+        return lastRouteOutcome;
+    }
+
+    /** Whether a Baritone route of this pack is running (settles it first: a route that ended is not running). */
+    public boolean hasBaritoneRoute() {
+        settleRoute();
+        return route != null;
+    }
+
+    /**
+     * Ends this pack's Baritone route on the caller's order: Baritone lets go of the bot (goal, path, search, inputs, the block
+     * being broken) and the route is recorded as cancelled, unless it had already ended by itself.
+     *
+     * @return true if a route was cancelled
+     */
+    public boolean cancelBaritoneRoute(String why) {
+        settleRoute();
+        if (route == null) {
+            return false;
+        }
+        BaritoneNavigator.cancel(player, why);
+        finishRoute(NavOutcome.Status.CANCELLED, "cancelled: " + why);
+        return true;
+    }
+
+    /**
+     * The per-tick check of a Baritone route: arrived, ended short (failed), timed out, or a dry route that got wet. Called by
+     * {@link #onUpdate} for a bot that is not driven and by {@code BaritoneDriver} at the end of a driven tick.
+     */
+    public void onBaritoneTick() {
+        settleRoute();
+    }
+
+    private void settleRoute() {
+        NavRoute current = route;
+        if (current == null) {
+            return;
+        }
+        NavRoute.Progress progress = BaritoneNavigator.progress(player, current);
+        boolean dryRouteWet = !current.options().allowWater() && player.isInWater();
+        boolean pastDeadline = serverTick() > current.deadlineTick();
+        NavRouteRules.Verdict verdict = NavRouteRules.verdict(progress, dryRouteWet, pastDeadline,
+                progress == NavRoute.Progress.ENDED_SHORT && BaritoneNavigator.searchFailed(player));
+        if (!verdict.ended()) {
+            return;
+        }
+        if (progress == NavRoute.Progress.RUNNING) {
+            // A dry route that got wet (a follower waits on its bank; the drowning safety net owns the bot from here) or one
+            // that ran out of time: Baritone lets go of the bot before the route is recorded.
+            BaritoneNavigator.cancel(player, verdict.reason());
+        }
+        finishRoute(verdict.status(), verdict.reason());
+    }
+
+    private void finishRoute(NavOutcome.Status status, String reason) {
+        NavRoute finished = route;
+        if (finished == null) {
+            return;
+        }
+        route = null;
+        BlockPos goal = finished.resolvedGoal() != null ? finished.resolvedGoal() : finished.target();
+        NavOutcome outcome = new NavOutcome(status, reason, finished.label(), goal, serverTick() - finished.startTick());
+        lastRouteOutcome = outcome;
+        BaritoneNavigator.releaseRoute(player.getUUID());
+        switch (status) {
+            case SUCCESS -> BotLog.path(player, outcome.event(), "engine", "baritone", "ticks", outcome.ticks());
+            case FAILED -> BotLog.warn(LogCategory.ERROR, player, outcome.event(),
+                    "engine", "baritone", "reason", reason, "goal", LogFields.pos(goal), "ticks", outcome.ticks());
+            default -> BotLog.path(player, outcome.event(), "engine", "baritone", "reason", reason,
+                    "goal", LogFields.pos(goal), "ticks", outcome.ticks());
+        }
+    }
+
+    private void logEngine(String kind, BlockPos goal, NavEngine engine, String why) {
+        BotLog.path(player, "nav_engine", "engine", engine.configValue(), "configured", NavEngineSelector.configuredFor(player.getUUID()).configValue(),
+                "kind", kind, "goal", LogFields.pos(goal), "why", why);
+    }
+
+    private int serverTick() {
+        return player.level().getServer().getTickCount();
     }
 
     /**
@@ -563,13 +783,16 @@ public final class ActionPack {
      * item use alone.
      */
     public void stopNavigation() {
+        if (route != null) {
+            cancelBaritoneRoute("stop_navigation");
+        }
         clearActivePathExecutor();
         this.walkTo = null;
         stopMovement();
     }
 
     public void stopAll() {
-        BaritoneRegistry.INSTANCE.preempt(player, "stop_all");
+        releaseBaritone("stop_all");
         clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
@@ -578,7 +801,7 @@ public final class ActionPack {
     }
 
     public boolean hasActiveActions() {
-        return BaritoneRegistry.INSTANCE.isBusy(player)
+        return (NavEngineSelector.baritoneLive() && BaritoneRegistry.INSTANCE.isBusy(player))
                 || pathExecutor != null
                 || walkTo != null
                 || mining != null
@@ -592,7 +815,8 @@ public final class ActionPack {
     }
 
     public boolean isPathExecutorIdle() {
-        return pathExecutor == null;
+        settleRoute();
+        return pathExecutor == null && route == null;
     }
 
     public boolean isWalkToIdle() {
@@ -604,6 +828,7 @@ public final class ActionPack {
     }
 
     public void onUpdate() {
+        settleRoute();
         tickPathExecutor();
         tickWalkTo();
         tickMining();

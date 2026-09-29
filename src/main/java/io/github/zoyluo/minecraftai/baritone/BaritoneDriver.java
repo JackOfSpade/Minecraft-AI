@@ -7,6 +7,7 @@ import baritone.api.event.events.type.EventState;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.function.BiFunction;
 
 /**
@@ -75,10 +76,17 @@ public final class BaritoneDriver {
                 entry.startY = bot.getY();
                 entry.startZ = bot.getZ();
                 BotInputBridge.apply(bot, baritone);
+                if (entry.waterAllowed) {
+                    // The route may swim: the drowning safety net must not treat the swimming bot as a rescue case (it moved a
+                    // submerged bot 1.43 blocks in the spike probe). Renewed every driven tick, so it lapses by itself with the drive.
+                    NavSafetyNet.INSTANCE.renewBaritoneWater(bot);
+                }
                 return true;
             }
             if (wasDriven) {
                 entry.driven = false;
+                entry.waterAllowed = false;
+                NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
                 BotInputBridge.release(bot);
                 BotLog.lifecycle(bot, "baritone_released", "pos", bot.blockPosition());
             }
@@ -115,6 +123,9 @@ public final class BaritoneDriver {
             // 7.
             baritone.getGameEventHandler().onPlayerUpdate(new PlayerUpdateEvent(EventState.POST));
             baritone.getGameEventHandler().onPostTick(nextTick(EventState.POST));
+            // The navigator seam's per-tick check (arrival, failure, timeout, water rule) while this bot is driven; a bot that is
+            // not driven gets the same check from ActionPack.onUpdate.
+            bot.getActionPack().onBaritoneTick();
         } catch (RuntimeException exception) {
             BotLog.error(bot, "baritone_post_tick_failed", exception);
             BaritoneRegistry.INSTANCE.reset(bot, "post_tick_failed");

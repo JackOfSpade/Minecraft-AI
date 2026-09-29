@@ -7,6 +7,8 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.HashSet;
 import java.util.Optional;
@@ -91,6 +93,23 @@ public final class FollowTask extends AbstractTask {
     private BlockPos holdTargetPos;
     private int nextHoldReevalTick;
     private final FollowSwimming swimming = new FollowSwimming();
+    // ---- nav.engine=baritone (see followLandBaritone): the goal cell the current Baritone route was aimed at, the approach radius
+    // in use, and the last route outcome already reacted to.
+    private BlockPos baritoneGoalPos;
+    private int baritoneRadius = (int) STOP_DISTANCE;
+    private NavOutcome handledOutcome;
+    private int baritoneStarts;
+    private int baritoneRegoals;
+
+    /** Package-visible for GameTests: how many Baritone routes land follow has started (not counting re-targeting of a running one). */
+    int baritoneStarts() {
+        return baritoneStarts;
+    }
+
+    /** Package-visible for GameTests: how often a running Baritone route was re-pointed at the moving player. */
+    int baritoneRegoals() {
+        return baritoneRegoals;
+    }
 
     public FollowTask(String targetName) {
         this.targetName = FollowTargetResolver.normalize(targetName);
@@ -167,6 +186,9 @@ public final class FollowTask extends AbstractTask {
         shelterExitDebtRepayer.reset(bot);
         stuckRecovery.reset(bot, elapsed);
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+        baritoneGoalPos = null;
+        baritoneRadius = (int) STOP_DISTANCE;
+        handledOutcome = bot.getActionPack().lastRouteOutcome();
     }
 
     @Override
@@ -176,6 +198,7 @@ public final class FollowTask extends AbstractTask {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             suspendLandRecovery(bot);
             stopBoatAndActions(bot);
+            baritoneGoalPos = null;
             waiting = true;
             if (elapsed % 200 == 1) {
                 BotLog.action(bot, "follow_target_offline", "target", targetName.isBlank() ? "owner" : targetName);
@@ -199,12 +222,16 @@ public final class FollowTask extends AbstractTask {
         if (targetInBoat) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             suspendLandRecovery(bot);
+            dropBaritoneRoute(bot);
             followBoat(bot, target);
             return;
         }
         if (targetSwimming) {
             suspendLandRecovery(bot);
             abandonBoatChild(bot);
+            // Swim-follow stays the legacy controller's (Baritone swimming is not what follows a swimmer in P1); a land route
+            // that was still running must not keep writing the bot's inputs next to it.
+            dropBaritoneRoute(bot);
             followSwimming(bot, target);
             return;
         }
@@ -215,6 +242,7 @@ public final class FollowTask extends AbstractTask {
         abandonBoatChild(bot);
         if (leaveBoatForLand(bot, target)) {
             suspendLandRecovery(bot);
+            dropBaritoneRoute(bot);
             waiting = true;
             return;
         }
@@ -222,10 +250,19 @@ public final class FollowTask extends AbstractTask {
         // them first (this renews the narrow swim lease itself), then ordinary land follow runs.
         if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)) {
             suspendLandRecovery(bot);
+            dropBaritoneRoute(bot);
             waiting = swimming.isWaiting();
             return;
         }
         followLand(bot, target);
+    }
+
+    /** Another follow mode takes the bot: a Baritone land route of this task ends now (single writer). */
+    private void dropBaritoneRoute(AIPlayerEntity bot) {
+        baritoneGoalPos = null;
+        if (bot.getActionPack().hasBaritoneRoute()) {
+            bot.getActionPack().cancelBaritoneRoute("follow_mode_changed");
+        }
     }
 
     /**
@@ -355,7 +392,89 @@ public final class FollowTask extends AbstractTask {
         waiting = swimming.follow(bot, target, elapsed, SWIM_STOP_DISTANCE);
     }
 
+    /** Ticks between re-targeting a running Baritone route at the moving player (Baritone re-plans in between by itself). */
+    private static final int BARITONE_REGOAL_TICKS = 20;
+    /** The player must have moved this far (squared, blocks) from the cell the route aims at before the goal is re-pointed. */
+    private static final double BARITONE_REGOAL_MOVED_SQ = 4.0D;
+
+    /**
+     * Land follow on Baritone: {@code GoalNear(player, radius)} (no stand-off cell, no goal snapping), re-targeted as the player
+     * moves (throttled, and only once they have moved a couple of blocks, so Baritone keeps favouring the path it is on). A
+     * player on the far side of water with no dry route leaves the route ending short: the bot stays on its bank, says so once
+     * ({@code follow_no_dry_route}) and re-plans on the normal schedule. Swimming players and boats are the legacy modes.
+     *
+     * @return false when Baritone is not (or no longer) the engine, and the legacy land follow must run this tick
+     */
+    private boolean followLandBaritone(AIPlayerEntity bot, ServerPlayer target) {
+        ActionPack pack = bot.getActionPack();
+        BlockPos targetPos = target.blockPosition();
+        if (bot.distanceTo(target) <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {
+            pack.stopNavigation();
+            waiting = true;
+            noRouteAnnounced = false;
+            baritoneGoalPos = null;
+            baritoneRadius = (int) STOP_DISTANCE;
+            repathBackoff = false;
+            return true;
+        }
+        if (!pack.isPathExecutorIdle()) {
+            waiting = false;
+            if (baritoneGoalPos != null && elapsed >= nextRepathTick
+                    && baritoneGoalPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ) {
+                ActionResult regoal = pack.startApproachTo(targetPos, baritoneRadius, true, true);
+                baritoneRegoals++;
+                if (ActionPack.ENGINE_NOT_BARITONE.equals(regoal.reason())) {
+                    return false;
+                }
+                nextRepathTick = elapsed + BARITONE_REGOAL_TICKS;
+                if (!regoal.isFailed()) {
+                    baritoneGoalPos = targetPos.immutable();
+                }
+            }
+            return true;
+        }
+        // No route is running: either none was started yet, or the last one ended.
+        NavOutcome ended = pack.lastRouteOutcome();
+        if (ended != null && ended != handledOutcome) {
+            handledOutcome = ended;
+            if (ended.status() == NavOutcome.Status.FAILED) {
+                // Ended short of the player and Baritone found no more of a way (a lake between us, a sealed room): wait dry.
+                announceNoRoute(bot, targetPos, ended.reason());
+                repathBackoff = true;
+                nextRepathTick = elapsed + REPATH_TICKS;
+                baritoneGoalPos = null;
+            } else if (ended.status() == NavOutcome.Status.SUCCESS) {
+                // Inside the goal radius but not close enough for the arrival rule (the goal counts whole blocks): aim tighter.
+                baritoneRadius = Math.max(1, baritoneRadius - 1);
+            }
+        }
+        if (repathBackoff && elapsed < nextRepathTick) {
+            waiting = true;
+            return true;
+        }
+        ActionResult started = pack.startApproachTo(targetPos, baritoneRadius, false, true);
+        baritoneStarts++;
+        if (ActionPack.ENGINE_NOT_BARITONE.equals(started.reason())) {
+            return false;
+        }
+        nextRepathTick = elapsed + (started.isFailed() ? REPATH_TICKS : BARITONE_REGOAL_TICKS);
+        if (started.isFailed()) {
+            announceNoRoute(bot, targetPos, started.reason());
+            repathBackoff = true;
+            baritoneGoalPos = null;
+            waiting = true;
+            return true;
+        }
+        repathBackoff = false;
+        baritoneGoalPos = targetPos.immutable();
+        waiting = false;
+        return true;
+    }
+
     private void followLand(AIPlayerEntity bot, ServerPlayer target) {
+        if (NavEngineSelector.baritoneSelectedFor(bot.getUUID()) && followLandBaritone(bot, target)) {
+            return;
+        }
         ActionPack pack = bot.getActionPack();
         double distance = bot.distanceTo(target);
         if (distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {

@@ -59,11 +59,25 @@ class BaritoneExecutionContractTest {
         for (String entry : new String[]{
                 "public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {\n        claim(",
                 "public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {\n        claim(",
-                "PathExecutor.RouteContract routeContract) {\n        claim(",
                 "public ActionResult startMining(BlockPos pos, Direction face) {\n        claim(",
-                "public void stopAll() {\n        BaritoneRegistry.INSTANCE.preempt("}) {
+                "public void stopAll() {\n        releaseBaritone(\"stop_all\");"}) {
             assertTrue(source.contains(entry), "missing hand-over in ActionPack: " + entry.split("\n")[0]);
         }
+        // The private path entry may hand the request to Baritone first (which is not the legacy executor and needs no
+        // hand-over), but everything the legacy executor does after a null answer starts with the claim.
+        int entry = source.indexOf("PathExecutor.RouteContract routeContract) {\n        // Engine seam");
+        int routed = source.indexOf("routeOnBaritone(\"path_to\"", entry);
+        int claim = source.indexOf("claim(\"path_to\");", routed);
+        int legacyWork = source.indexOf("int reserve = Math.max(0, protectedStoneLikeReserve);", claim);
+        assertTrue(entry > 0 && routed > entry && claim > routed && legacyWork > claim,
+                "startPathTo: the engine seam first, then the claim, then any legacy work");
+        assertTrue(source.contains("if (routed != null) {\n            return routed;\n        }\n        claim(\"path_to\")"),
+                "only a routed (non-null) answer may skip the claim");
+        // The claim and stopAll go through releaseBaritone, which is what preempts Baritone (and ends a recorded route).
+        int release = source.indexOf("private void releaseBaritone(String why) {");
+        assertTrue(release > 0 && source.indexOf("BaritoneRegistry.INSTANCE.preempt(player, why)", release) > release
+                        && source.indexOf("cancelBaritoneRoute(why)", release) > release,
+                "releaseBaritone must cancel the recorded route and preempt Baritone");
         assertTrue(source.contains("BaritoneRegistry.INSTANCE.isBusy(player)"), "hasActiveActions must count a busy Baritone");
     }
 

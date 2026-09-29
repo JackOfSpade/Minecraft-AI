@@ -9,6 +9,7 @@ import com.google.gson.annotations.SerializedName;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
+import io.github.zoyluo.minecraftai.navigation.NavEngine;
 import io.github.zoyluo.minecraftai.mode.OperatorCapabilities;
 import io.github.zoyluo.minecraftai.mode.CapabilityPolicy;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
@@ -209,7 +210,7 @@ public record MinecraftAiConfig(
                 new Night(true, 8),
                 new Mining(2, 0.10D, true),
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
-                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3),
+                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue()),
                 new Pickup(2.75D, 2.5D, 8.0D), // measured 1.5/1.0 as too small: tree-drop items with a vertical gap >1 don't get pulled in → countSoFar=0 infinite loop
                 new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100));
     }
@@ -414,7 +415,14 @@ public record MinecraftAiConfig(
                       int lookahead,
                       int nodeRetry,
                       double sprintMinDist,
-                      int maxSafeFall) {
+                      int maxSafeFall,
+                      // "legacy" (default) or "baritone": which navigator answers ordinary walk requests. See docs/NAVIGATION_ENGINE.md.
+                      String engine) {
+        /** The configured engine; a missing or unknown value is {@link NavEngine#LEGACY}. */
+        public NavEngine engineChoice() {
+            return NavEngine.parse(engine);
+        }
+
         Nav withDefaults(Nav defaults) {
             return new Nav(
                     positiveDoubleOrDefault(jumpReach, defaults.jumpReach),
@@ -424,7 +432,8 @@ public record MinecraftAiConfig(
                     positiveOrDefault(lookahead, defaults.lookahead),
                     positiveOrDefault(nodeRetry, defaults.nodeRetry),
                     positiveDoubleOrDefault(sprintMinDist, defaults.sprintMinDist),
-                    positiveOrDefault(maxSafeFall, defaults.maxSafeFall));
+                    positiveOrDefault(maxSafeFall, defaults.maxSafeFall),
+                    NavEngine.parse(engine).configValue());
         }
     }
 

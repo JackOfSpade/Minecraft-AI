@@ -7,6 +7,8 @@ import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
+import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -51,6 +53,15 @@ public final class BaritoneRegistry {
         volatile AIPlayerEntity bot;
         /** Baritone owns the bot's movement inputs right now (set and cleared by {@link BaritoneDriver} and {@link #preempt}). */
         volatile boolean driven;
+        /**
+         * The route Baritone is executing may go through water (set by the navigator per request, or by a caller that drives
+         * Baritone directly): while it is set and Baritone drives the bot, the drowning safety net leases the bot to Baritone
+         * (see {@code NavSafetyNet#renewBaritoneWater}), and the lease ends with the drive.
+         */
+        volatile boolean waterAllowed;
+        /** The last path event Baritone reported and the server tick it arrived in (how a route that ended short of its goal failed). */
+        volatile PathEvent lastEvent;
+        volatile int lastEventTick = -1;
         /** Where the bot stood when its last driven physics tick began (for the fall-damage check after it). */
         double startX;
         double startY;
@@ -74,6 +85,7 @@ public final class BaritoneRegistry {
                 return created;
             });
             entries.put(bot.getUUID(), entry);
+            NavEngineSelector.markBaritoneLive();
             BotLog.lifecycle(bot, "baritone_created", "instances", entries.size());
         } else {
             entry.bot = bot; // the same bot may have been given a new entity (respawn from a saved record)
@@ -103,6 +115,31 @@ public final class BaritoneRegistry {
     public void setPolicy(AIPlayerEntity bot, BaritonePolicy policy) {
         get(bot);
         entries.get(bot.getUUID()).context.setPolicy(policy);
+    }
+
+    /**
+     * Declares that what Baritone is doing for the bot may take it through water (a swim route): the drowning safety net then
+     * leases the bot to Baritone for as long as Baritone drives it. Cleared with every hand-over, so it has to be set again by
+     * whoever starts the next route.
+     */
+    public void setWaterAllowed(AIPlayerEntity bot, boolean allowed) {
+        get(bot);
+        entries.get(bot.getUUID()).waterAllowed = allowed;
+    }
+
+    /** The last path event of the bot's instance and the server tick it arrived in; null without one. */
+    PathEvent lastPathEvent(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry == null ? null : entry.lastEvent;
+    }
+
+    /** Forgets the last path event (a new route starts). */
+    void clearLastPathEvent(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry != null) {
+            entry.lastEvent = null;
+            entry.lastEventTick = -1;
+        }
     }
 
     public BaritonePolicy policy(AIPlayerEntity bot) {
@@ -200,6 +237,7 @@ public final class BaritoneRegistry {
             }
         }
         BaritoneEdits.clearAll();
+        BaritoneNavigator.releaseAllRoutes();
         if (!all.isEmpty()) {
             BotLog.lifecycle("baritone_cleared", "count", all.size());
         }
@@ -209,9 +247,12 @@ public final class BaritoneRegistry {
     private static void halt(Entry entry, AIPlayerEntity bot) {
         boolean wasDriven = entry.driven;
         entry.driven = false;
+        entry.waterAllowed = false;
         try {
             cancelAll(entry);
         } finally {
+            NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
+            BaritoneNavigator.releaseRoute(bot.getUUID());
             if (wasDriven) {
                 BotInputBridge.release(bot);
             }
@@ -256,6 +297,8 @@ public final class BaritoneRegistry {
         @Override
         public void onPathEvent(PathEvent event) {
             AIPlayerEntity bot = entry.bot;
+            entry.lastEvent = event;
+            entry.lastEventTick = bot.getServer().getTickCount();
             var behavior = entry.baritone.getPathingBehavior();
             BotLog.path(bot, "baritone_path_event", "event", event.name(), "goal", behavior.getGoal());
         }

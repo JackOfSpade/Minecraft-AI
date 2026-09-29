@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.runtime;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
+import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator;
 import io.github.zoyluo.minecraftai.brain.BotReporter;
 import io.github.zoyluo.minecraftai.brain.BotRuntimeOptions;
@@ -88,7 +89,9 @@ public final class RuntimeLifecycleCoordinator {
         IntentController.INSTANCE.cancelAll(bot, origin, reason);
         BrainCoordinator.INSTANCE.reset(bot);
         GoalExecutor.INSTANCE.unload(bot);
-        BaritoneRegistry.INSTANCE.reset(bot, "runtime_reset");
+        if (NavEngineSelector.baritoneLive()) {
+            BaritoneRegistry.INSTANCE.reset(bot, "runtime_reset");
+        }
         TaskManager.INSTANCE.resetToIdle(bot);
         clearTransient(bot);
         BotLog.lifecycle(bot, "bot_runtime_reset", "reason", reason);
@@ -102,7 +105,9 @@ public final class RuntimeLifecycleCoordinator {
         GoalExecutor.INSTANCE.suspendForDeath(bot);
         IdleCoordinator.INSTANCE.cancelClaimedJob(bot, "bot_died");
         TaskManager.INSTANCE.cancelIntentTasks(bot, "bot_died");
-        BaritoneRegistry.INSTANCE.reset(bot, "bot_died");
+        if (NavEngineSelector.baritoneLive()) {
+            BaritoneRegistry.INSTANCE.reset(bot, "bot_died");
+        }
         bot.getActionPack().stopAll();
         BrainCoordinator.INSTANCE.reset(bot);
         clearTransient(bot);
@@ -155,11 +160,14 @@ public final class RuntimeLifecycleCoordinator {
     }
 
     private static void forgetBot(AIPlayerEntity bot) {
-        BaritoneRegistry.INSTANCE.forget(bot, "bot_forgotten");
+        if (NavEngineSelector.baritoneLive()) {
+            BaritoneRegistry.INSTANCE.forget(bot, "bot_forgotten");
+        }
         MiningEvidenceAudit.clear(bot);
         MiningAssistRuntime.clearForced(bot.getUUID());
         clearTransient(bot);
         BotRuntimeOptions.INSTANCE.clear(bot);
+        NavEngineSelector.clearBotEngine(bot.getUUID());
         BotMemoryStore.INSTANCE.remove(bot.getUUID());
         EpisodeLog.INSTANCE.clearFor(bot.getUUID());
         KnowledgeBase.INSTANCE.forget(bot.getUUID());
@@ -169,13 +177,16 @@ public final class RuntimeLifecycleCoordinator {
     }
 
     private static void clearWorldRuntime() {
-        BaritoneRegistry.INSTANCE.clearAll();
+        if (NavEngineSelector.baritoneLive()) {
+            BaritoneRegistry.INSTANCE.clearAll();
+        }
         GoalExecutor.INSTANCE.clearAllRuntime();
         TaskManager.INSTANCE.clearAllRuntime();
         IdleCoordinator.INSTANCE.clearAllRuntime();
         TaskBoard.INSTANCE.clear();
         DangerWatcher.INSTANCE.clearAll();
         NavSafetyNet.INSTANCE.clearAll();
+        NavEngineSelector.clearAllBotEngines();
         StuckWatcher.INSTANCE.clearAll();
         EpisodeMemory.INSTANCE.clearAll();
         EpisodeLog.INSTANCE.clearAll();
