@@ -181,7 +181,8 @@ public final class BrainCoordinator {
         conversation.continuationTaskPolls = 0;
         conversation.budgetExhaustionReported = false;
         conversation.lastToolRoundFailureCount = 0;
-        conversation.initialActionStarted = false;
+        conversation.requestStarted = false;
+        conversation.failureReportCall = false;
         conversation.initialPlanSpoken = false;
         conversation.lastToolRoundMissingRequiredAction = false;
         conversation.lastToolRoundPlanBlockedAction = false;
@@ -204,16 +205,21 @@ public final class BrainCoordinator {
         // The withheld-say flag only ever describes the call that was just answered; the round
         // evaluation below decides whether the NEXT call needs it.
         conversation.withholdSayNextCall = false;
-        boolean planAlreadyAnnounced = conversation.initialPlanSpoken && !conversation.initialActionStarted;
+        // A failure-report call is a per-call marker (set by submit), never an instruction-level flag:
+        // it must neither start the player's request nor be held against it.
+        boolean failureReportCall = conversation.failureReportCall;
+        boolean planAlreadyAnnounced = !failureReportCall
+                && conversation.initialPlanSpoken && !conversation.requestStarted;
         recordResponseAndDeliverReply(bot, conversation, response);
-        InitialActionGate initialActionGate = prepareToolCallsForThisRound(conversation, response);
+        InitialActionGate initialActionGate = prepareToolCallsForThisRound(conversation, response, failureReportCall);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
 
         if (response.wantsToolCalls()) {
-            dispatchToolCallRound(bot, lease, conversation, response, toolCalls, initialActionGate, planAlreadyAnnounced);
+            dispatchToolCallRound(bot, lease, conversation, response, toolCalls, initialActionGate,
+                    planAlreadyAnnounced, failureReportCall);
             return;
         }
-        handleTextOnlyResponse(bot, lease, conversation, response);
+        handleTextOnlyResponse(bot, lease, conversation, response, failureReportCall);
     }
 
     /** Logs the API response, delivers any chat reply, and records token/Gemini-interaction bookkeeping. */
@@ -242,11 +248,14 @@ public final class BrainCoordinator {
     }
 
     /** Applies the initial-action-plan gate to this round's tool calls and appends the assistant message to history. */
-    private InitialActionGate prepareToolCallsForThisRound(BotConversation conversation, ChatResponse response) {
+    private InitialActionGate prepareToolCallsForThisRound(BotConversation conversation,
+                                                           ChatResponse response,
+                                                           boolean failureReportCall) {
         InitialActionGate initialActionGate = initialActionGate(
-                response.toolCalls(), conversation.initialActionStarted || conversation.initialPlanSpoken);
+                response.toolCalls(),
+                conversation.requestStarted || conversation.initialPlanSpoken || failureReportCall);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
-        if (!conversation.initialPlanSpoken && containsValidPlan(response.toolCalls())) {
+        if (!failureReportCall && !conversation.initialPlanSpoken && containsValidPlan(response.toolCalls())) {
             conversation.initialPlanSpoken = true;
         }
         conversation.history.add(ChatMessage.assistant(response.content(), toolCalls));
@@ -264,7 +273,8 @@ public final class BrainCoordinator {
                                        ChatResponse response,
                                        List<ChatToolCall> toolCalls,
                                        InitialActionGate initialActionGate,
-                                       boolean planAlreadyAnnounced) {
+                                       boolean planAlreadyAnnounced,
+                                       boolean failureReportCall) {
         ActionDispatcher.DispatchBatch dispatchBatch = dispatchWithInitialPlanGate(
                 bot,
                 toolCalls,
@@ -317,27 +327,30 @@ public final class BrainCoordinator {
                 .count();
         int failedToolCalls = dispatchBatch.failedCallCount() - repeatedPlanFaults
                 + response.geminiCappedFunctionResults().size();
-        boolean actionToolSucceeded = dispatchBatch.executedCalls().stream()
+        // "This instruction's request started" is deliberately NOT "some work is active": unrelated
+        // autonomous work (a flee, auto-eat, a leftover task) must not count as the player's command
+        // having begun, or the command is silently dropped when the planner never starts it. Only a
+        // work-start tool of this instruction that succeeded moves the flag (it then stays set).
+        boolean workStartToolSucceeded = dispatchBatch.executedCalls().stream()
                 .anyMatch(call -> call.ok() && isWorkStartTool(call.name()));
-        if (workActive || actionToolSucceeded) {
-            conversation.initialActionStarted = true;
-        }
-        boolean answerOnly = isAnswerOnlyReply(toolCalls);
-        boolean missingRequiredAction = !answerOnly
-                && !conversation.initialActionStarted
-                && !isControlOnlyReply(toolCalls)
-                && failedToolCalls == 0;
+        InstructionRoundEvaluator.RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                new InstructionRoundEvaluator.ToolRound(
+                        conversation.requestStarted,
+                        // initialPlanSpoken already includes a plan announced in this very round.
+                        conversation.initialPlanSpoken,
+                        failureReportCall,
+                        workActive,
+                        workStartToolSucceeded,
+                        isAnswerOnlyReply(toolCalls),
+                        isControlOnlyReply(toolCalls),
+                        failedToolCalls,
+                        initialActionGate.blockedActionCalls()));
+        conversation.requestStarted = outcome.requestStarted();
+        boolean missingRequiredAction = outcome.missingRequiredAction();
         conversation.lastToolRoundFailureCount = failedToolCalls;
-        conversation.lastToolRoundMissingRequiredAction = missingRequiredAction
-                || initialActionGate.blockedActionCalls();
+        conversation.lastToolRoundMissingRequiredAction = outcome.lastRoundMissingRequiredAction();
         conversation.lastToolRoundPlanBlockedAction = initialActionGate.blockedActionCalls();
-        // initialPlanSpoken already includes a plan announced in this very round (set before dispatch).
-        boolean plannedWithoutActing = conversation.initialPlanSpoken && !conversation.initialActionStarted;
-        conversation.withholdSayNextCall = shouldWithholdSay(
-                missingRequiredAction,
-                initialActionGate.blockedActionCalls(),
-                conversation.initialActionStarted,
-                plannedWithoutActing);
+        conversation.withholdSayNextCall = outcome.withholdSayNextCall();
         BotLog.comm(bot, "tool_round_evaluated",
                 "model_call", conversation.callBudget.callsUsed(),
                 "model_calls_remaining", conversation.callBudget.callsRemaining(),
@@ -349,6 +362,8 @@ public final class BrainCoordinator {
                 "repeated_plan_faults", repeatedPlanFaults,
                 "say_withheld_next_call", conversation.withholdSayNextCall,
                 "work_active", workActive,
+                "request_started", conversation.requestStarted,
+                "failure_report_call", failureReportCall,
                 "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions");
         if (missingRequiredAction || initialActionGate.blockedActionCalls()) {
             BotLog.warn(LogCategory.COMM, bot, "action_request_not_started",
@@ -377,7 +392,7 @@ public final class BrainCoordinator {
         // A valid one-off answer (for example say for a pure question) does not need a
         // second model call. Retries are reserved for an actual tool failure or for work
         // whose deterministic runtime is still progressing.
-        if (!workActive && failedToolCalls == 0) {
+        if (!outcome.keepGoing()) {
             if (!conversation.decision.complete(lease)) {
                 logStaleDecision(lease, "tool_round_completion");
                 return;
@@ -411,15 +426,20 @@ public final class BrainCoordinator {
     private void handleTextOnlyResponse(AIPlayerEntity bot,
                                         DecisionLease lease,
                                         BotConversation conversation,
-                                        ChatResponse response) {
+                                        ChatResponse response,
+                                        boolean failureReportCall) {
         // Tool choice is required for every fresh player turn. A bare text response cannot say
         // whether it was an answer or a plan, so do not let it silently complete an action
         // request. Once an initial action has genuinely started, a later text-only completion
-        // report remains valid.
-        if (!conversation.initialActionStarted) {
+        // report remains valid, and so is a text-only failure report (not an unfinished request).
+        InstructionRoundEvaluator.TextOnlyOutcome textOnly = InstructionRoundEvaluator.evaluateTextOnlyRound(
+                conversation.requestStarted, conversation.initialPlanSpoken, failureReportCall);
+        if (textOnly.requestOutstanding()) {
             conversation.lastToolRoundFailureCount = 0;
             conversation.lastToolRoundMissingRequiredAction = true;
             conversation.lastToolRoundPlanBlockedAction = false;
+            // onResponse cleared the flag; an announced-but-unstarted plan keeps say withheld.
+            conversation.withholdSayNextCall = textOnly.withholdSayNextCall();
             BotLog.warn(LogCategory.COMM, bot, "structured_tool_call_missing",
                     "model_call", conversation.callBudget.callsUsed(),
                     "finish_reason", response.finishReason());
@@ -551,12 +571,10 @@ public final class BrainCoordinator {
      */
     static boolean shouldWithholdSay(boolean missingRequiredAction,
                                      boolean planBlockedAction,
-                                     boolean initialActionStarted,
+                                     boolean requestStarted,
                                      boolean roundAnnouncedPlan) {
-        return missingRequiredAction
-                && !planBlockedAction
-                && !initialActionStarted
-                && roundAnnouncedPlan;
+        return InstructionRoundEvaluator.shouldWithholdSay(
+                missingRequiredAction, planBlockedAction, requestStarted, roundAnnouncedPlan);
     }
 
     /** The tools offered to a model call: everything, or everything except say when it is withheld. */
@@ -835,11 +853,20 @@ public final class BrainCoordinator {
         conversation.continuationTaskPolls = 0;
         // A task failure is reported with its own guaranteed model call, so it is checked before the
         // per-instruction planner budget: an exhausted planner budget must never swallow the report.
-        if (hasFailure && maybeInjectFailure(bot, conversation)) {
-            awaitingTask.remove(bot.getUUID());
-            trimHistory(conversation);
-            submit(bot, conversation, conversation.decision.beginEpoch(), true);
-            return true;
+        if (hasFailure) {
+            InstructionRoundEvaluator.FailureWake failureWake = maybeInjectFailure(bot, conversation);
+            if (failureWake == InstructionRoundEvaluator.FailureWake.INJECT) {
+                awaitingTask.remove(bot.getUUID());
+                trimHistory(conversation);
+                submit(bot, conversation, conversation.decision.beginEpoch(), true);
+                return true;
+            }
+            if (failureWake == InstructionRoundEvaluator.FailureWake.REPORT_DIRECTLY) {
+                // The player was already told, deterministically. The spent budget must not also
+                // trigger finishCallBudget's generic apology: one failure, one report.
+                awaitingTask.remove(bot.getUUID());
+                return false;
+            }
         }
         if (conversation.callBudget.exhausted()) {
             finishCallBudget(bot, conversation, "automatic_wake");
@@ -930,9 +957,6 @@ public final class BrainCoordinator {
             // A failure report is a say-only job: it never inherits a withheld say from an earlier
             // plan-only round of the instruction.
             boolean withholdSay = !failureReport && conversation.withholdSayNextCall;
-            if (failureReport) {
-                conversation.withholdSayNextCall = false;
-            }
             List<ToolDefinition> toolsSnapshot = toolsForCall(toolRegistry.tools(
                     brainConfig,
                     brainConfig.exposesLowLevelTools() || manualMode(bot),
@@ -951,9 +975,6 @@ public final class BrainCoordinator {
                     reportPendingFailureWithoutModel(bot, conversation);
                     return;
                 }
-                // Reporting a failure is not an unfinished player request: a say alone is the
-                // right answer, so the initial-action requirement must not chase it.
-                conversation.initialActionStarted = true;
             } else if (conversation.callBudget.tryAcquireModelCall()) {
                 reservation = PlayerInstructionCallBudget.Reservation.REGULAR;
             } else {
@@ -964,6 +985,10 @@ public final class BrainCoordinator {
                 finishCallBudget(bot, conversation, "submission");
                 return;
             }
+            // Reporting a failure is not an unfinished player request: a say alone is the right
+            // answer. That is remembered per call (read back by onResponse) instead of by touching
+            // the instruction-level request flags, so an errored report call leaves them intact.
+            conversation.failureReportCall = failureReport;
             BotLog.comm(bot, "model_call_submitted",
                     "model_call", conversation.callBudget.callsUsed(),
                     "model_calls_remaining", conversation.callBudget.callsRemaining(),
@@ -1093,9 +1118,18 @@ public final class BrainCoordinator {
                             submit(bot, conversation, nextLease);
                             return;
                         }
-                        if (maybeInjectFailure(bot, conversation)) {
+                        InstructionRoundEvaluator.FailureWake failureWake = maybeInjectFailure(bot, conversation);
+                        if (failureWake == InstructionRoundEvaluator.FailureWake.INJECT) {
                             trimHistory(conversation);
                             submit(bot, conversation, nextLease, true);
+                            return;
+                        }
+                        if (failureWake == InstructionRoundEvaluator.FailureWake.REPORT_DIRECTLY) {
+                            // Every call is spent and the player was just told directly. A further
+                            // continuation call could only end in a second, generic apology.
+                            if (!conversation.decision.failSubmission(nextLease)) {
+                                logStaleDecision(nextLease, "failure_reported_directly");
+                            }
                             return;
                         }
                         TaskStatus status = TaskManager.INSTANCE.status(bot);
@@ -1180,10 +1214,16 @@ public final class BrainCoordinator {
         // told to the player -- a dropped command with no word is the worst outcome.
         // The planner loop is over: a withheld say must not leak into a later wake-up call.
         conversation.withholdSayNextCall = false;
-        boolean requestNeverStarted = !conversation.initialActionStarted && !"automatic_wake".equals(trigger);
-        if (conversation.budgetExhaustionReported || (workActive && !requestNeverStarted)) {
+        InstructionRoundEvaluator.BudgetReport report = InstructionRoundEvaluator.budgetReport(
+                conversation.budgetExhaustionReported,
+                workActive,
+                conversation.requestStarted,
+                !conversation.lastInstruction.isBlank(),
+                "automatic_wake".equals(trigger));
+        if (report == InstructionRoundEvaluator.BudgetReport.SILENT) {
             return;
         }
+        boolean requestNeverStarted = report == InstructionRoundEvaluator.BudgetReport.COULD_NOT_START;
         conversation.budgetExhaustionReported = true;
         if (!workActive) {
             io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
@@ -1254,14 +1294,20 @@ public final class BrainCoordinator {
         return rest.subList(start, rest.size());
     }
 
-    private boolean maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
-        if (TaskManager.INSTANCE.peekFailure(bot).isPresent()
-                && !conversation.callBudget.canAcquireFailureReportCall()) {
+    private InstructionRoundEvaluator.FailureWake maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
+        InstructionRoundEvaluator.FailureWake wake = InstructionRoundEvaluator.failureWake(
+                TaskManager.INSTANCE.peekFailure(bot).isPresent(),
+                conversation.callBudget.canAcquireFailureReportCall());
+        if (wake == InstructionRoundEvaluator.FailureWake.REPORT_DIRECTLY) {
             // Even the dedicated failure-report allowance is spent (a task that keeps failing): tell
             // the player directly instead of leaving the failure unreported or looping the model.
-            TaskManager.INSTANCE.consumeFailure(bot)
-                    .ifPresent(failure -> reportFailureWithoutModel(bot, failure.name(), failure.reason()));
-            return false;
+            // The caller must treat this as the one and only report of that failure.
+            return TaskManager.INSTANCE.consumeFailure(bot)
+                    .map(failure -> {
+                        reportFailureWithoutModel(bot, failure.name(), failure.reason());
+                        return InstructionRoundEvaluator.FailureWake.REPORT_DIRECTLY;
+                    })
+                    .orElse(InstructionRoundEvaluator.FailureWake.NONE);
         }
         return TaskManager.INSTANCE.consumeFailure(bot)
                 .map(failure -> {
@@ -1294,9 +1340,9 @@ public final class BrainCoordinator {
                             "reason", failure.reason(),
                             "count", failure.count(),
                             "tick", failure.tick());
-                    return true;
+                    return InstructionRoundEvaluator.FailureWake.INJECT;
                 })
-                .orElse(false);
+                .orElse(InstructionRoundEvaluator.FailureWake.NONE);
     }
 
     private boolean maybeInjectGoalResult(AIPlayerEntity bot, BotConversation conversation) {
@@ -1424,8 +1470,13 @@ public final class BrainCoordinator {
         private int continuationTaskPolls;
         private boolean budgetExhaustionReported;
         private int lastToolRoundFailureCount;
-        private boolean initialActionStarted;
-        // Distinct from initialActionStarted (which requires the paired action to have actually
+        // This instruction's request has started: a work-start tool of THIS instruction succeeded.
+        // Deliberately not "some runtime work is active" (unrelated autonomous work says nothing about
+        // the player's command). Reset for every new instruction, never touched by failure reports.
+        private boolean requestStarted;
+        // The call in flight is a failure report (set per call by submit, read by onResponse).
+        private boolean failureReportCall;
+        // Distinct from requestStarted (which requires the paired action to have actually
         // succeeded/be active): a plan already spoken this turn should not be demanded again just
         // because the FOLLOWING action call failed on unrelated grounds (e.g. a bad tool argument).
         private boolean initialPlanSpoken;

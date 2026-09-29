@@ -1,0 +1,237 @@
+package io.github.zoyluo.minecraftai.brain;
+
+import io.github.zoyluo.minecraftai.brain.InstructionRoundEvaluator.BudgetReport;
+import io.github.zoyluo.minecraftai.brain.InstructionRoundEvaluator.FailureWake;
+import io.github.zoyluo.minecraftai.brain.InstructionRoundEvaluator.RoundOutcome;
+import io.github.zoyluo.minecraftai.brain.InstructionRoundEvaluator.TextOnlyOutcome;
+import io.github.zoyluo.minecraftai.brain.InstructionRoundEvaluator.ToolRound;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Behavioural tests of the per-instruction flag lifecycle (request started, say withheld, failure
+ * report rounds, budget-end and failure reporting). These are the rules behind "a command must never
+ * be silently dropped"; the coordinator itself only wires them to game state.
+ */
+final class InstructionRoundEvaluatorTest {
+    private static ToolRound round(boolean startedBefore,
+                                   boolean planSpoken,
+                                   boolean failureReportCall,
+                                   boolean workActive,
+                                   boolean workStartSucceeded,
+                                   boolean answerOnly,
+                                   boolean controlOnly,
+                                   int failed,
+                                   boolean planBlocked) {
+        return new ToolRound(startedBefore, planSpoken, failureReportCall, workActive, workStartSucceeded,
+                answerOnly, controlOnly, failed, planBlocked);
+    }
+
+    private static ToolRound planOnlyRound(boolean workActive) {
+        return round(false, true, false, workActive, false, false, false, 0, false);
+    }
+
+    // ---- say withheld after a plan-only round -------------------------------------------------
+
+    @Test
+    void aPlanOnlyRoundWithholdsSayFromTheNextCall() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(planOnlyRound(false));
+
+        assertTrue(outcome.missingRequiredAction());
+        assertTrue(outcome.withholdSayNextCall());
+        assertTrue(outcome.keepGoing());
+        assertFalse(outcome.requestStarted());
+    }
+
+    @Test
+    void aRoundWithoutAPlanNeverWithholdsSay() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, false, false, false, false, false, false, 0, false));
+
+        assertTrue(outcome.missingRequiredAction());
+        assertFalse(outcome.withholdSayNextCall());
+    }
+
+    @Test
+    void blockedActionCallsStillNeedSayToAnnounceThePlan() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, true, false, false, false, false, false, 0, true));
+
+        assertFalse(outcome.withholdSayNextCall());
+        assertTrue(outcome.lastRoundMissingRequiredAction());
+        assertTrue(outcome.keepGoing());
+    }
+
+    @Test
+    void aTextOnlyRoundKeepsSayWithheldWhileTheAnnouncedPlanIsUnstarted() {
+        // The previous call was already withheld (onResponse cleared the flag); the text-only branch
+        // must recompute it, otherwise the retry offers say again and the loop resumes.
+        TextOnlyOutcome outcome = InstructionRoundEvaluator.evaluateTextOnlyRound(false, true, false);
+
+        assertTrue(outcome.requestOutstanding());
+        assertTrue(outcome.withholdSayNextCall());
+    }
+
+    @Test
+    void aTextOnlyRoundWithoutAPlanKeepsSayAvailable() {
+        TextOnlyOutcome outcome = InstructionRoundEvaluator.evaluateTextOnlyRound(false, false, false);
+
+        assertTrue(outcome.requestOutstanding());
+        assertFalse(outcome.withholdSayNextCall());
+    }
+
+    @Test
+    void aTextOnlyReplyAfterTheRequestStartedOrAsAFailureReportIsSimplyDone() {
+        for (TextOnlyOutcome outcome : new TextOnlyOutcome[] {
+                InstructionRoundEvaluator.evaluateTextOnlyRound(true, true, false),
+                InstructionRoundEvaluator.evaluateTextOnlyRound(false, true, true)}) {
+            assertFalse(outcome.requestOutstanding());
+            assertFalse(outcome.withholdSayNextCall());
+        }
+    }
+
+    // ---- request started is independent of unrelated work --------------------------------------
+
+    @Test
+    void unrelatedRunningWorkDoesNotMarkTheRequestStarted() {
+        // A flee or auto-eat is running, the model only announced a plan: the command has NOT started.
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(planOnlyRound(true));
+
+        assertFalse(outcome.requestStarted());
+        assertTrue(outcome.missingRequiredAction());
+        assertTrue(outcome.withholdSayNextCall());
+        assertTrue(outcome.keepGoing());
+    }
+
+    @Test
+    void aSucceededWorkStartToolStartsTheRequestAndItStaysStarted() {
+        RoundOutcome first = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, true, false, true, true, false, false, 0, false));
+        assertTrue(first.requestStarted());
+        assertFalse(first.missingRequiredAction());
+        assertFalse(first.withholdSayNextCall());
+        assertTrue(first.keepGoing());
+
+        // A later status-only round with the work finished must not un-start it.
+        RoundOutcome later = InstructionRoundEvaluator.evaluateToolRound(
+                round(first.requestStarted(), true, false, false, false, false, false, 0, false));
+        assertTrue(later.requestStarted());
+        assertFalse(later.missingRequiredAction());
+        assertFalse(later.keepGoing());
+    }
+
+    @Test
+    void aValidAnswerWhileUnrelatedWorkRunsCompletesInsteadOfLoopingIntoAnApology() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, false, false, true, false, true, false, 0, false));
+
+        assertFalse(outcome.missingRequiredAction());
+        assertFalse(outcome.keepGoing());
+        assertFalse(outcome.requestStarted());
+    }
+
+    @Test
+    void aFailedToolCallKeepsThePlannerGoing() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, true, false, false, false, false, false, 1, false));
+
+        assertFalse(outcome.missingRequiredAction(), "the failure is repaired, not reported as a missing action");
+        assertTrue(outcome.keepGoing());
+    }
+
+    @Test
+    void anUnstartedRequestIsReportedEvenWhileUnrelatedWorkRuns() {
+        // The originally silent case: budget spent, unrelated work active, the command never started.
+        assertEquals(BudgetReport.COULD_NOT_START,
+                InstructionRoundEvaluator.budgetReport(false, true, false, true, false));
+        assertEquals(BudgetReport.COULD_NOT_START,
+                InstructionRoundEvaluator.budgetReport(false, false, false, true, false));
+    }
+
+    @Test
+    void aStartedRequestStaysQuietWhileItsWorkRunsAndApologisesOnlyWhenNothingRuns() {
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReport(false, true, true, true, false));
+        assertEquals(BudgetReport.COULD_NOT_WORK_OUT,
+                InstructionRoundEvaluator.budgetReport(false, false, true, true, false));
+    }
+
+    @Test
+    void theBudgetEndIsReportedAtMostOnceAndNeverForAnAutomaticWakeOrANonInstruction() {
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReport(true, false, false, true, false));
+        // An automatic wake is not a request that "never started".
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReport(false, true, false, true, true));
+        // No player instruction at all (an autonomous goal wake): never claims a command failed to start.
+        assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReport(false, true, false, false, false));
+        assertEquals(BudgetReport.COULD_NOT_WORK_OUT,
+                InstructionRoundEvaluator.budgetReport(false, false, false, false, false));
+    }
+
+    // ---- failure-report rounds leave the request flags alone -----------------------------------
+
+    @Test
+    void aSayOnlyFailureReportRoundDoesNotTouchTheRequestFlags() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, true, true, false, false, false, false, 0, false));
+
+        assertFalse(outcome.requestStarted(), "reporting a failure must not pretend the request started");
+        assertFalse(outcome.missingRequiredAction());
+        assertFalse(outcome.lastRoundMissingRequiredAction());
+        assertFalse(outcome.withholdSayNextCall());
+        assertFalse(outcome.keepGoing());
+    }
+
+    @Test
+    void aFailureReportRoundKeepsAnAlreadyStartedRequestStarted() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(true, true, true, false, false, false, false, 0, false));
+
+        assertTrue(outcome.requestStarted());
+        assertFalse(outcome.missingRequiredAction());
+    }
+
+    @Test
+    void aFailureReportRoundNeverDemandsAnActionEvenWithAnAnnouncedPlan() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, true, true, true, false, false, false, 0, true));
+
+        assertFalse(outcome.missingRequiredAction());
+        assertFalse(outcome.withholdSayNextCall());
+        assertFalse(outcome.requestStarted(), "running unrelated work still is not the request");
+    }
+
+    // ---- exactly one apology per failure -------------------------------------------------------
+
+    @Test
+    void aFailureWithACallAvailableIsInjectedNotApologisedForDirectly() {
+        assertEquals(FailureWake.INJECT, InstructionRoundEvaluator.failureWake(true, true));
+        assertEquals(FailureWake.NONE, InstructionRoundEvaluator.failureWake(false, true));
+        assertEquals(FailureWake.NONE, InstructionRoundEvaluator.failureWake(false, false));
+    }
+
+    @Test
+    void whenEveryCallIsSpentTheFailureIsReportedDirectlyExactlyOnce() {
+        PlayerInstructionCallBudget budget =
+                new PlayerInstructionCallBudget(PlayerInstructionCallBudget.DEFAULT_MAX_CALLS);
+        budget.beginPlayerInstruction();
+        while (budget.tryAcquireModelCall()) {
+            // planner allowance spent
+        }
+        // The dedicated failure allowance still serves two reports through the model.
+        for (int i = 0; i < PlayerInstructionCallBudget.MAX_FAILURE_REPORT_CALLS; i++) {
+            assertEquals(FailureWake.INJECT,
+                    InstructionRoundEvaluator.failureWake(true, budget.canAcquireFailureReportCall()));
+            budget.tryAcquireFailureReportCall();
+        }
+        assertTrue(budget.exhausted());
+
+        // Then the failure is reported directly, and that is the whole report: REPORT_DIRECTLY is a
+        // distinct verdict (not "no failure"), which is what lets the coordinator return right there
+        // instead of falling through to the exhausted-budget apology.
+        FailureWake wake = InstructionRoundEvaluator.failureWake(true, budget.canAcquireFailureReportCall());
+        assertEquals(FailureWake.REPORT_DIRECTLY, wake);
+        assertTrue(wake != FailureWake.NONE && wake != FailureWake.INJECT);
+    }
+}

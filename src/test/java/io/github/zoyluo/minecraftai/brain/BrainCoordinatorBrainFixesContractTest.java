@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import java.util.regex.Pattern;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -18,47 +20,81 @@ final class BrainCoordinatorBrainFixesContractTest {
         return Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/" + file));
     }
 
+    /** True when the source contains the text with any run of whitespace (incl. CRLF) matching any other. */
+    private static boolean containsIgnoringWhitespace(String source, String text) {
+        return indexIgnoringWhitespace(source, text) >= 0;
+    }
+
+    private static int indexIgnoringWhitespace(String source, String text) {
+        StringBuilder regex = new StringBuilder();
+        for (String part : text.trim().split("\\s+")) {
+            if (regex.length() > 0) {
+                regex.append("\\s+");
+            }
+            regex.append(Pattern.quote(part));
+        }
+        var matcher = Pattern.compile(regex.toString()).matcher(source);
+        return matcher.find() ? matcher.start() : -1;
+    }
+
     @Test
     void theWithheldSayFlagReachesBothProviderClients() throws IOException {
         String coordinator = read("brain/BrainCoordinator.java");
         String executor = read("brain/AsyncDecisionExecutor.java");
 
-        assertTrue(coordinator.contains("toolsForCall(toolRegistry.tools("),
+        assertTrue(containsIgnoringWhitespace(coordinator, "toolsForCall(toolRegistry.tools("),
                 "the offered tool set must be filtered when say is withheld");
-        assertTrue(coordinator.contains("                    withholdSay,\n"),
+        assertTrue(containsIgnoringWhitespace(coordinator, "geminiRequest, withholdSay,"),
                 "the flag must reach the executor so chat-completions requires a tool call");
-        assertTrue(executor.contains("apiClient.chatRequiringToolCall(historySnapshot, tools)"),
+        assertTrue(containsIgnoringWhitespace(executor, "apiClient.chatRequiringToolCall(historySnapshot, tools)"),
                 "chat-completions must send tool_choice=required on a forced call");
-        assertTrue(read("brain/GeminiInteractionsApiClient.java").contains("allowedTools.addProperty(\"mode\", \"any\")"),
+        assertTrue(containsIgnoringWhitespace(read("brain/GeminiInteractionsApiClient.java"),
+                        "allowedTools.addProperty(\"mode\", \"any\")"),
                 "the Gemini Interactions client must keep forcing a function call from the offered set");
     }
 
     @Test
     void failureWakesAreCheckedBeforeThePlannerBudgetAndUseTheirOwnReservation() throws IOException {
         String coordinator = read("brain/BrainCoordinator.java");
-        int failureWake = coordinator.indexOf("if (hasFailure && maybeInjectFailure(bot, conversation))");
-        int exhaustedWake = coordinator.indexOf("finishCallBudget(bot, conversation, \"automatic_wake\")");
+        int failureWake = indexIgnoringWhitespace(coordinator, "maybeInjectFailure(bot, conversation);");
+        int exhaustedWake = indexIgnoringWhitespace(coordinator, "finishCallBudget(bot, conversation, \"automatic_wake\")");
 
         assertTrue(failureWake > 0 && exhaustedWake > 0, "expected both wake branches");
         assertTrue(failureWake < exhaustedWake,
                 "an exhausted planner budget must not swallow the failure report");
-        assertTrue(coordinator.contains("conversation.decision.beginEpoch(), true);"),
+        assertTrue(containsIgnoringWhitespace(coordinator, "conversation.decision.beginEpoch(), true);"),
                 "the failure wake must submit with the failure-report reservation");
-        assertTrue(coordinator.contains("submit(bot, conversation, nextLease, true);"),
+        assertTrue(containsIgnoringWhitespace(coordinator, "submit(bot, conversation, nextLease, true);"),
                 "the continuation failure injection must use the failure-report reservation");
         assertTrue(coordinator.contains("reportFailureWithoutModel"),
                 "with every call spent the player must still be told, deterministically");
+        assertTrue(containsIgnoringWhitespace(coordinator, "FailureWake.REPORT_DIRECTLY) {"),
+                "a directly reported failure must end the wake instead of also finishing the budget");
     }
 
     @Test
     void budgetExhaustionWithoutAStartedRequestAlwaysTellsThePlayer() throws IOException {
         String coordinator = read("brain/BrainCoordinator.java");
 
-        assertTrue(coordinator.contains("boolean requestNeverStarted = !conversation.initialActionStarted"),
-                "the report decision must depend on whether the request started");
-        assertTrue(coordinator.contains("couldNotStartMessage(conversation.lastInstruction)"),
+        assertTrue(containsIgnoringWhitespace(coordinator,
+                        "InstructionRoundEvaluator.budgetReport( conversation.budgetExhaustionReported, workActive, conversation.requestStarted,"),
+                "the report decision must depend on whether THIS instruction's request started, not on running work");
+        assertTrue(containsIgnoringWhitespace(coordinator, "couldNotStartMessage(conversation.lastInstruction)"),
                 "the player must hear which command could not be started");
     }
+
+    @Test
+    void theRequestStartedFlagIsNeverDerivedFromMereRunningWork() throws IOException {
+        String coordinator = read("brain/BrainCoordinator.java");
+
+        assertTrue(!Pattern.compile("requestStarted\\s*=\\s*true").matcher(coordinator).find(),
+                "only the round evaluator may move the flag (via a successful work-start tool), never a raw assignment");
+        assertTrue(!Pattern.compile("if\\s*\\(\\s*workActive\\s*\\|\\|\\s*actionToolSucceeded").matcher(coordinator).find(),
+                "running work of any origin must not count as the request having started");
+        assertTrue(containsIgnoringWhitespace(coordinator, "conversation.failureReportCall = failureReport;"),
+                "a failure report is marked per call, not by mutating the instruction-level flags");
+    }
+
 
     @Test
     void ambientChatAndPlainTextRepliesAreLogged() throws IOException {

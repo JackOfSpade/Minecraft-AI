@@ -4,9 +4,13 @@ package io.github.zoyluo.minecraftai.brain;
  * Counts model requests made while carrying out one player instruction.
  *
  * <p>The owner must call {@link #beginPlayerInstruction()} only when a new
- * player instruction supersedes the previous one. Autonomous task/goal/failure
- * wake-ups deliberately reuse the same budget, so they cannot escape the cap
- * by opening a new decision epoch.</p>
+ * player instruction supersedes the previous one. Autonomous task/goal
+ * wake-ups deliberately reuse the same planner budget ({@link #DEFAULT_MAX_CALLS}),
+ * so they cannot escape the cap by opening a new decision epoch. Task-failure
+ * reports are the one exception: they draw first from a separate small
+ * allowance ({@link #MAX_FAILURE_REPORT_CALLS}) so a failure is still reported
+ * after the planner spent its calls, falling back to the planner budget only
+ * once that allowance is spent.</p>
  */
 final class PlayerInstructionCallBudget {
     static final int DEFAULT_MAX_CALLS = 3;
