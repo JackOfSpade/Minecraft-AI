@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
+import io.github.zoyluo.minecraftai.baritone.BaritoneDriver;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -41,9 +42,16 @@ public class AIPlayerEntity extends ServerPlayer {
         }
 
         try {
+            // While a Baritone process drives this bot it writes the inputs (before the physics tick below, like a client's
+            // input handling) and aims; the legacy executor is idle and writes nothing. See BaritoneDriver.
+            boolean baritoneDrives = BaritoneDriver.beforePhysics(this);
             super.tick();
             this.doTick();
-            this.actionPack.onUpdate();
+            if (baritoneDrives) {
+                BaritoneDriver.afterPhysics(this);
+            } else {
+                this.actionPack.onUpdate();
+            }
             logDamageSummary(damageLog.flushIfIdle(this.tickCount));
         } catch (RuntimeException exception) {
             // Was NullPointerException-only; widened so any unexpected exception here (not just an

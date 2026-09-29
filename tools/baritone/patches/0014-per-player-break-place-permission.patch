@@ -1,0 +1,94 @@
+IPlayerContext gets allowBreak()/allowPlace() (defaulting to the global settings); the cost model, mine process and executor ask the player context, so a host can allow one bot to place or break and forbid another (Settings are one object for the whole JVM).
+
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+index 27c41a9..b39c7a1 100644
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -17,6 +17,7 @@
+ 
+ package baritone.api.utils;
+ 
++import baritone.api.BaritoneAPI;
+ import baritone.api.cache.IWorldData;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.util.thread.BlockableEventLoop;
+@@ -104,6 +105,22 @@ public interface IPlayerContext {
+         return 0.5;
+     }
+ 
++    /**
++     * Whether this player may break blocks at all. Defaults to {@link baritone.api.Settings#allowBreak}, which is one value for
++     * the whole JVM; a host that runs several players with different permissions overrides it per player.
++     */
++    default boolean allowBreak() {
++        return BaritoneAPI.getSettings().allowBreak.value;
++    }
++
++    /**
++     * Whether this player may place blocks at all (bridging, pillaring). Defaults to {@link baritone.api.Settings#allowPlace}; see
++     * {@link #allowBreak()}.
++     */
++    default boolean allowPlace() {
++        return BaritoneAPI.getSettings().allowPlace.value;
++    }
++
+     default Rotation playerRotations() {
+         return new Rotation(player().getYRot(), player().getXRot());
+     }
+diff --git a/src/main/java/baritone/pathing/movement/CalculationContext.java b/src/main/java/baritone/pathing/movement/CalculationContext.java
+index 9161289..c726367 100644
+--- a/src/main/java/baritone/pathing/movement/CalculationContext.java
++++ b/src/main/java/baritone/pathing/movement/CalculationContext.java
+@@ -100,11 +100,11 @@ public class CalculationContext {
+         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
+         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+         this.toolSet = new ToolSet(player);
+-        this.hasThrowaway = Baritone.settings().allowPlace.value && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
++        this.hasThrowaway = baritone.getPlayerContext().allowPlace() && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
+         this.hasWaterBucket = Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
+         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
+         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
+-        this.allowBreak = Baritone.settings().allowBreak.value;
++        this.allowBreak = baritone.getPlayerContext().allowBreak();
+         this.allowBreakAnyway = new ArrayList<>(Baritone.settings().allowBreakAnyway.value);
+         this.allowParkour = Baritone.settings().allowParkour.value;
+         this.allowParkourPlace = Baritone.settings().allowParkourPlace.value;
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+index a3ebc79..7cf4395 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+@@ -279,7 +279,7 @@ public class MovementParkour extends Movement {
+             }
+         } else if (!ctx.playerFeet().equals(src)) {
+             if (ctx.playerFeet().equals(src.relative(direction)) || ctx.player().position().y - src.y > 0.0001) {
+-                if (Baritone.settings().allowPlace.value // see PR #3775
++                if (ctx.allowPlace() // see PR #3775
+                         && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway()
+                         && !MovementHelper.canWalkOn(ctx, dest.below())
+                         && !ctx.player().onGround()
+diff --git a/src/main/java/baritone/pathing/path/PathExecutor.java b/src/main/java/baritone/pathing/path/PathExecutor.java
+index 8a5359b..09c4eb6 100644
+--- a/src/main/java/baritone/pathing/path/PathExecutor.java
++++ b/src/main/java/baritone/pathing/path/PathExecutor.java
+@@ -385,7 +385,7 @@ public class PathExecutor implements IPathExecutor, Helper {
+                     // frostwalker only works if you cross the edge of the block on ground so in some cases we may not overshoot
+                     // Since MovementDescend can't know the next movement we have to tell it
+                     if (next instanceof MovementTraverse || next instanceof MovementParkour) {
+-                        boolean couldPlaceInstead = Baritone.settings().allowPlace.value && behavior.baritone.getInventoryBehavior().hasGenericThrowaway() && next instanceof MovementParkour; // traverse doesn't react fast enough
++                        boolean couldPlaceInstead = ctx.allowPlace() && behavior.baritone.getInventoryBehavior().hasGenericThrowaway() && next instanceof MovementParkour; // traverse doesn't react fast enough
+                         // this is true if the next movement does not ascend or descends and goes into the same cardinal direction (N-NE-E-SE-S-SW-W-NW) as the descend
+                         // in that case current.getDirection() is e.g. (0, -1, 1) and next.getDirection() is e.g. (0, 0, 3) so the cross product of (0, 0, 1) and (0, 0, 3) is taken, which is (0, 0, 0) because the vectors are colinear (don't form a plane)
+                         // since movements in exactly the opposite direction (e.g. descend (0, -1, 1) and traverse (0, 0, -1)) would also pass this check we also have to rule out that case
+diff --git a/src/main/java/baritone/process/MineProcess.java b/src/main/java/baritone/process/MineProcess.java
+index 7de06aa..dad6cc7 100644
+--- a/src/main/java/baritone/process/MineProcess.java
++++ b/src/main/java/baritone/process/MineProcess.java
+@@ -522,7 +522,7 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
+         if (this.filter == null) {
+             return null;
+         }
+-        if (!Baritone.settings().allowBreak.value) {
++        if (!ctx.allowBreak()) {
+             BlockOptionalMetaLookup f = new BlockOptionalMetaLookup(this.filter.blocks()
+                     .stream()
+                     .filter(e -> Baritone.settings().allowBreakAnyway.value.contains(e.getBlock()))

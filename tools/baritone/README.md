@@ -42,7 +42,7 @@ Gradle tasks: `generateBaritoneSources` (runs before `compileBaritoneJava`), `co
 belongs to the `minecraftai` mod in Loom, and is packed into the mod jar (and so remapped to intermediary with the rest).
 `javax.annotation` comes from `jsr305` (compileOnly), and there is deliberately **no nether-pathfinder** dependency.
 
-## The patch series (31 files, +109 / -259 lines)
+## The patch series (36 files, +131 / -264 lines)
 
 The edits are small and mostly deletions of client-only code. Two rules kept them small: types are *generalised*
 (`LocalPlayer` -> `Player`, `ClientChunkCache` -> `ChunkSource`, `ClientLevel` -> `Level`), and where behaviour must
@@ -63,6 +63,7 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0011-world-scanner-chunk-snapshot` | FasterWorldScanner | scans run on worker threads (parallel stream, mine/farm rescans); they read the chunk source's thread-safe view instead of `ServerChunkCache.getChunk`, which waits for the server thread once per chunk |
 | `0012-executor-host-hook` | Baritone, CachedWorld | Baritone's background pool (path searches, rescans, region loads) is supplied by the host through `HostEnvironment.executor()` (bounded, named, daemon) instead of a private unbounded non-daemon pool; the two never-ending cache loops (region packer, periodic save) get their own daemon threads so they cannot occupy a slot of the bounded pool |
 | `0013-cancel-before-start` | AbstractNodeCostSearch | `cancelRequested` is volatile and no longer reset when `calculate()` starts, so a search cancelled while it waits for a worker (bounded pool: it can wait) is dropped instead of running to its timeout |
+| `0014-per-player-break-place-permission` | IPlayerContext, CalculationContext, MineProcess, PathExecutor, MovementParkour | `IPlayerContext` gets defaulted `allowBreak()`/`allowPlace()` (the global `Settings` values); the cost model, mine process and executor ask the player context, so one bot can be allowed to place or break and another not (`Settings` is one object for the JVM) |
 
 ## Excluded from the build (see `exclude.txt`)
 
@@ -111,6 +112,16 @@ upstream counterpart goes to `overlay/`, not into a patch.
 | `BaritonePlanner` | (new) plan-only use: `plan(baritone, goal)` runs an A* on the shared pool over a snapshot taken on the server thread and returns a `Plan` (result, movements, search and queue time); one search per bot, superseded or cancelled with the bot |
 | `BaritoneExecutor` | (new) the shared worker pool behind `HostEnvironment.executor()`: `min(4, max(2, cores/2))` daemon threads, FIFO queue, queue-wait and concurrency counters |
 | `BaritoneSettings` | (new) the fixed global settings (no parkour, no water-bucket fall, no chunk cache, no avoidance, free look off, output to `BotLog`) and the ones derived from the mod's navigation config (`maxFallHeightNoWater` = `nav.maxSafeFall`) |
+| `BaritoneDriver` | (new) the tick driver, called from `AIPlayerEntity.tick()`: `beforePhysics` (refresh observable entities, `TickEvent`, input bridge) runs before `super.tick()`/`doTick()`, `afterPhysics` (`PlayerUpdateEvent` PRE = Baritone applies its look target, look bridge, fall check, POST) after it; the order is the client's, so Baritone's own timing assumptions hold. Only a bot Baritone is busy with is ticked |
+| `BotInputBridge` | (new) `InputOverrideHandler` state -> `zza`/`xxa`/jump/sneak/sprint of the bot. Sneak scaling (0.3) applied exactly once; sprint only with a forward input, food > 6, not sneaking/using an item/blind, and it ends on a wall hit (the server never clears the flag itself) |
+| look bridge (in `BaritoneDriver`) | Baritone's rotation becomes head and body rotation through `LookAction.setYawPitch`; `MiningController.driven(..)` (used for Baritone's breaks) neither re-aims nor re-selects the tool |
+| `BaritoneEdits` | (new) ledger of every break (completed `MiningController` break, block, tool, ticks) and placement (`BuildAction.useItemOnHit`) of a bot's instance; the end-to-end tests compare it with a diff of the world |
+| `BaritonePolicy` | (new) per-bot `allowBreak`/`allowPlace` (`UNRESTRICTED`, `WALK_ONLY`, `NO_PLACING`, `NO_BREAKING`), answered through `ServerPlayerContext.allowBreak()/allowPlace()` (patch 0014) |
+
+**Who moves the bot.** Exactly one of Baritone and the legacy `ActionPack` at a time. A bot is *driven* from the first tick a Baritone process wants control (or a path is searched/run) to the tick none does; while driven `ActionPack` executes nothing and writes no inputs. When legacy code gives an order (`startWalkTo`, any `startPathTo`, `startDigPathTo`, `startMining`, a held input, `stopAll`) `ActionPack.claim` calls `BaritoneRegistry.preempt`, which cancels Baritone (goal, path, search, keys, the block being broken) and releases the inputs it wrote before the legacy order takes effect; when Baritone takes over `ActionPack.yieldToBaritone` drops the legacy walk/path/mining. `hasActiveActions()` counts a busy Baritone. Falls: a driven bot gets `doCheckFallDamage` every tick (a `ServerPlayer` only checks falls on client move packets, so bots otherwise never take fall damage).
+
+Break/place routing: `ServerPlayerController.clickBlock/onPlayerDamageBlock` -> `MiningController.driven`, `processRightClickBlock` -> `BuildAction.useItemOnHit` (also opens doors and gates). Baritone has no other way to change a block.
+
 
 Covered by `BaritoneServerGameTests`, `BaritonePlanningGameTests` (a bot plans a wall detour, a one-block step, a pit, a closed wooden door, a closed iron door (broken through, at ten times the cost) and a water strip on a sealed platform) and `BaritoneGlueGameTests` (headless boot, registry lifecycle, worker pool bounds, queued-plan cancellation, settings, observable entities) on a real server with real bots: instance lifecycle, thread-safe chunk snapshot, A* on a worker thread
 (open floor and through a wall), the whole behavior stack ticking and producing inputs, ore scan through the snapshot and the raw

@@ -50,6 +50,8 @@ public final class ServerPlayerContext implements IPlayerContext {
     /** Written on the server thread, read from any thread (see {@link #entities()}). */
     private volatile List<Entity> observedEntities = List.of();
     private int observedAtTick = -1;
+    /** What this bot may do to the world; read by the cost model on the server thread and on workers. */
+    private volatile BaritonePolicy policy = BaritonePolicy.UNRESTRICTED;
 
     public ServerPlayerContext(IBaritone baritone, Supplier<? extends AIPlayerEntity> bot) {
         this.baritone = baritone;
@@ -149,6 +151,25 @@ public final class ServerPlayerContext implements IPlayerContext {
         }
         LevelChunk chunk = ((IClientChunkProvider) level.getChunkSource()).createThreadSafeCopy().getChunk(pos.getX() >> 4, pos.getZ() >> 4, false);
         return chunk == null ? Blocks.AIR.defaultBlockState() : chunk.getBlockState(pos);
+    }
+
+    /** The bot's break/place permission. Applies to the next plan (a running path re-validates its costs every tick). */
+    public void setPolicy(BaritonePolicy policy) {
+        this.policy = java.util.Objects.requireNonNull(policy, "policy");
+    }
+
+    public BaritonePolicy policy() {
+        return policy;
+    }
+
+    @Override
+    public boolean allowBreak() {
+        return policy.allowBreak();
+    }
+
+    @Override
+    public boolean allowPlace() {
+        return policy.allowPlace();
     }
 
     @Override

@@ -18,14 +18,32 @@ public final class MiningController {
 
     private final BlockPos pos;
     private final Direction face;
+    /** The caller aims and picks the tool itself (see {@link #driven}); this controller only runs the break. */
+    private final boolean driven;
     private boolean started;
     private BlockState targetState;
     private float progress;
     private int elapsed;
 
     public MiningController(BlockPos pos, Direction face) {
+        this(pos, face, false);
+    }
+
+    private MiningController(BlockPos pos, Direction face, boolean driven) {
         this.pos = pos;
         this.face = face;
+        this.driven = driven;
+    }
+
+    /**
+     * A break run for a movement driver that owns the bot's aim and its hotbar (Baritone): it has already turned the bot toward
+     * the block, checked with its own ray that the block is what the bot is looking at, and selected the tool its cost model
+     * priced the break with. Re-aiming at the face center here would fight the driver's rotation every tick, and re-selecting
+     * by this class's own tool score could swap the tool under it, so a driven controller does neither; everything else (the
+     * vanilla START/STOP/ABORT handshake, progress, reach, timeout, cache invalidation, the assist hook) is identical.
+     */
+    public static MiningController driven(BlockPos pos, Direction face) {
+        return new MiningController(pos, face, true);
     }
 
     /** The cell this controller is (or was) mining. Lets a caller react once it finishes. */
@@ -62,7 +80,9 @@ public final class MiningController {
             resetProgress(player);
         }
 
-        LookAction.lookAtBlock(player, pos, face);
+        if (!driven) {
+            LookAction.lookAtBlock(player, pos, face);
+        }
         double reach = player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
         if (player.getEyePosition().distanceTo(pos.getCenter()) > reach + 0.5D) {
             abort(player);
@@ -70,8 +90,12 @@ public final class MiningController {
         }
 
         if (!started) {
-            ToolSelector.equipBestTool(player, state);
-            BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face);
+            if (driven) {
+                BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face, "driver", "baritone");
+            } else {
+                ToolSelector.equipBestTool(player, state);
+                BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face);
+            }
             player.gameMode.handleBlockBreakAction(
                     pos,
                     ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,

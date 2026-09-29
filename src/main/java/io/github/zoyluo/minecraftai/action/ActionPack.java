@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.action;
 
+import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
@@ -64,15 +65,44 @@ public final class ActionPack {
         return player;
     }
 
+    /**
+     * Single-writer hand-over with Baritone (see {@code BaritoneDriver}): while Baritone drives the bot, this executor is idle; an
+     * order that would make it act (start a walk, a path, mining, hold an input) first takes the bot back, which stops
+     * Baritone and releases the inputs it wrote. Releasing (stop, zero, false) never takes the bot.
+     */
+    private void claim(String why) {
+        BaritoneRegistry.INSTANCE.preempt(player, why);
+    }
+
+    /**
+     * Baritone takes the bot over: everything this executor was doing is dropped without a trace of it left in the inputs, so
+     * the two never write at once. Called by {@code BaritoneDriver} on the first tick it drives the bot.
+     */
+    public void yieldToBaritone() {
+        clearActivePathExecutor();
+        stopMining();
+        this.walkTo = null;
+        stopMovement();
+    }
+
     public void setForward(float value) {
+        if (value != 0.0F) {
+            claim("set_forward");
+        }
         this.forward = clampInput(value);
     }
 
     public void setStrafing(float value) {
+        if (value != 0.0F) {
+            claim("set_strafing");
+        }
         this.strafing = clampInput(value);
     }
 
     public void setSneaking(boolean sneaking) {
+        if (sneaking) {
+            claim("set_sneaking");
+        }
         this.sneaking = sneaking;
         player.setShiftKeyDown(sneaking);
         if (sneaking && sprinting) {
@@ -81,6 +111,9 @@ public final class ActionPack {
     }
 
     public void setSprinting(boolean sprinting) {
+        if (sprinting) {
+            claim("set_sprinting");
+        }
         this.sprinting = sprinting;
         player.setSprinting(sprinting);
         if (sprinting && sneaking) {
@@ -89,10 +122,14 @@ public final class ActionPack {
     }
 
     public void setJumping(boolean jumping) {
+        if (jumping) {
+            claim("set_jumping");
+        }
         this.jumping = jumping;
     }
 
     public void jumpOnce() {
+        claim("jump_once");
         this.jumpTicks = 2;
     }
 
@@ -102,6 +139,7 @@ public final class ActionPack {
 
     /** Starts a direct walk with a caller-defined horizontal arrival tolerance. */
     public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {
+        claim("walk_to");
         clearActivePathExecutor();
         this.walkTo = new WalkToController(target, arrivalThreshold);
         this.mining = null;
@@ -122,6 +160,7 @@ public final class ActionPack {
      * The same reserve gates initial pillar planning, physical pillar execution and replanning.
      */
     public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {
+        claim("dig_path_to");
         int reserve = Math.max(0, protectedStoneLikeReserve);
         int now = player.level().getServer().getTickCount();
         BlockPos immutableGoal = goal.immutable();
@@ -223,6 +262,7 @@ public final class ActionPack {
                                      boolean allowDigFallback,
                                      int protectedStoneLikeReserve,
                                      PathExecutor.RouteContract routeContract) {
+        claim("path_to");
         int reserve = Math.max(0, protectedStoneLikeReserve);
         int now = player.level().getServer().getTickCount();
         BlockPos immutableGoal = goal.immutable();
@@ -491,6 +531,7 @@ public final class ActionPack {
     }
 
     public ActionResult startMining(BlockPos pos, Direction face) {
+        claim("mining");
         this.mining = new MiningController(pos, face);
         clearActivePathExecutor();
         this.forward = 0.0F;
@@ -528,6 +569,7 @@ public final class ActionPack {
     }
 
     public void stopAll() {
+        BaritoneRegistry.INSTANCE.preempt(player, "stop_all");
         clearActivePathExecutor();
         stopMining();
         this.walkTo = null;
@@ -536,7 +578,8 @@ public final class ActionPack {
     }
 
     public boolean hasActiveActions() {
-        return pathExecutor != null
+        return BaritoneRegistry.INSTANCE.isBusy(player)
+                || pathExecutor != null
                 || walkTo != null
                 || mining != null
                 || forward != 0.0F

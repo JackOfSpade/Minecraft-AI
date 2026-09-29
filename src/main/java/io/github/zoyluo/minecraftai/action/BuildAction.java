@@ -48,7 +48,6 @@ public final class BuildAction {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
             return ActionResult.failed("empty_hand");
         }
-        var item = stack.getItem();
 
         // Prove the exact support face inside both physical interaction reach and configured
         // perception before asking vanilla about that support or reading the destination.
@@ -60,6 +59,40 @@ public final class BuildAction {
             return ActionResult.failed("support_out_of_reach_or_sight");
         }
         BlockPos destination = against.relative(face);
+        Use use = useItemOnHit(player, hit, hand);
+        net.minecraft.world.InteractionResult result = use.result();
+        if (use.placed()) {
+            player.swing(hand);
+            player.resetLastActionTime();
+            return ActionResult.SUCCESS;
+        }
+        String reason = result.consumesAction() ? "accepted_without_block_change" : result.getClass().getSimpleName();
+        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed",
+                "pos", LogFields.pos(destination), "reason", reason);
+        return ActionResult.failed("interact_block_" + reason);
+    }
+
+    /**
+     * Outcome of {@link #useItemOnHit}.
+     *
+     * @param result      what the vanilla interaction returned
+     * @param placed      the interaction consumed the click and changed the block next to the clicked face (a block was placed)
+     * @param destination the cell a placement would have filled
+     */
+    public record Use(net.minecraft.world.InteractionResult result, boolean placed, BlockPos destination) {
+    }
+
+    /**
+     * Uses the held item of {@code hand} on the exact hit {@code hit}, the way a client's right click does, and keeps the mod's
+     * books when that placed a block (path cache invalidation, bot-edit ledger, the {@code place} action log line). This is
+     * the single place a block is put down by a click: {@link #placeBlock} finds a support face and aims for it, then ends
+     * here; a caller that has already aimed (a movement driver such as Baritone, whose right click may just as well open a
+     * door or a gate) hands over its own hit and ends here too. It does not aim, check reach or swing: the caller owns those.
+     */
+    public static Use useItemOnHit(AIPlayerEntity player, BlockHitResult hit, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+        var item = stack.getItem();
+        BlockPos destination = hit.getBlockPos().relative(hit.getDirection());
         var before = player.level().getBlockState(destination);
         net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                 player,
@@ -67,19 +100,13 @@ public final class BuildAction {
                 stack,
                 hand,
                 hit);
-        var after = player.level().getBlockState(destination);
-        if (result.consumesAction() && !after.equals(before)) {
-            player.swing(hand);
-            player.resetLastActionTime();
+        boolean placed = result.consumesAction() && !player.level().getBlockState(destination).equals(before);
+        if (placed) {
             AStarPathfinder.invalidateCache("block_place");
             BotEdits.notePlaced(player, destination);
-            BotLog.action(player, "place", "pos", LogFields.pos(destination), "face", face, "item", item);
-            return ActionResult.SUCCESS;
+            BotLog.action(player, "place", "pos", LogFields.pos(destination), "face", hit.getDirection(), "item", item);
         }
-        String reason = result.consumesAction() ? "accepted_without_block_change" : result.getClass().getSimpleName();
-        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed",
-                "pos", LogFields.pos(destination), "reason", reason);
-        return ActionResult.failed("interact_block_" + reason);
+        return new Use(result, placed, destination);
     }
 
     public static ActionResult placeBlockAt(AIPlayerEntity player, BlockPos pos) {

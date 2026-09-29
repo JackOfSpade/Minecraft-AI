@@ -1,10 +1,10 @@
 package io.github.zoyluo.minecraftai.baritone;
 
 import baritone.api.IBaritone;
+import baritone.api.event.events.PathEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
-import baritone.api.event.events.PathEvent;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import java.util.List;
@@ -29,6 +29,11 @@ import java.util.function.Function;
  *       than its own cancel flag, which {@code cancel} sets); it finishes on the immutable snapshot it was given, and its
  *       result is dropped because the search was cancelled.</li>
  * </ul>
+ *
+ * <p>Who moves the bot: the registry also knows whether Baritone <em>drives</em> a bot right now (a process is in control or
+ * a path is being executed or searched). {@link BaritoneDriver} runs the per-tick phases; the legacy action executor
+ * ({@code ActionPack}) yields to a driving Baritone and {@link #preempt takes the bot back} when it starts something itself,
+ * so exactly one of the two writes the bot's movement at any time.</p>
  */
 public final class BaritoneRegistry {
     public static final BaritoneRegistry INSTANCE = new BaritoneRegistry();
@@ -39,11 +44,17 @@ public final class BaritoneRegistry {
     }
 
     /** What the registry knows about one bot. */
-    private static final class Entry {
+    static final class Entry {
         final IBaritone baritone;
         final ServerPlayerContext context;
         /** The bot's live entity. Written on the server thread, read by workers through the context's supplier. */
         volatile AIPlayerEntity bot;
+        /** Baritone owns the bot's movement inputs right now (set and cleared by {@link BaritoneDriver} and {@link #preempt}). */
+        volatile boolean driven;
+        /** Where the bot stood when its last driven physics tick began (for the fall-damage check after it). */
+        double startX;
+        double startY;
+        double startZ;
 
         Entry(AIPlayerEntity bot, Function<Entry, IBaritone> factory) {
             this.bot = bot;
@@ -76,20 +87,69 @@ public final class BaritoneRegistry {
         return entry == null ? null : entry.baritone;
     }
 
+    /** The entry of the bot with this UUID, or null (package-private: the driver works on entries). */
+    Entry entry(UUID botId) {
+        return entries.get(botId);
+    }
+
     public int size() {
         return entries.size();
     }
 
     /**
-     * Runs one Baritone game tick for the bot: refreshes the observable-entity list, then dispatches the tick. The bot must
-     * call this <em>before</em> its own physics tick so that the inputs Baritone forces are in place when the bot moves
-     * (see the input bridge). Server thread only.
+     * The break/place permission of the bot's Baritone instance (created if needed). Takes effect at the next plan; a path
+     * that is already running re-validates its costs every tick and is cancelled as soon as it needs what is now forbidden.
+     */
+    public void setPolicy(AIPlayerEntity bot, BaritonePolicy policy) {
+        get(bot);
+        entries.get(bot.getUUID()).context.setPolicy(policy);
+    }
+
+    public BaritonePolicy policy(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        return entry == null ? BaritonePolicy.UNRESTRICTED : entry.context.policy();
+    }
+
+    /**
+     * Runs one raw Baritone game tick for the bot: refreshes the observable-entity list, then dispatches the tick event.
+     * This is the middle of {@link BaritoneDriver#beforePhysics}, which is what the bot's own tick calls; on its own it
+     * neither applies the inputs Baritone forced nor aims (tests that poke the behavior stack use it). Server thread only.
      */
     public void tick(AIPlayerEntity bot) {
         IBaritone baritone = get(bot);
         Entry entry = entries.get(bot.getUUID());
         entry.context.refreshEntities();
         baritone.getGameEventHandler().onTick(TickEvent.createNextProvider().apply(EventState.PRE, TickEvent.Type.IN));
+    }
+
+    /**
+     * Whether Baritone is doing something with the bot: it drives it this tick, or a process wants control, or a path is being
+     * searched or executed. Legacy code asks this before deciding the bot is idle.
+     */
+    public boolean isBusy(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null) {
+            return false;
+        }
+        // The process and path state is the server thread's; another thread only gets the flag.
+        return entry.driven || (bot.getServer().isSameThread() && BaritoneDriver.busy(entry.baritone));
+    }
+
+    /**
+     * The legacy action executor is about to give the bot its own orders: whatever Baritone is doing stops (goal, path, search,
+     * held keys, the block being broken) and the inputs it wrote are let go, before the caller writes its own. No-op when
+     * Baritone is not busy with the bot. Server thread only.
+     */
+    public void preempt(AIPlayerEntity bot, String why) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null || !(entry.driven || BaritoneDriver.busy(entry.baritone))) {
+            return;
+        }
+        if (hopToServerThread(bot, () -> preempt(bot, why))) {
+            return;
+        }
+        halt(entry, bot);
+        BotLog.lifecycle(bot, "baritone_preempted", "by", why);
     }
 
     /** Stops whatever Baritone is doing for the bot but keeps its instance. Server thread only; no-op if it has none. */
@@ -101,7 +161,7 @@ public final class BaritoneRegistry {
         if (hopToServerThread(bot, () -> reset(bot, reason))) {
             return;
         }
-        cancelAll(entry);
+        halt(entry, bot);
         BotLog.lifecycle(bot, "baritone_reset", "reason", reason);
     }
 
@@ -119,8 +179,9 @@ public final class BaritoneRegistry {
 
     private void teardown(AIPlayerEntity bot, Entry entry, String reason) {
         try {
-            cancelAll(entry);
+            halt(entry, bot);
         } finally {
+            BaritoneEdits.clear(bot.getUUID());
             BaritoneHost.destroy(entry.baritone);
             BotLog.lifecycle(bot, "baritone_destroyed", "reason", reason, "instances", entries.size());
         }
@@ -134,11 +195,26 @@ public final class BaritoneRegistry {
             try {
                 cancelAll(entry);
             } finally {
+                entry.driven = false;
                 BaritoneHost.destroy(entry.baritone);
             }
         }
+        BaritoneEdits.clearAll();
         if (!all.isEmpty()) {
             BotLog.lifecycle("baritone_cleared", "count", all.size());
+        }
+    }
+
+    /** Cancels everything Baritone is doing and lets go of the bot: no more forced inputs, no driving. */
+    private static void halt(Entry entry, AIPlayerEntity bot) {
+        boolean wasDriven = entry.driven;
+        entry.driven = false;
+        try {
+            cancelAll(entry);
+        } finally {
+            if (wasDriven) {
+                BotInputBridge.release(bot);
+            }
         }
     }
 
