@@ -120,8 +120,12 @@ public final class ProspectScanBudgetGameTests {
 
         OreProspector.Scan scan = OreProspector.begin(bot, 96, state -> state.is(Blocks.OAK_LOG), null);
         context.failIfEver(() -> {
-            if (!scan.isDone()) {
+            // Many steps per game tick: each step covers only 8 candidate cells, so one per tick would need more ticks
+            // than the test may run.
+            for (int i = 0; i < 64 && !scan.isDone(); i++) {
                 scan.step(1L);
+            }
+            if (!scan.isDone()) {
                 return;
             }
             LOG.info("[prospect-budget] tiny budget: steps={} result={}", scan.steps(), scan.result());
