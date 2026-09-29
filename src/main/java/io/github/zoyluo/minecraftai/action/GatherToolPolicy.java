@@ -46,6 +46,19 @@ public final class GatherToolPolicy {
     // nothing), so they are special-cased here to match vanilla's own hardcoded tool behavior.
     private static final Set<Block> SHEARS_SPECIAL = Set.of(Blocks.COBWEB, Blocks.VINE);
 
+    /**
+     * Category for a player-requested break of {@code state}. Identical to {@link #categoryFor(BlockState)}
+     * except for leaves when only the physical block count matters ({@code dropsMatter == false}, i.e.
+     * break_blocks): leaves need no tool at all, so demanding shears (2 iron) would make "break 32
+     * leaves" fail for a bot that merely has no shears. See {@link Leaves}.
+     */
+    public static Category categoryForBreak(BlockState state, AIPlayerEntity bot, boolean dropsMatter) {
+        if (state.is(BlockTags.LEAVES)) {
+            return Leaves.category(dropsMatter, hasTool(bot, Category.SHEARS), hasTool(bot, Category.HOE));
+        }
+        return categoryFor(state);
+    }
+
     /** Derives the optimal tool category for {@code state} from vanilla's own block tags. */
     public static Category categoryFor(BlockState state) {
         Block block = state.getBlock();
@@ -198,6 +211,25 @@ public final class GatherToolPolicy {
                 return 0;
             }
             return Math.max(0, totalLogsNeeded(planks, sticks, tableAvailable) - Math.max(0, logs));
+        }
+    }
+
+    /**
+     * Leaves are hoe-mineable and shears-optimal (shears are fastest and keep the leaf block as a
+     * drop). When the leaf block itself is wanted (gather) shears are required; when only the count
+     * of broken blocks matters, use shears or a hoe if already carried and otherwise the bare hand
+     * (leaves break in well under a second by hand) -- never a craft detour. Nested and pure so it is
+     * unit-testable without a bootstrapped game (like {@link Bootstrap}).
+     */
+    public static final class Leaves {
+        private Leaves() {
+        }
+
+        public static Category category(boolean dropsMatter, boolean hasShears, boolean hasHoe) {
+            if (dropsMatter || hasShears) {
+                return Category.SHEARS;
+            }
+            return hasHoe ? Category.HOE : Category.NONE;
         }
     }
 

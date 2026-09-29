@@ -240,6 +240,21 @@ public final class GatherQuotaTask extends AbstractTask {
                 "break_blocks", BuiltInRegistries.BLOCK.getKey(block).toString(), false);
     }
 
+    /**
+     * Breaks exactly the requested number of leaf blocks of any tree type ("break 32 leaves").
+     * Drops are irrelevant, so no tool is required (see GatherToolPolicy#leavesCategory).
+     */
+    public static GatherQuotaTask breakLeaves(int targetCount) {
+        Set<Block> leaves = new java.util.HashSet<>();
+        for (Block block : BuiltInRegistries.BLOCK) {
+            if (block.defaultBlockState().is(net.minecraft.tags.BlockTags.LEAVES)) {
+                leaves.add(block);
+            }
+        }
+        return new GatherQuotaTask(Items.OAK_LEAVES, targetCount, true, leaves,
+                "break_blocks", "leaves", false);
+    }
+
     @Override
     public String name() {
         return countBrokenBlocks ? exactBreakTaskName : "gather";
@@ -1514,7 +1529,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private void startHarvest(AIPlayerEntity bot) {
         handLogBreakInFlight = false;
         var targetState = bot.level().getBlockState(targetPos);
-        GatherToolPolicy.Category category = GatherToolPolicy.categoryFor(targetState);
+        GatherToolPolicy.Category category =
+                GatherToolPolicy.categoryForBreak(targetState, bot, !countBrokenBlocks);
         if (category != GatherToolPolicy.Category.NONE && !GatherToolPolicy.hasTool(bot, category)) {
             // The one relaxation of the strict rule: no axe and none craftable from inventory, so
             // break the minimum number of logs by hand (see GatherToolPolicy.Bootstrap).

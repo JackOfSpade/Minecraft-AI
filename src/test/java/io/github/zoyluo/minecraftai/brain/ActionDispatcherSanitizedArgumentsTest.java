@@ -90,4 +90,12 @@ final class ActionDispatcherSanitizedArgumentsTest {
         JsonObject sanitized = ActionDispatcher.sanitizedArguments("say", null);
         assertTrue(sanitized.entrySet().isEmpty());
     }
+
+    @Test
+    void chatLogTextIsSingleLineAndTruncatedSoAmbientChatIsLoggedLikeSay() {
+        assertEquals("hello\\nthere", ActionDispatcher.chatLogText("hello\nthere"));
+        String logged = ActionDispatcher.chatLogText("y".repeat(500));
+        assertEquals(303, logged.length());
+        assertTrue(logged.endsWith("..."));
+    }
 }

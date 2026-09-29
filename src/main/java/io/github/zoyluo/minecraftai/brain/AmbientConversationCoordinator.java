@@ -146,6 +146,12 @@ public final class AmbientConversationCoordinator {
             return;
         }
         String line = conversation.pendingLine;
+        // Unprompted chat never passes through the say tool, so log its text here the same way a
+        // say call is logged (otherwise only token counts of these lines ever reach the logs).
+        BotLog.comm(speaker, "ambient_say",
+                "message", ActionDispatcher.chatLogText(line),
+                "turn", conversation.index + 1,
+                "of", conversation.order.size());
         BrainCoordinator.INSTANCE.sendBotReply(speaker, line);
         conversation.transcript.add(new TranscriptEntry(speaker.getGameProfile().name(), line));
         conversation.index++;

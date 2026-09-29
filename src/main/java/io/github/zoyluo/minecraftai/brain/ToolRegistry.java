@@ -187,6 +187,12 @@ public final class ToolRegistry {
             return ok(selection.describe());
         });
 
+        register("lookup_recipe", "Read-only fact check against the running game (Minecraft 1.21.11): does this item or enchantment exist, and how is the item crafted (ingredients, crafting table or 2x2, or smelting). Use it BEFORE claiming an item, tool, recipe or enchantment does not exist or cannot be made -- your memory of the game is out of date. Accepts a full id (minecraft:copper_pickaxe) or a plain name (copper pickaxe, lunge); if nothing matches it lists similar ids.", objectSchema()
+                .property("name", stringSchema("item or enchantment id or plain name, for example minecraft:copper_pickaxe or lunge"))
+                .required("name")
+                .build(), (bot, args) -> ok(io.github.zoyluo.minecraftai.craft.ItemLookup.describe(
+                        requiredString(args, "name"), bot.level().registryAccess())));
+
         register("plan_craft", "Read-only preflight for crafting. Returns feasible, deterministic craft steps, missing materials, and each missing material's acquisition source.", objectSchema()
                 .property("item", stringSchema("target item id, for example minecraft:stone_pickaxe"))
                 .property("count", integerSchema("desired count"))
@@ -244,14 +250,16 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("break_blocks", "Break exactly the requested number of nearby matching blocks. Progress counts blocks actually broken, not inventory drops. Use this for explicit requests such as remove 3 minecraft:oak_log; use gather when the player wants items in inventory. It stays nearby and will not roam or tunnel to find blocks. It uses the right tool for the block, crafts one from inventory if needed, and otherwise reports missing_tool.", objectSchema()
-                .property("block", stringSchema("exact block id, for example minecraft:oak_log"))
+        register("break_blocks", "Break exactly the requested number of nearby matching blocks. Progress counts blocks actually broken, not inventory drops. Use this for explicit requests such as remove 3 minecraft:oak_log; use gather when the player wants items in inventory. For leaves ('break 32 leaves', 'clear the leaves') pass block=leaves: it counts leaf blocks of ANY tree type, needs no particular tool (shears or a hoe are used if carried, otherwise bare hands) and never crafts shears. It stays nearby and will not roam or tunnel to find blocks. It uses the right tool for the block, crafts one from inventory if needed, and otherwise reports missing_tool.", objectSchema()
+                .property("block", stringSchema("exact block id, for example minecraft:oak_log; or the word leaves for leaf blocks of any tree type"))
                 .property("count", integerSchema("positive number of matching blocks to break"))
                 .required("block")
                 .required("count")
                 .build(), (bot, args) -> {
-            Block block = requiredBreakableBlock(bot, args, "block");
-            Task task = GatherQuotaTask.breakBlocks(block, requiredPositiveInt(args, "count"));
+            Task task = isAnyLeavesRequest(args, "block")
+                    ? GatherQuotaTask.breakLeaves(requiredPositiveInt(args, "count"))
+                    : GatherQuotaTask.breakBlocks(
+                            requiredBreakableBlock(bot, args, "block"), requiredPositiveInt(args, "count"));
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
         });
@@ -979,8 +987,10 @@ public final class ToolRegistry {
             case "gather" -> GatherQuotaTask.collectAdditional(
                     requiredItem(params, "item"), optionalInt(params, "count", 1));
             case "clear_grass" -> GatherQuotaTask.clearGrass(requiredPositiveInt(params, "count"));
-            case "break_blocks" -> GatherQuotaTask.breakBlocks(
-                    requiredBreakableBlock(bot, params, "block"), requiredPositiveInt(params, "count"));
+            case "break_blocks" -> isAnyLeavesRequest(params, "block")
+                    ? GatherQuotaTask.breakLeaves(requiredPositiveInt(params, "count"))
+                    : GatherQuotaTask.breakBlocks(
+                            requiredBreakableBlock(bot, params, "block"), requiredPositiveInt(params, "count"));
             case "irrigate" -> new io.github.zoyluo.minecraftai.task.IrrigateTask(
                     bot.blockPosition().relative(bot.getDirection(), 2).below()); // dig a 2x2 infinite water source in the floor layer, 2 blocks in front of the bot
             case "milk_cow" -> new io.github.zoyluo.minecraftai.task.MilkCowTask(optionalInt(params, "count", 1)); // milk `count` buckets of milk (requires empty buckets)
@@ -1243,6 +1253,15 @@ public final class ToolRegistry {
         Identifier id = Identifier.parse(requiredString(args, name));
         return BuiltInRegistries.BLOCK.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id));
+    }
+
+    /** True when the player's block argument is the generic "leaves" (any leaf block) rather than one exact id. */
+    static boolean isAnyLeavesRequest(JsonObject args, String name) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
+            return false;
+        }
+        String value = args.get(name).getAsString().trim().toLowerCase(java.util.Locale.ROOT);
+        return value.equals("leaves") || value.equals("minecraft:leaves") || value.equals("any_leaves");
     }
 
     private static Block requiredBreakableBlock(AIPlayerEntity bot, JsonObject args, String name) {

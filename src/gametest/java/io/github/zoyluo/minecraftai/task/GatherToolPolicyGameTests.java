@@ -172,6 +172,52 @@ public final class GatherToolPolicyGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_break_leaves_needs_no_tool_and_counts_any_leaf_type", maxTicks = 800)
+    public void breakLeavesNeedsNoToolAndCountsAnyLeafType(GameTestHelper context) {
+        // "break 32 leaves": leaves are shears-optimal and hoe-mineable but need no tool, and the
+        // requested count is of physical blocks of ANY leaf type. A bare bot must therefore not stop
+        // with missing_tool:shears (2 iron ingots) nor detour through crafting; it breaks exactly N.
+        Fixture fixture = fixture(context, "BreakLeavesGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        java.util.List<BlockPos> cells = new java.util.ArrayList<>();
+        for (int dx = 2; dx <= 3; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                BlockPos pos = fixture.start().offset(dx, 0, dz);
+                var leaves = (dz == 0 ? Blocks.BIRCH_LEAVES : Blocks.OAK_LEAVES).defaultBlockState()
+                        .setValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT, true);
+                bot.level().setBlock(pos, leaves, Block.UPDATE_ALL);
+                cells.add(pos);
+            }
+        }
+        require(context, bot.getInventory().isEmpty(), "fixture must start with an empty inventory");
+
+        GatherQuotaTask task = GatherQuotaTask.breakLeaves(4);
+        task.start(bot);
+
+        context.failIfEver(() -> {
+            tickOrFail(context, task, bot);
+            require(context, !task.describe().contains("phase=ENSURE_TOOL"),
+                    "breaking leaves for a count must not detour through tool crafting: " + task.describe());
+            require(context, !task.describe().contains("phase=ROAM") && !task.describe().contains("phase=EXPLORE"),
+                    "leaves right beside the bot should never require roaming: " + task.describe());
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            int remaining = 0;
+            for (BlockPos pos : cells) {
+                if (bot.level().getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.LeavesBlock) {
+                    remaining++;
+                }
+            }
+            require(context, cells.size() - remaining == 4,
+                    "break_blocks leaves must break exactly 4 leaf blocks, broke " + (cells.size() - remaining));
+            require(context, InventoryAction.countItem(bot, Items.SHEARS) == 0
+                            && InventoryAction.countItem(bot, Items.WOODEN_HOE) == 0,
+                    "no tool should have been crafted for leaves");
+            finish(context, fixture);
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_drop_index_maps_dirt_sources_and_excludes_infrastructure", maxTicks = 40)
     public void dropIndexMapsDirtSourcesAndExcludesInfrastructure(GameTestHelper context) {
         Optional<Set<Block>> deterministic = RuntimeDropIndex.deterministicSourcesFor(Items.DIRT);

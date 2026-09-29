@@ -37,7 +37,7 @@ public final class BrainCoordinator {
     // question-only turn.
     private static final Set<String> READ_ONLY_TOOLS = Set.of(
             "inventory", "plan_craft", "find_container", "list_jobs",
-            "recall", "goal_status", "get_task_status");
+            "recall", "goal_status", "get_task_status", "lookup_recipe");
     // These are the known ways an LLM response can begin or perform requested work. This is a
     // positive list deliberately paired with runtime-work checks below: non-action tools cannot
     // accidentally satisfy the initial-action gate simply because they are not on a blacklist.
@@ -70,6 +70,13 @@ public final class BrainCoordinator {
     private static final String PLAN_REQUIRED_TOOL_RESULT =
             "blocked: call say with purpose=plan and a non-empty English plan before the first action or goal tool";
     private static final String THROTTLED_TOOL_RESULT = "throttled: per-response function-call cap reached";
+    // A plan is announced to the player once. Re-saying it (the model does this when it offers only
+    // say and never starts the work) must not be repeated in chat: it is dropped as a fault and the
+    // next call is forced to use an action tool instead (see shouldWithholdSay).
+    private static final String REPEATED_PLAN_TOOL_RESULT =
+            "blocked: your plan was already announced; do not say it again, call the action or goal tool now";
+    static final String SAY_TOOL_NAME = "say";
+    private static final int MAX_INSTRUCTION_ECHO_CHARS = 60;
 
     private final Map<UUID, BotConversation> conversations = new ConcurrentHashMap<>();
     private final Map<UUID, Boolean> manualModes = new ConcurrentHashMap<>();
@@ -178,6 +185,8 @@ public final class BrainCoordinator {
         conversation.initialPlanSpoken = false;
         conversation.lastToolRoundMissingRequiredAction = false;
         conversation.lastToolRoundPlanBlockedAction = false;
+        conversation.withholdSayNextCall = false;
+        conversation.lastInstruction = text;
         conversation.geminiInteractionId = null;
         conversation.pendingGeminiFunctionResults = List.of();
         io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clearUserGoal(bot); // B: a new message from the user clears the stored original goal; the first goal triggered by this message becomes the new "user's original goal"
@@ -192,12 +201,16 @@ public final class BrainCoordinator {
             return;
         }
 
+        // The withheld-say flag only ever describes the call that was just answered; the round
+        // evaluation below decides whether the NEXT call needs it.
+        conversation.withholdSayNextCall = false;
+        boolean planAlreadyAnnounced = conversation.initialPlanSpoken && !conversation.initialActionStarted;
         recordResponseAndDeliverReply(bot, conversation, response);
         InitialActionGate initialActionGate = prepareToolCallsForThisRound(conversation, response);
         List<ChatToolCall> toolCalls = initialActionGate.orderedCalls();
 
         if (response.wantsToolCalls()) {
-            dispatchToolCallRound(bot, lease, conversation, response, toolCalls, initialActionGate);
+            dispatchToolCallRound(bot, lease, conversation, response, toolCalls, initialActionGate, planAlreadyAnnounced);
             return;
         }
         handleTextOnlyResponse(bot, lease, conversation, response);
@@ -212,6 +225,8 @@ public final class BrainCoordinator {
                 "finish_reason", response.finishReason());
 
         if (response.content() != null && !response.content().isBlank()) {
+            // Plain-text replies bypass the say tool, so log them here the way say is logged.
+            BotLog.comm(bot, "bot_text_reply", "message", ActionDispatcher.chatLogText(response.content()));
             sendBotReply(bot, response.content());
         }
         conversation.lastPromptTokens = response.promptTokens();
@@ -248,11 +263,13 @@ public final class BrainCoordinator {
                                        BotConversation conversation,
                                        ChatResponse response,
                                        List<ChatToolCall> toolCalls,
-                                       InitialActionGate initialActionGate) {
+                                       InitialActionGate initialActionGate,
+                                       boolean planAlreadyAnnounced) {
         ActionDispatcher.DispatchBatch dispatchBatch = dispatchWithInitialPlanGate(
                 bot,
                 toolCalls,
                 initialActionGate,
+                planAlreadyAnnounced,
                 () -> conversation.decision.isApplying(lease));
         if (!conversation.decision.isApplying(lease)) {
             logStaleDecision(lease, "tool_batch");
@@ -293,7 +310,13 @@ public final class BrainCoordinator {
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
                 bot.getActionPack().hasActiveActions());
-        int failedToolCalls = dispatchBatch.failedCallCount() + response.geminiCappedFunctionResults().size();
+        // A dropped repeated say(plan) is a fault of its own (handled below), not a tool failure the
+        // model should be asked to repair: counting it would hide the missing action.
+        int repeatedPlanFaults = (int) dispatchBatch.executedCalls().stream()
+                .filter(call -> !call.ok() && call.content().contains(REPEATED_PLAN_TOOL_RESULT))
+                .count();
+        int failedToolCalls = dispatchBatch.failedCallCount() - repeatedPlanFaults
+                + response.geminiCappedFunctionResults().size();
         boolean actionToolSucceeded = dispatchBatch.executedCalls().stream()
                 .anyMatch(call -> call.ok() && isWorkStartTool(call.name()));
         if (workActive || actionToolSucceeded) {
@@ -308,6 +331,13 @@ public final class BrainCoordinator {
         conversation.lastToolRoundMissingRequiredAction = missingRequiredAction
                 || initialActionGate.blockedActionCalls();
         conversation.lastToolRoundPlanBlockedAction = initialActionGate.blockedActionCalls();
+        // initialPlanSpoken already includes a plan announced in this very round (set before dispatch).
+        boolean plannedWithoutActing = conversation.initialPlanSpoken && !conversation.initialActionStarted;
+        conversation.withholdSayNextCall = shouldWithholdSay(
+                missingRequiredAction,
+                initialActionGate.blockedActionCalls(),
+                conversation.initialActionStarted,
+                plannedWithoutActing);
         BotLog.comm(bot, "tool_round_evaluated",
                 "model_call", conversation.callBudget.callsUsed(),
                 "model_calls_remaining", conversation.callBudget.callsRemaining(),
@@ -316,6 +346,8 @@ public final class BrainCoordinator {
                 "missing_required_action", conversation.lastToolRoundMissingRequiredAction,
                 "initial_plan_blocked_action", initialActionGate.blockedActionCalls(),
                 "initial_plan_reordered", initialActionGate.reorderedPlan(),
+                "repeated_plan_faults", repeatedPlanFaults,
+                "say_withheld_next_call", conversation.withholdSayNextCall,
                 "work_active", workActive,
                 "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions");
         if (missingRequiredAction || initialActionGate.blockedActionCalls()) {
@@ -429,13 +461,23 @@ public final class BrainCoordinator {
      * later status/reporting rounds. When Gemini supplied a valid plan later in the same tool
      * batch, move only that call ahead of the first action. If it supplied no valid plan, return
      * synthetic failed results for every action call instead of letting an action happen first.
+     * A say(purpose=plan) repeated while the announced plan has still not started is dropped too
+     * ({@link #REPEATED_PLAN_TOOL_RESULT}): the player must not see the same announcement again.
      */
     private ActionDispatcher.DispatchBatch dispatchWithInitialPlanGate(
             AIPlayerEntity bot,
             List<ChatToolCall> calls,
             InitialActionGate gate,
+            boolean planAlreadyAnnounced,
             BooleanSupplier leaseGuard) {
-        if (!gate.blockedActionCalls()) {
+        boolean anyBlocked = false;
+        for (ChatToolCall call : calls) {
+            if (blockedResult(call, gate, planAlreadyAnnounced) != null) {
+                anyBlocked = true;
+                break;
+            }
+        }
+        if (!anyBlocked) {
             return dispatcher.dispatchBatch(bot, calls, leaseGuard);
         }
 
@@ -443,7 +485,7 @@ public final class BrainCoordinator {
         List<ChatToolCall> safeCalls = new ArrayList<>();
         for (int index = 0; index < calls.size() && index < maxCalls; index++) {
             ChatToolCall call = calls.get(index);
-            if (!isGenuineActionTool(call.name())) {
+            if (blockedResult(call, gate, planAlreadyAnnounced) == null) {
                 safeCalls.add(call);
             }
         }
@@ -459,10 +501,14 @@ public final class BrainCoordinator {
         int safeIndex = 0;
         for (int index = 0; index < calls.size(); index++) {
             ChatToolCall call = calls.get(index);
+            String blocked = blockedResult(call, gate, planAlreadyAnnounced);
             if (index >= maxCalls) {
                 appendSyntheticToolFailure(bot, call, THROTTLED_TOOL_RESULT, results, executedCalls);
-            } else if (isGenuineActionTool(call.name())) {
-                appendSyntheticToolFailure(bot, call, PLAN_REQUIRED_TOOL_RESULT, results, executedCalls);
+            } else if (blocked != null) {
+                if (REPEATED_PLAN_TOOL_RESULT.equals(blocked)) {
+                    BotLog.warn(LogCategory.COMM, bot, "repeated_plan_say_dropped");
+                }
+                appendSyntheticToolFailure(bot, call, blocked, results, executedCalls);
             } else if (safeIndex < safeBatch.messages().size()
                     && safeIndex < safeBatch.executedCalls().size()) {
                 results.add(safeBatch.messages().get(safeIndex));
@@ -477,6 +523,71 @@ public final class BrainCoordinator {
         }
         return new ActionDispatcher.DispatchBatch(
                 List.copyOf(results), List.copyOf(executedCalls), safeBatch.controlEffect());
+    }
+
+    /** The synthetic failure text for a call that must not run in this round, or null when it may run. */
+    private static String blockedResult(ChatToolCall call, InitialActionGate gate, boolean planAlreadyAnnounced) {
+        if (gate.blockedActionCalls() && isGenuineActionTool(call.name())) {
+            return PLAN_REQUIRED_TOOL_RESULT;
+        }
+        if (isRepeatedPlanSay(call, planAlreadyAnnounced)) {
+            return REPEATED_PLAN_TOOL_RESULT;
+        }
+        return null;
+    }
+
+    /** True for a valid say(purpose=plan) after a plan was already announced and no action has begun. */
+    static boolean isRepeatedPlanSay(ChatToolCall call, boolean planAlreadyAnnounced) {
+        return planAlreadyAnnounced && isValidSayWithPurpose(call, "plan");
+    }
+
+    /**
+     * Whether the NEXT model call must be forced into using an action tool: the model announced a
+     * plan (say purpose=plan) but started nothing (the say(plan)-only loop that re-offered ~60 tools
+     * and burned the whole call budget). The say tool is then removed from that call's tool set, so
+     * the only way to answer is to call something that does work. A round whose action calls were
+     * blocked for lacking a plan still needs say (to announce it), and a round with no plan may be a
+     * question, so neither withholds it.
+     */
+    static boolean shouldWithholdSay(boolean missingRequiredAction,
+                                     boolean planBlockedAction,
+                                     boolean initialActionStarted,
+                                     boolean roundAnnouncedPlan) {
+        return missingRequiredAction
+                && !planBlockedAction
+                && !initialActionStarted
+                && roundAnnouncedPlan;
+    }
+
+    /** The tools offered to a model call: everything, or everything except say when it is withheld. */
+    static List<ToolDefinition> toolsForCall(List<ToolDefinition> tools, boolean withholdSay) {
+        if (!withholdSay || tools == null) {
+            return tools;
+        }
+        List<ToolDefinition> withoutSay = new ArrayList<>(tools.size());
+        for (ToolDefinition tool : tools) {
+            if (tool != null && !SAY_TOOL_NAME.equals(tool.name())) {
+                withoutSay.add(tool);
+            }
+        }
+        return List.copyOf(withoutSay);
+    }
+
+    /** What the player hears when the planner gave up without ever starting the request. */
+    static String couldNotStartMessage(String instruction) {
+        String echo = instruction == null ? "" : instruction.replace('\n', ' ').replace('\r', ' ').trim();
+        if (echo.length() > MAX_INSTRUCTION_ECHO_CHARS) {
+            echo = echo.substring(0, MAX_INSTRUCTION_ECHO_CHARS - 3) + "...";
+        }
+        return echo.isEmpty()
+                ? "Sorry, I could not start that. Could you say it another way?"
+                : "Sorry, I could not start \"" + echo + "\". Could you say it another way?";
+    }
+
+    /** The one-line fallback when a failed task cannot get a model call to report it. */
+    static String failureFallbackMessage(String taskName, String reason) {
+        return "Sorry, my " + ReasonText.taskName(taskName == null ? "task" : taskName)
+                + " stopped: " + ReasonText.itemText(reason) + ".";
     }
 
     private static void appendSyntheticToolFailure(AIPlayerEntity bot,
@@ -720,16 +831,19 @@ public final class BrainCoordinator {
         if (conversation.history.isEmpty()) {
             conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), "")));
         }
+        conversation.withholdSayNextCall = false;
         conversation.continuationTaskPolls = 0;
-        if (conversation.callBudget.exhausted()) {
-            finishCallBudget(bot, conversation, "automatic_wake");
-            return false;
-        }
+        // A task failure is reported with its own guaranteed model call, so it is checked before the
+        // per-instruction planner budget: an exhausted planner budget must never swallow the report.
         if (hasFailure && maybeInjectFailure(bot, conversation)) {
             awaitingTask.remove(bot.getUUID());
             trimHistory(conversation);
-            submit(bot, conversation, conversation.decision.beginEpoch());
+            submit(bot, conversation, conversation.decision.beginEpoch(), true);
             return true;
+        }
+        if (conversation.callBudget.exhausted()) {
+            finishCallBudget(bot, conversation, "automatic_wake");
+            return false;
         }
         if (hasGoal && maybeInjectGoalContinuation(bot, conversation, "There is no active task, but the long-term goal is unfinished. Continue the current step and assign a high-level task when needed.")) {
             awaitingTask.remove(bot.getUUID());
@@ -800,19 +914,49 @@ public final class BrainCoordinator {
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation, DecisionLease lease) {
-        boolean callReserved = false;
+        submit(bot, conversation, lease, false);
+    }
+
+    /**
+     * {@code failureReport} draws the call from the dedicated failure-report allowance (see
+     * {@link PlayerInstructionCallBudget#tryAcquireFailureReportCall}) so a task failure is always
+     * reported, whatever the planner already spent on the player's instruction.
+     */
+    private void submit(AIPlayerEntity bot, BotConversation conversation, DecisionLease lease, boolean failureReport) {
+        PlayerInstructionCallBudget.Reservation reservation = PlayerInstructionCallBudget.Reservation.NONE;
         try {
             List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
             MinecraftAiConfig.Brain brainConfig = MinecraftAiConfig.get().brain();
-            List<ToolDefinition> toolsSnapshot = toolRegistry.tools(
+            // A failure report is a say-only job: it never inherits a withheld say from an earlier
+            // plan-only round of the instruction.
+            boolean withholdSay = !failureReport && conversation.withholdSayNextCall;
+            if (failureReport) {
+                conversation.withholdSayNextCall = false;
+            }
+            List<ToolDefinition> toolsSnapshot = toolsForCall(toolRegistry.tools(
                     brainConfig,
                     brainConfig.exposesLowLevelTools() || manualMode(bot),
                     BotRuntimeOptions.INSTANCE.memoryToolsEnabled(bot),
-                    brainConfig.coordinationToolsEnabled());
+                    brainConfig.coordinationToolsEnabled()), withholdSay);
             AsyncDecisionExecutor.GeminiInteractionRequest geminiRequest = executor.usesGeminiInteractions()
                     ? geminiRequestFor(conversation, historySnapshot)
                     : null;
-            if (!conversation.callBudget.tryAcquireModelCall()) {
+            if (failureReport) {
+                reservation = conversation.callBudget.tryAcquireFailureReportCall();
+                if (reservation == PlayerInstructionCallBudget.Reservation.NONE) {
+                    if (!conversation.decision.failSubmission(lease)) {
+                        logStaleDecision(lease, "failure_report_budget_submission");
+                        return;
+                    }
+                    reportPendingFailureWithoutModel(bot, conversation);
+                    return;
+                }
+                // Reporting a failure is not an unfinished player request: a say alone is the
+                // right answer, so the initial-action requirement must not chase it.
+                conversation.initialActionStarted = true;
+            } else if (conversation.callBudget.tryAcquireModelCall()) {
+                reservation = PlayerInstructionCallBudget.Reservation.REGULAR;
+            } else {
                 if (!conversation.decision.failSubmission(lease)) {
                     logStaleDecision(lease, "model_call_budget_submission");
                     return;
@@ -820,25 +964,26 @@ public final class BrainCoordinator {
                 finishCallBudget(bot, conversation, "submission");
                 return;
             }
-            callReserved = true;
             BotLog.comm(bot, "model_call_submitted",
                     "model_call", conversation.callBudget.callsUsed(),
                     "model_calls_remaining", conversation.callBudget.callsRemaining(),
                     "instruction", conversation.callBudget.instructionSequence(),
                     "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions",
-                    "continuation", geminiRequest != null && !geminiRequest.initial());
+                    "continuation", geminiRequest != null && !geminiRequest.initial(),
+                    "failure_report", failureReport,
+                    "say_withheld", withholdSay,
+                    "tools", toolsSnapshot.size());
             executor.submit(
                     bot,
                     lease,
                     historySnapshot,
                     toolsSnapshot,
                     geminiRequest,
+                    withholdSay,
                     (responseLease, response) -> onResponse(bot, responseLease, response),
                     (errorLease, throwable) -> onError(bot, errorLease, throwable));
         } catch (RuntimeException exception) {
-            if (callReserved) {
-                conversation.callBudget.releaseLastReservation();
-            }
+            conversation.callBudget.releaseFailureReportReservation(reservation);
             if (!conversation.decision.failSubmission(lease)) {
                 logStaleDecision(lease, "submission_error");
                 return;
@@ -950,7 +1095,7 @@ public final class BrainCoordinator {
                         }
                         if (maybeInjectFailure(bot, conversation)) {
                             trimHistory(conversation);
-                            submit(bot, conversation, nextLease);
+                            submit(bot, conversation, nextLease, true);
                             return;
                         }
                         TaskStatus status = TaskManager.INSTANCE.status(bot);
@@ -962,7 +1107,12 @@ public final class BrainCoordinator {
                         }
                         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
                         conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-                        String correction = conversation.lastToolRoundPlanBlockedAction
+                        String correction = conversation.withholdSayNextCall
+                                ? "You already announced your plan but did not start any work, so the say tool is not "
+                                + "available for this call. Call the action or goal tool that carries out the player's "
+                                + "request now (for example follow to come to or stay with the player, hold to stay put, "
+                                + "eat, gather, break_blocks, mine_ore, achieve_goal). Do not answer with text.\n\n"
+                                : conversation.lastToolRoundPlanBlockedAction
                                 ? "Your action tool calls were not run because you did not announce a plan first. "
                                 + "If the player asked only a question, call say with purpose=answer and use only "
                                 + "read-only tools. Otherwise call say with purpose=plan and a non-empty English plan "
@@ -1025,15 +1175,37 @@ public final class BrainCoordinator {
                 "last_failed_tool_calls", conversation.lastToolRoundFailureCount,
                 "last_missing_required_action", conversation.lastToolRoundMissingRequiredAction,
                 "last_initial_plan_blocked_action", conversation.lastToolRoundPlanBlockedAction);
-        if (workActive || conversation.budgetExhaustionReported) {
+        // Silence is only acceptable while the player's request is genuinely under way. Anything else
+        // (the planner never started it, even if some unrelated work happens to be running) must be
+        // told to the player -- a dropped command with no word is the worst outcome.
+        // The planner loop is over: a withheld say must not leak into a later wake-up call.
+        conversation.withholdSayNextCall = false;
+        boolean requestNeverStarted = !conversation.initialActionStarted && !"automatic_wake".equals(trigger);
+        if (conversation.budgetExhaustionReported || (workActive && !requestNeverStarted)) {
             return;
         }
         conversation.budgetExhaustionReported = true;
-        io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
-        TaskManager.INSTANCE.resetToIdle(bot);
-        bot.getActionPack().stopAll();
-        awaitingTask.remove(bot.getUUID());
-        sendBotReply(bot, "Sorry, I could not work out how to do that. Could you say it another way?");
+        if (!workActive) {
+            io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
+            TaskManager.INSTANCE.resetToIdle(bot);
+            bot.getActionPack().stopAll();
+            awaitingTask.remove(bot.getUUID());
+        }
+        sendBotReply(bot, requestNeverStarted
+                ? couldNotStartMessage(conversation.lastInstruction)
+                : "Sorry, I could not work out how to do that. Could you say it another way?");
+    }
+
+    private void reportFailureWithoutModel(AIPlayerEntity bot, String name, String reason) {
+        BotLog.warn(LogCategory.COMM, bot, "failure_reported_without_model_call",
+                "name", name, "reason", reason);
+        sendBotReply(bot, failureFallbackMessage(name, reason));
+    }
+
+    private void reportPendingFailureWithoutModel(AIPlayerEntity bot, BotConversation conversation) {
+        reportFailureWithoutModel(bot,
+                conversation.lastFailureName == null ? "task" : conversation.lastFailureName,
+                conversation.lastFailureReason == null ? "unknown" : conversation.lastFailureReason);
     }
 
     private static String conciseFailureMessage(String message) {
@@ -1083,8 +1255,18 @@ public final class BrainCoordinator {
     }
 
     private boolean maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
+        if (TaskManager.INSTANCE.peekFailure(bot).isPresent()
+                && !conversation.callBudget.canAcquireFailureReportCall()) {
+            // Even the dedicated failure-report allowance is spent (a task that keeps failing): tell
+            // the player directly instead of leaving the failure unreported or looping the model.
+            TaskManager.INSTANCE.consumeFailure(bot)
+                    .ifPresent(failure -> reportFailureWithoutModel(bot, failure.name(), failure.reason()));
+            return false;
+        }
         return TaskManager.INSTANCE.consumeFailure(bot)
                 .map(failure -> {
+                    conversation.lastFailureName = failure.name();
+                    conversation.lastFailureReason = failure.reason();
                     int maxRetries = MinecraftAiConfig.get().brain().maxTaskRetries();
                     String retryHint = failure.count() >= maxRetries
                             ? " The same failure has happened repeatedly; prefer a different approach or explain the limitation with say."
@@ -1215,16 +1397,18 @@ public final class BrainCoordinator {
         return """
                 You are a player in Minecraft named %s. You exist as a real player in the world and can interact with it using the tools provided.%s
 
+                Game version: this is Minecraft Java Edition 1.21.11 exactly. Your built-in memory of items, recipes, enchantments and mechanics is from older versions and is often out of date (for example copper tools and armor, spears and the Lunge enchantment exist in this version). Never tell the player that an item, recipe or enchantment does not exist, cannot be crafted, or works a certain way from memory: call lookup_recipe (read-only, cheap) to verify first, and trust its result over your memory even when the player has not corrected you.
+
                 Rules:
                 1. Understand the human's intent first, then break it into tool calls.
                 2. Coordinates are integers (block positions).
                 3. Prefer high-level deterministic tasks for survival work. For ores or raw ore materials, use mine_ore; it automatically prepares the required pickaxe before mining. For an item/tool goal such as iron_pickaxe or iron_ingot, use achieve_goal. Do not manually decompose these into gather/craft/mine steps unless the goal tool fails.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. A new player message always supersedes prior work. The runtime cancels old tasks, goals, queued goals, and actions before this request is planned, so treat each new message as self-contained. For a compound request in one message, goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) may be queued in that same response. High-level tasks run over multiple ticks; start only one non-goal task at a time and wait for its status before assigning another.
-                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). Then call the action or goal tool that starts the work in the SAME response. A plan/status say alone is invalid and will be retried. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
+                6. Before beginning requested work, call say with purpose=plan and a short one-sentence, player-facing plan in English. State the important first steps and why (for example, "I will gather cobblestone for tools and a foundation, then collect wood for the house."). Then call the action or goal tool that starts the work in the SAME response. A plan/status say alone is invalid: it starts nothing, the runtime will strip say from your next call and force an action tool, and if you still start nothing the player is told you could not do it. Never answer an action request with say alone. For "come here" / "come to me" call follow (it walks to the player); for "stay here" call hold; for "follow me" call follow; for "eat until full" call eat. For a pure question, opinion, or advice request, call say with purpose=answer only; do not start work merely because the question mentions an action (for example, "Do you think this is the best spot to mine?"). If the player asks about "this", "there", a building, terrain, or a route, use Speaker visual context when it is present. It is a real sample of the speaker's current line of sight, not a screenshot or a complete map: mention only evidence it contains. If it has no visible target or lacks enough evidence, say you cannot see enough to judge instead of inventing details. Use purpose=status only after work has started. The say tool appears in ordinary Minecraft chat as well as the MinecraftAi panel.
                 7. For an item or tool the player wants obtained from whatever materials are available, use achieve_goal directly even when materials may be missing. It is the deterministic dependency planner and will gather, craft, mine, smelt, and use an existing or newly made crafting table as needed. Use plan_craft only when the player explicitly asks for a feasibility or material breakdown; it is read-only. Use craft only when the player explicitly wants a one-step craft and the required materials are already carried. Do not decompose an item goal into assign_task, mine, smelt, planks, or sticks yourself.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
-                9. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected vein, stops, and reports the count; never approximate a vein with a count. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. The deterministic goal executor will plan gathering, crafting, mining, and smelting. A single mine_ore/achieve_goal call runs the entire multi-step plan autonomously. The only allowed companion call in that same response is the initial say plan required by rule 6; after that, STOP. Do not call inventory, assign_task, mine, or strip_mine. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
+                9. For "mine iron ore", call mine_ore with ore=minecraft:iron_ore. For "mine the whole/entire vein", "this vein" or "until the vein is gone", call mine_ore with mode=vein (optionally x/y/z of an ore in that vein): it mines only that connected vein, stops, and reports the count; never approximate a vein with a count. For "make an iron pickaxe" or "get iron ingots", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. The deterministic goal executor will plan gathering, crafting, mining, and smelting. A single mine_ore/achieve_goal call runs the entire multi-step plan autonomously. The only allowed companion call in that same response is the initial say plan required by rule 6; after that, STOP. Do not call inventory, assign_task, mine, or strip_mine. For wheat, carrots, or potatoes, call harvest_crop with crop=wheat/carrot/potato; it auto-prepares a hoe, tills, plants, waits, and harvests. To clear or hit grass/tall grass, call clear_grass with the requested count; it counts actual plants broken, not seed drops. For "break N leaves" / "clear the leaves", call break_blocks with block=leaves (any leaf type) and the exact count; drops are irrelevant and it uses shears or a hoe if carried, otherwise bare hands (never craft shears for it). Use gather only when the player wants leaf blocks in the inventory (that needs shears). For an explicit request to break, remove, or clear a precise number of another nearby block where drops do not matter, call break_blocks with its exact block id and count; it counts physical blocks broken and will not roam or tunnel. Use gather only when the player wants new inventory items: count always means the additional amount to collect, so "gather 3 logs" means collect 3 more even if logs are already carried. For water travel: launch_boat puts a boat into nearby safe water (crafting one first if needed), board_boat enters a nearby boat, boat_follow handles launch, boarding, and steering after a named player or the owner, and exit_boat dismounts safely. For "build a house", call build_house (blueprint optional); it auto-gathers all materials then builds.
                 10. After each action, look at the next world state (passed in user messages) and decide the next step.
                 11. When the task is complete or impossible, say so and stop calling tools.
                 12. You are fully autonomous and self-reliant. NEVER ask the human for help, for resources, or to move/carry you — the human will not help. NEVER mine ore with bare hands and NEVER use strip_mine or assign_task mine to dig without a proper pickaxe (that wastes blocks and drops nothing). To get ore always use mine_ore, and to get an item/tool use achieve_goal — these automatically walk to find wood, craft the needed pickaxe, then mine. If mine_ore/achieve_goal reports it cannot proceed, just retry the SAME mine_ore once (do NOT switch to an easier or different goal such as achieve_goal a pickaxe — mine_ore already auto-prepares the pickaxe, so switching only loses the real goal); if it still cannot, state the situation in one short sentence and stop — do not flail with move/strip_mine and do not beg.
@@ -1254,6 +1438,11 @@ public final class BrainCoordinator {
         private int lastCacheHitTokens;
         private long lastGoalResultSequence;
         private String lastPerceptionDigest = "";
+        // The say tool is removed from the next call after a say(plan)-only round (see shouldWithholdSay).
+        private boolean withholdSayNextCall;
+        private String lastInstruction = "";
+        private String lastFailureName;
+        private String lastFailureReason;
 
         private BotConversation(UUID botId) {
             decision = new DecisionSession(botId);

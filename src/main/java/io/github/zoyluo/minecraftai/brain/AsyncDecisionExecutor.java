@@ -34,6 +34,22 @@ public final class AsyncDecisionExecutor {
                        GeminiInteractionRequest geminiRequest,
                        BiConsumer<DecisionLease, ChatResponse> onResponse,
                        BiConsumer<DecisionLease, Throwable> onError) {
+        submit(bot, lease, historySnapshot, tools, geminiRequest, false, onResponse, onError);
+    }
+
+    /**
+     * {@code requireToolCall} forces a function call on the chat-completions path (tool_choice
+     * required); the Gemini Interactions path always requires one (allowed_tools mode any), so the
+     * flag changes nothing there -- the offered tool set is what constrains it.
+     */
+    public void submit(AIPlayerEntity bot,
+                       DecisionLease lease,
+                       List<ChatMessage> historySnapshot,
+                       List<ToolDefinition> tools,
+                       GeminiInteractionRequest geminiRequest,
+                       boolean requireToolCall,
+                       BiConsumer<DecisionLease, ChatResponse> onResponse,
+                       BiConsumer<DecisionLease, Throwable> onError) {
         var server = bot.level().getServer();
         var botId = bot.getUUID();
         String botName = bot.getGameProfile().name();
@@ -41,7 +57,9 @@ public final class AsyncDecisionExecutor {
             long started = System.nanoTime();
             try {
                 ChatResponse response = geminiRequest == null
-                        ? apiClient.chat(historySnapshot, tools)
+                        ? (requireToolCall && tools != null && !tools.isEmpty()
+                                ? apiClient.chatRequiringToolCall(historySnapshot, tools)
+                                : apiClient.chat(historySnapshot, tools))
                         : executeGeminiInteraction(geminiRequest, tools);
                 long elapsed = System.nanoTime() - started;
                 server.execute(() -> onResponse.accept(lease, response));

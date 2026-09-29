@@ -133,7 +133,7 @@ public final class ActionDispatcher {
             }
             if (logChatText && sanitized.get(sensitive).isJsonPrimitive()
                     && sanitized.get(sensitive).getAsJsonPrimitive().isString()) {
-                sanitized.addProperty(sensitive, truncateForLog(sanitized.get(sensitive).getAsString()));
+                sanitized.addProperty(sensitive, chatLogText(sanitized.get(sensitive).getAsString()));
             } else {
                 sanitized.addProperty(sensitive, "<redacted>");
             }
@@ -142,7 +142,7 @@ public final class ActionDispatcher {
     }
 
     /** Collapses to a single line (escaping real newlines) and truncates to {@link #CHAT_LOG_TEXT_MAX_CHARS}. */
-    private static String truncateForLog(String text) {
+    static String chatLogText(String text) {
         String singleLine = text.replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n");
         if (singleLine.length() > CHAT_LOG_TEXT_MAX_CHARS) {
             singleLine = singleLine.substring(0, CHAT_LOG_TEXT_MAX_CHARS) + "...";

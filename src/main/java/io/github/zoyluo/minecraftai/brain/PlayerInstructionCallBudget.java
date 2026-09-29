@@ -10,10 +10,25 @@ package io.github.zoyluo.minecraftai.brain;
  */
 final class PlayerInstructionCallBudget {
     static final int DEFAULT_MAX_CALLS = 3;
+    /**
+     * Model calls per player instruction that exist only to report a task failure to the player.
+     * They are deliberately separate from {@link #DEFAULT_MAX_CALLS}: a follow that is aborted long
+     * after the planner spent its three calls must still be reported instead of silently vanishing,
+     * while the small cap keeps a repeatedly failing task from looping the model forever.
+     */
+    static final int MAX_FAILURE_REPORT_CALLS = 2;
+
+    /** Which allowance a failure-report reservation was taken from (needed to roll it back). */
+    enum Reservation {
+        NONE,
+        FAILURE_REPORT,
+        REGULAR
+    }
 
     private final int maxCalls;
     private long instructionSequence;
     private int callsUsed;
+    private int failureReportCallsUsed;
 
     PlayerInstructionCallBudget(int maxCalls) {
         if (maxCalls <= 0) {
@@ -43,6 +58,7 @@ final class PlayerInstructionCallBudget {
             instructionSequence++;
         }
         callsUsed = callsAlreadyUsed;
+        failureReportCallsUsed = 0;
     }
 
     /**
@@ -55,6 +71,44 @@ final class PlayerInstructionCallBudget {
         }
         callsUsed++;
         return true;
+    }
+
+    /** Whether {@link #tryAcquireFailureReportCall()} would succeed right now (nothing is reserved). */
+    boolean canAcquireFailureReportCall() {
+        return failureReportCallsUsed < MAX_FAILURE_REPORT_CALLS || callsUsed < maxCalls;
+    }
+
+    /**
+     * Reserves one model call for reporting a task failure to the player. The dedicated failure
+     * allowance is used first so the planner's own calls stay available for a retry; only once it
+     * is spent does the regular allowance serve as a fallback. {@link Reservation#NONE} means the
+     * caller must report the failure without a model call.
+     */
+    Reservation tryAcquireFailureReportCall() {
+        if (failureReportCallsUsed < MAX_FAILURE_REPORT_CALLS) {
+            failureReportCallsUsed++;
+            return Reservation.FAILURE_REPORT;
+        }
+        if (callsUsed < maxCalls) {
+            callsUsed++;
+            return Reservation.REGULAR;
+        }
+        return Reservation.NONE;
+    }
+
+    /** Rolls back a {@link #tryAcquireFailureReportCall()} reservation when nothing could be queued. */
+    void releaseFailureReportReservation(Reservation reservation) {
+        switch (reservation) {
+            case FAILURE_REPORT -> {
+                if (failureReportCallsUsed <= 0) {
+                    throw new IllegalStateException("no_failure_report_reservation_to_release");
+                }
+                failureReportCallsUsed--;
+            }
+            case REGULAR -> releaseLastReservation();
+            case NONE -> {
+            }
+        }
     }
 
     /** Rolls back a reservation when the HTTP work could not be queued at all. */
@@ -71,6 +125,10 @@ final class PlayerInstructionCallBudget {
 
     int callsUsed() {
         return callsUsed;
+    }
+
+    int failureReportCallsUsed() {
+        return failureReportCallsUsed;
     }
 
     int callsRemaining() {

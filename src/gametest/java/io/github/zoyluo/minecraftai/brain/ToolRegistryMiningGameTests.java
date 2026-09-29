@@ -138,6 +138,83 @@ public final class ToolRegistryMiningGameTests {
         context.succeed();
     }
 
+    /**
+     * lookup_recipe is the fix for the model denying content newer than its memory (copper tools,
+     * the Lunge enchantment): it must answer from the live registries/recipe index, stay read-only
+     * (the active work is left untouched) and stay short.
+     */
+    @GameTest(maxTicks = 20)
+    public void lookupRecipeAnswersFromTheLiveGameAndIsReadOnly(GameTestHelper context) {
+        ActiveFixture fixture = activeFixture(context, "LookupRecipeGT");
+        try {
+            ToolDefinition definition = new ToolRegistry().get("lookup_recipe").orElse(null);
+            require(context, definition != null, "lookup_recipe was not registered");
+
+            String copper = lookup(context, fixture, definition, "minecraft:copper_pickaxe");
+            require(context, copper.contains("exists in Minecraft 1.21.11")
+                            && copper.contains("minecraft:copper_ingot") && copper.contains("minecraft:stick"),
+                    "copper pickaxe must be reported with its copper_ingot + stick recipe, got: " + copper);
+            require(context, copper.contains("crafting table"),
+                    "the copper pickaxe needs a crafting table (3x3 recipe), got: " + copper);
+            String plainName = lookup(context, fixture, definition, "Copper Pickaxe");
+            require(context, plainName.equals(copper),
+                    "a plain-language name must resolve like the id: " + plainName);
+
+            String lunge = lookup(context, fixture, definition, "lunge");
+            require(context, lunge.contains("enchantment that exists in Minecraft 1.21.11"),
+                    "Lunge must be reported as an existing enchantment, got: " + lunge);
+
+            String unknown = lookup(context, fixture, definition, "copper_pick");
+            require(context, unknown.contains("neither an item nor an enchantment")
+                            && unknown.contains("Similar ids:") && unknown.contains("minecraft:copper_pickaxe"),
+                    "an unknown name must list similar real ids, got: " + unknown);
+            for (String answer : List.of(copper, lunge, unknown)) {
+                require(context, answer.length() < 400, "lookup output must stay short, was " + answer.length());
+            }
+
+            JsonObject missing = new JsonObject();
+            ToolDefinition.ToolResult bad = null;
+            try {
+                bad = definition.handler().invoke(fixture.bot(), missing);
+            } catch (IllegalArgumentException expected) {
+                // The dispatcher turns this into bad_arg; a direct handler call surfaces it.
+            }
+            require(context, bad == null || !bad.ok(), "a missing name must be rejected");
+            requireUndisturbed(context, fixture, "lookup_recipe");
+        } finally {
+            cleanupFixture(context, fixture);
+        }
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = 20)
+    public void breakBlocksLeavesRequestIsRecognisedForBothEntryPoints(GameTestHelper context) {
+        for (String accepted : List.of("leaves", "minecraft:leaves", " Leaves ")) {
+            JsonObject args = new JsonObject();
+            args.addProperty("block", accepted);
+            require(context, ToolRegistry.isAnyLeavesRequest(args, "block"),
+                    "'" + accepted + "' must mean any leaf block");
+        }
+        for (String other : List.of("minecraft:oak_leaves", "minecraft:oak_log", "")) {
+            JsonObject args = new JsonObject();
+            args.addProperty("block", other);
+            require(context, !ToolRegistry.isAnyLeavesRequest(args, "block"),
+                    "'" + other + "' is an exact block id, not the generic leaves request");
+        }
+        require(context, !ToolRegistry.isAnyLeavesRequest(new JsonObject(), "block"),
+                "a missing block argument is not a leaves request");
+        context.succeed();
+    }
+
+    private static String lookup(GameTestHelper context, ActiveFixture fixture, ToolDefinition definition,
+                                 String name) {
+        JsonObject args = new JsonObject();
+        args.addProperty("name", name);
+        ToolDefinition.ToolResult result = definition.handler().invoke(fixture.bot(), args);
+        require(context, result != null && result.ok(), "lookup_recipe " + name + " failed: " + result);
+        return result.message();
+    }
+
     private static void requireRejected(GameTestHelper context, String id, boolean requireCorrection) {
         try {
             ToolRegistry.oreTargetsFrom(id);
