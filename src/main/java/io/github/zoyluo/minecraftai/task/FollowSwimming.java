@@ -248,6 +248,12 @@ final class FollowSwimming {
     /**
      * Distance the bot must swim to breathe: the free water column above its head when there is one,
      * otherwise the length of a bounded water route to the nearest cell with air (throttled).
+     *
+     * <p>Raw world reads (deliberate): the column scan looks only at the cells directly above the bot's own
+     * head -- the water it is submerged in and the block that would stop it surfacing -- which is what a
+     * swimmer physically feels and sees straight up. It feeds only an oxygen decision (when to head up for
+     * air); it never selects a block, item or entity. The bounded route search is {@link SwimRoute}, whose
+     * header documents the same reasoning.
      */
     private double blocksToAir(AIPlayerEntity bot, ServerLevel world, int elapsed) {
         BlockPos eye = BlockPos.containing(bot.getEyePosition());

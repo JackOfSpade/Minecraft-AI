@@ -80,6 +80,10 @@ public final class FollowTask extends AbstractTask {
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
     private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
     private int directWalkCount;
+    // A failed search whose straight-line fallback was refused (water, a drop, a wall on the line): the follower
+    // waits at its bank and re-plans on the normal schedule, and tells the player so once until it next arrives.
+    private boolean noRouteAnnounced;
+    private int noRouteNotices;
     // Where the followed player stood when the resolved goal collapsed onto the bot's own cell (see
     // followLand): the hold is re-evaluated as soon as they move rather than after a full REPATH_TICKS.
     private BlockPos holdTargetPos;
@@ -110,6 +114,16 @@ public final class FollowTask extends AbstractTask {
         return directWalkCount;
     }
 
+    /** Package-visible for GameTests: true while the goal has collapsed onto the bot's own cell and it is holding there. */
+    boolean holdingAtOwnCell() {
+        return holdTargetPos != null;
+    }
+
+    /** Package-visible for GameTests: how many times the player was told there is no route to them. */
+    int noRouteNotices() {
+        return noRouteNotices;
+    }
+
     @Override
     public String name() {
         return "follow";
@@ -138,6 +152,7 @@ public final class FollowTask extends AbstractTask {
         swimming.reset();
         waiting = false;
         repathBackoff = false;
+        noRouteAnnounced = false;
         holdTargetPos = null;
         nextHoldReevalTick = 0;
         boatFollow = null;
@@ -346,6 +361,7 @@ public final class FollowTask extends AbstractTask {
             // MAX_TICKS with no replan.  Arriving must cancel the navigation itself.
             pack.stopNavigation();
             waiting = true;
+            noRouteAnnounced = false;
             stuckRecovery.reset(bot, elapsed);
             return;
         }
@@ -462,12 +478,31 @@ public final class FollowTask extends AbstractTask {
             pack.stopNavigation();
             repathBackoff = true;
             waiting = true;
+            announceNoRoute(bot, standNear, path.reason());
             return;
         }
 
         // A completed/failed controller waits for the scheduled replan rather than looking active
         // while idle.  This is intentional reacquisition, so StuckWatcher must not abort it.
         waiting = pathIdle && walkIdle;
+    }
+
+    /**
+     * No route to the player and no verified straight walk: the bot stays dry where it is (it swims only to follow
+     * a player who is themselves in the water), keeps re-planning on the normal schedule, and says so once.
+     */
+    private void announceNoRoute(AIPlayerEntity bot, BlockPos standNear, String reason) {
+        if (noRouteAnnounced) {
+            return;
+        }
+        noRouteAnnounced = true;
+        noRouteNotices++;
+        BotLog.action(bot, "follow_no_dry_route",
+                "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.blockPosition()),
+                "stand_near", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear),
+                "reason", reason);
+        BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
+                "I can't find a dry way to you from here, so I'll wait here and keep looking.");
     }
 
     /**

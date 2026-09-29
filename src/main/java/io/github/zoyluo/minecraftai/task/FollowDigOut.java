@@ -48,6 +48,18 @@ import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
  * plain stone, dirt, sand or gravel that somebody else placed looks exactly like the natural kind,
  * and the placed-block ledger only knows the bots' own placements. What is guaranteed is exactly the
  * list above; digging stays a last resort after a whole stall window, bounded to {@link #MAX_CELLS} cells.
+ *
+ * <p><b>Raw world reads (deliberate).</b> {@link #plan}, {@link #isOpen}, {@link #isSolidFloor} and
+ * {@link #stepInto} read block/fluid state directly instead of through {@code ObservableWorldQuery}. That is
+ * legitimate here and is not an information leak, for two reasons. (1) Every cell they read is one the bot's
+ * own body touches or is about to enter: the cell it faces, the cells above and below that, and the cell two
+ * above it for the falling-block check -- all within two blocks of the bot, i.e. what it stands in and stands
+ * next to (the same local physical knowledge the pathfinder's own {@code Standability} and the dig-enterable
+ * test use). (2) The reads either make the dig REFUSE (a fluid, a hazard, a missing floor, a suspended falling
+ * block) or confirm a one-cell step that {@code FakePlayerMotion.stepToStandable} then re-verifies against the
+ * live world; none of them selects a target. The one read that does choose what to break -- the
+ * block itself -- is gated by {@code ObservableWorldQuery.canObserveBlock} in {@link #plan}. Fluid is
+ * refused on every side, so a dig-out can never open a wall into water either.
  */
 final class FollowDigOut {
     static final int MAX_CELLS = 8;

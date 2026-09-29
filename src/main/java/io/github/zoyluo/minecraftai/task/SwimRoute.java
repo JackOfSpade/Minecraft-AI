@@ -20,6 +20,15 @@ import net.minecraft.tags.FluidTags;
  * Used by follow to leave the water toward a player who walked out, to climb toward the nearest
  * breathable cell when a straight-up ascent is blocked, and to get around an obstacle that a
  * greedy step toward a swimmer cannot.
+ *
+ * <p><b>Raw world reads (deliberate).</b> The search reads block and fluid state directly, not through
+ * {@code ObservableWorldQuery}: it is the same local physical knowledge as {@code NavSafetyNet}'s water-rescue
+ * search it reuses (a bot in water sees and feels the water around it, and the dry landing it swims to is at
+ * the surface next to it), it only ever picks cells for the bot's OWN body to move through (never a block to
+ * break, an item, or an entity), and a per-cell ray test would multiply a 4000-node search by the shared ray
+ * budget. The search radius is bounded ({@link #RADIUS_H}/{@link #RADIUS_V}), and every step of a returned
+ * route is re-verified against the live world by {@code FakePlayerMotion.swimStepTo}/{@code stepToStandable}
+ * as it is taken (a route is dropped after repeated refused steps).
  */
 final class SwimRoute {
     enum Goal {

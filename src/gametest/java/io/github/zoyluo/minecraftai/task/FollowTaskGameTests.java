@@ -200,7 +200,7 @@ public final class FollowTaskGameTests {
         ServerLevel world = context.getLevel();
         BlockPos c = context.absolutePos(new BlockPos(8, 24, 8));
         preparePlatform(context, c, 6);
-        buildWaterStrip(world, c, -1, 2);
+        buildWaterStrip(world, c, -1, 2, true);
 
         String targetName = "FollowNearBankTargetGT";
         AIPlayerEntity targetBot = spawn(context, targetName, c.offset(3, 0, 0));
@@ -229,16 +229,25 @@ public final class FollowTaskGameTests {
     }
 
     /**
-     * The stand-off point resolves onto the FAR bank of a moat, where no walkable route exists.
-     * The failed search used to trigger the unverified straight walk into the water; now the bot
-     * may only take a straight segment whose every cell is standable, so it stays dry.
+     * The stand-off point resolves onto the FAR bank of a moat that is sealed at both ends (bedrock, no
+     * walkable, climbable or diggable way round), so there is genuinely no dry route. The failed search
+     * used to trigger the unverified straight walk into the water; now the bot may only take a straight
+     * segment whose every cell is standable, so it stays dry: it waits on its own bank, re-plans on the
+     * normal schedule and tells the player once. It is held for 800 ticks so the whole stall-recovery
+     * ladder (recovery steps, forced replans, back-off, the give-up notice) runs while it is watched, and
+     * it must never end up on the far side (a snap or teleport across the moat would be dry, too).
+     *
+     * <p>History: this fixture used to close the moat with one-block stone caps level with the floor,
+     * which is a walkable bridge along each end (a real dry route, reached and left by diagonal steps past
+     * the water's corner cells). The bot legitimately walked it -- and, when its string-pulled shortcut
+     * clipped the corner cell of the water, ended up in the moat now and then.
      */
-    @GameTest(maxTicks = 400)
+    @GameTest(maxTicks = 900)
     public void followWithNoRouteAcrossWaterStaysDryInsteadOfWalkingStraightIn(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos c = context.absolutePos(new BlockPos(8, 30, 8));
         preparePlatform(context, c, 6);
-        buildWaterStrip(world, c, -1, 0);
+        buildWaterStrip(world, c, -1, 0, true);
 
         String targetName = "FollowFarBankTargetGT";
         AIPlayerEntity targetBot = spawn(context, targetName, c.offset(3, 0, 0));
@@ -254,13 +263,117 @@ public final class FollowTaskGameTests {
         context.failIfEver(() -> {
             tick[0]++;
             requireDry(context, world, bot);
+            require(context, bot.getX() < c.getX() - 1.0D,
+                    "the bot left its own bank of a moat with no route (x=" + bot.getX() + " at tick " + tick[0] + ")");
             require(context, followTask.state() == TaskState.RUNNING,
                     "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
             require(context, followTask.directWalkCount() == 0,
                     "follow started " + followTask.directWalkCount() + " unverified straight-line walks");
-            if (tick[0] >= 300) {
+            if (tick[0] >= 800) {
+                require(context, followTask.noRouteNotices() == 1,
+                        "the player must be told there is no dry route exactly once, not "
+                                + followTask.noRouteNotices() + " times");
                 finish(context, bot, botName, targetBot, targetName);
             }
+        });
+    }
+
+    /**
+     * The unsealed fixture: the moat's end closures are one-block stone caps, a genuine dry bridge that the
+     * bot reaches and leaves by diagonal steps past the water's corner cells. The bot may take it -- it
+     * crosses the moat and ends up beside the player -- but on every tick of the way it must stay dry.
+     * Regression for a shortcut (string-pulled route segment) whose sampling stepped over the corner
+     * column of the water and cut the bot across it.
+     */
+    @GameTest(maxTicks = 600)
+    public void followTakesTheDryBridgeAroundTheMoatWithoutTouchingTheWater(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 30, 8));
+        preparePlatform(context, c, 6);
+        buildWaterStrip(world, c, -1, 0, false);
+
+        String targetName = "FollowBridgeTargetGT";
+        AIPlayerEntity targetBot = spawn(context, targetName, c.offset(3, 0, 0));
+        TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
+        String botName = "FollowBridgeGT";
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
+        FollowTask followTask = new FollowTask(targetName);
+        TaskManager.INSTANCE.assign(bot, followTask,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_dry_bridge"));
+
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            tick[0]++;
+            requireDry(context, world, bot);
+            require(context, followTask.state() == TaskState.RUNNING,
+                    "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
+            require(context, followTask.directWalkCount() == 0,
+                    "follow started " + followTask.directWalkCount() + " unverified straight-line walks");
+            if (bot.getX() > c.getX() + 0.5D && bot.distanceTo(targetBot) <= 4.0D) {
+                finish(context, bot, botName, targetBot, targetName);
+                return;
+            }
+            require(context, tick[0] < 580, "the bot never crossed the dry bridge to the player: at "
+                    + bot.blockPosition() + " distance " + bot.distanceTo(targetBot));
+        });
+    }
+
+    /**
+     * The nearest standable cell to the stand-off point is the bot's own, so it holds; once the player
+     * moves, that answer is stale and must be re-evaluated within the short re-check window rather than
+     * after the full REPATH_TICKS (40) the hold was scheduled for. The bot holds on its own bank of a
+     * sealed moat; the player then steps to a reachable spot on that bank, and the bot must set off well
+     * inside the long schedule.
+     */
+    @GameTest(maxTicks = 400)
+    public void followReevaluatesAHeldOwnCellGoalAsSoonAsThePlayerMoves(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 34, 8));
+        preparePlatform(context, c, 6);
+        buildWaterStrip(world, c, -1, 2, true);
+
+        String targetName = "FollowHoldTargetGT";
+        AIPlayerEntity targetBot = spawn(context, targetName, c.offset(3, 0, 0));
+        TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
+        String botName = "FollowHoldGT";
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
+        FollowTask followTask = new FollowTask(targetName);
+        TaskManager.INSTANCE.assign(bot, followTask,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_hold_reeval"));
+
+        // Where the player steps to: on the bot's own bank, far enough from where it holds that it must move.
+        BlockPos newSpot = c.offset(-5, 0, 4);
+        int[] holdSeenAt = {-1};
+        int[] movedAt = {-1};
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            tick[0]++;
+            requireDry(context, world, bot);
+            require(context, followTask.state() == TaskState.RUNNING,
+                    "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
+            if (movedAt[0] < 0) {
+                require(context, tick[0] < 300, "the bot never reached the hold at its own bank");
+                if (holdSeenAt[0] < 0 && followTask.holdingAtOwnCell()) {
+                    holdSeenAt[0] = tick[0];
+                }
+                // Six ticks into a fresh hold: past the re-check window (5), far inside the schedule (40).
+                if (holdSeenAt[0] >= 0 && tick[0] == holdSeenAt[0] + 6) {
+                    teleportTo(world, targetBot, newSpot);
+                    movedAt[0] = tick[0];
+                }
+                return;
+            }
+            int sinceMove = tick[0] - movedAt[0];
+            boolean reacting = !followTask.holdingAtOwnCell()
+                    && (!bot.getActionPack().isPathExecutorIdle() || !bot.getActionPack().isWalkToIdle());
+            if (reacting) {
+                finish(context, bot, botName, targetBot, targetName);
+                return;
+            }
+            require(context, sinceMove < 15,
+                    "the bot still held a stale own-cell goal " + sinceMove + " ticks after the player moved");
         });
     }
 
@@ -318,15 +431,28 @@ public final class FollowTaskGameTests {
         return wall;
     }
 
-    /** Water columns x in [fromX, toX] (relative to c), full width of the platform, capped at both ends. */
-    private static void buildWaterStrip(ServerLevel world, BlockPos c, int fromX, int toX) {
+    /**
+     * Water columns x in [fromX, toX] (relative to c), full width of the platform, closed at both ends
+     * (z = +-7) so the water cannot spill. {@code sealed} makes those end closures four-high bedrock
+     * (nothing can be walked over, stepped up onto or dug), so the water is a true moat with NO dry
+     * route around it. Unsealed, the closures are one-block stone caps level with the floor -- which is a
+     * real, walkable one-block-wide bridge along each end of the moat (reached and left by diagonal steps
+     * past the water's corner cells): that is the shape that used to be mistaken for a "no route" fixture.
+     */
+    private static void buildWaterStrip(ServerLevel world, BlockPos c, int fromX, int toX, boolean sealed) {
         for (int dx = fromX; dx <= toX; dx++) {
             for (int dz = -7; dz <= 7; dz++) {
                 BlockPos floor = c.offset(dx, -1, dz);
                 boolean cap = Math.abs(dz) == 7;
                 world.setBlock(floor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                world.setBlock(floor, cap ? Blocks.STONE.defaultBlockState() : Blocks.WATER.defaultBlockState(),
-                        Block.UPDATE_ALL);
+                if (cap && sealed) {
+                    for (int dy = 0; dy <= 3; dy++) {
+                        world.setBlock(floor.above(dy), Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
+                    }
+                } else {
+                    world.setBlock(floor, cap ? Blocks.STONE.defaultBlockState() : Blocks.WATER.defaultBlockState(),
+                            Block.UPDATE_ALL);
+                }
             }
         }
     }

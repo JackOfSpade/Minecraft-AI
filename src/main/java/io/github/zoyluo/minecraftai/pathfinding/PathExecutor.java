@@ -567,37 +567,47 @@ public final class PathExecutor {
         return lineClearForStringPull(pack.player().level(), from, target);
     }
 
-    private static boolean lineClearForStringPull(net.minecraft.server.level.ServerLevel world, BlockPos from, BlockPos target) {
-        int dx = target.getX() - from.getX();
+    /**
+     * True when the straight line from {@code from} to {@code target} (cell centre to cell centre) crosses
+     * only dry, supported, passable columns: {@link StringPullLine} enumerates every column the line's
+     * centre enters, so a shortcut can never clip the corner of a water cell or a void. (The first version
+     * sampled twice per block and could step over a corner column between two samples: the bot then walked
+     * the cut, its centre ended up over water, and a land follow that had a dry route swam.)
+     */
+    static boolean lineClearForStringPull(net.minecraft.server.level.ServerLevel world, BlockPos from, BlockPos target) {
         int dy = target.getY() - from.getY();
-        int dz = target.getZ() - from.getZ();
-        int samples = Math.max(1, Math.max(Math.abs(dx), Math.abs(dz)) * 2);
-        int previousX = from.getX();
-        int previousZ = from.getZ();
-        for (int i = 1; i <= samples; i++) {
-            double t = (double) i / samples;
-            BlockPos sample = BlockPos.containing(
-                    from.getX() + 0.5D + dx * t,
-                    from.getY() + dy * t,
-                    from.getZ() + 0.5D + dz * t);
-            if (!passableColumn(world, sample)) {
+        java.util.List<StringPullLine.Cell> cells = StringPullLine.cells(
+                from.getX(), from.getZ(), target.getX(), target.getZ());
+        int previousY = from.getY();
+        for (StringPullLine.Cell cell : cells) {
+            boolean last = cell.x() == target.getX() && cell.z() == target.getZ();
+            int y = last ? target.getY() : (int) Math.floor(from.getY() + dy * cell.fraction());
+            BlockPos sample = new BlockPos(cell.x(), y, cell.z());
+            if (!passableColumn(world, sample) || !dryColumn(world, sample)) {
                 return false;
             }
-            if (!hasSupport(world, sample) && !sample.equals(from)) {
+            if (!hasSupport(world, sample)) {
                 return false;
             }
-            // A line that crosses from one column into a diagonal one clips the corner of the two
-            // columns it passes between; the 0.6-wide body then presses against that block (the
-            // NeighborEnumerator diagonal rule already refuses such corners, string-pulling must too).
-            if (sample.getX() != previousX && sample.getZ() != previousZ
-                    && (!passableColumn(world, new BlockPos(sample.getX(), sample.getY(), previousZ))
-                    || !passableColumn(world, new BlockPos(previousX, sample.getY(), sample.getZ())))) {
-                return false;
+            // A line that enters a column through an exact corner brushes both neighbouring columns
+            // (the NeighborEnumerator diagonal rule already refuses walls there); the 0.6-wide body
+            // must not press against a block or hang over a fluid either.
+            if (cell.corner()) {
+                int[] side = cell.sideXz();
+                BlockPos a = new BlockPos(side[0], previousY, side[1]);
+                BlockPos b = new BlockPos(side[2], previousY, side[3]);
+                if (!passableColumn(world, a) || !passableColumn(world, b)) {
+                    return false;
+                }
             }
-            previousX = sample.getX();
-            previousZ = sample.getZ();
+            previousY = y;
         }
         return Standability.isStandable(world, target);
+    }
+
+    /** No fluid at the feet or head cell: a shallow-water column over a solid bed is still not walkable. */
+    private static boolean dryColumn(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
+        return world.getFluidState(feet).isEmpty() && world.getFluidState(feet.above()).isEmpty();
     }
 
     private static boolean passableColumn(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
