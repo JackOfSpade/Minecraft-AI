@@ -24,8 +24,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -332,10 +330,7 @@ public final class BoatFollowGameTests {
         BlockState water = Blocks.WATER.defaultBlockState();
         // The gametest box is one chunk-sized structure; the lake is wider than that and boats
         // only tick (and only float/drive) in entity-ticking chunks, so force-load the whole area.
-        forceLakeChunks(world, feet, true);
-        // Released when the test ends (pass, fail or timeout) so a finished test never leaves its
-        // chunks force-loaded for the rest of the batch.
-        GameTestCleanup.whenFinished(context, () -> forceLakeChunks(world, feet, false));
+        forceLakeChunks(world, feet);
         // Leftover boats from earlier tests in the same server would be offered as "empty boats".
         world.getEntitiesOfClass(AbstractBoat.class,
                 net.minecraft.world.phys.AABB.encapsulatingFullBlocks(feet.offset(-30, -10, -30), feet.offset(LAKE_MAX_X + 30, 10, MAX_Z + 30)),
@@ -369,33 +364,19 @@ public final class BoatFollowGameTests {
         return feet;
     }
 
-    /** Reference counts per forced chunk, so overlapping fixtures never unforce each other's chunks. */
-    private static final Map<Long, Integer> FORCED_CHUNK_REFS = new HashMap<>();
     /**
-     * Chunks this fixture itself switched to force-loaded. The GameTest runner force-loads the chunks under every
-     * test structure too (TestInstanceBlockEntity), and that flag is shared: unforcing a chunk the runner forced
-     * lets it unload under the NEXT test, which then waits forever for its structure chunks to be entity-loaded
-     * (its tick counter never starts, so it does not even time out). Only chunks we forced are ever released.
+     * Force-loads every chunk under the lake so the boats keep ticking (boats only tick and float in
+     * entity-ticking chunks). The chunks are deliberately never released: ChunkForcing is a plain flag shared with
+     * the GameTest runner, which force-loads each test structure's chunks too and starts the NEXT batch from its own
+     * completion listener, before ours runs. Unforcing a lake chunk in our completion cleanup therefore removed the
+     * flag the next test's structure had just been given (the runner's setChunkForced(true) saw it already set), the
+     * chunk unloaded, and that test then waited forever for its structure chunks to be entity-loaded: its tick
+     * counter never starts, so it does not even time out and the server ticks on at full speed.
      */
-    private static final java.util.Set<Long> OWNED_FORCED_CHUNKS = new java.util.HashSet<>();
-
-    private static void forceLakeChunks(ServerLevel world, BlockPos feet, boolean forced) {
+    private static void forceLakeChunks(ServerLevel world, BlockPos feet) {
         for (int cx = (feet.getX() - 1) >> 4; cx <= (feet.getX() + LAKE_MAX_X + 1) >> 4; cx++) {
             for (int cz = (feet.getZ() - 1) >> 4; cz <= (feet.getZ() + MAX_Z + 1) >> 4; cz++) {
-                long key = net.minecraft.world.level.ChunkPos.asLong(cx, cz);
-                int refs = FORCED_CHUNK_REFS.getOrDefault(key, 0) + (forced ? 1 : -1);
-                if (refs > 0) {
-                    FORCED_CHUNK_REFS.put(key, refs);
-                } else {
-                    FORCED_CHUNK_REFS.remove(key);
-                }
-                if (forced && refs == 1) {
-                    if (world.setChunkForced(cx, cz, true)) {
-                        OWNED_FORCED_CHUNKS.add(key);
-                    }
-                } else if (!forced && refs <= 0 && OWNED_FORCED_CHUNKS.remove(key)) {
-                    world.setChunkForced(cx, cz, false);
-                }
+                world.setChunkForced(cx, cz, true);
             }
         }
     }
