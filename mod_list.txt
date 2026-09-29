@@ -225,6 +225,7 @@ INVENTORY / UI / QOL
 | YetAnotherConfigLib (YACL) | 3.8.2+1.21.11-fabric  | 2026-09-27 |
 | Stackable Potions  | 1.0.0+1.21.11-fabric           | 2026-09-28 |
 | Stackable          | 2.0.5 (fabric-1.21.11)         | 2026-09-28 |
+| Endless Inventory  | 1.1.3.3 (fabric, "Endless Inventory-fabric-1.21.11-1.1.3.3.jar") | 2026-09-29 |
 
 Stackable Potions (by CursedFlames) makes potions of every type stack to 16.
 Requires only Fabric API (already installed). Added 2026-09-28.
@@ -235,6 +236,19 @@ stack limits (configurable, up to 2.147B on this version range); it does not
 touch potions itself, complementary to Stackable Potions above rather than
 overlapping with it. Requires only Fabric API (already installed).
 Added 2026-09-28. https://modrinth.com/mod/stackable127
+
+Endless Inventory (by Kay_Zhang/kwwsyk, https://modrinth.com/mod/endless-inventory,
+MIT) replaces Infinite Inventory (below): an infinite, paginated extra inventory
+opened with `I` (or attached beside container screens), with search, sorting,
+bookmarks and an optional inner crafting grid. Needed on client and server; its
+Fabric build is made for exactly 1.21.11 and only needs Fabric API (Cloth Config
+optional, already installed). Config: config/endless_inventory-server.toml and
+-client.toml. Its "auto pick up into the endless inventory" feature (block drops,
+item pickups, XP) is allowed server-side by default but OFF per player until that
+player enables it in their own client settings; the Minecraft-AI bots have no client
+and keep it off, so their mining/gathering drop handling is unaffected. Do not force
+autopick on for all players. All its mixins are non-exclusive @Inject hooks.
+Added 2026-09-29.
 
 Infinite Inventory (by robsterad, https://modrinth.com/mod/infinite-inventory-mod,
 2.0.0) was added and REMOVED on 2026-09-29: it crashes the client on launch on 1.21.11.
