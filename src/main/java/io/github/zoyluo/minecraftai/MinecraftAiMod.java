@@ -92,7 +92,8 @@ public class MinecraftAiMod implements ModInitializer {
             BotEdits.snapshotIfDue(server.getTickCount(), assistSidecar);
             // One-shot idle-moment build a few seconds after start (lazy build stays the fallback).
             io.github.zoyluo.minecraftai.loot.RuntimeDropIndex.tickWarmup(server,
-                    () -> io.github.zoyluo.minecraftai.task.TaskManager.INSTANCE.activeCount() == 0);
+                    () -> io.github.zoyluo.minecraftai.task.TaskManager.INSTANCE.activeCount() == 0,
+                    () -> !io.github.zoyluo.minecraftai.observe.TpsGuard.INSTANCE.degraded(server));
             // Keep last: feeds this tick's measured work to the mining assist's TickHeadroom.
             MiningAssistRuntime.endTick(server.getTickCount());
         });

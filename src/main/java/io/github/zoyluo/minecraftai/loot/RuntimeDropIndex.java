@@ -66,6 +66,8 @@ public final class RuntimeDropIndex {
     // Only ever touched on the server thread (arm from SERVER_STARTED, tickWarmup from the tick hook).
     // > 0: counting down; 0: delay elapsed, waiting for an idle moment; -1: no warm-up pending.
     private static int warmupTicksLeft = -1;
+    // Ticks spent waiting for an idle moment since the delay elapsed (bounded by DropIndexWarmupSchedule).
+    private static int warmupWaitedTicks;
 
     /**
      * Registers the server without building: the build costs 200-350 ms (build_ms in
@@ -80,16 +82,21 @@ public final class RuntimeDropIndex {
         armedServer = server;
         ready = false;
         warmupTicksLeft = WARMUP_DELAY_TICKS;
+        warmupWaitedTicks = 0;
     }
 
     /**
      * Server-thread tick hook: counts down from {@link #arm}, then builds the index once at the first
      * moment {@code idle} says no bot task is running (a 200-650 ms build inside a running task is a
      * visible hitch and skews any timing-sensitive work); no-op if a first query already built it
-     * lazily. Cheap when nothing is pending. If the server is never idle the lazy first-use build
-     * remains the fallback.
+     * lazily. Cheap when nothing is pending. The wait for an idle moment is bounded (see
+     * {@link DropIndexWarmupSchedule}): a bot that always holds a task (e.g. follows a player all
+     * session) would never let the server be idle, so after {@link DropIndexWarmupSchedule#MAX_IDLE_WAIT_TICKS}
+     * the build is forced at the first tick {@code lowLoad} holds. If even that never happens the lazy
+     * first-use build remains the fallback.
      */
-    public static void tickWarmup(MinecraftServer server, java.util.function.BooleanSupplier idle) {
+    public static void tickWarmup(MinecraftServer server, java.util.function.BooleanSupplier idle,
+                                  java.util.function.BooleanSupplier lowLoad) {
         if (warmupTicksLeft < 0) {
             return;
         }
@@ -101,7 +108,11 @@ public final class RuntimeDropIndex {
             warmupTicksLeft--;
             return;
         }
-        if (!idle.getAsBoolean()) {
+        boolean idleNow = idle.getAsBoolean();
+        if (!DropIndexWarmupSchedule.buildNow(idleNow, !idleNow && lowLoad.getAsBoolean(), warmupWaitedTicks)) {
+            if (warmupWaitedTicks < Integer.MAX_VALUE) {
+                warmupWaitedTicks++;
+            }
             return;
         }
         warmupTicksLeft = -1;
@@ -162,6 +173,7 @@ public final class RuntimeDropIndex {
         ready = false;
         armedServer = null;
         warmupTicksLeft = -1;
+        warmupWaitedTicks = 0;
     }
 
     /**
