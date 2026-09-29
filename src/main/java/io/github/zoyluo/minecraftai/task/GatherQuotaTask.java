@@ -136,6 +136,9 @@ public final class GatherQuotaTask extends AbstractTask {
     // earmarked for that craft and do not count toward the player's quota.
     private boolean bootstrapActive;
     private int bootstrapExcluded;
+    // True from the moment a bare-hand bootstrap break of a LOG is started until it is recorded: only then is a
+    // pickup wait owed (a non-log block broken while the bootstrap is still active drops nothing the craft needs).
+    private boolean handLogBreakInFlight;
     // break_blocks only: the bootstrap logs are broken by hand and must still be collected to craft the axe.
     private int bootstrapPickupTicks;
     private static final int BOOTSTRAP_PICKUP_TICKS = 100;
@@ -1236,7 +1239,7 @@ public final class GatherQuotaTask extends AbstractTask {
         resetSurveyWatchdog();
         if (countSoFar >= targetCount) {
             phase = Phase.DONE;
-        } else if (bootstrapActive) {
+        } else if (bootstrapActive && handLogBreakInFlight) {
             // Log bootstrap by hand: exact-break mode has no PICKUP phase (drops normally do not
             // matter), but the axe is crafted from these very logs -- without collecting them
             // GatherToolPolicy.bootstrapLogsByHand would never reach zero and every remaining log
@@ -1509,6 +1512,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // tier before mining; if it can't be crafted either, the whole task stops instead of falling
     // back to a sub-optimal tool.
     private void startHarvest(AIPlayerEntity bot) {
+        handLogBreakInFlight = false;
         var targetState = bot.getEntityWorld().getBlockState(targetPos);
         GatherToolPolicy.Category category = GatherToolPolicy.categoryFor(targetState);
         if (category != GatherToolPolicy.Category.NONE && !GatherToolPolicy.hasTool(bot, category)) {
@@ -1526,6 +1530,7 @@ public final class GatherQuotaTask extends AbstractTask {
                                 "logs_by_hand", byHand,
                                 "pos", targetPos.toShortString());
                     }
+                    handLogBreakInFlight = true;
                     doStartHarvest(bot);
                     return;
                 }
@@ -1545,7 +1550,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // An axe (or equivalent) arrived by another route mid-bootstrap (picked up, given,
             // crafted elsewhere): the earmarked hand-broken logs are no longer reserved for a
             // craft, so stop discounting them or absolute-quota progress is under-reported.
-            bootstrapActive = false;
+            endBootstrap(bot);
         }
         doStartHarvest(bot);
     }
@@ -1571,7 +1576,7 @@ public final class GatherQuotaTask extends AbstractTask {
      */
     private void ensureTool(AIPlayerEntity bot) {
         if (GatherToolPolicy.hasTool(bot, pendingToolCategory)) {
-            bootstrapActive = false;
+            endBootstrap(bot);
             pendingToolCategory = null;
             toolCraftTask = null;
             lastToolCraftFailure = null;
@@ -1625,11 +1630,32 @@ public final class GatherQuotaTask extends AbstractTask {
             countSoFar = Math.max(0, accepted - (bootstrapActive ? bootstrapExcluded : 0));
             return;
         }
-        int inventoryDelta = Math.max(0, accepted - acceptedInventoryAtStart);
-        long pickupDelta = Math.max(0L, pickedUpAccepted(bot) - pickedUpAtStart);
-        int observedNewItems = Math.max(0, Math.max(inventoryDelta,
-                pickupDelta >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) pickupDelta) - bootstrapExcluded);
+        int observedNewItems = Math.max(0, rawNewItems(bot) - bootstrapExcluded);
         countSoFar = Math.max(countSoFar, observedNewItems);
+    }
+
+    /** Accepted items this task has received so far (monotonic: max of inventory delta and picked-up stat delta). */
+    private int rawNewItems(AIPlayerEntity bot) {
+        int inventoryDelta = Math.max(0, countAccepted(bot) - acceptedInventoryAtStart);
+        long pickupDelta = Math.max(0L, pickedUpAccepted(bot) - pickedUpAtStart);
+        return Math.max(inventoryDelta, pickupDelta >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) pickupDelta);
+    }
+
+    /**
+     * Ends the log bootstrap. The hand-broken logs earmarked for the axe craft stop being discounted in an
+     * absolute quota (they are consumed or counted like any other log). In a new-items quota only logs
+     * that really arrived while bootstrapping stay excluded: when an axe shows up mid-bootstrap (given, picked
+     * up, crafted elsewhere) fewer logs than the planned minimum were collected, and subtracting the planned
+     * number would under-report every later log; the crafted-axe path collected them all, so nothing changes.
+     */
+    private void endBootstrap(AIPlayerEntity bot) {
+        if (countNewItems) {
+            bootstrapExcluded = Math.min(bootstrapExcluded, rawNewItems(bot));
+        } else {
+            bootstrapExcluded = 0;
+        }
+        bootstrapActive = false;
+        handLogBreakInFlight = false;
     }
 
     private long pickedUpAccepted(AIPlayerEntity bot) {

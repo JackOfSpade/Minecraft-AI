@@ -259,6 +259,30 @@ public final class GatherToolPolicyGameTests {
         }, 5);
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_axe_arriving_mid_bootstrap_does_not_under_report_a_new_items_quota", maxTicks = 2000)
+    public void axeArrivingMidBootstrapDoesNotUnderReportANewItemsQuota(TestContext context) {
+        // The bootstrap plans to discount 3 hand-broken logs from a "gather 6 NEW logs" quota. If an
+        // axe arrives by another route after only the first hand break, just that one log was
+        // collected; discounting the planned 3 would under-report and make the bot break 2 logs too
+        // many. Exactly 6 logs must then be broken with the axe.
+        Fixture fixture = fixture(context, "BootstrapAxeArrivesGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 6);
+        boolean[] axeGiven = {false};
+        runLogBootstrap(context, fixture, task, (hand, axe) -> {
+            require(context, hand == 1, "the axe was handed over after the first hand break, hand breaks=" + hand);
+            require(context, axe == 6,
+                    "a quota of 6 new logs must be met by exactly 6 axe breaks after the one bootstrap log, axe breaks=" + axe);
+            require(context, InventoryAction.countItem(bot, Items.OAK_LOG) >= 6,
+                    "expected at least 6 logs in the inventory, had " + InventoryAction.countItem(bot, Items.OAK_LOG));
+        }, Integer.MAX_VALUE, counts -> {
+            if (!axeGiven[0] && counts[0] >= 1) {
+                axeGiven[0] = true;
+                InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
+            }
+        }, false);
+    }
+
     /** Sanity ceiling for hand breaks in a gather bootstrap (minimum is 3; slack for pickup misses). */
     private static final int HAND_BREAK_SLACK = 6;
 
@@ -273,6 +297,15 @@ public final class GatherToolPolicyGameTests {
     private static void runLogBootstrap(TestContext context, Fixture fixture, GatherQuotaTask task,
                                         java.util.function.BiConsumer<Integer, Integer> onComplete,
                                         int maxTotalBroken) {
+        runLogBootstrap(context, fixture, task, onComplete, maxTotalBroken, null, true);
+    }
+
+    /** As above; {@code afterTick} (nullable) sees {handBreaks, axeBreaks} at the end of every tick. */
+    private static void runLogBootstrap(TestContext context, Fixture fixture, GatherQuotaTask task,
+                                        java.util.function.BiConsumer<Integer, Integer> onComplete,
+                                        int maxTotalBroken,
+                                        java.util.function.Consumer<int[]> afterTick,
+                                        boolean expectEnsureTool) {
         AIPlayerEntity bot = fixture.bot();
         java.util.List<BlockPos> treeCells = new java.util.ArrayList<>();
         for (int dx = 3; dx <= 4; dx++) {
@@ -321,6 +354,9 @@ public final class GatherToolPolicyGameTests {
             }
             previousRemaining[0] = remaining;
             axeCarriedBefore[0] = InventoryAction.countItem(bot, Items.WOODEN_AXE) > 0;
+            if (afterTick != null) {
+                afterTick.accept(new int[] {handBreaks[0], axeBreaks[0]});
+            }
             require(context, handBreaks[0] <= HAND_BREAK_SLACK,
                     "implausibly many logs broken by hand: " + handBreaks[0]);
             require(context, handBreaks[0] + axeBreaks[0] <= maxTotalBroken,
@@ -331,7 +367,7 @@ public final class GatherToolPolicyGameTests {
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, sawEnsureTool.get() || carriesTable,
+            require(context, !expectEnsureTool || sawEnsureTool.get() || carriesTable,
                     "task never detoured through the axe-crafting phase");
             onComplete.accept(handBreaks[0], axeBreaks[0]);
             finish(context, fixture);
