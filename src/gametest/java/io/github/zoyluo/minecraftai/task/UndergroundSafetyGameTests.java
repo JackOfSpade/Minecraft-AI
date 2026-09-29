@@ -30,6 +30,12 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.text.Text;
 
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.finish;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.preparePlatform;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterShell;
+
 /** Deterministic regressions for the bounded underground safety contracts. */
 public final class UndergroundSafetyGameTests {
     @GameTest(maxTicks = 20)
@@ -1164,22 +1170,6 @@ public final class UndergroundSafetyGameTests {
         });
     }
 
-    private static List<BlockPos> shelterShell(BlockPos feet) {
-        List<BlockPos> shell = new ArrayList<>(9);
-        shell.add(feet.up(2));
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            shell.add(feet.offset(direction));
-            shell.add(feet.up().offset(direction));
-        }
-        return List.copyOf(shell);
-    }
-
-    private static boolean isSealed(TestContext context, BlockPos pos) {
-        var state = context.getWorld().getBlockState(pos);
-        return !state.isReplaceable()
-                && !state.getCollisionShape(context.getWorld(), pos).isEmpty();
-    }
-
     private static void assertPhysicalShelterExit(TestContext context,
                                                   AIPlayerEntity bot,
                                                   BlockPos shelterFeet) {
@@ -1194,19 +1184,6 @@ public final class UndergroundSafetyGameTests {
         require(context, context.getWorld().getBlockState(actual).isAir()
                         && context.getWorld().getBlockState(actual.up()).isAir(),
                 "shelter terminal exit did not leave a two-block opening");
-    }
-
-    private static void preparePlatform(TestContext context, BlockPos feet, int radius) {
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                context.getWorld().setBlockState(cell.down(),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            }
-        }
     }
 
     private static void clearVolume(TestContext context, BlockPos center, int radius) {
@@ -1230,16 +1207,4 @@ public final class UndergroundSafetyGameTests {
         return bot;
     }
 
-    private static void finish(TestContext context, AIPlayerEntity bot, String name) {
-        TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        DangerWatcher.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
-    }
-
-    private static void require(TestContext context, boolean condition, String message) {
-        if (!condition) {
-            context.throwGameTestException(Text.of(message));
-        }
-    }
 }

@@ -20,7 +20,6 @@ import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
@@ -28,6 +27,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.text.Text;
+
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.preparePlatform;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.runLocked;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterShell;
 
 /**
  * Live regressions for emergency-only wood material and safety-task replacement boundaries.
@@ -51,20 +56,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         "gametest_shelter_mixed_wood_fallback"));
 
         int[] holdStartedElapsed = {-1};
-        boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.runAtEveryTick(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
-            
+        runLocked(context, () -> {
             context.getWorld().setTimeOfDay(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 context.throwGameTestException(Text.of("mixed-wood shelter ended as "
@@ -314,20 +306,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
         HoldingTask[] safetyHolder = {null};
         long[] holderAssignedTick = {-1L};
-        boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.runAtEveryTick(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
-            
+        runLocked(context, () -> {
             context.getWorld().setTimeOfDay(1000L);
             require(context, bot.isAlive() && bot.getBlockPos().equals(feet),
                     "trapped fight-back fixture moved or died before replacement");
@@ -420,20 +399,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 "first Creeper defense did not preserve exactly one mission frame");
 
         long started = context.getTick();
-        boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
-            if (timeLockAcquired[0]) {
-                io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
-            }
-        });
-        context.runAtEveryTick(() -> {
-            if (!timeLockAcquired[0]) {
-                if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
-                    return;
-                }
-                timeLockAcquired[0] = true;
-            }
-            
+        runLocked(context, () -> {
             context.getWorld().setTimeOfDay(1000L);
             bot.setHealth(4.7F);
             bot.getHungerManager().setFoodLevel(17);
@@ -471,28 +437,12 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         return List.copyOf(result);
     }
 
-    private static List<BlockPos> shelterShell(BlockPos feet) {
-        List<BlockPos> result = new ArrayList<>(9);
-        result.add(feet.up(2));
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            result.add(feet.offset(direction));
-            result.add(feet.up().offset(direction));
-        }
-        return List.copyOf(result);
-    }
-
     private static long countBlock(TestContext context,
                                    List<BlockPos> positions,
                                    Block block) {
         return positions.stream()
                 .filter(pos -> context.getWorld().getBlockState(pos).isOf(block))
                 .count();
-    }
-
-    private static boolean isSealed(TestContext context, BlockPos pos) {
-        var state = context.getWorld().getBlockState(pos);
-        return !state.isReplaceable()
-                && !state.getCollisionShape(context.getWorld(), pos).isEmpty();
     }
 
     private static void assertOwnedNorthExit(TestContext context,
@@ -508,22 +458,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         require(context, context.getWorld().getBlockState(exit).isAir()
                         && context.getWorld().getBlockState(exit.up()).isAir(),
                 "shelter completed without reopening its owned two-block north doorway");
-    }
-
-    private static void preparePlatform(TestContext context, BlockPos feet, int radius) {
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                context.getWorld().setBlockState(
-                        cell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        cell.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            }
-        }
     }
 
     private static void prepareEscapeCorridor(TestContext context, BlockPos feet) {
@@ -632,12 +566,6 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
         context.complete();
-    }
-
-    private static void require(TestContext context, boolean condition, String message) {
-        if (!condition) {
-            context.throwGameTestException(Text.of(message));
-        }
     }
 
     private static final class HoldingTask extends AbstractTask {

@@ -3,23 +3,26 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.test.TestContext;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.text.Text;
+
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.assertPhysicalExit;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.finish;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.preparePlatform;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.runLocked;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterShell;
 
 /**
  * Live regressions for the no-food rescue lifecycle inside a sealed recovery shelter: the
@@ -301,54 +304,6 @@ public final class EmergencyShelterRescueGameTests {
         });
     }
 
-    private static List<BlockPos> shelterShell(BlockPos feet) {
-        List<BlockPos> shell = new ArrayList<>(9);
-        shell.add(feet.up(2));
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            shell.add(feet.offset(direction));
-            shell.add(feet.up().offset(direction));
-        }
-        return List.copyOf(shell);
-    }
-
-    private static boolean isSealed(TestContext context, BlockPos pos) {
-        var state = context.getWorld().getBlockState(pos);
-        return !state.isReplaceable()
-                && !state.getCollisionShape(context.getWorld(), pos).isEmpty();
-    }
-
-    private static void assertPhysicalExit(TestContext context,
-                                           AIPlayerEntity bot,
-                                           BlockPos shelterFeet) {
-        BlockPos actual = bot.getBlockPos();
-        int horizontal = Math.abs(actual.getX() - shelterFeet.getX())
-                + Math.abs(actual.getZ() - shelterFeet.getZ());
-        require(context, actual.getY() == shelterFeet.getY() && horizontal == 1,
-                "terminal pose was not one adjacent exit step: "
-                        + shelterFeet.toShortString() + " -> " + actual.toShortString());
-        require(context, Standability.isStandable(context.getWorld(), actual),
-                "terminal exit was not standable: " + actual.toShortString());
-        require(context, context.getWorld().getBlockState(actual).isAir()
-                        && context.getWorld().getBlockState(actual.up()).isAir(),
-                "terminal exit did not leave a two-block opening");
-    }
-
-    private static void preparePlatform(TestContext context, BlockPos feet, int radius) {
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                context.getWorld().setBlockState(cell.down(),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell,
-                        Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell.up(),
-                        Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell.up(2),
-                        Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            }
-        }
-    }
-
     private static AIPlayerEntity spawn(TestContext context, String name, BlockPos feet) {
         context.getWorld().setTimeOfDay(1000L);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -363,16 +318,4 @@ public final class EmergencyShelterRescueGameTests {
         return bot;
     }
 
-    private static void finish(TestContext context, AIPlayerEntity bot, String name) {
-        TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        DangerWatcher.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
-    }
-
-    private static void require(TestContext context, boolean condition, String message) {
-        if (!condition) {
-            context.throwGameTestException(Text.of(message));
-        }
-    }
 }
