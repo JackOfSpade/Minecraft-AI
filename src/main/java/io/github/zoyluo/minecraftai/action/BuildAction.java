@@ -13,6 +13,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.block.ShapeContext;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -239,6 +240,7 @@ public final class BuildAction {
                     ? rotateAndRaycast(player, target, sampleRange)
                     : rayTo(player, eye, target, sampleRange);
             if (hit == null
+                    || hit.getType() != HitResult.Type.BLOCK
                     || hit.getBlockPos() == null
                     || !hit.getBlockPos().equals(against)
                     || hit.getSide() != face) {

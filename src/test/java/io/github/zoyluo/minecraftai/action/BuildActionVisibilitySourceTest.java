@@ -103,8 +103,10 @@ class BuildActionVisibilitySourceTest {
 
         assertFalse(body.contains("LookAction.lookAt"),
                 "the pure probe ray must never rotate the player");
-        assertFalse(body.contains(".setYaw") && body.contains(".setPitch"),
-                "the pure probe ray must never write yaw/pitch directly either");
+        assertFalse(body.contains(".setYaw"),
+                "the pure probe ray must never write yaw directly either");
+        assertFalse(body.contains(".setPitch"),
+                "the pure probe ray must never write pitch directly either");
         assertFalse(body.contains("player.raycast("),
                 "the pure probe ray must build its own RaycastContext, not vanilla's look-direction raycast");
         assertTrue(body.contains("new RaycastContext("),

@@ -203,6 +203,54 @@ public final class BuildActionEdgeVisibilityGameTests {
         cleanup(context, bot, "BuildOrdinary");
     }
 
+    @GameTest(environment = "minecraftai-gametest:build_action_edge_visibility_game_tests_can_accept_placement_at_never_turns_the_bots_head", maxTicks = 40)
+    public void canAcceptPlacementAtNeverTurnsTheBotsHead(TestContext context) {
+        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+        clear(context, feet);
+        context.getWorld().setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos supported = feet.north();
+        context.getWorld().setBlockState(
+                supported.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        // Far cell with no support face at all: the probe must reject it without turning either.
+        BlockPos unsupported = feet.east(3).up(2);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    context.getWorld().setBlockState(unsupported.add(dx, dy, dz),
+                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                }
+            }
+        }
+        AIPlayerEntity bot = spawn(context, "BuildProbeNoTurn", feet, Vec3d.ofBottomCenter(feet));
+        equipTwoCobblestone(bot);
+        // Deliberately not facing either candidate, so any look-at would show up as a change.
+        bot.setYaw(133.0F);
+        bot.setPitch(-27.0F);
+        bot.setHeadYaw(133.0F);
+        bot.setBodyYaw(133.0F);
+        float yaw = bot.getYaw();
+        float pitch = bot.getPitch();
+        float headYaw = bot.getHeadYaw();
+        float bodyYaw = bot.getBodyYaw();
+
+        boolean acceptsSupported = BuildAction.canAcceptPlacementAt(bot, supported);
+        boolean acceptsUnsupported = BuildAction.canAcceptPlacementAt(bot, unsupported);
+
+        require(context, acceptsSupported, "the probe should accept an ordinary supported cell");
+        StringBuilder dbg = new StringBuilder(); for (Direction d : Direction.values()) { dbg.append(d).append("=").append(context.getWorld().getBlockState(unsupported.offset(d)).getBlock()).append(" "); }
+        require(context, !acceptsUnsupported, "the probe should reject a cell with no support face: pos=" + unsupported.toShortString() + " eye=" + bot.getEyePos() + " " + dbg);
+        require(context, bot.getYaw() == yaw && bot.getPitch() == pitch,
+                "canAcceptPlacementAt turned the bot's head: yaw " + yaw + "->" + bot.getYaw()
+                        + " pitch " + pitch + "->" + bot.getPitch());
+        require(context, bot.getHeadYaw() == headYaw && bot.getBodyYaw() == bodyYaw,
+                "canAcceptPlacementAt turned the bot's head/body yaw");
+        require(context, context.getWorld().getBlockState(supported).isAir()
+                        && context.getWorld().getBlockState(unsupported).isAir(),
+                "canAcceptPlacementAt must not mutate the world");
+        cleanup(context, bot, "BuildProbeNoTurn");
+    }
+
+
     private static void assertFluidOnlyInsetObservable(TestContext context,
                                                        String name,
                                                        Block fluid) {
