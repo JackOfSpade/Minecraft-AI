@@ -646,33 +646,45 @@ public final class FarmSurvivalGameTests {
     /**
      * A drop lying across a lava-bottomed pit is never walked at: the straight walk-over has no route planning, and
      * the cell under the bot's feet at the pit's edge is plain air, so only a scan of the whole fall column (down to
-     * the floor it would land on) sees the lava. The same drop on the bot's own side is still a safe corridor.
+     * the floor it would land on) sees the lava. The same drop on the bot's own side is still a safe corridor. (The drops
+     * are gold nuggets: nothing else in this class drops them, so a neighbouring test's leftover wheat in the shared,
+     * overlapping GameTest grid can never be the drop the walk-over goes for.)
      */
     @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_walk_over_drop_across_a_lava_pit_is_skipped", maxTicks = 200)
     public void walkOverDropAcrossALavaPitIsSkipped(GameTestHelper context) {
         var world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(14, 4, 14));
-        forceChunks(context, feet, 12);
-        prepareGround(world, feet, 12);
+        forceChunks(context, feet, 8);
+        prepareGround(world, feet, 7);
         // A two-wide pit east of the bot, lava at its bottom (one layer under the surface), stone below that.
-        for (int dz = -12; dz <= 12; dz++) {
+        for (int dz = -7; dz <= 7; dz++) {
             for (int dx = 2; dx <= 3; dx++) {
                 world.setBlock(feet.offset(dx, -3, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 world.setBlock(feet.offset(dx, -2, dz), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
                 world.setBlock(feet.offset(dx, -1, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
+        // The fixture area overlaps its neighbours in the shared GameTest grid: put the pit back to plain stone when
+        // this test is over, so a lava trench never waits for the next test's cows, items or bots.
+        GameTestCleanup.whenFinished(context, () -> {
+            for (int dz = -7; dz <= 7; dz++) {
+                for (int dx = 2; dx <= 3; dx++) {
+                    world.setBlock(feet.offset(dx, -2, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                    world.setBlock(feet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        });
         AIPlayerEntity bot = spawnBot(context, "FarmLavaGapGT", feet);
         requireStrict(context, bot);
         BlockPos farSide = feet.offset(6, 0, 0);
         BlockPos nearSide = feet.offset(-3, 0, 0);
         ItemEntity across = new ItemEntity(world, farSide.getX() + 0.5D, farSide.getY() + 0.1D, farSide.getZ() + 0.5D,
-                new ItemStack(Items.WHEAT, 3));
+                new ItemStack(Items.GOLD_NUGGET, 3));
         across.setDeltaMovement(Vec3.ZERO);
         world.addFreshEntity(across);
         GameTestCleanup.whenFinished(context, across::discard);
         ItemEntity near = new ItemEntity(world, nearSide.getX() + 0.5D, nearSide.getY() + 0.1D, nearSide.getZ() + 0.5D,
-                new ItemStack(Items.WHEAT, 3));
+                new ItemStack(Items.GOLD_NUGGET, 3));
         near.setDeltaMovement(Vec3.ZERO);
         world.addFreshEntity(near);
         GameTestCleanup.whenFinished(context, near::discard);
@@ -689,7 +701,7 @@ public final class FarmSurvivalGameTests {
                         "the drop across the lava pit was accepted as a safe corridor");
                 near.discard(); // only the far drop is left for the walk-over below
             }
-            HarvestCore.walkOverDrops(bot, Set.of(Items.WHEAT), 12.0D);
+            HarvestCore.walkOverDrops(bot, Set.of(Items.GOLD_NUGGET), 12.0D);
             require(context, bot.isAlive() && !bot.isInLava() && bot.getX() < startX + 1.5D,
                     "the bot walked toward the drop across the lava pit: x=" + bot.getX() + " start=" + startX
                             + " inLava=" + bot.isInLava());
