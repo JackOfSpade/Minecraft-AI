@@ -83,6 +83,12 @@ What to look for:
 Caveats: the check runs on a Terralith/Tectonic/Streams Reflowing world generator, but the fixtures build their own blocks, so terrain does
 not matter. A run takes 1 to 3 minutes longer than a plain one because Loader remaps about 30 mods.
 
+## Baritone GameTests: what to run how
+
+- Run the Baritone classes one class glob at a time (`baritone_navigation_game_tests_*`, `baritone_survival_game_tests_*`, `baritone_engine_*`, ...), not as one `baritone_*` glob: the default-batch arenas of different classes were laid out separately and can overlap in one big batch (a survival course then sees the blocks of an engine arena).
+- `baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes` proves that the legacy engine loads no Baritone class. Loaded classes cannot be unloaded, so the proof only exists in a fresh JVM: run it alone (`bash gt_filter.sh <repo> <out> baritone_engine_water_game_tests_legacy_engine_loads_no_baritone_classes`). Selected that way (its own name as the filter, no glob) it FAILS when Baritone was already loaded (inconclusive is a failure there); inside a class glob or the whole suite an earlier test may have used Baritone, the load check is skipped and the result line `gametest_legacy_lazy conclusive=false` says so.
+- The tests of `BaritoneEngineTunnelGameTests` (digging a staircase and a diagonal tunnel in natural stone under strict observability with zero refusals, the refusal cap, route replacement, a refused swim route) and the fail-after-live test each have their own environment (batch), so they run one after the other and never overlap other arenas.
+
 ## Single Isolated Evidence Run
 
 Minimal command:

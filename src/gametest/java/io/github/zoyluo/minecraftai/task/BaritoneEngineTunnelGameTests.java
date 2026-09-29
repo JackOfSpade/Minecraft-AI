@@ -34,7 +34,7 @@ public final class BaritoneEngineTunnelGameTests {
      * A solid mass of natural stone (x 0..6, the whole width, up to the ceiling) with a two-cell pocket at height three behind it:
      * the only way to the goal is a staircase up through the stone, and every cell of it is dug from inside the stair as it grows.
      */
-    @GameTest(maxTicks = 1500)
+    @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_staircase_up_through_natural_stone_needs_no_unobservable_break", maxTicks = 1500)
     public void staircaseUpThroughNaturalStoneNeedsNoUnobservableBreak(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 22, 14, 6);
         stoneMass(arena, 0, 6);
@@ -47,7 +47,7 @@ public final class BaritoneEngineTunnelGameTests {
     }
 
     /** As above, along a diagonal of the floor: the goal is four blocks to the side and eight ahead, all through stone. */
-    @GameTest(maxTicks = 1500)
+    @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_diagonal_tunnel_through_natural_stone_needs_no_unobservable_break", maxTicks = 1500)
     public void diagonalTunnelThroughNaturalStoneNeedsNoUnobservableBreak(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 25, 14, 6);
         stoneMass(arena, 0, 6);
@@ -92,7 +92,7 @@ public final class BaritoneEngineTunnelGameTests {
      * which is what a route through blocks it may not touch amounts to) ends after the cap as {@code FAILED policy_refused}, and
      * Baritone has let go of the bot.
      */
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_a_route_that_is_vetoed_again_and_again_ends_as_policy_refused", maxTicks = 600)
     public void aRouteThatIsVetoedAgainAndAgainEndsAsPolicyRefused(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, -1, 14, 6);
         AIPlayerEntity bot = arena.spawnOnBaritone("BePolicyCap", arena.cell(-12, 0, 0));
@@ -125,7 +125,7 @@ public final class BaritoneEngineTunnelGameTests {
      * A route replaced by a newer request is recorded as cancelled ("replaced"), not silently overwritten, and the navigator's
      * bookkeeping follows the newer route to its end.
      */
-    @GameTest(maxTicks = 600)
+    @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_a_route_replaced_by_anewer_request_is_recorded_as_cancelled", maxTicks = 600)
     public void aRouteReplacedByANewerRequestIsRecordedAsCancelled(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, -2, 14, 6);
         AIPlayerEntity bot = arena.spawnOnBaritone("BeReplaced", arena.cell(-12, 0, 0));
@@ -164,7 +164,7 @@ public final class BaritoneEngineTunnelGameTests {
      * A swim route that is refused at admission (its goal is sealed in bedrock) leaves nothing behind: no dry/swim route entry, no
      * water lease that would suppress the drowning safety net for a bot in the water.
      */
-    @GameTest(maxTicks = 300)
+    @GameTest(environment = "minecraftai-gametest:baritone_engine_tunnel_game_tests_a_refused_swim_route_leaves_no_lease_and_no_route_entry", maxTicks = 300)
     public void aRefusedSwimRouteLeavesNoLeaseAndNoRouteEntry(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, -3, 14, 6);
         for (int dx = -1; dx <= 1; dx++) {
