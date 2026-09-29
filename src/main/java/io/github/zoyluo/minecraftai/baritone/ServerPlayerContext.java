@@ -8,12 +8,18 @@ import baritone.api.utils.IPlayerController;
 import baritone.api.utils.RayTraceUtils;
 import baritone.api.utils.Rotation;
 import baritone.behavior.LookBehavior;
+import baritone.utils.accessor.IClientChunkProvider;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import java.util.function.Supplier;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.HitResult;
 
 /**
@@ -73,6 +79,30 @@ public final class ServerPlayerContext implements IPlayerContext {
     @Override
     public BetterBlockPos viewerPos() {
         return playerFeet();
+    }
+
+    /**
+     * Same as the interface default, but never blocks. The default reads the block under the player through {@code Level#getBlockState},
+     * which on a server waits for the server thread when called from any other thread; Baritone calls this from worker threads
+     * (world scans, path searches), and from a parallel stream that the server thread itself is waiting on, which deadlocks.
+     */
+    @Override
+    public BetterBlockPos playerFeet() {
+        AIPlayerEntity self = player();
+        BetterBlockPos feet = new BetterBlockPos(self.getX(), self.getY() + 0.1251, self.getZ());
+        if (blockStateAt(feet).getBlock() instanceof SlabBlock) {
+            return feet.above();
+        }
+        return feet;
+    }
+
+    private BlockState blockStateAt(BlockPos pos) {
+        Level level = world();
+        if (minecraft().isSameThread()) {
+            return level.getBlockState(pos);
+        }
+        LevelChunk chunk = ((IClientChunkProvider) level.getChunkSource()).createThreadSafeCopy().getChunk(pos.getX() >> 4, pos.getZ() >> 4, false);
+        return chunk == null ? Blocks.AIR.defaultBlockState() : chunk.getBlockState(pos);
     }
 
     @Override

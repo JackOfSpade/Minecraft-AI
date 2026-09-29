@@ -100,7 +100,7 @@ upstream counterpart goes to `overlay/`, not into a patch.
 
 | Class | Replaces (upstream, client) |
 |---|---|
-| `ServerPlayerContext` | `BaritonePlayerContext`: bot supplier, `ServerLevel`, `MinecraftServer` as the game-thread object, `getAllEntities()` |
+| `ServerPlayerContext` | `BaritonePlayerContext`: bot supplier, `ServerLevel`, `MinecraftServer` as the game-thread object, `getAllEntities()`, a non-blocking `playerFeet()` (the default reads `Level#getBlockState`, which waits for the server thread from any other thread, and deadlocked the ore scan) |
 | `ServerPlayerController` | `BaritonePlayerController`: breaking through the mod's `MiningController`, placing through `useItemOn` |
 | `LoadedChunkSnapshot` + `ServerChunkCacheBaritoneMixin` + `ChunkMapVisibleChunksAccessorMixin` | the client's `MixinClientChunkProvider`/`MixinChunkArray`: an O(1), non-blocking, thread-safe view of the loaded chunks (`ChunkMap#visibleChunkMap` is published copy-on-write) |
 | `BaritonePalettedContainerMixin` (+ `...DataMixin`), `BaritoneItemStackMixin`, `BaritoneLootTableMixin`, `BaritoneLootContextBuilderMixin` | the client-only `MixinPalettedContainer`, `MixinItemStack`, `MixinLootTable`, `MixinLootContextBuilder` (same code, needed by ore scanning and drop matching) |
