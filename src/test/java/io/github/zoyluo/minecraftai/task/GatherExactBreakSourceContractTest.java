@@ -69,14 +69,24 @@ final class GatherExactBreakSourceContractTest {
                 "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
         String bootstrapPickup = methodBody(source, "private void bootstrapPickup(AIPlayerEntity bot)");
 
-        // The fallback walks to the factual break cell, only while both movers are idle (never fights a route).
+        // The fallback walks to the factual break cell (through the sweep, whose first step is that plain
+        // walk, pinned in theSweepStartsWithThePlainWalkToTheBreakCellAndReportsWhatItDid), only while both movers are idle
+        // (never fights a route) and no observed drop is being chased.
         assertTrue(matches(bootstrapPickup,
-                        "bootstrapPickupOrigin\\s*!=\\s*null\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
+                        "!chasingVisibleDrop\\s*&&\\s*bootstrapPickupOrigin\\s*!=\\s*null\\s*&&\\s*bootstrapOriginSweep\\s*!=\\s*null"
+                                + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
                                 + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"),
-                "the origin approach must wait for an idle path executor and walk-to");
+                "the origin sweep must wait for an idle path executor and walk-to, and not run while a visible drop is chased");
         assertTrue(matches(bootstrapPickup,
-                        "HarvestCore\\.approachKnownPickupCell\\(\\s*bot\\s*,\\s*bootstrapPickupOrigin\\s*\\)"),
-                "bootstrapPickup must walk to the recorded break cell via HarvestCore.approachKnownPickupCell");
+                        "chasingVisibleDrop\\s*=\\s*HarvestCore\\.approachDropPhysically\\(\\s*bot\\s*,\\s*visibleDrop\\.get\\(\\)\\s*\\)"),
+                "a supported observed drop is chased first and suppresses the sweep");
+        assertTrue(matches(bootstrapPickup, "bootstrapOriginSweep\\.step\\(bot\\)"),
+                "bootstrapPickup must sweep from the recorded break cell");
+        assertTrue(matches(source, "bootstrapOriginSweep\\s*=\\s*new KnownCellPickupSweep\\(\\s*bootstrapPickupOrigin\\s*\\)"),
+                "the sweep is centred on the recorded break cell");
+        assertTrue(matches(bootstrapPickup,
+                        "swept\\s*==\\s*KnownCellPickupSweep\\.Step\\.MOVING\\s*&&\\s*!bootstrapOriginApproachLogged"),
+                "the approach is logged only when a walk really started");
         assertTrue(bootstrapPickup.contains("\"gather_bootstrap_origin_approach\""),
                 "the approach must stay observable in the log");
         // The origin is dropped when the pickup window ends (collected or given up), before the phase changes.
@@ -98,6 +108,10 @@ final class GatherExactBreakSourceContractTest {
         // ...and a task restart never inherits a stale one.
         assertTrue(matches(source, "pickupOriginApproachLogged\\s*=\\s*false;\\s*bootstrapPickupOrigin\\s*=\\s*null;"),
                 "starting the task must reset the bootstrap origin");
+        assertTrue(matches(source, "bootstrapOriginSweep\\s*=\\s*null;\\s*pickupOriginSweep\\s*=\\s*null;"),
+                "starting the task must reset both sweeps");
+        assertTrue(matches(bootstrapPickup, "bootstrapPickupOrigin\\s*=\\s*null;\\s*bootstrapOriginSweep\\s*=\\s*null;"),
+                "the sweep is forgotten together with the origin on exit");
     }
 
     @Test
@@ -107,14 +121,43 @@ final class GatherExactBreakSourceContractTest {
         String pickup = methodBody(source, "private void pickup(AIPlayerEntity bot)");
 
         assertTrue(matches(pickup,
-                        "pickupOrigin\\s*!=\\s*null\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
+                        "!chasingVisibleDrop\\s*&&\\s*pickupOrigin\\s*!=\\s*null\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isPathExecutorIdle\\(\\)"
                                 + "\\s*&&\\s*bot\\.getActionPack\\(\\)\\.isWalkToIdle\\(\\)"),
-                "the pickup origin approach must wait for idle movers");
-        assertTrue(matches(pickup, "HarvestCore\\.approachKnownPickupCell\\(\\s*bot\\s*,\\s*pickupOrigin\\s*\\)"),
-                "pickup must walk to the recorded break cell via HarvestCore.approachKnownPickupCell");
+                "the pickup origin sweep must wait for idle movers and must not run while a visible drop is chased");
+        assertTrue(matches(pickup,
+                        "chasingVisibleDrop\\s*=\\s*HarvestCore\\.approachDropPhysically\\(\\s*bot\\s*,\\s*visibleDrop\\.get\\(\\)\\s*\\)"),
+                "a supported observed drop is chased first and suppresses the sweep");
+        assertTrue(matches(pickup, "new KnownCellPickupSweep\\(\\s*pickupOrigin\\s*\\)")
+                        && matches(pickup, "pickupOriginSweep\\.step\\(bot\\)"),
+                "pickup must sweep from the recorded break cell");
+        assertTrue(matches(pickup,
+                        "swept\\s*==\\s*KnownCellPickupSweep\\.Step\\.MOVING\\s*&&\\s*!pickupOriginApproachLogged"),
+                "the approach is logged only when a walk really started");
         assertTrue(pickup.contains("\"gather_pickup_origin_approach\""),
                 "the approach must stay observable in the log");
         assertTrue(matches(source, "pickupOrigin\\s*=\\s*targetPos\\s*==\\s*null\\s*\\?\\s*null\\s*:\\s*targetPos\\.immutable\\(\\);"),
                 "the origin is the block that was just started on");
+    }
+
+    @Test
+    void theSweepStartsWithThePlainWalkToTheBreakCellAndReportsWhatItDid() throws IOException {
+        String sweep = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/action/KnownCellPickupSweep.java"));
+        String step = methodBody(sweep, "public Step step(AIPlayerEntity bot)");
+
+        // First cell: exactly the plain approach (HarvestCore.approachKnownPickupCell) toward the remembered
+        // break cell, both to walk there and to nudge once standing in it; later cells use exact surface routes.
+        assertTrue(matches(step, "targetIsFirst\\s*\\?\\s*HarvestCore\\.approachKnownPickupCell\\(\\s*bot\\s*,\\s*origin\\s*\\)"
+                        + "\\s*:\\s*HarvestCore\\.startExactPickupPath\\(\\s*bot\\s*,\\s*target\\s*\\)"),
+                "the first sweep step must be the plain walk to the break cell, later ones exact surface routes");
+        assertTrue(matches(step, "if\\s*\\(\\s*targetIsFirst\\s*\\)\\s*\\{[^}]*HarvestCore\\.approachKnownPickupCell\\(\\s*bot\\s*,\\s*origin\\s*\\)"),
+                "standing in the first cell it nudges toward the break cell exactly as the plain approach does");
+        // MOVING is returned only after a route/approach was really started; dwelling, skipping and
+        // exhaustion are distinct results so callers log a walk only when one began.
+        assertTrue(matches(step, "if\\s*\\(\\s*!started\\s*\\)\\s*\\{\\s*retire\\(\\);\\s*return Step\\.SKIPPED;\\s*\\}\\s*return Step\\.MOVING;"),
+                "MOVING is reported only when the approach/route really started");
+        assertTrue(step.contains("return Step.DWELLING;") && step.contains("return Step.EXHAUSTED;"),
+                "dwelling and exhaustion are reported as such");
+        assertFalse(matches(step, "return\\s+(true|false);"), "step reports an enum, not a boolean");
     }
 }

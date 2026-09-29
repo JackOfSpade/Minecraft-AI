@@ -30,6 +30,18 @@ public final class KnownCellPickupSweep {
     /** Failed route starts / arrival attempts tolerated per cell before it is skipped. */
     static final int MAX_ATTEMPTS = 3;
 
+    /** What one {@link #step} did, so the caller logs a walk only when one really started. */
+    public enum Step {
+        /** A route (or a descent) toward the current target cell was started by this call. */
+        MOVING,
+        /** The bot is standing in the target cell, nudging toward the break cell, waiting for the pickup. */
+        DWELLING,
+        /** The current cell was given up on (no route / attempts used up); nothing moved this call. */
+        SKIPPED,
+        /** Every candidate cell has been visited: nothing left to try. */
+        EXHAUSTED
+    }
+
     private final BlockPos origin;
     private final Set<BlockPos> visited = new HashSet<>();
     private BlockPos target;
@@ -53,14 +65,14 @@ public final class KnownCellPickupSweep {
     }
 
     /**
-     * One step of the sweep; call it only while the bot is not already moving. Returns false once
-     * every candidate cell has been visited (nothing left to try).
+     * One step of the sweep; call it only while the bot is not already moving. Reports what it did;
+     * {@link Step#EXHAUSTED} once every candidate cell has been visited (nothing left to try).
      */
-    public boolean step(AIPlayerEntity bot) {
+    public Step step(AIPlayerEntity bot) {
         if (target == null) {
             target = nextTarget(bot);
             if (target == null) {
-                return false;
+                return Step.EXHAUSTED;
             }
             dwell = 0;
             attempts = 0;
@@ -77,19 +89,20 @@ public final class KnownCellPickupSweep {
             if (++dwell >= DWELL_TICKS) {
                 retire();
             }
-            return true;
+            return Step.DWELLING;
         }
         if (++attempts > MAX_ATTEMPTS) {
             retire();
-            return true;
+            return Step.SKIPPED;
         }
         boolean started = targetIsFirst
                 ? HarvestCore.approachKnownPickupCell(bot, origin)
                 : HarvestCore.startExactPickupPath(bot, target);
         if (!started) {
             retire();
+            return Step.SKIPPED;
         }
-        return true;
+        return Step.MOVING;
     }
 
     private void retire() {

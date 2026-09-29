@@ -1298,9 +1298,10 @@ public final class GatherQuotaTask extends AbstractTask {
         boolean collected = countAccepted(bot) > bootstrapPickupBaseline;
         if (!collected && --bootstrapPickupTicks > 0) {
             var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
+            boolean chasingVisibleDrop = false;
             if (visibleDrop.isPresent()
                     && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-                HarvestCore.approachDropPhysically(bot, visibleDrop.get());
+                chasingVisibleDrop = HarvestCore.approachDropPhysically(bot, visibleDrop.get());
             }
             // The drop can pop behind the logs that are still standing (out of line of sight, so
             // "not observable" and never chased). Our own break cell is a factual coordinate, exactly as
@@ -1309,10 +1310,12 @@ public final class GatherQuotaTask extends AbstractTask {
             // The sweep starts with that walk and, when the drop is still not in reach (it came to rest a
             // cell or two away, hidden behind the standing logs), keeps walking the standable cells around
             // the break cell (see KnownCellPickupSweep).
-            if (bootstrapPickupOrigin != null && bootstrapOriginSweep != null
+            // It runs only while no observed drop is being approached: a supported observed drop is
+            // chased by approachDropPhysically above and the sweep must never pull the bot away from it.
+            if (!chasingVisibleDrop && bootstrapPickupOrigin != null && bootstrapOriginSweep != null
                     && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-                boolean started = bootstrapOriginSweep.step(bot);
-                if (started && !bootstrapOriginApproachLogged) {
+                KnownCellPickupSweep.Step swept = bootstrapOriginSweep.step(bot);
+                if (swept == KnownCellPickupSweep.Step.MOVING && !bootstrapOriginApproachLogged) {
                     bootstrapOriginApproachLogged = true;
                     BotLog.action(bot, "gather_bootstrap_origin_approach",
                             "origin", bootstrapPickupOrigin.toShortString(),
@@ -1369,16 +1372,19 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         pickupTicks--;
         var visibleDrop = HarvestCore.nearestDropAnyOf(bot, acceptItems, 8.0D);
+        boolean chasingVisibleDrop = false;
         if (visibleDrop.isPresent()) {
             if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-                HarvestCore.approachDropPhysically(bot, visibleDrop.get());
+                chasingVisibleDrop = HarvestCore.approachDropPhysically(bot, visibleDrop.get());
             }
         }
         // A freshly spawned visible ItemEntity can remain airborne, making entity-based pickup
         // navigation deliberately wait.  The break coordinate is already a factual, durable
         // ledger entry, so if the entity route did not start any movement, walk to that exact
         // cell now instead of standing four blocks away until the whole pickup window expires.
-        if (pickupOrigin != null
+        // The sweep runs only while no observed drop is being approached (approachDropPhysically above
+        // returned false or there is no visible drop): it must never pull the bot away from a chased drop.
+        if (!chasingVisibleDrop && pickupOrigin != null
                 && bot.getActionPack().isPathExecutorIdle()
                 && bot.getActionPack().isWalkToIdle()) {
             // The sweep starts with that walk and, when the drop is still not in reach (it came to rest
@@ -1388,8 +1394,8 @@ public final class GatherQuotaTask extends AbstractTask {
                 pickupOriginSweep = new KnownCellPickupSweep(pickupOrigin);
                 pickupOriginSweepLogged = 0;
             }
-            boolean started = pickupOriginSweep.step(bot);
-            if (started && !pickupOriginApproachLogged) {
+            KnownCellPickupSweep.Step swept = pickupOriginSweep.step(bot);
+            if (swept == KnownCellPickupSweep.Step.MOVING && !pickupOriginApproachLogged) {
                 pickupOriginApproachLogged = true;
                 BotLog.action(bot, "gather_pickup_origin_approach",
                         "origin", pickupOrigin.toShortString(),

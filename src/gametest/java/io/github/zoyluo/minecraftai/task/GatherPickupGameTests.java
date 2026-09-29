@@ -328,9 +328,68 @@ public final class GatherPickupGameTests {
                 return;
             }
             if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-                require(context, sweep.step(bot),
+                require(context, sweep.step(bot) != io.github.zoyluo.minecraftai.action.KnownCellPickupSweep.Step.EXHAUSTED,
                         "the sweep ran out of cells before collecting the drop");
             }
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_bootstrap_pickup_sweeps_for_hidden_resting_drop", maxTicks = 700)
+    public void bootstrapPickupSweepsForHiddenRestingDrop(GameTestHelper context) {
+        // Integration of the whole exact-break bootstrap through GatherQuotaTask (not the sweep alone): an
+        // empty-inventory bot breaks a capped log by hand, and the drop of that break is replaced by one
+        // resting on the far side of the log, out of the bot's line of sight. The BOOTSTRAP_PICKUP
+        // window must find it by walking around the break cell (no digging) instead of giving up and
+        // breaking another log by hand for want of the one that was lost.
+        Fixture fixture = fixture(context, "GatherBootstrapHiddenDropGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        BlockPos log = fixture.start().east(3);
+        BlockPos cap = log.above();
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        bot.level().setBlock(cap, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        // A two-high stone wall beside the log hides the far corner (log.east().south()) from a bot standing
+        // west of the log even once the log cell itself is empty.
+        bot.level().setBlock(log.south(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        bot.level().setBlock(log.south().above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        require(context, bot.getInventory().isEmpty(), "fixture must start with an empty inventory");
+
+        GatherQuotaTask task = GatherQuotaTask.breakBlocks(Blocks.OAK_LOG, 5);
+        task.start(bot);
+        AtomicBoolean planted = new AtomicBoolean();
+
+        context.failIfEver(() -> {
+            tickOrFail(context, task, bot);
+            require(context, bot.level().getBlockState(cap).is(Blocks.STONE),
+                    "the bootstrap pickup must never dig the cap: " + task.describe());
+            boolean pickupPhase = task.describe().contains("phase=BOOTSTRAP_PICKUP");
+            if (!planted.get()) {
+                if (!pickupPhase) {
+                    return;
+                }
+                require(context, bot.level().getBlockState(log).isAir(),
+                        "the bootstrap pickup began but the log is still there: " + task.describe());
+                // Replace the drop of that break by one resting behind the stone wall beside the (former) log cell.
+                for (ItemEntity drop : bot.level().getEntitiesOfClass(ItemEntity.class,
+                        new AABB(log).inflate(6.0D), entity -> true)) {
+                    drop.discard();
+                }
+                BlockPos resting = log.east().south();
+                ItemEntity hidden = new ItemEntity(bot.level(), resting.getX() + 0.5D, resting.getY(),
+                        resting.getZ() + 0.5D, new ItemStack(Items.OAK_LOG));
+                hidden.setDeltaMovement(Vec3.ZERO);
+                hidden.setPickUpDelay(0);
+                bot.level().addFreshEntity(hidden);
+                require(context, !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, hidden),
+                        "fixture: the planted drop must be out of the bot's sight (bot at " + bot.blockPosition() + ", log " + log + ", drop " + resting + ")");
+                planted.set(true);
+                return;
+            }
+            if (pickupPhase) {
+                return;
+            }
+            require(context, InventoryAction.countItem(bot, Items.OAK_LOG) == 1,
+                    "the hidden drop was not collected before the bootstrap pickup ended: " + task.describe());
+            finish(context, fixture);
         });
     }
 
