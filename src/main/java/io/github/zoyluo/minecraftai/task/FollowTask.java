@@ -1,7 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BoatAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -33,9 +35,15 @@ public final class FollowTask extends AbstractTask {
     private static final double STOP_DISTANCE = 3.0D;
     private static final double MAX_DIRECT_FALLBACK_DISTANCE = 12.0D;
     private static final int REPATH_TICKS = 40;
+    // Retry delay after a "pathfinding_throttled" answer (ActionPack's success cooldown is 5 ticks).
+    private static final int THROTTLED_RETRY_TICKS = 5;
     private static final double SWIM_STOP_DISTANCE = 3.5D;
     private static final int SWIM_REPATH_TICKS = 30;
     private static final double BOAT_TURN_ONLY_ANGLE = 82.0D;
+    // How close a boat paddling to a dry shore aims before dismounting. This was the land STOP_DISTANCE
+    // (2.0) until r10 widened that to 3.0 and, unintentionally, this standoff with it; the shore
+    // approach is unrelated to the follower's personal space, so it keeps its own value.
+    private static final double BOAT_SHORE_STANDOFF = 2.0D;
     // A block-snapped bot cannot always land at exactly STOP_DISTANCE: standNear floors to a
     // BlockPos, and the followed player's own continuous (non-integer) position means the real
     // entity-to-entity distance at that cell is only ever approximately STOP_DISTANCE. Without
@@ -76,9 +84,15 @@ public final class FollowTask extends AbstractTask {
     private final Set<UUID> abandonedBoats = new HashSet<>();
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
     private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
+    private int directWalkCount;
 
     public FollowTask(String targetName) {
         this.targetName = FollowTargetResolver.normalize(targetName);
+    }
+
+    /** Package-visible for GameTests: how many straight-line walks land follow has started. */
+    int directWalkCount() {
+        return directWalkCount;
     }
 
     @Override
@@ -133,10 +147,7 @@ public final class FollowTask extends AbstractTask {
             return;
         }
 
-        // WalkToController only ever touches yaw (it preserves whatever pitch the bot already had),
-        // so without this the bot's head stays frozen at its pre-follow pitch for the whole task --
-        // this is what "looking at the sky" was: nothing here was ever setting a sane pitch.
-        CombatCore.lookAt(bot, target);
+        faceTarget(bot, target);
 
         // The owner/name lookup above is explicit player authority, not a radius- or
         // line-of-sight-gated entity scan.  If a new instruction cancelled a sealed shelter,
@@ -168,6 +179,28 @@ public final class FollowTask extends AbstractTask {
             return;
         }
         followLand(bot, target);
+    }
+
+    /**
+     * WalkToController only ever touches yaw (it preserves whatever pitch the bot already had), so
+     * without a pitch update the bot's head stays frozen at its pre-follow pitch for the whole task
+     * -- this is what "looking at the sky" was.
+     *
+     * <p>The YAW, however, belongs to whichever path/walk controller is steering: this runs at the
+     * end of the server tick, after the bot has already moved, and the bearing the controller just
+     * set is what the next tick's movement uses. Re-aiming the whole body at the player here turned
+     * every path leg into "walk straight at the player" (session log: 7 windows of ~8 s where the
+     * bot ignored its path nodes, pressed toward the moving player and ended in walk_failed
+     * timeout). While anything is navigating only the pitch follows the player; when idle or
+     * arrived the bot turns to face them completely.
+     */
+    private static void faceTarget(AIPlayerEntity bot, ServerPlayerEntity target) {
+        boolean steering = !bot.getActionPack().isPathExecutorIdle() || !bot.getActionPack().isWalkToIdle();
+        if (steering) {
+            LookAction.lookPitchAt(bot, target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D));
+        } else {
+            CombatCore.lookAt(bot, target);
+        }
     }
 
     private void followBoat(AIPlayerEntity bot, ServerPlayerEntity target) {
@@ -204,7 +237,7 @@ public final class FollowTask extends AbstractTask {
      * the water so that the next attempt starts from a shore.
      */
     private void boatAcquireBackoffStep(AIPlayerEntity bot, ServerPlayerEntity target) {
-        boolean noBoatMaterial = lastBoatFailure.contains("need_boat_or_five_matching_planks");
+        boolean noBoatMaterial = lastBoatFailure.contains(BoatLaunchTask.FAIL_NEED_BOAT_OR_PLANKS);
         if (noBoatMaterial || bot.isTouchingWater() || bot.isSubmergedInWater()) {
             followSwimming(bot, target);
             return;
@@ -312,9 +345,13 @@ public final class FollowTask extends AbstractTask {
     }
 
     private void followLand(AIPlayerEntity bot, ServerPlayerEntity target) {
+        ActionPack pack = bot.getActionPack();
         double distance = bot.distanceTo(target);
         if (distance <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {
-            bot.getActionPack().stopMovement();
+            // stopMovement() alone only releases the keys: a live PathExecutor re-presses forward
+            // on its next tick and keeps walking its stale route for up to WalkToController's
+            // MAX_TICKS with no replan.  Arriving must cancel the navigation itself.
+            pack.stopNavigation();
             waiting = true;
             stuckRecovery.reset(bot, elapsed);
             return;
@@ -335,8 +372,8 @@ public final class FollowTask extends AbstractTask {
         if (stuckRecovery.consumeForcedRepath()) {
             nextRepathTick = elapsed;
         }
-        boolean pathIdle = bot.getActionPack().isPathExecutorIdle();
-        boolean walkIdle = bot.getActionPack().isWalkToIdle();
+        boolean pathIdle = pack.isPathExecutorIdle();
+        boolean walkIdle = pack.isWalkToIdle();
 
         // The actual walk/path destination is offset STOP_DISTANCE from the player -- never the
         // player's own block -- so the bot's own arrival condition stops it at the requested
@@ -356,9 +393,36 @@ public final class FollowTask extends AbstractTask {
             // resolution (AStarPathfinder.resolveEndpoint / Standability.findNearestStandableForGoal:
             // nearby cell first, then a bounded fluid-refusing deep fallback), so no second
             // "surface-first" search is layered on top here.
-            ActionResult path = bot.getActionPack().startPathTo(standNear);
+            ActionResult path = pack.startPathTo(standNear);
             nextRepathTick = elapsed + REPATH_TICKS;
+            if (ActionPack.PATHFINDING_THROTTLED.equals(path.reason()) && path.isFailed()) {
+                // An identical request inside ActionPack's cooldown is not a failed route: it means
+                // "the plan you already have stands".  Treating it as a failure drove the
+                // straight-line fallback and ~1,090 one-node walk_complete spins in the session
+                // log.  Keep whatever is running; when nothing is, just retry once the cooldown ends.
+                nextRepathTick = elapsed + THROTTLED_RETRY_TICKS;
+                if (pathIdle && walkIdle) {
+                    repathBackoff = true;
+                    waiting = true;
+                } else {
+                    waiting = false;
+                }
+                return;
+            }
             if (!path.isFailed()) {
+                if (pack.activePathGoal() != null && pack.activePathGoal().equals(bot.getBlockPos())) {
+                    // The goal resolved onto the very cell the bot stands in (the nearest standable
+                    // cell to the stand-off point IS this one): a zero-length route that "completes"
+                    // instantly and would be re-requested every tick.  This is as close as ordinary
+                    // walking gets; hold here and re-evaluate on the normal schedule.
+                    pack.stopNavigation();
+                    BotLog.action(bot, "follow_at_nearest_standable",
+                            "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.getBlockPos()),
+                            "stand_near", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
+                    repathBackoff = true;
+                    waiting = true;
+                    return;
+                }
                 repathBackoff = false;
                 waiting = false;
                 return;
@@ -372,12 +436,25 @@ public final class FollowTask extends AbstractTask {
                 return;
             }
             if (distance <= MAX_DIRECT_FALLBACK_DISTANCE) {
-                bot.getActionPack().startWalkTo(standNear.toCenterPos());
-                repathBackoff = false;
-                waiting = false;
-                return;
+                FollowDirectWalk.Verdict verdict = FollowDirectWalk.verify(
+                        bot.getEntityWorld(), bot.getBlockPos(), standNear);
+                if (verdict.safe()) {
+                    directWalkCount++;
+                    BotLog.action(bot, "follow_direct_walk",
+                            "reason", "path_failed:" + path.reason(),
+                            "verified", verdict.reason(),
+                            "to", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
+                    pack.startWalkTo(standNear.toCenterPos());
+                    repathBackoff = false;
+                    waiting = false;
+                    return;
+                }
+                BotLog.action(bot, "follow_direct_walk_refused",
+                        "reason", verdict.reason(),
+                        "path_reason", path.reason(),
+                        "to", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
             }
-            bot.getActionPack().stopMovement();
+            pack.stopNavigation();
             repathBackoff = true;
             waiting = true;
             return;
@@ -413,7 +490,7 @@ public final class FollowTask extends AbstractTask {
 
     /** @return true while the bot is still aboard and needs another boat tick before land follow. */
     private boolean leaveBoatForLand(AIPlayerEntity bot, ServerPlayerEntity target) {
-        return BoatSupport.leaveBoatForLand(bot, target.getX(), target.getZ(), STOP_DISTANCE, BOAT_TURN_ONLY_ANGLE);
+        return BoatSupport.leaveBoatForLand(bot, target.getX(), target.getZ(), BOAT_SHORE_STANDOFF, BOAT_TURN_ONLY_ANGLE);
     }
 
     private void abandonBoatChild(AIPlayerEntity bot) {

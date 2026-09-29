@@ -166,14 +166,13 @@ final class FollowStuckRecovery {
         BlockPos targetPos = target.getBlockPos();
         double currentDistSq = current.getSquaredDistance(targetPos);
         double minDistSq = minDistance * minDistance;
-        Standability.clearCache();
 
         BlockPos best = null;
         double bestDistSq = currentDistSq;
         for (int dy = -1; dy <= 1; dy++) {
             for (Direction direction : Direction.Type.HORIZONTAL) {
                 BlockPos candidate = current.offset(direction).add(0, dy, 0);
-                if (!Standability.isStandable(world, candidate)) {
+                if (!Standability.isStandableFresh(world, candidate)) {
                     continue;
                 }
                 double distSq = candidate.getSquaredDistance(targetPos);

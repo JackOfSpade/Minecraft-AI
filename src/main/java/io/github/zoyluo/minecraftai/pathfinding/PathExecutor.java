@@ -573,6 +573,8 @@ public final class PathExecutor {
         int dy = target.getY() - from.getY();
         int dz = target.getZ() - from.getZ();
         int samples = Math.max(1, Math.max(Math.abs(dx), Math.abs(dz)) * 2);
+        int previousX = from.getX();
+        int previousZ = from.getZ();
         for (int i = 1; i <= samples; i++) {
             double t = (double) i / samples;
             BlockPos sample = BlockPos.ofFloored(
@@ -585,6 +587,16 @@ public final class PathExecutor {
             if (!hasSupport(world, sample) && !sample.equals(from)) {
                 return false;
             }
+            // A line that crosses from one column into a diagonal one clips the corner of the two
+            // columns it passes between; the 0.6-wide body then presses against that block (the
+            // NeighborEnumerator diagonal rule already refuses such corners, string-pulling must too).
+            if (sample.getX() != previousX && sample.getZ() != previousZ
+                    && (!passableColumn(world, new BlockPos(sample.getX(), sample.getY(), previousZ))
+                    || !passableColumn(world, new BlockPos(previousX, sample.getY(), sample.getZ())))) {
+                return false;
+            }
+            previousX = sample.getX();
+            previousZ = sample.getZ();
         }
         return Standability.isStandable(world, target);
     }

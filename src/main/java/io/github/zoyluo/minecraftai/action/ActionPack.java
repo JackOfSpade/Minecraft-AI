@@ -22,6 +22,8 @@ import java.util.Collections;
 import java.util.Optional;
 
 public final class ActionPack {
+    /** Failure reason of a request identical to the previous one still inside its cooldown. */
+    public static final String PATHFINDING_THROTTLED = "pathfinding_throttled";
     private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
     private static final int PATHFIND_FAILURE_COOLDOWN_TICKS = 20;
     // NAV-OPT two-phase pathfinding budget: pure walking only searches air cells (small search
@@ -53,6 +55,7 @@ public final class ActionPack {
     private PathRequestIdentity activePathRequest;
     private BlockPos activePathGoal;
     private int nextPathfindTick;
+    private final SnapRepeatGuard physicalSnapGuard = new SnapRepeatGuard();
 
     public ActionPack(AIPlayerEntity player) {
         this.player = player;
@@ -128,7 +131,7 @@ public final class ActionPack {
                 immutableGoal, canPillar, true, reserve,
                 PathExecutor.RouteContract.unrestricted());
         if (preparePathRequest(request, now)) {
-            return ActionResult.failed("pathfinding_throttled");
+            return ActionResult.failed(PATHFINDING_THROTTLED);
         }
         if (!snapPlayerToNearestStandable("path_start_invalid")) {
             lastPathRequest = request;
@@ -227,7 +230,7 @@ public final class ActionPack {
         PathRequestIdentity request = new PathRequestIdentity(
                 immutableGoal, canPillar, allowDigFallback, reserve, routeContract);
         if (preparePathRequest(request, now)) {
-            return ActionResult.failed("pathfinding_throttled");
+            return ActionResult.failed(PATHFINDING_THROTTLED);
         }
         if (routeContract.constrained()
                 && player.getBlockPos().getY() < routeContract.minimumY()) {
@@ -410,6 +413,14 @@ public final class ActionPack {
     }
 
     private boolean tryPhysicalSnap(ServerWorld world, BlockPos current, String reason) {
+        int nowTick = player.getEntityWorld().getServer().getTicks();
+        if (!physicalSnapGuard.allows(current, nowTick)) {
+            // Second snap out of the same cell inside the window: whatever walked the bot back in
+            // would just be undone again (see SnapRepeatGuard). One re-snap per stall.
+            BotLog.path(player, "path_start_physical_snap_suppressed",
+                    "reason", reason, "from", LogFields.pos(current));
+            return false;
+        }
         // Same-level steps first, then a one-block drop, finally a vanilla-style jump. A vertical
         // move may include one horizontal axis; three-axis corner jumps are never legitimate.
         int[][] horizontalOffsets = {
@@ -435,6 +446,7 @@ public final class ActionPack {
                     continue;
                 }
                 Standability.clearCache();
+                physicalSnapGuard.record(current, nowTick);
                 BotLog.path(player, "path_start_physical_snap",
                         "reason", reason,
                         "from", io.github.zoyluo.minecraftai.log.LogFields.pos(current),
@@ -488,6 +500,18 @@ public final class ActionPack {
         this.jumping = false;
         this.jumpTicks = 0;
         player.setJumping(false);
+    }
+
+    /**
+     * Cancels the active path executor and direct walk and releases the movement keys.  Unlike
+     * {@link #stopMovement()} (keys only -- a live executor re-presses forward on its very next
+     * tick and keeps walking a stale route), this really stops navigation, but leaves mining and
+     * item use alone.
+     */
+    public void stopNavigation() {
+        clearActivePathExecutor();
+        this.walkTo = null;
+        stopMovement();
     }
 
     public void stopAll() {

@@ -40,6 +40,16 @@ public final class Standability {
         return result;
     }
 
+    /**
+     * {@link #isStandable} read straight from the world: neither reads nor writes the shared memo.
+     * For callers that must see the current block state of a handful of cells (a bot that may have
+     * just dug or been walled in) without evicting every other bot's cached results, which is what
+     * {@link #clearCache()} does.
+     */
+    public static boolean isStandableFresh(ServerWorld world, BlockPos pos) {
+        return compute(world, pos);
+    }
+
     public static Optional<BlockPos> findNearestStandable(ServerWorld world,
                                                           BlockPos origin,
                                                           int horizontalRadius,
@@ -121,32 +131,68 @@ public final class Standability {
 
     private static Optional<BlockPos> findNearestInWindow(ServerWorld world, BlockPos origin,
                                                            int horizontalRadius, int verticalDown, int verticalUp) {
+        return scanWindowInShells(origin, horizontalRadius, verticalDown, verticalUp, pos -> isStandable(world, pos));
+    }
+
+    /**
+     * Best cell of the {@code horizontalRadius x [-verticalDown, +verticalUp] x horizontalRadius}
+     * window around {@code origin} by true 3D distance, ties broken toward the origin's own column
+     * (smaller horizontal distance) and then the lower cell.
+     *
+     * <p>Cells are visited in shells of equal Chebyshev distance from {@code origin}. Every cell of
+     * shell {@code s + 1} or beyond is at least {@code s + 1} blocks away, so once the best hit so
+     * far is strictly closer than that the rest of the window cannot beat (or tie) it and the scan
+     * stops: a goal on ordinary ground resolves after a handful of probes instead of the whole
+     * 17 x 17 x 8 window. The result is identical to scanning the entire window.
+     */
+    static Optional<BlockPos> scanWindowInShells(BlockPos origin, int horizontalRadius,
+                                                 int verticalDown, int verticalUp,
+                                                 java.util.function.Predicate<BlockPos> standable) {
+        int maxShell = Math.max(horizontalRadius, Math.max(verticalDown, verticalUp));
         BlockPos best = null;
         double bestDistSq = Double.MAX_VALUE;
         int bestHorizontalSq = Integer.MAX_VALUE;
-        for (int dx = -horizontalRadius; dx <= horizontalRadius; dx++) {
-            for (int dz = -horizontalRadius; dz <= horizontalRadius; dz++) {
-                for (int dy = -verticalDown; dy <= verticalUp; dy++) {
-                    BlockPos candidate = origin.add(dx, dy, dz);
-                    if (!isStandable(world, candidate)) {
-                        continue;
-                    }
-                    double distSq = candidate.getSquaredDistance(origin);
-                    int horizontalSq = dx * dx + dz * dz;
-                    // Ties: the goal's own column first (a goal offered on a solid block means "stand
-                    // on top of it", which callers such as the surface-water search rely on to
-                    // climb a rim and look over it), then the lower cell (findStandableInColumn's
-                    // own safer tie-break).
-                    boolean better = distSq < bestDistSq
-                            || (distSq == bestDistSq && best != null
-                            && (horizontalSq < bestHorizontalSq
-                            || (horizontalSq == bestHorizontalSq && candidate.getY() < best.getY())));
-                    if (better) {
-                        best = candidate.toImmutable();
-                        bestDistSq = distSq;
-                        bestHorizontalSq = horizontalSq;
+        int bestDx = 0;
+        int bestDz = 0;
+        for (int shell = 0; shell <= maxShell; shell++) {
+            for (int dx = -Math.min(shell, horizontalRadius); dx <= Math.min(shell, horizontalRadius); dx++) {
+                for (int dz = -Math.min(shell, horizontalRadius); dz <= Math.min(shell, horizontalRadius); dz++) {
+                    boolean horizontalOnShell = Math.max(Math.abs(dx), Math.abs(dz)) == shell;
+                    int dyFrom = Math.max(-verticalDown, -shell);
+                    int dyTo = Math.min(verticalUp, shell);
+                    for (int dy = dyFrom; dy <= dyTo; dy++) {
+                        if (!horizontalOnShell && Math.abs(dy) != shell) {
+                            continue;
+                        }
+                        BlockPos candidate = origin.add(dx, dy, dz);
+                        if (!standable.test(candidate)) {
+                            continue;
+                        }
+                        double distSq = candidate.getSquaredDistance(origin);
+                        int horizontalSq = dx * dx + dz * dz;
+                        // Ties: the goal's own column first (a goal offered on a solid block means "stand
+                        // on top of it", which callers such as the surface-water search rely on to
+                        // climb a rim and look over it), then the lower cell (findStandableInColumn's
+                        // own safer tie-break).
+                        boolean better = distSq < bestDistSq
+                                || (distSq == bestDistSq && best != null
+                                && (horizontalSq < bestHorizontalSq
+                                || (horizontalSq == bestHorizontalSq && (candidate.getY() < best.getY()
+                                || (candidate.getY() == best.getY()
+                                && (dx < bestDx || (dx == bestDx && dz < bestDz)))))));
+                        if (better) {
+                            best = candidate.toImmutable();
+                            bestDistSq = distSq;
+                            bestHorizontalSq = horizontalSq;
+                            bestDx = dx;
+                            bestDz = dz;
+                        }
                     }
                 }
+            }
+            double nextShellMinimum = (double) (shell + 1) * (shell + 1);
+            if (best != null && bestDistSq < nextShellMinimum) {
+                break;
             }
         }
         return Optional.ofNullable(best);

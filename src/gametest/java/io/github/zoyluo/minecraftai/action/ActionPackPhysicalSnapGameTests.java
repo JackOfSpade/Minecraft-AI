@@ -783,6 +783,53 @@ public final class ActionPackPhysicalSnapGameTests {
         context.complete();
     }
 
+    /**
+     * Session log 01:51:50-01:53:02: 42 path_start_physical_snap events while the bot yo-yoed
+     * between two cells -- a straight-line walk kept carrying it back into the invalid start cell
+     * and every failed search snapped it out again.  A second snap out of the same cell inside the
+     * stall window must be refused (strict survival then reports NO_START) instead of repeating.
+     */
+    @GameTest(maxTicks = 20)
+    public void secondPhysicalSnapOutOfTheSameCellIsRefusedInsteadOfYoYoing(TestContext context) {
+        var world = context.getWorld();
+        BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 6, 5));
+        BlockPos landing = invalid.add(1, -1, 0);
+        BlockPos goal = landing.add(2, 0, 0);
+
+        for (int x = landing.getX(); x <= goal.getX(); x++) {
+            BlockPos feet = new BlockPos(x, landing.getY(), landing.getZ());
+            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        }
+        world.setBlockState(invalid.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(invalid, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(invalid.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+
+        String name = "SnapYoYoGT";
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3d.ofBottomCenter(invalid),
+                        0.0F, 0.0F, GameMode.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        bot.teleport(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, false);
+        require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_first_snap")
+                        && bot.getBlockPos().equals(landing),
+                "the first snap out of the invalid start did not land on the adjacent cell: "
+                        + bot.getBlockPos().toShortString());
+
+        // Something (the old straight-line walk fallback) carries the bot back into the same cell.
+        bot.teleport(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, false);
+        require(context, !bot.getActionPack().snapPlayerToNearestStandable("gametest_second_snap"),
+                "a second snap out of the same cell inside the stall window was not refused");
+        require(context, bot.getBlockPos().equals(invalid),
+                "the refused snap still moved the bot to " + bot.getBlockPos().toShortString());
+
+        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
+        context.complete();
+    }
+
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve76_rejects76_and_pillar_spends77th_stone", maxTicks = 200)
     public void reserve76Rejects76AndPillarSpends77thStone(TestContext context) {
         verifyStoneReserveBoundary(context, 76);

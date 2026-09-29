@@ -27,6 +27,22 @@ public final class LookAction {
         return ActionResult.SUCCESS;
     }
 
+    /**
+     * Tilts the head toward {@code target} and leaves the body/head yaw untouched.  For callers that
+     * want the bot to look at something while a path or walk controller is steering it: the
+     * controllers face the direction of travel, and a full {@link #lookAt} between ticks would turn
+     * the body toward the target and walk the bot into whatever lies between them.
+     */
+    public static ActionResult lookPitchAt(AIPlayerEntity player, Vec3d target) {
+        Vec3d eye = player.getEyePos();
+        double dx = target.x - eye.x;
+        double dz = target.z - eye.z;
+        double dy = target.y - eye.y;
+        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+        player.setPitch(MathHelper.clamp(pitch, -90.0F, 90.0F));
+        return ActionResult.SUCCESS;
+    }
+
     public static ActionResult lookAtBlock(AIPlayerEntity player, BlockPos pos, Direction face) {
         Vec3d target = Vec3d.ofCenter(pos).add(
                 face.getOffsetX() * 0.5D,

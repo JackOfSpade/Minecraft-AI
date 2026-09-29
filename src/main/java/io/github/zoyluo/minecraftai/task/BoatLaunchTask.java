@@ -18,6 +18,8 @@ import java.util.UUID;
  * The task stays local: it will not tunnel or roam looking for a river/ocean.
  */
 public final class BoatLaunchTask extends AbstractTask {
+    /** Failure reason when the bot holds no boat and cannot craft one; FollowTask keys its swim-vs-walk choice on it. */
+    static final String FAIL_NEED_BOAT_OR_PLANKS = "need_boat_or_five_matching_planks";
     private static final int MAX_TICKS = 1_200;
     private static final int MAX_LAUNCH_ATTEMPTS = 3;
     private static final int MAX_BOARD_ATTEMPTS = 3;
@@ -128,7 +130,7 @@ public final class BoatLaunchTask extends AbstractTask {
         if (craftTask == null) {
             Item candidate = BoatSupport.craftableBoat(bot).orElse(null);
             if (candidate == null) {
-                fail("need_boat_or_five_matching_planks");
+                fail(FAIL_NEED_BOAT_OR_PLANKS);
                 return;
             }
             craftTask = new CraftTask(candidate, 1);
