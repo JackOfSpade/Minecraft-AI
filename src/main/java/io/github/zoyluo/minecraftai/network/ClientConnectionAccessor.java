@@ -4,4 +4,6 @@ import io.netty.channel.Channel;
 
 public interface ClientConnectionAccessor {
     void minecraftai$setChannel(Channel channel);
+
+    Channel minecraftai$getChannel();
 }

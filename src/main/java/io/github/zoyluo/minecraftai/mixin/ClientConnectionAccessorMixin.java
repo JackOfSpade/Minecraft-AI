@@ -11,4 +11,8 @@ public abstract class ClientConnectionAccessorMixin implements ClientConnectionA
     @Override
     @Accessor("channel")
     public abstract void minecraftai$setChannel(Channel channel);
+
+    @Override
+    @Accessor("channel")
+    public abstract Channel minecraftai$getChannel();
 }

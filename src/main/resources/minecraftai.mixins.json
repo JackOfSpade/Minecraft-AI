@@ -12,7 +12,9 @@
     "ServerEntityManagerCacheAccessorMixin",
     "LoginTimeoutMixin",
     "AIPlayerControlledBoatLogicalSideMixin",
-    "AIPlayerControlledBoatPaddleMixin"
+    "AIPlayerControlledBoatPaddleMixin",
+    "ServerCommonNetworkHandlerAccessorMixin",
+    "SleepManagerHumansOnlyMixin"
   ],
   "client": [],
   "server": [],
