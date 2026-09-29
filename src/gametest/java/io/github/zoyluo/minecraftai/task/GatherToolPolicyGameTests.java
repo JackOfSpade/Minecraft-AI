@@ -196,6 +196,74 @@ public final class GatherToolPolicyGameTests {
         context.complete();
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_log_bootstrap_crafts_axe_from_empty_inventory", maxTicks = 2000)
+    public void logBootstrapCraftsAxeFromEmptyInventory(TestContext context) {
+        // The one relaxation of the strict optimal-tool rule (GatherToolPolicy.Bootstrap): logs are
+        // axe-optimal but the axe itself comes from logs, so an empty-inventory bot must break the
+        // MINIMUM logs by hand (crafting table + wooden axe = 3 logs), craft the axe, then finish
+        // the request with it. Never roam/explore, never stop with missing_tool:axe.
+        Fixture fixture = fixture(context, "GatherToolBootstrapGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        java.util.List<BlockPos> treeCells = new java.util.ArrayList<>();
+        for (int dx = 3; dx <= 4; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dy = 0; dy <= 1; dy++) {
+                    BlockPos pos = fixture.start().add(dx, dy, dz);
+                    bot.getEntityWorld().setBlockState(pos, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+                    treeCells.add(pos);
+                }
+            }
+        }
+        require(context, bot.getInventory().isEmpty(), "fixture must start with an empty inventory");
+
+        GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.OAK_LOG, 6);
+        task.start(bot);
+        AtomicBoolean sawEnsureTool = new AtomicBoolean();
+        int[] previousRemaining = {treeCells.size()};
+        int[] handBreaks = {0};
+        int[] axeBreaks = {0};
+
+        context.runAtEveryTick(() -> {
+            tickOrFail(context, task, bot);
+            if (task.describe().contains("phase=ENSURE_TOOL")) {
+                sawEnsureTool.set(true);
+            }
+            int remaining = 0;
+            for (BlockPos pos : treeCells) {
+                if (bot.getEntityWorld().getBlockState(pos).isOf(Blocks.OAK_LOG)) {
+                    remaining++;
+                }
+            }
+            int broken = previousRemaining[0] - remaining;
+            if (broken > 0) {
+                if (bot.getMainHandStack().isOf(Items.WOODEN_AXE)) {
+                    axeBreaks[0] += broken;
+                } else {
+                    handBreaks[0] += broken;
+                }
+            }
+            previousRemaining[0] = remaining;
+            require(context, handBreaks[0] <= 3,
+                    "broke more than the bootstrap minimum (3 logs) by hand: " + handBreaks[0]);
+            require(context, !task.describe().contains("phase=ROAM") && !task.describe().contains("phase=EXPLORE"),
+                    "a tree right beside the bot should never require roaming: " + task.describe());
+            if (task.state() != TaskState.COMPLETED) {
+                return;
+            }
+            require(context, sawEnsureTool.get(), "task never detoured through the axe-crafting phase");
+            require(context, handBreaks[0] >= 1 && handBreaks[0] <= 3,
+                    "bootstrap should break between 1 and 3 logs by hand, broke " + handBreaks[0]);
+            require(context, axeBreaks[0] >= 6,
+                    "rest of the request should be gathered with the crafted axe, axe breaks=" + axeBreaks[0]);
+            require(context, InventoryAction.countItem(bot, Items.WOODEN_AXE) >= 1,
+                    "did not keep the crafted wooden axe");
+            require(context, InventoryAction.countItem(bot, Items.OAK_LOG) >= 6,
+                    "bootstrap logs must not count toward the quota; expected >= 6 logs, had "
+                            + InventoryAction.countItem(bot, Items.OAK_LOG));
+            finish(context, fixture);
+        });
+    }
+
     /** A 3x3 patch of grass_block at floor level immediately in front of the bot's spawn point. */
     private static void placeGrassPatch(AIPlayerEntity bot, BlockPos start) {
         for (int dx = 1; dx <= 3; dx++) {

@@ -124,6 +124,10 @@ public final class GatherQuotaTask extends AbstractTask {
     private int toolCraftCandidateIndex;
     private Task toolCraftTask;
     private String lastToolCraftFailure;
+    // Log bootstrap (GatherToolPolicy.Bootstrap): logs broken by hand only to craft the first axe are
+    // earmarked for that craft and do not count toward the player's quota.
+    private boolean bootstrapActive;
+    private int bootstrapExcluded;
     private int searchRadius = SEARCH_RADIUS;
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
@@ -1347,8 +1351,27 @@ public final class GatherQuotaTask extends AbstractTask {
     // tier before mining; if it can't be crafted either, the whole task stops instead of falling
     // back to a sub-optimal tool.
     private void startHarvest(AIPlayerEntity bot) {
-        GatherToolPolicy.Category category = GatherToolPolicy.categoryFor(bot.getEntityWorld().getBlockState(targetPos));
+        var targetState = bot.getEntityWorld().getBlockState(targetPos);
+        GatherToolPolicy.Category category = GatherToolPolicy.categoryFor(targetState);
         if (category != GatherToolPolicy.Category.NONE && !GatherToolPolicy.hasTool(bot, category)) {
+            // The one relaxation of the strict rule: no axe and none craftable from inventory, so
+            // break the minimum number of logs by hand (see GatherToolPolicy.Bootstrap).
+            if (category == GatherToolPolicy.Category.AXE && GatherToolPolicy.isLogBootstrapTarget(targetState)) {
+                int byHand = GatherToolPolicy.bootstrapLogsByHand(bot);
+                if (byHand > 0) {
+                    if (!bootstrapActive) {
+                        bootstrapActive = true;
+                        bootstrapExcluded += byHand;
+                        BotLog.action(bot, "gather_tool_bootstrap",
+                                "category", GatherToolPolicy.token(category),
+                                "logs_needed", byHand,
+                                "logs_by_hand", byHand,
+                                "pos", targetPos.toShortString());
+                    }
+                    doStartHarvest(bot);
+                    return;
+                }
+            }
             bot.getActionPack().stopAll();
             pendingToolCategory = category;
             toolCraftCandidateIndex = 0;
@@ -1384,6 +1407,7 @@ public final class GatherQuotaTask extends AbstractTask {
      */
     private void ensureTool(AIPlayerEntity bot) {
         if (GatherToolPolicy.hasTool(bot, pendingToolCategory)) {
+            bootstrapActive = false;
             pendingToolCategory = null;
             toolCraftTask = null;
             lastToolCraftFailure = null;
@@ -1433,13 +1457,14 @@ public final class GatherQuotaTask extends AbstractTask {
     private void refreshCountSoFar(AIPlayerEntity bot) {
         int accepted = countAccepted(bot);
         if (!countNewItems) {
-            countSoFar = accepted;
+            // While bootstrapping, the logs earmarked for the axe craft are not part of the quota.
+            countSoFar = Math.max(0, accepted - (bootstrapActive ? bootstrapExcluded : 0));
             return;
         }
         int inventoryDelta = Math.max(0, accepted - acceptedInventoryAtStart);
         long pickupDelta = Math.max(0L, pickedUpAccepted(bot) - pickedUpAtStart);
-        int observedNewItems = Math.max(inventoryDelta,
-                pickupDelta >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) pickupDelta);
+        int observedNewItems = Math.max(0, Math.max(inventoryDelta,
+                pickupDelta >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) pickupDelta) - bootstrapExcluded);
         countSoFar = Math.max(countSoFar, observedNewItems);
     }
 

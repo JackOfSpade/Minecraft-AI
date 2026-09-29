@@ -226,7 +226,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("gather", "Gather the requested number of NEW/additional items. Existing copies in inventory never satisfy count: collect 3 logs means collect 3 more logs. It loops survey, move, harvest, and pickup without assigning child tasks. For a request to break a precise number of blocks where drops do not matter, use break_blocks; for grass/tall grass use clear_grass.", objectSchema()
+        register("gather", "Gather the requested number of NEW/additional items. Existing copies in inventory never satisfy count: collect 3 logs means collect 3 more logs. It loops survey, move, harvest, and pickup without assigning child tasks. It uses the right tool for the block, crafts one from inventory if needed, and otherwise reports missing_tool. For a request to break a precise number of blocks where drops do not matter, use break_blocks; for grass/tall grass use clear_grass.", objectSchema()
                 .property("item", stringSchema("target item id, for example minecraft:cobblestone"))
                 .property("count", integerSchema("number of new items to collect"))
                 .required("item")
@@ -246,7 +246,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("break_blocks", "Break exactly the requested number of nearby matching blocks. Progress counts blocks actually broken, not inventory drops. Use this for explicit requests such as remove 3 minecraft:oak_log; use gather when the player wants items in inventory. It stays nearby and will not roam or tunnel to find blocks.", objectSchema()
+        register("break_blocks", "Break exactly the requested number of nearby matching blocks. Progress counts blocks actually broken, not inventory drops. Use this for explicit requests such as remove 3 minecraft:oak_log; use gather when the player wants items in inventory. It stays nearby and will not roam or tunnel to find blocks. It uses the right tool for the block, crafts one from inventory if needed, and otherwise reports missing_tool.", objectSchema()
                 .property("block", stringSchema("exact block id, for example minecraft:oak_log"))
                 .property("count", integerSchema("positive number of matching blocks to break"))
                 .required("block")

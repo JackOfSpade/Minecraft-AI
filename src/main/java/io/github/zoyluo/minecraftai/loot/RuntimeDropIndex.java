@@ -63,6 +63,7 @@ public final class RuntimeDropIndex {
         if (world == null) {
             return;
         }
+        long startNanos = System.nanoTime();
         Map<Item, Set<Block>> deterministic = new HashMap<>();
         Map<Item, Set<Block>> probabilistic = new HashMap<>();
         int scanned = 0;
@@ -89,7 +90,8 @@ public final class RuntimeDropIndex {
         BotLog.comm(null, "runtime_drop_index_built",
                 "scanned", scanned,
                 "deterministic_items", deterministic.size(),
-                "probabilistic_items", probabilistic.size());
+                "probabilistic_items", probabilistic.size(),
+                "build_ms", (System.nanoTime() - startNanos) / 1_000_000L);
     }
 
     public static void clear() {
