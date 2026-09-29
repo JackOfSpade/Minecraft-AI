@@ -131,19 +131,26 @@ public final class BaritoneNavigationGameTests {
 
     @GameTest(maxTicks = 400)
     public void drivenBotTakesVanillaFallDamageAndKeepsGoing(GameTestHelper context) {
-        Course c = Course.begin(context, "NavFallGT", 13, -2, 12, 4);
+        Course c = Course.begin(context, "NavFallGT", 13, -2, 24, 4);
         c.snapshot();
-        // Six blocks up in the air: the bot is given a goal on the floor and falls first. A server player only checks falls when a
-        // client's move packet arrives, so without the driver's fall check this would cost nothing (fall distance stays 0).
-        c.bot.teleportTo(c.world, c.feet.getX() + 0.5D, c.feet.getY() + 6.0D, c.feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        c.bot.setOnGround(false);
+        BlockPos goal = c.feet.offset(20, 0, 0);
         float health = c.bot.getHealth();
-        BlockPos goal = c.feet.offset(6, 0, 0);
         c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+        // A server player only checks a fall when a client's move packet arrives, so a bot that moves on its own gets no fall damage
+        // at all; the driver's per-tick check is what applies it. While Baritone is walking the bot, six blocks of accumulated fall
+        // distance (what a six-block drop leaves on landing; Baritone cannot be kept busy through a real fall, it gives up on a path
+        // that starts in mid-air) must be paid at the next tick on the ground: 6 - 3 safe = 3 hit points, exactly as vanilla.
+        int[] tick = {0};
+        context.onEachTick(() -> {
+            if (++tick[0] == 12) {
+                require(context, BaritoneRegistry.INSTANCE.isBusy(c.bot) && c.bot.onGround(), "the bot is not being driven on the ground at tick 12");
+                c.bot.fallDistance = 6.0D;
+            }
+        });
         c.await(300, run -> {
-            run.requireNear(goal, 1.6, 0.6, "fall then walk");
-            // fall distance 6 - 3 safe = 3 hit points, exactly as vanilla
-            require(context, c.bot.getHealth() == health - 3.0F, "a six-block fall must cost 3 hit points: " + health + " -> " + c.bot.getHealth());
+            run.requireNear(goal, 1.6, 0.6, "walk with a fall");
+            require(context, c.bot.getHealth() == health - 3.0F, "six blocks of fall distance must cost 3 hit points: " + health + " -> " + c.bot.getHealth());
+            require(context, c.bot.fallDistance == 0.0D, "the fall distance was not reset by the landing check: " + c.bot.fallDistance);
             run.requireNoEdits();
         });
     }
