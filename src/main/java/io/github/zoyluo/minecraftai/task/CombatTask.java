@@ -576,13 +576,13 @@ public final class CombatTask extends AbstractTask {
             return true;
         }
         BlockPos here = bot.blockPosition();
-        if (belowDefenseFloor(here) || outsideDefenseRadius(here)) {
+        if (!isWithinDefensiveLeash(defensiveAnchor, here)) {
             return disengageOrRetreatFromImmediatePressure(
                     bot, "bot_left_leash", here);
         }
         if (target != null && target.isAlive()) {
             BlockPos targetPos = target.blockPosition();
-            if (belowDefenseFloor(targetPos) || outsideDefenseRadius(targetPos)) {
+            if (!isWithinDefensiveLeash(defensiveAnchor, targetPos)) {
                 return disengageOrRetreatFromImmediatePressure(
                         bot, "target_left_leash", targetPos);
             }
@@ -700,16 +700,37 @@ public final class CombatTask extends AbstractTask {
         return bot.distanceTo(entity) < safeDistance;
     }
 
-    private boolean belowDefenseFloor(BlockPos pos) {
-        return pos.getY() < defensiveAnchor.getY() - DEFENSIVE_MAX_VERTICAL_DROP;
+    /**
+     * The fight's leash, shared with DangerWatcher so the threat range and the leash agree: a spot is
+     * inside when it is within {@code DEFENSIVE_MAX_HORIZONTAL_DISTANCE} of the anchor horizontally and
+     * not more than {@code DEFENSIVE_MAX_VERTICAL_DROP} below it.
+     */
+    static boolean isWithinDefensiveLeash(BlockPos anchor, BlockPos pos) {
+        if (pos.getY() < anchor.getY() - DEFENSIVE_MAX_VERTICAL_DROP) {
+            return false;
+        }
+        double dx = pos.getX() - anchor.getX();
+        double dz = pos.getZ() - anchor.getZ();
+        return dx * dx + dz * dz
+                <= DEFENSIVE_MAX_HORIZONTAL_DISTANCE * DEFENSIVE_MAX_HORIZONTAL_DISTANCE;
     }
 
-    private boolean outsideDefenseRadius(BlockPos pos) {
-        double dx = pos.getX() - defensiveAnchor.getX();
-        double dz = pos.getZ() - defensiveAnchor.getZ();
-        return dx * dx + dz * dz
-                > DEFENSIVE_MAX_HORIZONTAL_DISTANCE * DEFENSIVE_MAX_HORIZONTAL_DISTANCE;
+    /** The entity a defensive fight is bound to; {@code null} for an ordinary (non-defensive) fight. */
+    LivingEntity defensiveTarget() {
+        return defensiveAnchor == null ? null : fixedDefensiveTarget;
     }
+
+    /** True when this defensive fight's bound target already stands outside its leash. */
+    boolean defensiveTargetOutsideLeash() {
+        return defensiveAnchor != null
+                && fixedDefensiveTarget != null
+                && !isWithinDefensiveLeash(defensiveAnchor, fixedDefensiveTarget.blockPosition());
+    }
+
+    static boolean isImmediatePressureOn(AIPlayerEntity bot, LivingEntity entity) {
+        return isImmediatePressure(bot, entity);
+    }
+
 
     private void endDefensiveEngagement(AIPlayerEntity bot, String reason, BlockPos observed) {
         finishRangedLoadout(bot);
@@ -718,6 +739,10 @@ public final class CombatTask extends AbstractTask {
                 "reason", reason,
                 "anchor", defensiveAnchor.toShortString(),
                 "observed", observed.toShortString());
+        if ("target_left_leash".equals(reason)) {
+            // Per-target cooldown so DangerWatcher does not re-assign the same fight next scan.
+            DangerWatcher.INSTANCE.noteTargetLeftLeash(bot, fixedDefensiveTarget);
+        }
         complete();
     }
 

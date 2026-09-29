@@ -43,6 +43,10 @@ public final class DangerWatcher {
     private final Map<UUID, Integer> nextEscapeHelpTick = new ConcurrentHashMap<>();  // Escape help-request throttling
     private final Map<UUID, Integer> nextShelterAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, ShelterEpisode> shelterEpisodes = new ConcurrentHashMap<>();
+    /** botId -> (target entity uuid -> server tick until which defensive combat vs that target is held off after it left the leash). */
+    private final Map<UUID, Map<UUID, Integer>> leashCooldowns = new ConcurrentHashMap<>();
+    /** Counts how often a bot was judged trapped in the dark (before any surface escape is attempted); read by tests. */
+    private final Map<UUID, Integer> darkTrapDetections = new ConcurrentHashMap<>();
 
     // Layer 1 trapped backoff: an evasion-class task (evade/shelter) repeatedly firing on the same
     // cell without the bot escaping counts as "trapped". Back off for a while and stop dispatching,
@@ -62,6 +66,8 @@ public final class DangerWatcher {
     private static final int SURFACE_SKIP_LOG_TICKS = 600;  // at most one auto_light_skipped log per bot every 30s
     private static final double SHELTER_EPISODE_RADIUS = 4.0D;
     private static final double CLOSE_DEFENSIVE_HOSTILE_RADIUS = CombatCore.ATTACK_RANGE + 2.0D;
+    /** After a defensive fight ended because its target left the leash, hold off re-engaging that same target this long (5s). */
+    static final int TARGET_LEASH_COOLDOWN_TICKS = 100;
 
     private DangerWatcher() {
     }
@@ -69,6 +75,8 @@ public final class DangerWatcher {
     public void clear(AIPlayerEntity bot) {
         UUID id = bot.getUUID();
         nextThreatAttemptTick.remove(id);
+        leashCooldowns.remove(id);
+        darkTrapDetections.remove(id);
         nextEatAttemptTick.remove(id);
         nextResupplyAttemptTick.remove(id);
         nextNightAttemptTick.remove(id);
@@ -83,6 +91,8 @@ public final class DangerWatcher {
 
     public void clearAll() {
         nextThreatAttemptTick.clear();
+        leashCooldowns.clear();
+        darkTrapDetections.clear();
         nextEatAttemptTick.clear();
         nextResupplyAttemptTick.clear();
         nextNightAttemptTick.clear();
@@ -417,38 +427,45 @@ public final class DangerWatcher {
                     && shouldAssignThreatTask(active, top)
                     && canAssignThreatTask(server, bot, top)) {
                 Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
-                boolean trapped = trappedBackoff(server, bot, task);
-                if (trapped) {
-                    boolean criticalHostile = isHostileBacked(top)
-                            && (top.type() == Threat.Type.LOW_HP
-                            || top.severity() == Threat.Severity.HIGH);
-                    if (!criticalHostile || hasActiveHostileDefenseOwner(bot)) {
-                        return true;
+                // Align with the leash: a defensive fight against a target that is already outside its
+                // leash (a drowned in water 10 blocks off / below the floor) would be assigned and then
+                // immediately disengage (target_left_leash), over and over. Hold off instead.
+                boolean heldOff = task instanceof CombatTask leashed
+                        && holdOffOutOfLeashCombat(server, bot, leashed);
+                if (!heldOff) {
+                    boolean trapped = trappedBackoff(server, bot, task);
+                    if (trapped) {
+                        boolean criticalHostile = isHostileBacked(top)
+                                && (top.type() == Threat.Type.LOW_HP
+                                || top.severity() == Threat.Severity.HIGH);
+                        if (!criticalHostile || hasActiveHostileDefenseOwner(bot)) {
+                            return true;
+                        }
+                        // A hard backoff may throttle ordinary churn, but it cannot claim a live
+                        // critical hostile while leaving only paused mission work. Fall through and
+                        // assign the already-decided shelter/evade owner; the normal high-severity
+                        // cooldown below replaces the longer diagnostic backoff.
                     }
-                    // A hard backoff may throttle ordinary churn, but it cannot claim a live
-                    // critical hostile while leaving only paused mission work. Fall through and
-                    // assign the already-decided shelter/evade owner; the normal high-severity
-                    // cooldown below replaces the longer diagnostic backoff.
-                }
-                if (active.isPresent()
-                        && shouldPauseForThreat(active.get(), top, task)
-                        && shouldPreserveActiveWork(bot)) {
+                    if (active.isPresent()
+                            && shouldPauseForThreat(active.get(), top, task)
+                            && shouldPreserveActiveWork(bot)) {
+                        if (task instanceof EmergencyShelterTask) {
+                            markThreatDirectionAvoided(active.get(), bot, top);
+                        }
+                        TaskManager.INSTANCE.pauseFor(bot, "threat: " + top.type());
+                    }
+                    TaskManager.INSTANCE.assign(bot, task, TaskOrigin.safety("threat:" + top.type()));
                     if (task instanceof EmergencyShelterTask) {
-                        markThreatDirectionAvoided(active.get(), bot, top);
+                        noteShelterAttempt(server, bot);
                     }
-                    TaskManager.INSTANCE.pauseFor(bot, "threat: " + top.type());
+                    nextThreatAttemptTick.put(bot.getUUID(), server.getTickCount() + threatCooldownTicks(top, task));
+                    BotLog.danger(bot, "threat_detected",
+                            "type", top.type(),
+                            "severity", top.severity(),
+                            "source", top.pos(),
+                            "decision", task.name());
+                    return true;
                 }
-                TaskManager.INSTANCE.assign(bot, task, TaskOrigin.safety("threat:" + top.type()));
-                if (task instanceof EmergencyShelterTask) {
-                    noteShelterAttempt(server, bot);
-                }
-                nextThreatAttemptTick.put(bot.getUUID(), server.getTickCount() + threatCooldownTicks(top, task));
-                BotLog.danger(bot, "threat_detected",
-                        "type", top.type(),
-                        "severity", top.severity(),
-                        "source", top.pos(),
-                        "decision", task.name());
-                return true;
             }
         }
         // Mitigation hardening (life-saving fallback): trapped in a dark underground spot -> retreat to the surface, taking priority over resupply/eating.
@@ -634,9 +651,17 @@ public final class DangerWatcher {
         // not a Gemini decision or an excuse to leave an enclosure half-cleaned while weakened.
         boolean shelterCleanupRecovery = EmergencyShelterTask.hasPendingCleanup(bot)
                 && foodLevel < 20;
+        // Wounded but stalled: natural regeneration needs food >= 18, so a bot at 17 food and 11.8
+        // hp used to sit wounded for ~85 minutes with bread in its pack (it is above the low-hunger
+        // threshold and above the retreat-hp heal threshold). Eat to full, but only when it is
+        // plainly safe (no observed hostile pressure, not hurt just now, no safety task running).
+        boolean regenStall = isRegenStall(bot)
+                && !hasNakedEatHostilePressure(bot, hostilePressure)
+                && !isSafetyTaskActive(bot, active);
         if (foodLevel > survival.hungerEatThreshold()
                 && !healingEmergency
-                && !shelterCleanupRecovery) {
+                && !shelterCleanupRecovery
+                && !regenStall) {
             return false;
         }
         boolean critical = foodLevel <= survival.hungerCriticalThreshold();
@@ -1086,9 +1111,7 @@ public final class DangerWatcher {
         }
         var world = bot.level();
         BlockPos feet = bot.blockPosition();
-        boolean darkUnderground = !world.canSeeSky(feet)
-                && world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) < 8;
-        if (!darkUnderground) {
+        if (!isDarkTrapCell(world, feet)) {
             darkStuckRecords.remove(bot.getUUID());
             return false;
         }
@@ -1102,6 +1125,10 @@ public final class DangerWatcher {
             return false; // Not stuck long enough yet
         }
         darkStuckRecords.remove(bot.getUUID());
+        darkTrapDetections.merge(bot.getUUID(), 1, Integer::sum);
+        BotLog.danger(bot, "dark_trap_detected", "at", feet.toShortString(),
+                "block_light", world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet),
+                "combined_light", world.getMaxLocalRawBrightness(feet, world.getSkyDarken()));
         if (!escapeToSurface(bot)) {
             return false; // No open-sky standable spot above (rare); hand off to other logic
         }
@@ -1119,6 +1146,29 @@ public final class DangerWatcher {
             nextEscapeHelpTick.put(bot.getUUID(), now + TRAP_HELP_INTERVAL);
         }
         return true;
+    }
+
+    /** How many times this bot was judged trapped in the dark since it was last cleared. */
+    int darkTrapDetections(AIPlayerEntity bot) {
+        return darkTrapDetections.getOrDefault(bot.getUUID(), 0);
+    }
+
+    /** Light level below which a spot counts as dark enough to spawn hostile mobs (same 8 as before). */
+    static final int DARK_TRAP_LIGHT = 8;
+
+    /**
+     * A genuinely dark, enclosed spot: not on the surface (a roof, not merely tree canopy or
+     * mushroom growth, see {@link SurfaceCheck}) and dark by the combined light vanilla uses for
+     * spawn eligibility (block light, or sky light reduced by the current ambient darkness).
+     * {@code canSeeSky} alone treated every leaf-covered or roofed cell as a cave, even at noon.
+     */
+    static boolean isDarkTrapCell(net.minecraft.world.level.Level world, BlockPos feet) {
+        // Cheap light reads first; the column scan of SurfaceCheck only runs for a genuinely dark spot.
+        if (world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) >= DARK_TRAP_LIGHT
+                || world.getMaxLocalRawBrightness(feet, world.getSkyDarken()) >= DARK_TRAP_LIGHT) {
+            return false;
+        }
+        return !SurfaceCheck.isOnSurface(world, feet);
     }
 
     // teleport upward to the nearest open-sky standable spot directly above (life-saving fallback, resets fallDistance).
@@ -1287,6 +1337,24 @@ public final class DangerWatcher {
         return max - stack.getDamageValue() <= max * 0.10D;
     }
 
+    /** Natural regeneration only runs at food >= 18 (vanilla FoodData). */
+    static final int REGEN_FOOD_LEVEL = 18;
+
+    /**
+     * Wounded (below max health) with a food bar too low for natural regeneration and food to eat.
+     * Pure of any safety context; the caller adds the hostile-pressure and safety-task gates.
+     */
+    static boolean isRegenStall(AIPlayerEntity bot) {
+        return bot.getHealth() < bot.getMaxHealth()
+                && bot.getFoodData().getFoodLevel() < REGEN_FOOD_LEVEL
+                && InventoryAction.findFoodSlot(bot) >= 0;
+    }
+
+    private static boolean isSafetyTaskActive(AIPlayerEntity bot, Optional<Task> active) {
+        return active.isPresent()
+                && TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false);
+    }
+
     private static boolean isHealingEatTransaction(AIPlayerEntity bot) {
         return bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
                 && bot.getFoodData().getFoodLevel() < 20
@@ -1352,6 +1420,55 @@ public final class DangerWatcher {
     private static boolean isMeleeForbiddenThreat(Threat threat) {
         return threat.entity() != null
                 && CombatCore.isMeleeForbiddenThreat(threat.entity());
+    }
+
+    /**
+     * True when defensive combat against {@code combat}'s bound target should not be assigned right
+     * now: the target is already outside the fight's leash (see
+     * {@link CombatTask#isWithinDefensiveLeash}) or a recent fight against it ended with
+     * {@code target_left_leash} (per-target cooldown), and it exerts no immediate pressure.
+     * Assigning anyway made combat start and disengage in the same breath, repeatedly (a drowned
+     * in water out of reach). Immediate pressure (ranged, or close and visible) and a bot that
+     * was just hurt keep the existing behaviour.
+     */
+    private boolean holdOffOutOfLeashCombat(MinecraftServer server, AIPlayerEntity bot, CombatTask combat) {
+        LivingEntity target = combat.defensiveTarget();
+        if (target == null || bot.hurtTime > 0) {
+            return false;
+        }
+        int now = server.getTickCount();
+        Map<UUID, Integer> cooldowns = leashCooldowns.get(bot.getUUID());
+        Integer until = cooldowns == null ? null : cooldowns.get(target.getUUID());
+        boolean cooling = until != null && now < until;
+        if (until != null && !cooling) {
+            cooldowns.remove(target.getUUID());
+        }
+        boolean outside = combat.defensiveTargetOutsideLeash();
+        if (!cooling && !outside) {
+            return false;
+        }
+        if (CombatTask.isImmediatePressureOn(bot, target)) {
+            return false;
+        }
+        if (!cooling) {
+            // First sighting outside the leash: log once and start the per-target cooldown so the
+            // same target is not re-evaluated (and re-logged) on every scan.
+            leashCooldowns.computeIfAbsent(bot.getUUID(), id -> new ConcurrentHashMap<>())
+                    .put(target.getUUID(), now + TARGET_LEASH_COOLDOWN_TICKS);
+            BotLog.danger(bot, "combat_held_off", "reason", "target_outside_leash",
+                    "target", target.getType().toString(),
+                    "distance", (int) bot.distanceTo(target));
+        }
+        return true;
+    }
+
+    /** Called by defensive Combat when it ended because its target left the leash. */
+    void noteTargetLeftLeash(AIPlayerEntity bot, LivingEntity target) {
+        if (target == null || bot.level().getServer() == null) {
+            return;
+        }
+        leashCooldowns.computeIfAbsent(bot.getUUID(), id -> new ConcurrentHashMap<>())
+                .put(target.getUUID(), bot.level().getServer().getTickCount() + TARGET_LEASH_COOLDOWN_TICKS);
     }
 
     /** A completed escape is a new safety boundary; its assignment-time debounce must not linger. */

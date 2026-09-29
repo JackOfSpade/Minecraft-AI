@@ -1,0 +1,440 @@
+package io.github.zoyluo.minecraftai.task;
+
+import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.ToolSelector;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.runtime.IntentController;
+import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.monster.zombie.Husk;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
+import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
+
+/**
+ * Real-server proofs of the survival-reflex fixes from the 2026-09-29 session review: wounded-and-stalled
+ * regeneration eating, the dark-trap reflex no longer firing under a tree canopy in daylight, a chat request
+ * not cancelling a running SAFETY task, defensive combat not being assigned against an out-of-leash target,
+ * the tool selector ignoring air/fluid, armor-equip and damage log coalescing, and diag_health_drop naming its
+ * cause.
+ */
+public final class SurvivalReflexGameTests {
+    private static final long NOON = 6000L;
+
+    // ---- 1: wounded bot with food < 18 eats to full and regenerates ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_wounded_bot_below_regen_food_eats_and_regenerates", maxTicks = 700)
+    public void woundedBotBelowRegenFoodEatsAndRegenerates(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "WoundedEaterGT", 20, 5, 30, 4);
+        bot.setHealth(12.0F);
+        bot.getFoodData().setFoodLevel(17);
+        bot.getFoodData().setSaturation(0.0F);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 3));
+        boolean[] sawEat = {false};
+        context.failIfEver(() -> {
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof EatTask) {
+                sawEat[0] = true;
+                require(context, active.state() != TaskState.FAILED, "EatTask failed: " + active.failureReason());
+            }
+            if (sawEat[0] && bot.getFoodData().getFoodLevel() >= DangerWatcher.REGEN_FOOD_LEVEL
+                    && bot.getHealth() > 12.0F) {
+                require(context, InventoryAction.countItem(bot, Items.BREAD) < 3, "food rose without eating bread");
+                despawnAndComplete(context, bot);
+            }
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_wounded_bot_does_not_eat_while_a_safety_task_runs", maxTicks = 120)
+    public void woundedBotDoesNotEatWhileASafetyTaskRuns(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "WoundedSafetyGT", 20, 5, 70, 4);
+        bot.setHealth(12.0F);
+        bot.getFoodData().setFoodLevel(17);
+        bot.getFoodData().setSaturation(0.0F);
+        InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 3));
+        HoldingTask safety = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, safety, TaskOrigin.safety("gametest_safety_hold"));
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == safety,
+                    "a regeneration bite replaced the running SAFETY task");
+            require(context, bot.getFoodData().getFoodLevel() == 17, "the bot ate during a SAFETY task");
+            if (++ticks[0] >= 80) {
+                despawnAndComplete(context, bot);
+            }
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_healthy_or_regenerating_bot_does_not_eat", maxTicks = 120)
+    public void healthyOrRegeneratingBotDoesNotEat(GameTestHelper context) {
+        AIPlayerEntity fullHealth = spawnOnPlatform(context, "FullHpFood17GT", 20, 5, 110, 4);
+        fullHealth.setHealth(fullHealth.getMaxHealth());
+        fullHealth.getFoodData().setFoodLevel(17);
+        InventoryAction.giveItem(fullHealth, new ItemStack(Items.BREAD, 3));
+        AIPlayerEntity regenerating = spawnOnPlatform(context, "Hp12Food18GT", 40, 5, 110, 4);
+        regenerating.setHealth(12.0F);
+        regenerating.getFoodData().setFoodLevel(18);
+        InventoryAction.giveItem(regenerating, new ItemStack(Items.BREAD, 3));
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            require(context, !(TaskManager.INSTANCE.getActive(fullHealth).orElse(null) instanceof EatTask),
+                    "a full-health bot ate at food 17");
+            require(context, !(TaskManager.INSTANCE.getActive(regenerating).orElse(null) instanceof EatTask),
+                    "a wounded bot that already regenerates (food 18) ate");
+            if (++ticks[0] >= 80) {
+                despawnAndComplete(context, fullHealth, regenerating);
+            }
+        });
+    }
+
+    // ---- 2: dark-trap reflex ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_bot_under_tree_canopy_at_noon_is_not_dark_trapped", maxTicks = 1500)
+    public void botUnderTreeCanopyAtNoonIsNotDarkTrapped(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(20, 5, 150));
+        buildFloor(world, feet, 9);
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
+                for (int dy = 3; dy <= 4; dy++) {
+                    world.setBlock(feet.offset(dx, dy, dz),
+                            Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true), Block.UPDATE_ALL);
+                }
+            }
+        }
+        for (int dy = 0; dy <= 4; dy++) {
+            world.setBlock(feet.offset(2, dy, 0), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        AIPlayerEntity bot = spawnAt(context, "CanopyNoonGT", feet);
+        int[] ticks = {0};
+        TimeLockedRun.run(context, 1200, () -> {
+            world.setDayTime(NOON);
+            if (ticks[0] == 40) {
+                // The fixture reproduces the reported case: no sky view and no block light (the old test).
+                require(context, !world.canSeeSky(feet)
+                                && world.getBrightness(LightLayer.BLOCK, feet) < DangerWatcher.DARK_TRAP_LIGHT,
+                        "fixture is not the reported case (the bot can see the sky or has block light)");
+            }
+            require(context, DangerWatcher.INSTANCE.darkTrapDetections(bot) == 0,
+                    "the bot under a tree canopy at noon was judged trapped in the dark");
+            return ++ticks[0] >= 320; // more than 160 ticks standing still after the light settled, the old trigger
+        }, () -> cleanUp(bot));
+    }
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_bot_in_sealed_dark_stone_pocket_is_dark_trapped", maxTicks = 1500)
+    public void botInSealedDarkStonePocketIsDarkTrapped(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(20, 5, 190));
+        int wall = 3;
+        for (int dx = -wall; dx <= wall; dx++) {
+            for (int dz = -wall; dz <= wall; dz++) {
+                boolean onWall = Math.abs(dx) == wall || Math.abs(dz) == wall;
+                world.setBlock(feet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(feet.offset(dx, dy, dz), onWall || dy == 3
+                            ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        AIPlayerEntity bot = spawnAt(context, "DarkPocketGT", feet);
+        int[] ticks = {0};
+        TimeLockedRun.run(context, 1200, () -> {
+            world.setDayTime(NOON);
+            require(context, !SurfaceCheck.isOnSurface(world, feet), "fixture pocket is not under a roof");
+            if (DangerWatcher.INSTANCE.darkTrapDetections(bot) >= 1) {
+                return true;
+            }
+            require(context, ++ticks[0] < 500, "the bot in a sealed dark stone pocket was never judged trapped");
+            return false;
+        }, () -> cleanUp(bot));
+    }
+
+    // ---- 3: a chat request does not cancel a running SAFETY task ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_new_chat_request_keeps_a_running_safety_task", maxTicks = 60)
+    public void newChatRequestKeepsARunningSafetyTask(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "ChatSafetyGT", 20, 5, 230, 4);
+        // 1. A safety task with mission work paused beneath it: the request replaces the mission, not the fight.
+        HoldingTask mission = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, mission, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_mission"));
+        TaskManager.INSTANCE.pauseFor(bot, "gametest_threat");
+        HoldingTask fight = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, fight, TaskOrigin.safety("gametest_fight"));
+        IntentController.INSTANCE.cancelAllKeepingActiveSafety(
+                bot, IntentController.ControlOrigin.SYSTEM, "new_player_request");
+        require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == fight,
+                "the chat request cancelled the running SAFETY task");
+        require(context, fight.state() == TaskState.RUNNING, "the SAFETY task is no longer RUNNING: " + fight.state());
+        require(context, !TaskManager.INSTANCE.hasPaused(bot), "the paused mission beneath the fight survived the request");
+        require(context, mission.state() != TaskState.RUNNING && mission.state() != TaskState.PAUSED,
+                "the paused mission was not cancelled: " + mission.state());
+        // 2. An explicit stop still preempts the SAFETY task.
+        IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.PLAYER_COMMAND, "stop");
+        require(context, TaskManager.INSTANCE.getActive(bot).isEmpty(), "an explicit stop did not preempt the SAFETY task");
+        // 3. An ordinary (non-safety) task is still replaced by a new request.
+        HoldingTask ordinary = new HoldingTask();
+        TaskManager.INSTANCE.assign(bot, ordinary, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_ordinary"));
+        IntentController.INSTANCE.cancelAllKeepingActiveSafety(
+                bot, IntentController.ControlOrigin.SYSTEM, "new_player_request");
+        require(context, TaskManager.INSTANCE.getActive(bot).isEmpty(), "a new chat request did not cancel ordinary work");
+        despawnAndComplete(context, bot);
+    }
+
+    // ---- 4: defensive combat is not assigned against a target already outside the leash ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_out_of_leash_hostile_does_not_start_and_drop_combat_repeatedly", maxTicks = 600)
+    public void outOfLeashHostileDoesNotStartAndDropCombatRepeatedly(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(20, 5, 270));
+        buildFloor(world, feet, 14);
+        AIPlayerEntity bot = spawnAt(context, "LeashWatcherGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD));
+        EquipAction.equipBestWeapon(bot);
+        Husk husk = EntityType.HUSK.create(world, EntitySpawnReason.COMMAND);
+        if (husk == null) {
+            cleanUp(bot);
+            context.fail(Component.nullToEmpty("failed to create the husk fixture"));
+            return;
+        }
+        BlockPos huskFeet = feet.east(9); // inside the ten-block pressure range, outside the eight-block leash
+        husk.setPersistenceRequired();
+        husk.setNoAi(true);
+        husk.snapTo(huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D, 90.0F, 0.0F);
+        world.addFreshEntity(husk);
+        Set<Task> combats = new HashSet<>();
+        int[] ticks = {0};
+        TimeLockedRun.run(context, 500, () -> {
+            world.setDayTime(18000L);
+            if (ticks[0] == 40) {
+                require(context, DangerWatcher.hasObservableHostilePressure(bot),
+                        "fixture: the husk is not observable hostile pressure");
+                require(context, !CombatTask.isWithinDefensiveLeash(bot.blockPosition(), husk.blockPosition()),
+                        "fixture: the husk is inside the leash");
+            }
+            TaskManager.INSTANCE.getActive(bot).ifPresent(task -> {
+                if (task instanceof CombatTask) {
+                    combats.add(task);
+                }
+            });
+            if (++ticks[0] < 200) {
+                return false;
+            }
+            husk.discard();
+            require(context, combats.isEmpty(),
+                    "defensive combat was assigned " + combats.size() + " time(s) against a target outside the leash");
+            List<String> lines = botLog(bot.getGameProfile().name());
+            if (lines != null) {
+                long disengaged = lines.stream().filter(line -> line.contains("event=defensive_combat_disengaged")).count();
+                require(context, disengaged == 0, "defensive combat disengaged " + disengaged + " time(s) with target_left_leash");
+            }
+            return true;
+        }, () -> cleanUp(bot));
+    }
+
+    // ---- 5: the tool selector ignores air and fluid ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_equip_best_tool_ignores_air_and_fluid_targets", maxTicks = 60)
+    public void equipBestToolIgnoresAirAndFluidTargets(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "ToolAirGT", 20, 5, 320, 4);
+        var stacks = bot.getInventory().getNonEquipmentItems();
+        for (int slot = 0; slot < stacks.size(); slot++) {
+            stacks.set(slot, ItemStack.EMPTY);
+        }
+        stacks.set(0, new ItemStack(Items.IRON_PICKAXE));
+        stacks.set(1, new ItemStack(Items.OAK_PLANKS, 32));
+        bot.getInventory().setSelectedSlot(0);
+        for (var state : List.of(Blocks.AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(),
+                Blocks.WATER.defaultBlockState(), Blocks.LAVA.defaultBlockState())) {
+            ToolSelector.Selection selection = ToolSelector.equipBestTool(bot, state);
+            require(context, !selection.changed(), "equipBestTool changed the selection for " + state.getBlock());
+            require(context, bot.getInventory().getSelectedSlot() == 0,
+                    "equipBestTool moved the hotbar to slot " + bot.getInventory().getSelectedSlot() + " for " + state.getBlock());
+        }
+        despawnAndComplete(context, bot);
+    }
+
+    // ---- 6: armor equip logging is coalesced ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_repeated_armor_equip_is_logged_once", maxTicks = 300)
+    public void repeatedArmorEquipIsLoggedOnce(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "ArmorLogGT", 20, 5, 360, 4);
+        for (int round = 0; round < 3; round++) {
+            bot.getInventory().getNonEquipmentItems().set(5, new ItemStack(Items.IRON_CHESTPLATE));
+            bot.setItemSlot(EquipmentSlot.CHEST, ItemStack.EMPTY);
+            require(context, EquipAction.equipBestArmor(bot) == 1, "round " + round + ": the chestplate was not equipped");
+        }
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            if (++ticks[0] < 40) {
+                return;
+            }
+            List<String> lines = botLog(bot.getGameProfile().name());
+            if (lines == null) {
+                despawnAndComplete(context, bot); // per-bot log unavailable: nothing to read
+                return;
+            }
+            long logged = lines.stream().filter(line -> line.contains("event=equip_armor")).count();
+            if (logged < 1 && ticks[0] < 200) {
+                return; // the per-bot log is written asynchronously
+            }
+            require(context, logged == 1, "the same chestplate equip was logged " + logged + " times, expected 1");
+            despawnAndComplete(context, bot);
+        });
+    }
+
+    // ---- 7 + 8: damage source in diag_health_drop, damage log coalescing ----
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_diag_health_drop_names_the_damage_source", maxTicks = 450)
+    public void diagHealthDropNamesTheDamageSource(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnOnPlatform(context, "DiagCauseGT", 20, 5, 400, 4);
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            ticks[0]++;
+            if (ticks[0] == 80) { // a fresh bot ignores damage until its (fake) client has loaded, about 60 ticks
+                bot.hurtServer(world, world.damageSources().magic(), 2.0F);
+            }
+            if (ticks[0] < 100) {
+                return;
+            }
+            List<String> lines = botLog(bot.getGameProfile().name());
+            if (lines == null) {
+                despawnAndComplete(context, bot); // per-bot log unavailable: nothing to read
+                return;
+            }
+            String drop = lines.stream().filter(line -> line.contains("event=diag_health_drop")).findFirst().orElse(null);
+            if (drop == null) {
+                require(context, ticks[0] < 300, "no diag_health_drop line was logged");
+                return;
+            }
+            require(context, drop.contains("magic"), "diag_health_drop does not name the damage source: " + drop);
+            despawnAndComplete(context, bot);
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_repeated_same_source_damage_is_logged_as_one_line_with_a_count", maxTicks = 450)
+    public void repeatedSameSourceDamageIsLoggedAsOneLineWithACount(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnOnPlatform(context, "DamageBurstGT", 20, 5, 440, 4);
+        bot.setHealth(bot.getMaxHealth());
+        int[] ticks = {0};
+        context.failIfEver(() -> {
+            ticks[0]++;
+            if (ticks[0] >= 80 && ticks[0] < 86) { // after the ~60-tick post-spawn invulnerability
+                bot.hurtServer(world, world.damageSources().magic(), 1.0F);
+            }
+            if (ticks[0] < 170) {
+                return; // let the two-second window pass so the summary is flushed by the idle tick
+            }
+            List<String> lines = botLog(bot.getGameProfile().name());
+            if (lines == null) {
+                despawnAndComplete(context, bot);
+                return;
+            }
+            long single = lines.stream().filter(line -> line.contains("event=damage_taken ")).count();
+            long summaries = lines.stream().filter(line -> line.contains("event=damage_taken_repeated")).count();
+            if (summaries < 1 && ticks[0] < 350) {
+                return; // asynchronous per-bot log writer
+            }
+            require(context, single == 1, "expected one damage_taken line for six same-source hits, saw " + single);
+            require(context, summaries == 1, "expected one damage_taken_repeated summary, saw " + summaries);
+            String summary = lines.stream().filter(line -> line.contains("event=damage_taken_repeated")).findFirst().orElse("");
+            require(context, summary.contains("repeats='5'"), "the summary does not count the five repeats: " + summary);
+            despawnAndComplete(context, bot);
+        });
+    }
+
+    // ---- fixtures ----
+
+    private static final class HoldingTask extends AbstractTask {
+        @Override
+        public String name() {
+            return "holding_work";
+        }
+
+        @Override
+        public String describe() {
+            return "Holding";
+        }
+
+        @Override
+        public double progress() {
+            return 0.5D;
+        }
+
+        @Override
+        protected void onStart(AIPlayerEntity bot) {
+        }
+
+        @Override
+        protected void onTick(AIPlayerEntity bot) {
+        }
+    }
+
+    private static void buildFloor(ServerLevel world, BlockPos feet, int radius) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                BlockPos cell = feet.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 6; dy++) {
+                    world.setBlock(cell.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+    }
+
+    private static AIPlayerEntity spawnOnPlatform(GameTestHelper context, String name, int x, int y, int z, int radius) {
+        BlockPos feet = context.absolutePos(new BlockPos(x, y, z));
+        buildFloor(context.getLevel(), feet, radius);
+        context.getLevel().setDayTime(1000L);
+        return spawnAt(context, name, feet);
+    }
+
+    private static AIPlayerEntity spawnAt(GameTestHelper context, String name, BlockPos feet) {
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
+                        0.0F, 0.0F, GameType.SURVIVAL)
+                .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, true);
+        bot.setHealth(bot.getMaxHealth());
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
+        return bot;
+    }
+
+    private static void cleanUp(AIPlayerEntity bot) {
+        TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
+        DangerWatcher.INSTANCE.clear(bot);
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), bot.getGameProfile().name());
+    }
+
+    private static void despawnAndComplete(GameTestHelper context, AIPlayerEntity... bots) {
+        for (AIPlayerEntity bot : bots) {
+            cleanUp(bot);
+        }
+        context.succeed();
+    }
+}
