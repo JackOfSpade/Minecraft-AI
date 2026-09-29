@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.gametest.GameTestCleanup;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.network.PlayerKind;
@@ -330,7 +331,7 @@ public final class BoatFollowGameTests {
         BlockState water = Blocks.WATER.defaultBlockState();
         // The gametest box is one chunk-sized structure; the lake is wider than that and boats
         // only tick (and only float/drive) in entity-ticking chunks, so force-load the whole area.
-        forceLakeChunks(world, feet);
+        forceLakeChunks(context, feet);
         // Leftover boats from earlier tests in the same server would be offered as "empty boats".
         world.getEntitiesOfClass(AbstractBoat.class,
                 net.minecraft.world.phys.AABB.encapsulatingFullBlocks(feet.offset(-30, -10, -30), feet.offset(LAKE_MAX_X + 30, 10, MAX_Z + 30)),
@@ -366,19 +367,14 @@ public final class BoatFollowGameTests {
 
     /**
      * Force-loads every chunk under the lake so the boats keep ticking (boats only tick and float in
-     * entity-ticking chunks). The chunks are deliberately never released: ChunkForcing is a plain flag shared with
-     * the GameTest runner, which force-loads each test structure's chunks too and starts the NEXT batch from its own
-     * completion listener, before ours runs. Unforcing a lake chunk in our completion cleanup therefore removed the
-     * flag the next test's structure had just been given (the runner's setChunkForced(true) saw it already set), the
-     * chunk unloaded, and that test then waited forever for its structure chunks to be entity-loaded: its tick
-     * counter never starts, so it does not even time out and the server ticks on at full speed.
+     * entity-ticking chunks). Release is handled by {@link GameTestChunkForcing}: never from a plain completion
+     * cleanup (that runs after the runner has already forced the NEXT test's structure chunks, and unforcing a
+     * shared chunk hangs that test), only for chunks outside every live structure.
      */
-    private static void forceLakeChunks(ServerLevel world, BlockPos feet) {
-        for (int cx = (feet.getX() - 1) >> 4; cx <= (feet.getX() + LAKE_MAX_X + 1) >> 4; cx++) {
-            for (int cz = (feet.getZ() - 1) >> 4; cz <= (feet.getZ() + MAX_Z + 1) >> 4; cz++) {
-                world.setChunkForced(cx, cz, true);
-            }
-        }
+    private static void forceLakeChunks(GameTestHelper context, BlockPos feet) {
+        GameTestChunkForcing.forceForTest(context,
+                (feet.getX() - 1) >> 4, (feet.getX() + LAKE_MAX_X + 1) >> 4,
+                (feet.getZ() - 1) >> 4, (feet.getZ() + MAX_Z + 1) >> 4);
     }
 
     private static AbstractBoat placeBoat(ServerLevel world, BlockPos cell) {

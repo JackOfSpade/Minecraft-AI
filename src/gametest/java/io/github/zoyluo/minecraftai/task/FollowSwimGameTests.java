@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -224,7 +225,7 @@ public final class FollowSwimGameTests {
         // wall splits it completely, and the bot carries no placeable block, so no walking route
         // exists (the follow order alone must get it through, by the ordinary dig-through route or,
         // failing that, the recovery ladder's dig-out).
-        buildIsland(world, feet, z -> Blocks.STONE.defaultBlockState());
+        buildIsland(context, feet, z -> Blocks.STONE.defaultBlockState());
         AIPlayerEntity bot = spawnBot(world, "DigWallBot", feet.offset(4, 0, 6));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         AIPlayerEntity target = spawnBot(world, "DigWallTgt", feet.offset(17, 0, 6));
@@ -244,7 +245,6 @@ public final class FollowSwimGameTests {
             }
             if (bot.getX() >= feet.getX() + 12.0D && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
                 require(context, now > 5, "impossible instant arrival");
-                forceChunks(world, feet, 26, false);
                 despawn(world, bot, target);
                 context.succeed();
             }
@@ -264,7 +264,7 @@ public final class FollowSwimGameTests {
     public void stuckRecoveryDigsPlainStoneOnlyWithToolNeverBuildingBlocks(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
         ServerLevel world = context.getLevel();
-        buildIsland(world, feet, z -> z >= 10 ? Blocks.OAK_PLANKS.defaultBlockState()
+        buildIsland(context, feet, z -> z >= 10 ? Blocks.OAK_PLANKS.defaultBlockState()
                 : z >= 7 ? Blocks.COBBLESTONE.defaultBlockState() : Blocks.STONE.defaultBlockState());
         // Lane z=2: pickaxe + stone.  Lane z=5: stone but no tool.  Lane z=8: pickaxe + cobblestone.
         // Lane z=11: pickaxe + planks.
@@ -437,8 +437,9 @@ public final class FollowSwimGameTests {
      * A sealed island: floor only inside x 0..24, z 0..12, split completely by a 2-high, 2-thick
      * wall at x 10..11 made of {@code wallForZ(z)}.
      */
-    private static void buildIsland(ServerLevel world, BlockPos feet, java.util.function.IntFunction<BlockState> wallForZ) {
-        forceChunks(world, feet, 26, true);
+    private static void buildIsland(GameTestHelper context, BlockPos feet, java.util.function.IntFunction<BlockState> wallForZ) {
+        ServerLevel world = context.getLevel();
+        forceChunks(context, feet, 26);
         for (int x = -2; x <= 26; x++) {
             for (int z = -2; z <= 14; z++) {
                 boolean floor = x >= 0 && x <= 24 && z >= 0 && z <= 12;
@@ -468,7 +469,7 @@ public final class FollowSwimGameTests {
         ServerLevel world = context.getLevel();
         world.setDayTime(1000L);
         BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
-        forceChunks(world, feet, maxX, true);
+        forceChunks(context, feet, maxX);
         BlockState stone = Blocks.STONE.defaultBlockState();
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockState water = Blocks.WATER.defaultBlockState();
@@ -495,12 +496,11 @@ public final class FollowSwimGameTests {
         return new Pond(feet, x0, x1, maxX, area);
     }
 
-    private static void forceChunks(ServerLevel world, BlockPos feet, int maxX, boolean forced) {
-        for (int cx = (feet.getX() - 2) >> 4; cx <= (feet.getX() + maxX + 1) >> 4; cx++) {
-            for (int cz = (feet.getZ() - 2) >> 4; cz <= (feet.getZ() + MAX_Z + 1) >> 4; cz++) {
-                world.setChunkForced(cx, cz, forced);
-            }
-        }
+    /** Force-loads the chunks under the pond/island; released by {@link GameTestChunkForcing} (see there). */
+    private static void forceChunks(GameTestHelper context, BlockPos feet, int maxX) {
+        GameTestChunkForcing.forceForTest(context,
+                (feet.getX() - 2) >> 4, (feet.getX() + maxX + 1) >> 4,
+                (feet.getZ() - 2) >> 4, (feet.getZ() + MAX_Z + 1) >> 4);
     }
 
     static boolean noBoats(ServerLevel world, Pond pond) {
@@ -545,7 +545,6 @@ public final class FollowSwimGameTests {
     }
 
     static void finish(GameTestHelper context, Pond pond, AIPlayerEntity bot, AIPlayerEntity target) {
-        forceChunks(context.getLevel(), pond.feet(), pond.maxX(), false);
         TaskManager.INSTANCE.abort(bot);
         despawn(context.getLevel(), bot, target);
         context.succeed();

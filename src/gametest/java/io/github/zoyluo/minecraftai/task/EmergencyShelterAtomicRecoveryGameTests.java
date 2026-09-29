@@ -511,8 +511,10 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     reserveSpentWhileSealed[0] = true;
                 }
                 if (bot.getHealth() < bot.getMaxHealth()) {
-                    // Out of food items but with a full hunger bar the bot still regenerates: it holds sealed
-                    // until it is back at full health (it must not cry for help or give up at half health).
+                    // Out of food items but with hunger at 18+ the bot still regenerates: it holds sealed
+                    // while natural regeneration is actually running (the fixture's saturation funds the few
+                    // heals needed); it must not cry for help or give up at half health merely because no
+                    // food item is left.
                     require(context, task.state() == TaskState.RUNNING && sealed,
                             "food-19 shelter opened before healing completed: hp=" + bot.getHealth()
                                     + " " + task.describe());
@@ -710,6 +712,224 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             hostiles.forEach(Husk::discard);
             finish(context, bot, botName);
         });
+    }
+
+    // ---- non-forced (failure) exits ------------------------------------------------------------------------------
+    // The head-port observation reseal, the pressured-egress rotation and the exit deadline still run for an exit
+    // that is NOT a recovered/forced one. The cleanest way to reach one is a breach during HOLD: removing the roof
+    // block makes isEnvelopeSealed false, so beginExit("shelter_breached_during_hold") starts an ordinary exit while
+    // the bot is at full health (a recovered bot would force its door instead, see above). The terminal failure
+    // keeps the FIRST reason noted (the breach): the typed pressure timeout only flips the exit to forced mode
+    // (force_pressure_exit=true once exit_age reaches the 500-tick deadline), it never replaces an earlier reason.
+
+    private static final String BREACHED_DURING_HOLD = "shelter_breached_during_hold";
+    private static final int PRESSURE_EXIT_DEADLINE = 500;
+
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_breach_exit_reseals_a_hostile_at_the_head_port_and_rotates_egress", maxTicks = 16000)
+    public void breachExitResealsAHostileAtTheHeadPortAndRotatesEgress(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        preparePlatform(context, feet, 4);
+        AIPlayerEntity bot = spawn(context, "ShelterBreachResealGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 24));
+
+        EmergencyShelterTask task = new EmergencyShelterTask();
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_breach_reseal"));
+        Husk[] hostile = {null};
+        boolean[] breached = {false};
+        boolean[] resealObserved = {false};
+
+        runLocked(context, () -> {
+            context.getLevel().setDayTime(1000L);
+            if (!breached[0]) {
+                requireStillBuildingOrHolding(context, task);
+                if (task.describe().contains("phase=HOLD")) {
+                    hostile[0] = spawnHusk(context, feet.north(2));
+                    breachRoof(context, feet);
+                    breached[0] = true;
+                }
+                return;
+            }
+            if (hostile[0] != null) {
+                require(context, isSealed(context, feet.north()),
+                        "the foot doorway opened next to a visible hostile: " + task.describe());
+                if (describedInt(task, "observation_reseals") >= 1) {
+                    require(context, isSealed(context, feet.north().above()),
+                            "the observed head port was not resealed: " + task.describe());
+                    resealObserved[0] = true;
+                    hostile[0].discard();
+                    hostile[0] = null;
+                    return;
+                }
+            }
+            if (task.state() == TaskState.RUNNING) {
+                if (!task.describe().contains("phase=STEP_OUT")) {
+                    require(context, bot.blockPosition().equals(feet),
+                            "the bot moved before a physical STEP_OUT: " + task.describe());
+                }
+                return;
+            }
+            require(context, resealObserved[0],
+                    "the exit ended without ever resealing the observed pressure: " + task.describe());
+            require(context, task.state() == TaskState.FAILED
+                            && BREACHED_DURING_HOLD.equals(task.failureReason()),
+                    "a breach exit must end with its own typed reason: "
+                            + task.state() + ":" + task.failureReason());
+            require(context, !bot.blockPosition().equals(feet.north()),
+                    "the exit reused the pressured north doorway instead of rotating egress");
+            assertPhysicalExit(context, bot, feet);
+            finish(context, bot, "ShelterBreachResealGT");
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_breach_exit_with_hostiles_on_all_four_sides_rotates_then_forces_after_the_pressure_deadline", maxTicks = 16000)
+    public void breachExitWithHostilesOnAllFourSidesRotatesThenForcesAfterThePressureDeadline(
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        preparePlatform(context, feet, 4);
+        AIPlayerEntity bot = spawn(context, "ShelterBreachAllPressureGT", feet);
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 32));
+
+        EmergencyShelterTask task = new EmergencyShelterTask();
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_breach_all_pressure"));
+        List<Husk> hostiles = new ArrayList<>();
+        boolean[] breached = {false};
+        int[] maxPressured = {0};
+        int[] forcedAtExitAge = {-1};
+
+        runLocked(context, () -> {
+            context.getLevel().setDayTime(1000L);
+            if (!breached[0]) {
+                requireStillBuildingOrHolding(context, task);
+                if (task.describe().contains("phase=HOLD")) {
+                    for (Direction direction : Direction.Plane.HORIZONTAL) {
+                        hostiles.add(spawnHusk(context, feet.relative(direction, 2)));
+                    }
+                    breachRoof(context, feet);
+                    breached[0] = true;
+                }
+                return;
+            }
+            maxPressured[0] = Math.max(maxPressured[0], describedInt(task, "pressured_egress"));
+            boolean forced = task.describe().contains("force_pressure_exit=true");
+            if (forced && forcedAtExitAge[0] < 0) {
+                forcedAtExitAge[0] = describedInt(task, "exit_age");
+            }
+            if (!forced) {
+                // Until the global deadline no foot doorway may open next to a visible hostile, and the bot
+                // stays on its anchor.
+                for (Direction direction : Direction.Plane.HORIZONTAL) {
+                    require(context, isSealed(context, feet.relative(direction)),
+                            "a foot doorway opened before the pressure deadline: " + direction + " "
+                                    + task.describe());
+                }
+                require(context, bot.blockPosition().equals(feet),
+                        "the bot left its anchor before the pressure deadline: " + task.describe());
+            }
+            if (task.state() == TaskState.RUNNING) {
+                return;
+            }
+            require(context, task.state() == TaskState.FAILED
+                            && BREACHED_DURING_HOLD.equals(task.failureReason()),
+                    "a breach exit must end with its own typed reason: "
+                            + task.state() + ":" + task.failureReason());
+            require(context, maxPressured[0] == 4 && describedInt(task, "observation_reseals") >= 4,
+                    "the exit did not rotate across all four pressured doors before forcing: max_pressured="
+                            + maxPressured[0] + " " + task.describe());
+            require(context, forcedAtExitAge[0] >= PRESSURE_EXIT_DEADLINE,
+                    "the pressure exit was forced before its deadline: exit_age=" + forcedAtExitAge[0]);
+            assertPhysicalExit(context, bot, feet);
+            hostiles.forEach(Husk::discard);
+            finish(context, bot, "ShelterBreachAllPressureGT");
+        });
+    }
+
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_breach_exit_without_a_spare_block_stays_sealed_until_the_pressure_deadline", maxTicks = 16000)
+    public void breachExitWithoutASpareBlockStaysSealedUntilThePressureDeadline(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
+        preparePlatform(context, feet, 4);
+        AIPlayerEntity bot = spawn(context, "ShelterBreachNoBlockGT", feet);
+        // Ten blocks exactly fund the supported envelope. Once it is sealed, a full non-block inventory keeps
+        // a mined wall drop from being collected, so the observation reseal is factually unavailable.
+        InventoryAction.giveItem(bot, new ItemStack(Items.NETHERRACK, 10));
+
+        EmergencyShelterTask task = new EmergencyShelterTask();
+        TaskManager.INSTANCE.assign(bot, task,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_breach_no_spare_block"));
+        Husk[] hostile = {null};
+        boolean[] breached = {false};
+        int[] sealedRetryTicks = {0};
+        int[] forcedAtExitAge = {-1};
+
+        runLocked(context, () -> {
+            context.getLevel().setDayTime(1000L);
+            if (!breached[0]) {
+                requireStillBuildingOrHolding(context, task);
+                if (task.describe().contains("phase=HOLD")) {
+                    require(context, InventoryAction.countItem(bot, Items.NETHERRACK) == 0,
+                            "exact-material fixture retained a reseal block");
+                    for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+                        if (bot.getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
+                            bot.getInventory().getNonEquipmentItems().set(slot, new ItemStack(Items.STICK, 64));
+                        }
+                    }
+                    bot.getInventory().setChanged();
+                    hostile[0] = spawnHusk(context, feet.north(2));
+                    breachRoof(context, feet);
+                    breached[0] = true;
+                }
+                return;
+            }
+            boolean forced = task.describe().contains("force_pressure_exit=true");
+            if (forced && forcedAtExitAge[0] < 0) {
+                forcedAtExitAge[0] = describedInt(task, "exit_age");
+            }
+            boolean headOpenFootSealed = context.getLevel().getBlockState(feet.north().above()).isAir()
+                    && isSealed(context, feet.north());
+            if (!forced) {
+                require(context, bot.blockPosition().equals(feet) && !hasPassableEnvelopeSide(context, feet),
+                        "a failed reseal published movement or a passable door before the deadline: "
+                                + task.describe());
+                require(context, describedInt(task, "observation_reseals") == 0,
+                        "a reseal was published without a block to place: " + task.describe());
+                if (task.state() == TaskState.RUNNING && headOpenFootSealed) {
+                    sealedRetryTicks[0]++;
+                }
+            }
+            if (task.state() == TaskState.RUNNING) {
+                return;
+            }
+            require(context, task.state() == TaskState.FAILED
+                            && BREACHED_DURING_HOLD.equals(task.failureReason()),
+                    "a breach exit must end with its own typed reason: "
+                            + task.state() + ":" + task.failureReason());
+            require(context, sealedRetryTicks[0] >= 20,
+                    "the fixture did not prove bounded head-open/foot-sealed reseal retries: "
+                            + sealedRetryTicks[0]);
+            require(context, forcedAtExitAge[0] >= PRESSURE_EXIT_DEADLINE,
+                    "the pressure exit was forced before its deadline: exit_age=" + forcedAtExitAge[0]);
+            assertPhysicalExit(context, bot, feet);
+            if (hostile[0] != null) {
+                hostile[0].discard();
+            }
+            finish(context, bot, "ShelterBreachNoBlockGT");
+        });
+    }
+
+    /** Before the breach the shelter must still be building or holding; anything else is a broken fixture. */
+    private static void requireStillBuildingOrHolding(GameTestHelper context, EmergencyShelterTask task) {
+        if (task.state() != TaskState.RUNNING) {
+            context.fail(Component.nullToEmpty("shelter ended before the breach fixture ran: "
+                    + task.state() + ":" + task.failureReason() + " " + task.describe()));
+        }
+    }
+
+    /** Removes the roof block of a sealed shelter: an ordinary (non-forced) exit starts on the next task tick. */
+    private static void breachRoof(GameTestHelper context, BlockPos feet) {
+        require(context, shelterShell(feet).stream().allMatch(pos -> isSealed(context, pos)),
+                "the fixture breached a shelter that was not sealed yet");
+        context.getLevel().setBlock(feet.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_water_rescue_and_body_fluid_reject_fixed_shelter_admission", maxTicks = 30)

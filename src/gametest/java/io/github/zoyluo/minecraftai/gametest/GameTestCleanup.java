@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.gametest;
 
 import java.lang.reflect.Field;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.GameTestInfo;
 import net.minecraft.gametest.framework.GameTestListener;
@@ -19,7 +20,13 @@ import org.slf4j.LoggerFactory;
  * runner notifies every listener exactly once when the test is done, whether it succeeded, failed or ran out
  * of ticks. The {@link GameTestInfo} is only reachable through {@code GameTestHelper}'s private field, so it
  * is read reflectively (this source set only ever runs in the Mojang-mapped dev/test environment, where the
- * field is named {@code testInfo}).
+ * field is named {@code testInfo}); {@code GameTestCleanupSelfTests} fails loudly if a version bump breaks
+ * that lookup or the once-only listener contract.
+ *
+ * <p>Ordering: the runner registers its own listener (which starts the NEXT test batch and clears every
+ * force-loaded chunk) when the batch starts, before the test body registers ours. A cleanup therefore runs AFTER
+ * the runner has already spawned the next batch's structures. Cleanup code must not undo shared state the
+ * runner may have just re-established (see {@link GameTestChunkForcing}).
  */
 public final class GameTestCleanup {
     private static final Logger LOG = LoggerFactory.getLogger("minecraftai-gametest-cleanup");
@@ -35,39 +42,54 @@ public final class GameTestCleanup {
      * logged and swallowed so it cannot take down the test runner's tick loop.
      */
     public static void whenFinished(GameTestHelper helper, Runnable cleanup) {
+        whenFinished(helper, (info, runner) -> cleanup.run());
+    }
+
+    /** Like {@link #whenFinished(GameTestHelper, Runnable)}, for a cleanup that needs the runner's view. */
+    public static void whenFinished(GameTestHelper helper, BiConsumer<GameTestInfo, GameTestRunner> cleanup) {
+        infoOf(helper).addListener(onceListener(cleanup));
+    }
+
+    /**
+     * The listener behind {@code whenFinished}: runs {@code cleanup} on the first pass/fail notification and
+     * never again, and swallows (logs) anything the cleanup throws.
+     */
+    static GameTestListener onceListener(BiConsumer<GameTestInfo, GameTestRunner> cleanup) {
         AtomicBoolean ran = new AtomicBoolean(false);
-        Runnable once = () -> {
-            if (!ran.compareAndSet(false, true)) {
-                return;
+        return new GameTestListener() {
+            private void once(GameTestInfo info, GameTestRunner runner) {
+                if (!ran.compareAndSet(false, true)) {
+                    return;
+                }
+                try {
+                    cleanup.accept(info, runner);
+                } catch (RuntimeException | Error failure) {
+                    LOG.error("GameTest cleanup failed", failure);
+                }
             }
-            try {
-                cleanup.run();
-            } catch (RuntimeException | Error failure) {
-                LOG.error("GameTest cleanup failed", failure);
-            }
-        };
-        infoOf(helper).addListener(new GameTestListener() {
+
             @Override
             public void testStructureLoaded(GameTestInfo info) {
             }
 
             @Override
             public void testPassed(GameTestInfo info, GameTestRunner runner) {
-                once.run();
+                once(info, runner);
             }
 
             @Override
             public void testFailed(GameTestInfo info, GameTestRunner runner) {
-                once.run();
+                once(info, runner);
             }
 
             @Override
             public void testAddedForRerun(GameTestInfo original, GameTestInfo rerun, GameTestRunner runner) {
             }
-        });
+        };
     }
 
-    private static GameTestInfo infoOf(GameTestHelper helper) {
+    /** The framework's info object behind {@code helper} (reflective; see the class docs). */
+    static GameTestInfo infoOf(GameTestHelper helper) {
         try {
             return (GameTestInfo) TEST_INFO.get(helper);
         } catch (IllegalAccessException impossible) {
