@@ -2,7 +2,10 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
+import io.github.zoyluo.minecraftai.action.EquipAction;
+import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -23,6 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.level.ClipContext;
@@ -56,11 +60,21 @@ public final class CreeperDefenseTask extends AbstractTask {
     private static final int WALL_RETRY_TICKS = 5;
     private static final int OWNER_WATCHDOG_TICKS = 2400;
     private static final int WATCHDOG_LOG_INTERVAL = 200;
+    /** Shield fallback range: a late-fuse Creeper this close cannot be outrun in the ticks left. */
+    private static final double SHIELD_DISTANCE_SQUARED = 4.5D * 4.5D;
+    /** A creeper fuse is 30 ticks; the shield never outlives it by much before the task re-evaluates. */
+    private static final int SHIELD_MAX_TICKS = 60;
+    /** Consecutive ticks the tracked Creeper must be unobservable before its fuse counts as resolved. */
+    private static final int SHIELD_RESOLVED_MISSING_TICKS = 2;
+    /** A visibly defused Creeper (no fuse) or one this far away no longer needs the shield up. */
+    private static final double SHIELD_RELEASE_DISTANCE_SQUARED = 8.0D * 8.0D;
 
     private enum Phase {
         ESCAPE,
         BUILD_CORE,
-        HOLD_BARRIER
+        HOLD_BARRIER,
+        /** Last resort with no wall and no way out: face the fuse behind a raised shield. */
+        SHIELD
     }
 
     /** Assignment payload whose position was captured inside the same observation boundary. */
@@ -157,6 +171,8 @@ public final class CreeperDefenseTask extends AbstractTask {
     private int wallPlacements;
     private boolean wingPlacementDisabled;
     private int currentlyVisibleRiskCount;
+    private int shieldStartedElapsed;
+    private int shieldMissingTicks;
 
     /**
      * Compatibility admission for callers that already proved this exact entity observable.
@@ -198,6 +214,7 @@ public final class CreeperDefenseTask extends AbstractTask {
             case ESCAPE -> Math.min(0.60D, elapsed / 400.0D);
             case BUILD_CORE -> Math.min(0.82D, 0.60D + wallPlacements * 0.10D);
             case HOLD_BARRIER -> 0.90D;
+            case SHIELD -> 0.70D;
         };
     }
 
@@ -295,7 +312,7 @@ public final class CreeperDefenseTask extends AbstractTask {
 
         // A wall is tied to one remembered ray. Revalidate that geometry every tick, not only
         // when a UUID changes: the same Creeper can walk around the side of a completed column.
-        if (phase != Phase.ESCAPE && !barrierFaces(bot, lastSeenPos)) {
+        if (phase != Phase.ESCAPE && phase != Phase.SHIELD && !barrierFaces(bot, lastSeenPos)) {
             fallbackToEscape(bot, risk, "creeper_wall_direction_changed");
         }
 
@@ -303,12 +320,106 @@ public final class CreeperDefenseTask extends AbstractTask {
             case ESCAPE -> tickEscape(bot, risk);
             case BUILD_CORE -> tickCoreBuild(bot, risk);
             case HOLD_BARRIER -> tickBarrierHold(bot, risk);
+            case SHIELD -> tickShield(bot, risk);
         }
     }
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         bot.getActionPack().stopAll();
+    }
+
+    /**
+     * The fallback of last resort. A wall that failed (no material, no support) or an escape that
+     * makes no progress leaves a late-fuse Creeper within a few blocks: shields block explosion
+     * damage, so face it behind a raised shield until the fuse resolves. Only with a shield.
+     */
+    private boolean shouldRaiseShield(AIPlayerEntity bot, int stalledTicks, double sourceDistanceSquared) {
+        boolean wallFailed = elapsed < nextWallAttemptElapsed;
+        boolean escapeMakingNoProgress = escapeGoal == null || stalledTicks >= WALL_STALL_TICKS;
+        return rememberedLateFuse
+                && sourceDistanceSquared <= SHIELD_DISTANCE_SQUARED
+                && (wallFailed || escapeMakingNoProgress)
+                && EquipAction.hasShield(bot);
+    }
+
+    private void beginShield(AIPlayerEntity bot) {
+        bot.getActionPack().stopAll();
+        if (!EquipAction.equipShieldOffhand(bot)) {
+            return;
+        }
+        phase = Phase.SHIELD;
+        shieldStartedElapsed = elapsed;
+        shieldMissingTicks = 0;
+        escapeGoal = null;
+        BotLog.danger(bot, "creeper_shield_started",
+                "source", lastSeenPos,
+                "source_id", trackedCreeperId,
+                "distance_sq", distanceToLastSeenSquared(bot),
+                "wall_placed", wallPlacements);
+        faceAndRaiseShield(bot);
+    }
+
+    private void faceAndRaiseShield(AIPlayerEntity bot) {
+        if (lastSeenPos != null) {
+            LookAction.lookAt(bot, Vec3.atCenterOf(lastSeenPos));
+        }
+        bot.getActionPack().stopMovement();
+        if (!bot.getOffhandItem().is(net.minecraft.world.item.Items.SHIELD)
+                && !EquipAction.equipShieldOffhand(bot)) {
+            return;
+        }
+        if (!bot.isUsingItem() || bot.getUsedItemHand() != InteractionHand.OFF_HAND) {
+            InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
+        }
+    }
+
+    private void tickShield(AIPlayerEntity bot, RiskSelection risk) {
+        VisibleCreeper visible = risk == null ? null : risk.visible();
+        if (visible == null) {
+            shieldMissingTicks++;
+        } else {
+            shieldMissingTicks = 0;
+            // Keep the shield aimed at where the source is now, not where it was first seen.
+            lastSeenPos = visible.pos();
+        }
+        boolean gone = shieldMissingTicks >= SHIELD_RESOLVED_MISSING_TICKS;
+        boolean defused = visible != null && !visible.fuseStarted();
+        boolean farAway = visible != null
+                && visible.distanceSquared() >= SHIELD_RELEASE_DISTANCE_SQUARED;
+        boolean expired = elapsed - shieldStartedElapsed > SHIELD_MAX_TICKS;
+        if (gone || defused || farAway || expired) {
+            endShield(bot, gone ? "creeper_gone_or_exploded"
+                    : defused ? "fuse_defused" : farAway ? "creeper_far" : "shield_timeout");
+            return;
+        }
+        faceAndRaiseShield(bot);
+    }
+
+    private void endShield(AIPlayerEntity bot, String reason) {
+        bot.releaseUsingItem();
+        bot.getActionPack().stopAll();
+        BotLog.danger(bot, "creeper_shield_ended",
+                "reason", reason,
+                "source", lastSeenPos,
+                "source_id", trackedCreeperId,
+                "hp", bot.getHealth());
+        boolean resolved = "creeper_gone_or_exploded".equals(reason)
+                || "fuse_defused".equals(reason) || "creeper_far".equals(reason);
+        if (resolved && trackedCreeperId != null) {
+            // The fuse this owner was holding for is over: do not wait out the remembered-risk
+            // grace for a Creeper that no longer exists (or no longer threatens).
+            recentRisks.remove(trackedCreeperId);
+            if (recentRisks.isEmpty() && currentlyVisibleRiskCount == 0) {
+                completeOwner(bot, "shield_fuse_resolved");
+                return;
+            }
+        }
+        phase = Phase.ESCAPE;
+        escapeGoal = null;
+        nextWallAttemptElapsed = elapsed + WALL_RETRY_TICKS;
+        resetAwayProgress(bot);
+        startEscapePath(bot, null, "shield_ended_" + reason);
     }
 
     private void tickEscape(AIPlayerEntity bot, RiskSelection risk) {
@@ -335,6 +446,12 @@ public final class CreeperDefenseTask extends AbstractTask {
                 placeNextCoreBlock(bot, risk);
             }
             return;
+        }
+        if (shouldRaiseShield(bot, stalledTicks, sourceDistanceSquared)) {
+            beginShield(bot);
+            if (phase == Phase.SHIELD) {
+                return;
+            }
         }
 
         boolean reachedGoal = escapeGoal != null

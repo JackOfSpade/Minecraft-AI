@@ -13,6 +13,8 @@ import net.minecraft.world.entity.LivingEntity;
 public final class GuardTask extends AbstractTask {
     private static final double GUARD_RADIUS = 10.0D;
     private static final double RETURN_DISTANCE = 5.0D;
+    /** Sustained loss of sight (2.5 s) ends an engagement, like CombatTask's own grace window. */
+    private static final int LOST_SIGHT_LIMIT = 50;
 
     private enum Phase {
         WATCH,
@@ -28,6 +30,7 @@ public final class GuardTask extends AbstractTask {
     private LivingEntity target;
     private BlockPos guardPoint;
     private int repositionTicks;
+    private int lostSightTicks;
     private boolean waiting;
 
     public GuardTask(BlockPos point, String targetPlayerName) {
@@ -114,16 +117,44 @@ public final class GuardTask extends AbstractTask {
         waiting = true;
     }
 
+    /**
+     * Ends the engagement, returning true, when the target is gone or dead, is no longer a legal
+     * melee target (a never-melee threat such as a creeper or an angry enderman, or a mob that is
+     * calm again), or has been out of sight (behind a wall) for longer than a momentary occlusion.
+     * The guard never keeps swinging at, or chasing, something it cannot legally hit.
+     */
+    private boolean disengageIfInvalid(AIPlayerEntity bot, String phaseName) {
+        String reason = null;
+        if (target == null) {
+            reason = "target_gone";
+        } else if (!target.isAlive()) {
+            reason = "target_dead";
+        } else if (CombatCore.isMeleeForbiddenThreat(target)) {
+            reason = "melee_forbidden";
+        } else if (!CombatCore.hostileTo(bot, target)) {
+            reason = "not_hostile";
+        } else if (CombatCore.hasLineOfSight(bot, target)) {
+            lostSightTicks = 0;
+        } else if (++lostSightTicks > LOST_SIGHT_LIMIT) {
+            reason = "lost_sight";
+        }
+        if (reason == null) {
+            return false;
+        }
+        BotLog.danger(bot, "guard_disengage", "phase", phaseName, "reason", reason);
+        bot.getActionPack().stopAll();
+        target = null;
+        lostSightTicks = 0;
+        phase = Phase.RETURN;
+        return true;
+    }
+
     private void approach(AIPlayerEntity bot) {
-        if (target == null || !target.isAlive()) {
-            BotLog.danger(bot, "guard_disengage", "phase", "APPROACH",
-                    "reason", target == null ? "target_gone" : "target_dead");
-            target = null;
-            phase = Phase.RETURN;
+        if (disengageIfInvalid(bot, "APPROACH")) {
             return;
         }
         CombatCore.lookAt(bot, target);
-        if (CombatCore.inMeleeRange(bot, target)) {
+        if (CombatCore.canStrikeNow(bot, target)) {
             bot.getActionPack().stopAll();
             phase = Phase.STRIKE;
             return;
@@ -134,14 +165,10 @@ public final class GuardTask extends AbstractTask {
     }
 
     private void strike(AIPlayerEntity bot) {
-        if (target == null || !target.isAlive()) {
-            BotLog.danger(bot, "guard_disengage", "phase", "STRIKE",
-                    "reason", target == null ? "target_gone" : "target_dead");
-            target = null;
-            phase = Phase.RETURN;
+        if (disengageIfInvalid(bot, "STRIKE")) {
             return;
         }
-        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE) {
+        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE || !CombatCore.canStrikeNow(bot, target)) {
             phase = Phase.APPROACH;
             CombatCore.startApproach(bot, target);
             return;
@@ -153,16 +180,12 @@ public final class GuardTask extends AbstractTask {
     }
 
     private void reposition(AIPlayerEntity bot) {
-        if (target == null || !target.isAlive()) {
-            BotLog.danger(bot, "guard_disengage", "phase", "REPOSITION",
-                    "reason", target == null ? "target_gone" : "target_dead");
-            bot.getActionPack().stopMovement();
-            target = null;
-            phase = Phase.RETURN;
+        if (disengageIfInvalid(bot, "REPOSITION")) {
             return;
         }
         CombatCore.lookAt(bot, target);
-        bot.getActionPack().setStrafing(elapsed % 40 < 20 ? 0.45F : -0.45F);
+        bot.getActionPack().setStrafing(CombatCore.safeStrafeInput(
+                bot, elapsed % 40 < 20 ? 0.45F : -0.45F));
         repositionTicks--;
         if (repositionTicks <= 0) {
             bot.getActionPack().stopMovement();

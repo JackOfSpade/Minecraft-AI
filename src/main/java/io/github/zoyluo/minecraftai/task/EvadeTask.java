@@ -31,6 +31,16 @@ public final class EvadeTask extends AbstractTask {
     private final Threat threat;
     private BlockPos escapeGoal;
 
+    /**
+     * How far one escape leg must carry the bot from {@code source}. The generic leg is twelve
+     * blocks; a warden's sonic boom reaches fifteen (twenty vertically) and ignores armour, so a
+     * flight from a warden must end outside that range or it only relocates the bot inside it.
+     */
+    static int escapeDistanceFor(LivingEntity source) {
+        return source instanceof net.minecraft.world.entity.monster.warden.Warden
+                ? CombatCore.WARDEN_ESCAPE_DISTANCE : ESCAPE_DISTANCE;
+    }
+
     public EvadeTask(Threat threat) {
         this.threat = threat;
     }
@@ -125,7 +135,7 @@ public final class EvadeTask extends AbstractTask {
 
     private boolean startBestEscapePath(AIPlayerEntity bot) {
         escapeGoal = admitBestSurfaceEscapePath(
-                bot, threat.entity(), threat.pos(), ESCAPE_DISTANCE);
+                bot, threat.entity(), threat.pos(), escapeDistanceFor(threat.entity()));
         return escapeGoal != null;
     }
 

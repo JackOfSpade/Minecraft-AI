@@ -17,7 +17,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.item.Item;
@@ -158,7 +157,7 @@ public final class DangerWatcher {
             long deathTick = server.getTickCount();
             int visibleHostilesAtDeath = bot.level()
                     .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(8.0D),
-                            entity -> entity instanceof Monster && entity.isAlive())
+                            entity -> isActiveHostileThreat(bot, entity))
                     .stream()
                     .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
                     .toList().size();
@@ -1002,7 +1001,7 @@ public final class DangerWatcher {
         if (repeat >= 2 && bot.hurtTime > 0) {
             trapRecords.remove(bot.getUUID());
             var hostile = bot.level().getEntitiesOfClass(
-                    net.minecraft.world.entity.monster.Monster.class,
+                    LivingEntity.class,
                     bot.getBoundingBox().inflate(4.0D), e -> e.isAlive())
                     .stream()
                     .filter(e -> isActiveHostileThreat(bot, e))
@@ -1309,17 +1308,12 @@ public final class DangerWatcher {
      * selected this bot as its target, it is treated exactly like every other hostile mob.
      */
     static boolean isActiveHostileThreat(AIPlayerEntity bot, LivingEntity entity) {
-        if (!(entity instanceof Monster) || !entity.isAlive()) {
-            return false;
-        }
-        if (entity instanceof EnderMan enderman) {
-            // isAngry() is only a broad tracked flag: an Enderman targeting another player or mob
-            // also sets it. isAngryAt() binds persistent/universal anger to this exact bot and
-            // remains factual if teleportation temporarily clears the live target reference.
-            return enderman.getTarget() == bot
-                    || enderman.isAngryAt(bot, bot.level());
-        }
-        return true;
+        // One shared policy (CombatCore.hostileTo): Enemy-interface hostility, neutral mobs (the
+        // Enderman rule generalised) only once angry at this exact bot or after they hurt the bot
+        // or its owner, and never the owner or another bot. isAngry() is only a broad tracked flag
+        // (an Enderman targeting another mob also sets it); isAngryAt() binds persistent anger to
+        // this exact bot and stays factual if teleportation temporarily clears the live target.
+        return CombatCore.hostileTo(bot, entity);
     }
 
     private static boolean shouldAssignThreatTask(Optional<Task> active, Threat threat) {
@@ -1427,7 +1421,7 @@ public final class DangerWatcher {
 
     private static boolean isHostileBacked(Threat threat) {
         return isHostilePressure(threat)
-                && threat.entity() instanceof Monster
+                && threat.entity() != null
                 && threat.entity().isAlive();
     }
 
@@ -1510,6 +1504,11 @@ public final class DangerWatcher {
         if (CombatTask.isImmediatePressureOn(bot, target)) {
             return false;
         }
+        if (CombatTask.canShootFromWhereItStands(bot, target)) {
+            // Outside the melee leash but inside bow range with a clear line: shoot from here
+            // instead of holding off (or assigning melee that would immediately disengage).
+            return false;
+        }
         if (!cooling) {
             // First sighting outside the leash: log once and start the per-target cooldown so the
             // same target is not re-evaluated (and re-logged) on every scan.
@@ -1560,8 +1559,10 @@ public final class DangerWatcher {
         // Explosive pressure cannot be hidden behind a closer ordinary mob. A strict obsidian run
         // resumed its water mission while a Creeper was still visible at fifteen blocks; sorting
         // Creepers first keeps every shelter/combat branch below aligned with the no-melee policy.
+        // A warden, like a creeper, is a lethal never-melee source: it sorts first as well.
         hostiles.sort(Comparator
-                .comparing((LivingEntity mob) -> !(mob instanceof Creeper))
+                .comparing((LivingEntity mob) -> !(mob instanceof Creeper
+                        || mob instanceof net.minecraft.world.entity.monster.warden.Warden))
                 .thenComparing(mob -> meleeModeActive || CombatCore.isRangedThreat(mob) ? 0 : 1)
                 .thenComparingDouble(bot::distanceTo));
         for (LivingEntity mob : hostiles) {

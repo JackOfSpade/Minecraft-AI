@@ -26,6 +26,7 @@
       "io.github.zoyluo.minecraftai.task.DescendCheckpointGameTests",
       "io.github.zoyluo.minecraftai.task.DigDownReturnGameTests",
       "io.github.zoyluo.minecraftai.task.CreeperDefenseGameTests",
+      "io.github.zoyluo.minecraftai.task.CombatHardeningGameTests",
       "io.github.zoyluo.minecraftai.task.DangerWatcherLowHealthGameTests",
       "io.github.zoyluo.minecraftai.task.EmergencyShelterAtomicRecoveryGameTests",
       "io.github.zoyluo.minecraftai.task.EmergencyShelterMaterialSchedulingGameTests",

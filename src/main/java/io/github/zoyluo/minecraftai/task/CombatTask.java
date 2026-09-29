@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
@@ -23,6 +24,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.skeleton.AbstractSkeleton;
+import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -60,6 +63,24 @@ public final class CombatTask extends AbstractTask {
     /** Raise the shield a little ahead of CreeperDefenseTask's own late-fuse wall threshold. */
     private static final float SHIELD_CREEPER_FUSE_THRESHOLD = 0.35F;
     private static final double SHIELD_CREEPER_FUSE_RANGE = 10.0D;
+    /**
+     * A skeleton is "visibly drawing" once its bow has been up this long (a full draw is 20 ticks);
+     * the shield needs five ticks to start blocking, so this leaves it time to come up.
+     */
+    private static final int SHOOTER_DRAW_TICKS = 12;
+    /** Only shooters this close or closer give too little warning from the flying arrow alone. */
+    private static final double SHOOTER_DRAW_RANGE = 10.0D;
+    /** Head-aim tolerance: the shooter must face the bot within roughly twenty degrees. */
+    private static final double SHOOTER_AIM_DOT = 0.94D;
+    /** Longest single pause for one drawing shooter, then a cooldown before the next one. */
+    private static final int SHOOTER_SHIELD_MAX_TICKS = 40;
+    private static final int SHOOTER_SHIELD_COOLDOWN_TICKS = 40;
+    /** The shield only helps between swings once it can be up for its five warm-up ticks. */
+    private static final float MIN_BLOCK_COOLDOWN_TICKS = 6.0F;
+    /** A friend on the line of fire holds the drawn bow this long before falling back to melee. */
+    private static final int FRIENDLY_LINE_HOLD_LIMIT = 60;
+    /** A warden's flight must clear its sonic boom range, not the generic six-block retreat step. */
+    private static final int WARDEN_RETREAT_STEP_DISTANCE = CombatCore.WARDEN_ESCAPE_DISTANCE;
     /** "there are other ranged enemies" -- at least one besides whichever one is currently targeted. */
     private static final int PEEKABOO_MIN_RANGED_THREATS = 2;
     private static final double PEEKABOO_SCAN_RANGE = 24.0D;
@@ -87,6 +108,9 @@ public final class CombatTask extends AbstractTask {
     private int lostSightTicks; // Consecutive tick count with no line of sight to the target (blocked by a wall)
     /** True while a reactive shield block (projectile/creeper fuse) is currently being held up. */
     private boolean reactiveShieldRaised;
+    private int shooterShieldTicks;
+    private int shooterShieldCooldownUntil;
+    private int friendlyLineTicks;
     private BlockPos peekHideSpot;
     private BlockPos peekCoverFeet;
     private BlockPos peekExposeSpot;
@@ -268,14 +292,27 @@ public final class CombatTask extends AbstractTask {
         }
         ProjectileThreat.Incoming incoming = ProjectileThreat.mostImminent(bot).orElse(null);
         LivingEntity fusingCreeper = incoming == null ? nearbyImminentCreeper(bot) : null;
-        if (incoming == null && fusingCreeper == null) {
+        LivingEntity drawingShooter = incoming == null && fusingCreeper == null
+                ? nextDrawingShooter(bot) : null;
+        if (incoming == null && fusingCreeper == null && drawingShooter == null) {
+            shooterShieldTicks = 0;
             if (reactiveShieldRaised) {
                 lowerReactiveShield(bot);
                 BotLog.action(bot, "reactive_shield_lowered");
             }
             return false;
         }
-        Vec3 faceTowards = incoming != null ? incoming.projectile().position() : fusingCreeper.position();
+        if (drawingShooter != null && ++shooterShieldTicks > SHOOTER_SHIELD_MAX_TICKS) {
+            // Bounded pause: a shooter that keeps its bow drawn cannot freeze the fight forever.
+            shooterShieldTicks = 0;
+            shooterShieldCooldownUntil = elapsed + SHOOTER_SHIELD_COOLDOWN_TICKS;
+            lowerReactiveShield(bot);
+            BotLog.action(bot, "reactive_shield_lowered", "reason", "shooter_draw_timeout");
+            return false;
+        }
+        Vec3 faceTowards = incoming != null
+                ? incoming.projectile().position()
+                : fusingCreeper != null ? fusingCreeper.position() : drawingShooter.getEyePosition();
         LookAction.lookAt(bot, faceTowards);
         if (!bot.isUsingItem() || bot.getUsedItemHand() != InteractionHand.OFF_HAND) {
             InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
@@ -284,12 +321,48 @@ public final class CombatTask extends AbstractTask {
         if (!reactiveShieldRaised) {
             reactiveShieldRaised = true;
             BotLog.action(bot, "reactive_shield_raised",
-                    "reason", incoming != null ? "incoming_projectile" : "creeper_fuse",
+                    "reason", incoming != null ? "incoming_projectile"
+                            : fusingCreeper != null ? "creeper_fuse" : "shooter_draw",
                     "source", incoming != null
                             ? BuiltInRegistries.ENTITY_TYPE.getKey(incoming.projectile().getType()).toString()
-                            : "creeper");
+                            : fusingCreeper != null ? "creeper"
+                            : BuiltInRegistries.ENTITY_TYPE.getKey(drawingShooter.getType()).toString());
         }
         return true;
+    }
+
+    private LivingEntity nextDrawingShooter(AIPlayerEntity bot) {
+        return elapsed < shooterShieldCooldownUntil ? null : nearbyDrawingShooter(bot);
+    }
+
+    /**
+     * An observed skeleton that is visibly drawing a bow at the bot: its use pose is synced, its
+     * bow has been up long enough for the arrow to be imminent, and its head is aimed at the bot.
+     * Crossbows (a charged shot is held for a long time) and trident throwers are excluded by the
+     * bow check. Decided only on synced pose and head aim, never on the mob's hidden target.
+     */
+    static LivingEntity nearbyDrawingShooter(AIPlayerEntity bot) {
+        return bot.level().getEntitiesOfClass(AbstractSkeleton.class,
+                        bot.getBoundingBox().inflate(SHOOTER_DRAW_RANGE),
+                        skeleton -> skeleton.isAlive()
+                                && ObservableWorldQuery.canObserveEntity(bot, skeleton)
+                                && isDrawingBowAt(skeleton, bot))
+                .stream()
+                .min(Comparator.comparingDouble(bot::distanceToSqr))
+                .orElse(null);
+    }
+
+    static boolean isDrawingBowAt(LivingEntity shooter, AIPlayerEntity bot) {
+        if (!shooter.isUsingItem()
+                || !shooter.getUseItem().is(Items.BOW)
+                || shooter.getTicksUsingItem() < SHOOTER_DRAW_TICKS) {
+            return false;
+        }
+        Vec3 toBot = bot.getEyePosition().subtract(shooter.getEyePosition());
+        if (toBot.lengthSqr() < 1.0E-6D) {
+            return true;
+        }
+        return shooter.getViewVector(1.0F).dot(toBot.normalize()) >= SHOOTER_AIM_DOT;
     }
 
     private static LivingEntity nearbyImminentCreeper(AIPlayerEntity bot) {
@@ -353,7 +426,9 @@ public final class CombatTask extends AbstractTask {
         // the best physical melee weapon before either closing the remaining gap or striking.
         finishRangedLoadout(bot);
         CombatCore.ensureMeleeWeapon(bot);
-        if (CombatCore.inMeleeRange(bot, target)) {
+        // Contact means a legal strike pose (reach to the target's box and no wall between), not
+        // just feet-distance: a mob on the far side of a window keeps being approached, never struck.
+        if (CombatCore.canStrikeNow(bot, target)) {
             bot.getActionPack().stopAll();
             phase = Phase.STRIKE;
             return;
@@ -396,6 +471,19 @@ public final class CombatTask extends AbstractTask {
         // and restarted the use. A hand-rolled tick counter here would desync from that and could
         // release a shot well before it's actually at full pull.
         if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
+            if (StrikeLegality.friendlyOnLineOfFire(bot, target)) {
+                // Never release into the owner or another bot: hold the draw until the line clears,
+                // then give up on the bow if it does not.
+                if (++friendlyLineTicks > FRIENDLY_LINE_HOLD_LIMIT) {
+                    friendlyLineTicks = 0;
+                    finishRangedLoadout(bot);
+                    CombatCore.ensureMeleeWeapon(bot);
+                    phase = Phase.APPROACH;
+                    startApproach(bot);
+                }
+                return;
+            }
+            friendlyLineTicks = 0;
             bot.releaseUsingItem();
             phase = Phase.APPROACH;
         }
@@ -415,26 +503,43 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         finishRangedLoadout(bot);
-        CombatCore.lookAt(bot, target);
-        if (shouldBlock(bot)) {
-            beginBlock(bot);
-            return;
+        if (bot.isUsingItem() && bot.getUsedItemHand() == InteractionHand.MAIN_HAND) {
+            bot.stopUsingItem(); // a stale main-hand use (bow, food) must not keep the hands busy
         }
-        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE) {
+        CombatCore.lookAt(bot, target);
+        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE || !CombatCore.canStrikeNow(bot, target)) {
+            // Out of reach, or a wall/window in the way: close the distance instead of swinging.
             phase = Phase.APPROACH;
             startApproach(bot);
             return;
         }
         CombatCore.ensureMeleeWeapon(bot);
-        if (CombatCore.strikeIfReady(bot, target)) {
-            // The hit itself may have consumed the final point of durability. Equip the physical
-            // successor in the same task tick instead of allowing logged empty-hand attacks.
-            CombatCore.ensureMeleeWeapon(bot);
-            repositionTicks = 8;
-            phase = Phase.REPOSITION;
+        if (bot.getAttackStrengthScale(0.5F) >= 0.95F) {
+            // A ready swing always comes first. The shield is only ever raised BETWEEN swings, so a
+            // shield-holding bot at low health still fights instead of turtling forever.
+            if (CombatCore.strikeIfReady(bot, target)) {
+                // The hit itself may have consumed the final point of durability. Equip the physical
+                // successor in the same task tick instead of allowing logged empty-hand attacks.
+                CombatCore.ensureMeleeWeapon(bot);
+                if (shouldBlock(bot)) {
+                    beginBlock(bot);
+                } else {
+                    repositionTicks = 8;
+                    phase = Phase.REPOSITION;
+                }
+            }
+            return;
+        }
+        if (shouldBlock(bot)) {
+            beginBlock(bot);
         }
     }
 
+    /**
+     * Holds the raised shield only while the attack cooldown runs, with movement stopped (a raised
+     * shield does not slow a fake player the way it slows a human, so it is never up while walking
+     * or strafing). When the cooldown completes the shield drops and the swing happens.
+     */
     private void block(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
             bot.releaseUsingItem();
@@ -443,13 +548,18 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         CombatCore.lookAt(bot, target);
-        if (!bot.isUsingItem()) {
-            InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
-        }
+        bot.getActionPack().stopMovement();
         blockTicks--;
-        if (blockTicks <= 0 || bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 1.5F) {
+        if (bot.getAttackStrengthScale(0.5F) >= 0.95F
+                || blockTicks <= 0
+                || bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 1.5F) {
             bot.releaseUsingItem();
             phase = Phase.STRIKE;
+            strike(bot);
+            return;
+        }
+        if (!bot.isUsingItem()) {
+            InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
         }
     }
 
@@ -461,7 +571,9 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         CombatCore.lookAt(bot, target);
-        bot.getActionPack().setStrafing(elapsed % 40 < 20 ? 0.45F : -0.45F);
+        // Never strafe off a ledge or into lava: the sideways input is checked for footing first.
+        bot.getActionPack().setStrafing(CombatCore.safeStrafeInput(
+                bot, elapsed % 40 < 20 ? 0.45F : -0.45F));
         repositionTicks--;
         if (repositionTicks <= 0) {
             bot.getActionPack().stopMovement();
@@ -519,7 +631,8 @@ public final class CombatTask extends AbstractTask {
 
         if (retreatDestination == null || bot.getActionPack().isPathExecutorIdle()) {
             retreatDestination = EvadeTask.admitBestSurfaceEscapePath(
-                    bot, threat, threat.blockPosition(), RETREAT_STEP_DISTANCE);
+                    bot, threat, threat.blockPosition(),
+                    threat instanceof Warden ? WARDEN_RETREAT_STEP_DISTANCE : RETREAT_STEP_DISTANCE);
             if (retreatDestination == null) {
                 fail("combat_no_valid_retreat_route");
             }
@@ -582,7 +695,10 @@ public final class CombatTask extends AbstractTask {
         }
         if (target != null && target.isAlive()) {
             BlockPos targetPos = target.blockPosition();
-            if (!isWithinDefensiveLeash(defensiveAnchor, targetPos)) {
+            // A hostile outside the melee leash that can be shot from here is not a reason to
+            // disengage: the bow does not need the leash (it cannot reach, and does not chase).
+            if (!isWithinDefensiveLeash(defensiveAnchor, targetPos)
+                    && !canShootFromWhereItStands(bot, target)) {
                 return disengageOrRetreatFromImmediatePressure(
                         bot, "target_left_leash", targetPos);
             }
@@ -695,8 +811,8 @@ public final class CombatTask extends AbstractTask {
         if (CombatCore.isRangedThreat(entity)) {
             return true;
         }
-        double safeDistance = CombatCore.isMeleeForbiddenThreat(entity)
-                ? CREEPER_HEAL_SAFE_DISTANCE : HEAL_SAFE_DISTANCE;
+        double safeDistance = CombatCore.safeDistanceFrom(
+                entity, HEAL_SAFE_DISTANCE, CREEPER_HEAL_SAFE_DISTANCE);
         return bot.distanceTo(entity) < safeDistance;
     }
 
@@ -754,6 +870,25 @@ public final class CombatTask extends AbstractTask {
         CombatCore.ensureMeleeWeapon(bot);
         phase = Phase.APPROACH;
         startApproach(bot);
+    }
+
+    /**
+     * True when {@code target} is beyond the melee boundary but within bow range, observed with a
+     * clear line of sight, and the bot holds a bow with real arrows, and no friend stands on the
+     * line of fire: a shot from where the bot already stands, with no approach needed. Never for a
+     * never-melee threat (a creeper or enderman is evaded, not provoked).
+     */
+    static boolean canShootFromWhereItStands(AIPlayerEntity bot, LivingEntity target) {
+        if (target == null || !target.isAlive() || CombatCore.isMeleeForbiddenThreat(target)) {
+            return false;
+        }
+        double distance = bot.distanceTo(target);
+        return distance > BOW_MELEE_SWITCH_DISTANCE
+                && distance <= SEARCH_RANGE
+                && ObservableWorldQuery.canObserveEntity(bot, target)
+                && CombatCore.hasLineOfSight(bot, target)
+                && EquipAction.bestRangedSlot(bot, target).isPresent()
+                && !StrikeLegality.friendlyOnLineOfFire(bot, target);
     }
 
     private boolean shouldUseBow(AIPlayerEntity bot) {
@@ -946,7 +1081,8 @@ public final class CombatTask extends AbstractTask {
             CombatCore.lookAtForBowShot(bot, target);
             return;
         }
-        if (bot.isUsingItem()) {
+        if (bot.isUsingItem() && !StrikeLegality.friendlyOnLineOfFire(bot, target)) {
+            // With a friend on the line of fire the drawn bow is kept, never released into them.
             bot.releaseUsingItem();
             BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
         }
@@ -975,6 +1111,12 @@ public final class CombatTask extends AbstractTask {
     }
 
     private void beginBlock(AIPlayerEntity bot) {
+        // Only worth raising when the cooldown leaves the shield its five warm-up ticks.
+        float cooldownTicksLeft = bot.getCurrentItemAttackStrengthDelay()
+                * (1.0F - Math.min(1.0F, bot.getAttackStrengthScale(0.5F)));
+        if (cooldownTicksLeft < MIN_BLOCK_COOLDOWN_TICKS) {
+            return;
+        }
         blockTicks = BLOCK_TICKS;
         bot.getActionPack().stopMovement();
         phase = Phase.BLOCK;

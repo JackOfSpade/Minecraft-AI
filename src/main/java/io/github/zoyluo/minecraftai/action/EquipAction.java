@@ -18,6 +18,9 @@ import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.Item;
@@ -27,6 +30,7 @@ import net.minecraft.world.item.alchemy.PotionContents;
 
 public final class EquipAction {
     private static final int MIN_MELEE_RAW_DURABILITY = 2;
+    private static final double SCORE_EPSILON = 1.0E-6D;
     // Vanilla Arrow starts at two base damage for normal, spectral, and tipped arrows.
     // Potion damage is added as a selection score only; vanilla remains the authority on impact.
     private static final int VANILLA_ARROW_DAMAGE_SCORE = 2;
@@ -115,10 +119,25 @@ public final class EquipAction {
         return slot;
     }
 
+    /**
+     * Picks the best automatic melee weapon by sustained damage per second, not by per-hit damage.
+     *
+     * <p>Vanilla attack cooldown makes a slow heavy weapon worse than its damage suggests: a stone
+     * axe hits for 9 every 1.25 s while a stone sword hits for 5 every 0.625 s, so by the vanilla
+     * numbers a sword out-damages the same-tier axe at every tier (and knocks the mob back twice as
+     * often). The score is {@code (1 + ATTACK_DAMAGE) * (4 + ATTACK_SPEED)}, read from the stack's
+     * own attribute modifiers so modded weapons with unusual numbers are ranked correctly, plus a
+     * small Sharpness bonus. Ties go to swords, then to remaining durability.
+     *
+     * <p>Spears (piercing/kinetic weapons with lunge and charge attacks) and the mace (fall-smash
+     * damage) are excluded from automatic melee choice on purpose, see
+     * {@link #isQualifiedMeleeWeapon}: their normal click attack is not what their damage numbers
+     * describe, so ranking them here would mis-rank them.
+     */
     public static OptionalInt bestWeaponSlot(AIPlayerEntity bot) {
         Inventory inventory = bot.getInventory();
         int bestSlot = -1;
-        double bestDamage = 1.0D;
+        double bestScore = 0.0D;
         int bestSwordPriority = -1;
         int bestDurability = -1;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
@@ -126,16 +145,16 @@ public final class EquipAction {
             if (!isQualifiedMeleeWeapon(stack)) {
                 continue;
             }
-            double damage = attackDamage(stack);
+            double score = meleeScore(stack);
             int swordPriority = swordPriority(stack);
             int durability = remainingDurability(stack);
-            if (damage > bestDamage
-                    || Double.compare(damage, bestDamage) == 0
-                    && damage > 1.0D
+            boolean better = bestSlot < 0
+                    || score > bestScore + SCORE_EPSILON
+                    || Math.abs(score - bestScore) <= SCORE_EPSILON
                     && (swordPriority > bestSwordPriority
-                    || swordPriority == bestSwordPriority
-                    && durability > bestDurability)) {
-                bestDamage = damage;
+                    || swordPriority == bestSwordPriority && durability > bestDurability);
+            if (better) {
+                bestScore = score;
                 bestSwordPriority = swordPriority;
                 bestDurability = durability;
                 bestSlot = slot;
@@ -144,10 +163,43 @@ public final class EquipAction {
         return bestSlot < 0 ? OptionalInt.empty() : OptionalInt.of(bestSlot);
     }
 
-    /** Only purpose-built melee tools may authorize a defensive Combat transaction. */
+    /**
+     * Sustained melee damage per second of one swing-per-cooldown rotation, in units of
+     * (damage x cooldown-rate); only the ordering matters. Attack damage and speed are the player's
+     * base value (1.0 and 4.0) plus the stack's own additive modifiers.
+     */
+    static double meleeScore(ItemStack stack) {
+        double damage = 1.0D + attackDamage(stack) + sharpnessBonus(stack);
+        double speed = Math.max(0.1D, 4.0D + attackSpeedModifier(stack));
+        return damage * speed;
+    }
+
+    private static double sharpnessBonus(ItemStack stack) {
+        ItemEnchantments enchantments = stack.getOrDefault(
+                DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
+        for (Holder<Enchantment> enchantment : enchantments.keySet()) {
+            if (enchantment.is(Enchantments.SHARPNESS)) {
+                int level = enchantments.getLevel(enchantment);
+                return level > 0 ? 0.5D + 0.5D * level : 0.0D;
+            }
+        }
+        return 0.0D;
+    }
+
+    /**
+     * Only purpose-built melee tools may authorize a defensive Combat transaction: swords and axes.
+     * Spears (any item tagged as a spear, or carrying the piercing/kinetic weapon components) and
+     * the mace are deliberately not qualified: a spear's damage comes from its jab/charge attack
+     * and lunge rather than a plain click, and the mace's from a falling smash, so neither is
+     * modelled by the per-swing score and both stay out of automatic melee choice.
+     */
     public static boolean isQualifiedMeleeWeapon(ItemStack stack) {
         return !stack.isEmpty()
                 && (stack.is(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem)
+                && !stack.is(ItemTags.SPEARS)
+                && !stack.is(Items.MACE)
+                && !stack.has(DataComponents.PIERCING_WEAPON)
+                && !stack.has(DataComponents.KINETIC_WEAPON)
                 && remainingDurability(stack) >= MIN_MELEE_RAW_DURABILITY;
     }
 
@@ -315,6 +367,20 @@ public final class EquipAction {
         return candidate.mainSlot() < current.mainSlot();
     }
 
+    /** True when the bot carries a shield, raised or not: in the offhand or anywhere in the inventory. */
+    public static boolean hasShield(AIPlayerEntity bot) {
+        if (bot.getOffhandItem().is(Items.SHIELD)) {
+            return true;
+        }
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(Items.SHIELD)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static boolean equipShieldOffhand(AIPlayerEntity bot) {
         if (bot.getOffhandItem().is(Items.SHIELD)) {
             return true;
@@ -378,6 +444,10 @@ public final class EquipAction {
 
     public static double attackDamage(ItemStack stack) {
         return attributeValue(stack, EquipmentSlot.MAINHAND, Attributes.ATTACK_DAMAGE);
+    }
+
+    private static double attackSpeedModifier(ItemStack stack) {
+        return attributeValue(stack, EquipmentSlot.MAINHAND, Attributes.ATTACK_SPEED);
     }
 
     private static double equippedArmorScore(AIPlayerEntity bot, EquipmentSlot slot) {

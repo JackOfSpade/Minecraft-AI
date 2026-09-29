@@ -4,21 +4,41 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
+import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.pathfinding.DangerCheck;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.NeutralMob;
+import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.monster.Ghast;
+import net.minecraft.world.entity.monster.MagmaCube;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.entity.monster.Shulker;
+import net.minecraft.world.entity.monster.Slime;
+import net.minecraft.world.entity.monster.creaking.Creaking;
+import net.minecraft.world.entity.monster.piglin.Piglin;
+import net.minecraft.world.entity.monster.piglin.PiglinAi;
+import net.minecraft.world.entity.monster.spider.Spider;
+import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -37,6 +57,14 @@ public final class CombatCore {
     /** Creepers can erase a zero-death mission before ordinary melee pressure is re-entered. */
     private static final double CREEPER_PRESSURE_RANGE = 16.0D;
     private static final double RANGED_HOSTILE_PRESSURE_RANGE = 20.0D;
+    /** Vanilla Warden sonic boom: horizontal reach (SonicBoom behaviour closerThan(15, 20)). */
+    public static final double WARDEN_SONIC_BOOM_RANGE = 15.0D;
+    /** A warden remains pressure a little beyond its boom range, with or without line of sight. */
+    private static final double WARDEN_PRESSURE_RANGE = WARDEN_SONIC_BOOM_RANGE + 2.0D;
+    /** A flight from a warden must end outside its boom range, not merely at the generic escape distance. */
+    public static final int WARDEN_ESCAPE_DISTANCE = (int) WARDEN_SONIC_BOOM_RANGE + 5;
+    /** How long a mob that hurt the bot (or its owner) stays a known aggressor: 10 seconds. */
+    private static final int HURT_MEMORY_TICKS = 200;
 
     private CombatCore() {
     }
@@ -59,6 +87,27 @@ public final class CombatCore {
     /** Shared combat policy: projectile-capable mobs keep pressure while line of sight remains. */
     static boolean isRangedThreat(LivingEntity entity) {
         return entity instanceof RangedAttackMob;
+    }
+
+    /**
+     * Mobs that hurt from range but are never a bow or melee target for this bot (ghast fireballs,
+     * shulker bullets) still keep pressure while line of sight remains, exactly like a shooter.
+     */
+    static boolean isLongRangeDanger(LivingEntity entity) {
+        return isRangedThreat(entity) || entity instanceof Ghast || entity instanceof Shulker;
+    }
+
+    /**
+     * How far from {@code entity} a heal/settle pause is safe: the ordinary contact margin, the
+     * explosive margin for creepers (vanilla ignition backs off beyond seven blocks) and the sonic
+     * boom range for a warden.
+     */
+    static double safeDistanceFrom(LivingEntity entity, double contactSafeDistance,
+                                   double explosiveSafeDistance) {
+        if (entity instanceof Warden) {
+            return WARDEN_PRESSURE_RANGE;
+        }
+        return isMeleeForbiddenThreat(entity) ? explosiveSafeDistance : contactSafeDistance;
     }
 
     /** Observable, reachable ranged attackers around the bot -- used to decide when cover/peekaboo
@@ -115,7 +164,12 @@ public final class CombatCore {
                 && distanceSquared <= CREEPER_PRESSURE_RANGE * CREEPER_PRESSURE_RANGE) {
             return true;
         }
-        return isRangedThreat(entity)
+        if (entity instanceof Warden
+                && distanceSquared <= WARDEN_PRESSURE_RANGE * WARDEN_PRESSURE_RANGE) {
+            // A sonic boom needs no melee contact and ignores armour: hold the whole boom range.
+            return true;
+        }
+        return isLongRangeDanger(entity)
                 && distanceSquared
                 <= RANGED_HOSTILE_PRESSURE_RANGE * RANGED_HOSTILE_PRESSURE_RANGE
                 && hasLineOfSight(bot, entity);
@@ -128,13 +182,89 @@ public final class CombatCore {
      * safety must create distance rather than turn an interrupted mining mission into a duel.
      */
     static boolean isMeleeForbiddenThreat(LivingEntity entity) {
-        return entity instanceof Creeper || entity instanceof EnderMan;
+        // Never melee: a Warden (30 damage per hit, and a sonic boom that ignores armour), the
+        // Wither (boss), ghasts and shulkers (out of reach or evade-only until they have their own
+        // tactic), and a heart-bound Creaking, which cannot be damaged by the bot at all.
+        // isHeartBound() only removes an attack option, so it can never hand the bot an advantage.
+        return entity instanceof Creeper
+                || entity instanceof EnderMan
+                || entity instanceof Warden
+                || entity instanceof WitherBoss
+                || entity instanceof Ghast
+                || entity instanceof Shulker
+                || entity instanceof Creaking creaking && creaking.isHeartBound();
+    }
+
+    /** Owner or another bot: never a target of any strike or shot. */
+    public static boolean isFriendly(AIPlayerEntity bot, Entity entity) {
+        return StrikeLegality.isFriendly(bot, entity);
+    }
+
+    /**
+     * True when {@code entity} is a hostile the bot may defend against.
+     *
+     * <ul>
+     *   <li>Anything implementing {@link Enemy} or {@link Monster} counts (slimes, magma cubes,
+     *       ghasts, phantoms, shulkers and hoglins are not {@code Monster}s), except a tiny slime,
+     *       which deals no damage, and a piglin while the bot wears gold.</li>
+     *   <li>A neutral mob (zombified piglin, enderman, ...) is a threat only once it has hurt the
+     *       bot or its owner, or is provably angry at this exact bot.</li>
+     *   <li>A spider is neutral in daylight unless it is visibly aggressive.</li>
+     *   <li>Any other mob (a wolf, a golem, a bee) becomes a threat only when it hurt the bot or
+     *       its owner: the victim knows who hurt it. A calm bystander is never auto-attacked.</li>
+     * </ul>
+     * Owner and other bots are never hostile. This is for DEFENCE decisions only.
+     */
+    public static boolean hostileTo(AIPlayerEntity bot, LivingEntity entity) {
+        if (entity == null || entity == bot || !entity.isAlive() || isFriendly(bot, entity)) {
+            return false;
+        }
+        if (hasHurtBotOrOwner(bot, entity)) {
+            return true;
+        }
+        if (entity instanceof NeutralMob neutral) {
+            // isAngryAt() binds persistent/universal anger to this exact bot; the live target is the
+            // legacy signal the Enderman rule has always used.
+            return neutral.isAngryAt(bot, bot.level())
+                    || entity instanceof Mob mob && mob.getTarget() == bot;
+        }
+        if (entity instanceof Piglin && PiglinAi.isWearingSafeArmor(bot)) {
+            return false;
+        }
+        if (entity instanceof Slime slime && !(entity instanceof MagmaCube) && slime.getSize() <= 1) {
+            return false;
+        }
+        if (entity instanceof Spider spider
+                && spider.getLightLevelDependentMagicValue() >= 0.5F
+                && !spider.isAggressive()) {
+            return false;
+        }
+        return entity instanceof Enemy || entity instanceof Monster;
+    }
+
+    /** True when {@code entity} hurt the bot, or the bot's owner, within the last ten seconds. */
+    public static boolean hasHurtBotOrOwner(AIPlayerEntity bot, LivingEntity entity) {
+        if (recentlyHurtBy(bot, entity)) {
+            return true;
+        }
+        Optional<UUID> ownerId = AIPlayerManager.INSTANCE.ownerOf(bot);
+        if (ownerId.isEmpty() || bot.level().getServer() == null) {
+            return false;
+        }
+        ServerPlayer owner = bot.level().getServer().getPlayerList().getPlayer(ownerId.get());
+        return owner != null && owner.level() == bot.level() && recentlyHurtBy(owner, entity);
+    }
+
+    private static boolean recentlyHurtBy(LivingEntity victim, LivingEntity attacker) {
+        return victim.getLastHurtByMob() == attacker
+                && victim.tickCount - victim.getLastHurtByMobTimestamp() <= HURT_MEMORY_TICKS;
     }
 
     public static Optional<LivingEntity> nearestTarget(AIPlayerEntity bot, EntityType<?> targetType, double range) {
         return bot.level()
                 .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(range),
-                        entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot)
+                        entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot
+                                && !isFriendly(bot, entity))
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
@@ -144,7 +274,9 @@ public final class CombatCore {
         AABB box = new AABB(center).inflate(range);
         return bot.level()
                 .getEntitiesOfClass(LivingEntity.class, box,
-                        entity -> entity instanceof Monster && entity.isAlive() && entity != bot)
+                        entity -> entity != bot
+                                && hostileTo(bot, entity)
+                                && !isMeleeForbiddenThreat(entity))
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
@@ -203,15 +335,77 @@ public final class CombatCore {
         }
     }
 
+    /**
+     * True when a swing at {@code target} would be legal right now: inside the melee boundary,
+     * the target's box inside vanilla's entity interaction range, no colliding block in the way, and
+     * not a friend. A wall or window between the bot and its target is never struck through.
+     */
+    public static boolean canStrikeNow(AIPlayerEntity bot, LivingEntity target) {
+        return inMeleeRange(bot, target) && StrikeLegality.strikeRefusal(bot, target) == null;
+    }
+
     public static boolean strikeIfReady(AIPlayerEntity bot, LivingEntity target) {
         lookAt(bot, target);
+        if (isFriendly(bot, target) || isMeleeForbiddenThreat(target)) {
+            return false;
+        }
         if (!inMeleeRange(bot, target)) {
             return false;
         }
         if (bot.getAttackStrengthScale(0.5F) < 0.95F) {
             return false;
         }
-        InteractAction.attackEntity(bot, target);
+        if (bot.isUsingItem()) {
+            // A raised shield is lowered to swing, exactly as a player releases it; any other use in
+            // progress (a drawn bow, food) keeps the hands busy and forbids the attack.
+            if (bot.getUsedItemHand() != net.minecraft.world.InteractionHand.OFF_HAND
+                    || !bot.getOffhandItem().is(net.minecraft.world.item.Items.SHIELD)) {
+                return false;
+            }
+            bot.releaseUsingItem();
+        }
+        return InteractAction.attackEntity(bot, target).isSuccess();
+    }
+
+    /**
+     * A sideways input that cannot walk the bot off a ledge or into lava: the desired direction if
+     * both the near and the far cell it would cross are standable and free of hazards, else the
+     * opposite direction under the same test, else no strafe at all.
+     */
+    public static float safeStrafeInput(AIPlayerEntity bot, float desired) {
+        if (desired == 0.0F) {
+            return 0.0F;
+        }
+        if (canStrafeToward(bot, desired)) {
+            return desired;
+        }
+        return canStrafeToward(bot, -desired) ? -desired : 0.0F;
+    }
+
+    private static boolean canStrafeToward(AIPlayerEntity bot, float input) {
+        double yaw = Math.toRadians(bot.getYRot());
+        double sign = Math.signum(input);
+        double lateralX = Math.cos(yaw) * sign;
+        double lateralZ = Math.sin(yaw) * sign;
+        for (double reach : new double[]{0.9D, 1.6D}) {
+            BlockPos cell = BlockPos.containing(
+                    bot.getX() + lateralX * reach, bot.getY(), bot.getZ() + lateralZ * reach);
+            if (!isSafeStrafeCell(bot.level(), cell)) {
+                return false;
+            }
+        }
         return true;
+    }
+
+    private static boolean isSafeStrafeCell(ServerLevel level, BlockPos feet) {
+        if (DangerCheck.scan(level, feet) != null) {
+            return false;
+        }
+        if (Standability.isStandableFresh(level, feet)) {
+            return true;
+        }
+        // A one-block step down is still a safe footing; a longer drop is a ledge.
+        BlockPos lower = feet.below();
+        return DangerCheck.scan(level, lower) == null && Standability.isStandableFresh(level, lower);
     }
 }

@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.action.MiningAction;
 import io.github.zoyluo.minecraftai.action.MovementAction;
+import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.coordination.Job;
 import io.github.zoyluo.minecraftai.coordination.TaskBoard;
@@ -662,14 +663,24 @@ public final class ToolRegistry {
             String entityType = requiredString(args, "entity_type");
             Identifier id = Identifier.parse(entityType);
             CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "tool_attack_entity");
-            Optional<Entity> target = bot.level()
+            // Never the owner or another bot, and only a target the bot could legally hit right now
+            // (its box within vanilla's entity interaction range and no colliding block between): the
+            // old 4.5-block scan let this tool land hits from five to seven blocks and through walls.
+            java.util.List<Entity> candidates = bot.level()
                     .getEntities(bot, bot.getBoundingBox().inflate(4.5D),
                             entity -> BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).equals(id)
-                                    && ObservableWorldQuery.canObserveEntity(bot, entity))
-                    .stream()
+                                    && !StrikeLegality.isFriendly(bot, entity)
+                                    && ObservableWorldQuery.canObserveEntity(bot, entity));
+            Optional<Entity> target = candidates.stream()
+                    .filter(entity -> StrikeLegality.strikeRefusal(bot, entity) == null)
                     .min(Comparator.comparingDouble(bot::distanceTo));
             if (target.isEmpty()) {
-                return fail("no_nearby_entity: " + entityType);
+                if (candidates.isEmpty()) {
+                    return fail("no_nearby_entity: " + entityType);
+                }
+                Entity nearest = candidates.stream()
+                        .min(Comparator.comparingDouble(bot::distanceTo)).orElseThrow();
+                return fail("target_not_strikable: " + StrikeLegality.strikeRefusal(bot, nearest));
             }
             return result(InteractAction.attackEntity(bot, target.get()));
         });

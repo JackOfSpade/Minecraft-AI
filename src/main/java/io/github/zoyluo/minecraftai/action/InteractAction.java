@@ -10,7 +10,20 @@ public final class InteractAction {
     private InteractAction() {
     }
 
+    /**
+     * One melee attack. {@code ServerPlayer.attack} checks nothing itself (vanilla checks reach in
+     * the packet handler, which this direct call skips), so the survival-legal preconditions are
+     * enforced here for every caller: never the owner or another bot, the target's box inside the
+     * vanilla entity interaction range, and no colliding block in the way. A refused strike does
+     * not swing, does not reset the cooldown and does not turn the bot.
+     */
     public static ActionResult attackEntity(AIPlayerEntity player, Entity target) {
+        String refusal = StrikeLegality.strikeRefusal(player, target);
+        if (refusal != null) {
+            BotLog.action(player, "attack_refused", "reason", refusal,
+                    "target_type", target.getType(), "target_id", target.getId());
+            return ActionResult.failed(refusal);
+        }
         Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
         LookAction.lookAt(player, targetCenter);
         player.attack(target);
