@@ -43,11 +43,6 @@ final class GlobalNotes {
             out.add("Auto-target is off: this bot stays passive until it is attacked (revenge), given a forced "
                     + "target or placed in a hostile faction. It is a global PvP BOT setting, not a per-bot choice.");
         }
-        BotProfile.Behavior b = profile.behavior();
-        if (b.usesPath() && !b.combatant()) {
-            out.add("This bot is a pacifist path follower: PvP BOT skips its combat AI entirely while it follows "
-                    + "its path (no retaliation); only eating, totems, potions, mending and shield automation still run.");
-        }
     }
 
     private static void ranged(List<String> out, Inventory inv, GlobalCapabilities caps) {

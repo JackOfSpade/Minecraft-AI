@@ -236,4 +236,9 @@ final class EngineContext {
             LOG.debug(message, args);
         }
     }
+
+    /** A rare, operator-relevant event (never per tick or per bot): always written at INFO. */
+    void info(String message, Object... args) {
+        LOG.info(message, args);
+    }
 }

@@ -867,4 +867,29 @@ class PopulationStoreTest {
     void findOfNullIsEmptyAndDoesNotThrow(@TempDir Path dir) {
         assertEquals(Optional.empty(), loaded(dir).find(null));
     }
+
+    @Test
+    void aStoreWrittenBeforeAllInhabitantsFoughtIsMigratedOnLoadAndRewrittenAtTheNextSave(@TempDir Path dir) throws IOException {
+        String k = key(3, 4).asString();
+        write(dir.resolve(PopulationStore.POPULATIONS_FILE), "{\"dataVersion\":2,\"structures\":{\"" + k + "\":{\"dataVersion\":2,"
+                + "\"status\":\"POPULATED\",\"bots\":[{\"index\":0,\"name\":\"Calm_1\",\"state\":\"SPAWNED\",\"profile\":{"
+                + "\"version\":1,\"seed\":1,\"archetype\":\"Pacifist\",\"behavior\":{\"stance\":\"GUARD_POST\","
+                + "\"combatant\":false,\"walkType\":\"bhop\",\"patrolRadius\":0,\"waypointCount\":1,"
+                + "\"waypoints\":[{\"x\":1,\"y\":2,\"z\":3}]}}}]}}}");
+
+        PopulationStore store = new PopulationStore(dir);
+        PopulationStore.LoadReport report = store.load();
+        assertTrue(report.usable());
+        assertTrue(report.messages().stream().anyMatch(m -> m.contains("data migration to version")), report.messages().toString());
+        BotProfile profile = store.findBot("Calm_1").orElseThrow().bot().profile;
+        assertTrue(profile.behavior().combatant());
+        assertEquals(BotProfile.MIGRATED_ARCHETYPE, profile.archetype());
+        assertEquals(1, profile.behavior().waypoints().size());
+
+        assertTrue(store.saveIfDirty(), "the migrated data is written back without any other change");
+        String json = read(dir.resolve(PopulationStore.POPULATIONS_FILE));
+        assertTrue(json.contains("\"dataVersion\":" + StructureRecord.CURRENT_DATA_VERSION), json);
+        assertFalse(json.contains("\"combatant\":false"), json);
+        assertFalse(json.contains("Pacifist"), json);
+    }
 }

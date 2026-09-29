@@ -7,14 +7,13 @@ import java.util.List;
  * sees "Archer" instead of a list of ids. Purely informational: nothing reads it back, and it is derived
  * from the facets rather than rolled, so it can never disagree with the loadout.
  * <p>
- * The first matching rule wins, ordered from the most distinctive trait (a pacifist ignores its whole
- * loadout; an explosive kit dominates every fight) down to the plain fallback.
+ * The first matching rule wins, ordered from the most distinctive trait (an explosive kit dominates every
+ * fight) down to the plain fallback. There is no pacifist label: every inhabitant fights.
  */
 final class Archetypes {
     private Archetypes() {
     }
 
-    static final String PACIFIST = "Pacifist";
     static final String DEMOLITIONIST = "Demolitionist";
     static final String SKYFARER = "Skyfarer";
     static final String SMASHER = "Smasher";
@@ -32,16 +31,13 @@ final class Archetypes {
     /** A bot that carries nothing at all (profile randomisation switched off). */
     static final String UNEQUIPPED = "Unequipped";
 
-    static final List<String> ALL = List.of(PACIFIST, DEMOLITIONIST, SKYFARER, SMASHER, LANCER, HARPOONER,
+    static final List<String> ALL = List.of(DEMOLITIONIST, SKYFARER, SMASHER, LANCER, HARPOONER,
             ARCHER, SKIRMISHER, TANK, BERSERKER, GUARD, SCOUT, DUELIST, BRAWLER, UNEQUIPPED);
 
     /** Average PvP BOT armor score from which a fully dressed bot with defences counts as a tank (iron and up). */
     private static final int TANK_ARMOR_SCORE = 60;
 
     static String label(Facts f, BotProfile.Behavior behavior) {
-        if (behavior.usesPath() && !behavior.combatant()) {
-            return PACIFIST;
-        }
         if (f.explosive() != Facts.ExplosiveKit.NONE) {
             return DEMOLITIONIST;
         }

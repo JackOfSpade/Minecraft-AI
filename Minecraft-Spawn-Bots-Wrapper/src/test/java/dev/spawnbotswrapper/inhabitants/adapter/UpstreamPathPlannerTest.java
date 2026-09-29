@@ -125,16 +125,19 @@ class UpstreamPathPlannerTest {
     }
 
     @Test
-    void downgradingKeepsAPacifistAPacifist() {
-        // Refusing instead would leave the bot without a path, i.e. a fighter.
-        PatrolPlan plan = UpstreamPathPlanner.plan("Inh_Foo", behavior(Stance.PATROL_PINGPONG, false, "bhop", 1)).plan();
-        assertFalse(plan.attack());
+    void downgradingKeepsTheBotAFighter() {
+        PatrolPlan plan = UpstreamPathPlanner.plan("Inh_Foo", behavior(Stance.PATROL_PINGPONG, true, "bhop", 1)).plan();
+        assertTrue(plan.attack());
     }
 
     @Test
-    void combatantBecomesTheAttackFlag() {
-        assertTrue(UpstreamPathPlanner.plan("Inh_Foo", behavior(Stance.GUARD_POST, true, "bhop", 1)).plan().attack());
-        assertFalse(UpstreamPathPlanner.plan("Inh_Foo", behavior(Stance.GUARD_POST, false, "bhop", 1)).plan().attack());
+    void everyPathIsBuiltWithTheAttackFlagOnWhateverTheLegacyFlagSays() {
+        for (String stance : List.of(Stance.GUARD_POST, Stance.PATROL_CYCLE, Stance.PATROL_PINGPONG)) {
+            int points = stance.equals(Stance.GUARD_POST) ? 1 : 3;
+            assertTrue(UpstreamPathPlanner.plan("Inh_Foo", behavior(stance, true, "bhop", points)).plan().attack(), stance);
+            assertTrue(UpstreamPathPlanner.plan("Inh_Foo", behavior(stance, false, "bhop", points)).plan().attack(),
+                    stance + " with the retired pacifist flag must still attack");
+        }
     }
 
     @Test

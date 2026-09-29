@@ -42,7 +42,7 @@ class PopulationFileTest {
     private static Path writeAndGet(Path dir, Map<StructureKey, StructureRecord> records,
                                     Map<String, PersistentDeckStore.Snapshot> decks) throws IOException {
         Path file = dir.resolve("populations.json");
-        PopulationFile.write(file, 1, records, decks);
+        PopulationFile.write(file, StructureRecord.CURRENT_DATA_VERSION, records, decks);
         return file;
     }
 
@@ -62,7 +62,7 @@ class PopulationFileTest {
         Path file = writeAndGet(dir, records, decks);
         PopulationFile.ReadResult read = PopulationFile.read(file);
         assertEquals(OK, read.outcome(), read.detail());
-        assertEquals(1, read.parsed().dataVersion());
+        assertEquals(StructureRecord.CURRENT_DATA_VERSION, read.parsed().dataVersion());
         assertEquals(List.copyOf(records.keySet()), List.copyOf(read.parsed().structures().keySet()), "storage order is kept");
         for (Map.Entry<StructureKey, StructureRecord> e : records.entrySet()) {
             assertRecordEquals(e.getValue(), read.parsed().structures().get(e.getKey()));
@@ -79,7 +79,7 @@ class PopulationFileTest {
         String text = Files.readString(file);
         assertFalse(text.contains("null"));
         assertFalse(text.contains("\n"));
-        assertTrue(text.startsWith("{\"dataVersion\":1,\"structures\":{"), text);
+        assertTrue(text.startsWith("{\"dataVersion\":" + StructureRecord.CURRENT_DATA_VERSION + ",\"structures\":{"), text);
     }
 
     @Test
@@ -341,10 +341,61 @@ class PopulationFileTest {
 
     @Test
     void aNewerDataVersionIsTooNewWhateverElseItContains() {
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":3,\"structures\":{}}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":3,\"structures\":\"a new kind of thing\"}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":3}").outcome());
-        assertEquals(TOO_NEW, parse("{\"dataVersion\":3,\"structures\":{\"" + K1 + "\":{\"status\":\"BRAND_NEW\"}}}").outcome());
-        assertEquals(TOO_NEW, parse(doc("\"" + K1 + "\":{\"dataVersion\":3}")).outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":4,\"structures\":{}}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":4,\"structures\":\"a new kind of thing\"}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":4}").outcome());
+        assertEquals(TOO_NEW, parse("{\"dataVersion\":4,\"structures\":{\"" + K1 + "\":{\"status\":\"BRAND_NEW\"}}}").outcome());
+        assertEquals(TOO_NEW, parse(doc("\"" + K1 + "\":{\"dataVersion\":4}")).outcome());
+    }
+
+    // ---------------------------------------------------------------- dataVersion 3: every inhabitant fights
+
+    private static String botWithBehavior(String name, String combatant, String archetype) {
+        return "{\"index\":0,\"name\":\"" + name + "\",\"state\":\"SPAWNED\",\"profile\":{\"version\":1,\"seed\":7,"
+                + "\"archetype\":\"" + archetype + "\",\"loadout\":{\"items\":[{\"slot\":\"hotbar\",\"index\":0,"
+                + "\"spec\":{\"item\":\"minecraft:iron_sword\",\"count\":1}}]},"
+                + "\"vitals\":{\"healthFraction\":0.5,\"foodLevel\":10,\"attributes\":{}},"
+                + "\"behavior\":{\"stance\":\"PATROL_CYCLE\",\"combatant\":" + combatant + ",\"walkType\":\"sprint\","
+                + "\"patrolRadius\":12.5,\"waypointCount\":2,\"waypoints\":[{\"x\":1,\"y\":64,\"z\":2},{\"x\":5,\"y\":64,\"z\":6}]}}}";
+    }
+
+    @Test
+    void aPacifistProfileOfAnOlderDataVersionIsMigratedToAFighterAndTheRestOfItIsUntouched() {
+        PopulationFile.Parsed parsed = ok("{\"dataVersion\":2,\"structures\":{\"" + K1 + "\":{\"dataVersion\":2,"
+                + "\"status\":\"POPULATED\",\"bots\":[" + botWithBehavior("Calm_1", "false", "Pacifist") + ","
+                + botWithBehavior("Keen_2", "true", "Duelist") + "]}}}");
+        List<BotRecord> bots = parsed.structures().get(StructureKey.parse(K1)).bots;
+
+        BotProfile calm = bots.get(0).profile;
+        assertTrue(calm.behavior().combatant(), "the pacifist flag is cleared");
+        assertEquals(BotProfile.MIGRATED_ARCHETYPE, calm.archetype(), "the retired label is replaced");
+        assertEquals(BotProfile.Stance.PATROL_CYCLE, calm.behavior().stance());
+        assertEquals(BotProfile.WalkType.SPRINT, calm.behavior().walkType());
+        assertEquals(12.5, calm.behavior().patrolRadius());
+        assertEquals(2, calm.behavior().waypoints().size(), "waypoints are kept: nothing is re-planned");
+        assertEquals(1, calm.loadout().items().size());
+        assertEquals(7L, calm.seed());
+
+        assertEquals("Duelist", bots.get(1).profile.archetype(), "a fighter is not touched");
+        assertEquals(StructureRecord.CURRENT_DATA_VERSION, parsed.structures().get(StructureKey.parse(K1)).dataVersion);
+        assertTrue(parsed.warnings().stream().anyMatch(w -> w.contains("1 inhabitant profile(s)") && w.contains("fighters")),
+                parsed.warnings().toString());
+    }
+
+    @Test
+    void theMigrationJudgesARecordWithoutItsOwnVersionByTheFileHeader() {
+        PopulationFile.Parsed parsed = ok("{\"dataVersion\":2,\"structures\":{\"" + K1 + "\":{\"status\":\"POPULATED\",\"bots\":["
+                + botWithBehavior("Calm_1", "false", "Pacifist") + "]}}}");
+        assertTrue(parsed.structures().get(StructureKey.parse(K1)).bots.get(0).profile.behavior().combatant());
+    }
+
+    @Test
+    void aCurrentDataVersionFileIsNotMigratedAgain() {
+        PopulationFile.Parsed parsed = ok("{\"dataVersion\":" + StructureRecord.CURRENT_DATA_VERSION + ",\"structures\":{\"" + K1
+                + "\":{\"dataVersion\":" + StructureRecord.CURRENT_DATA_VERSION + ",\"status\":\"POPULATED\",\"bots\":["
+                + botWithBehavior("Odd_1", "false", "Hand_Edited") + "]}}}");
+        assertFalse(parsed.structures().get(StructureKey.parse(K1)).bots.get(0).profile.behavior().combatant(),
+                "a current file is authoritative; only the path planner ignores the legacy flag");
+        assertTrue(parsed.warnings().stream().noneMatch(w -> w.contains("migration")), parsed.warnings().toString());
     }
 }

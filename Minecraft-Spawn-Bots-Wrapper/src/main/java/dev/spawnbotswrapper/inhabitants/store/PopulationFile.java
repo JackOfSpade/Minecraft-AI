@@ -184,7 +184,7 @@ final class PopulationFile {
                     }
                     case "structures" -> {
                         requireAbsent(structures, name);
-                        structures = readStructures(in, warnings);
+                        structures = readStructures(in, warnings, version == null ? StructureRecord.CURRENT_DATA_VERSION : version);
                     }
                     case "decks" -> {
                         requireAbsent(decks, name);
@@ -254,8 +254,10 @@ final class PopulationFile {
         return out;
     }
 
-    private static Map<StructureKey, StructureRecord> readStructures(JsonReader in, List<String> warnings) throws IOException {
+    private static Map<StructureKey, StructureRecord> readStructures(JsonReader in, List<String> warnings,
+                                                                     int headerVersion) throws IOException {
         Map<StructureKey, StructureRecord> out = new LinkedHashMap<>();
+        int migratedBots = 0;
         in.beginObject();
         while (in.hasNext()) {
             String keyText = in.nextName();
@@ -264,12 +266,16 @@ final class PopulationFile {
             if (key == null) {
                 throw new MalformedJsonException("unparseable structure key \"" + abbreviate(keyText) + "\"");
             }
-            normalise(key, record, warnings);
+            migratedBots += normalise(key, record, warnings, headerVersion);
             if (out.putIfAbsent(key, record) != null) {
                 throw new MalformedJsonException("duplicate structure key \"" + abbreviate(keyText) + "\"");
             }
         }
         in.endObject();
+        if (migratedBots > 0) {
+            warnings.add("data migration to version " + StructureRecord.CURRENT_DATA_VERSION + ": " + migratedBots
+                    + " inhabitant profile(s) that were pacifists are now fighters (every inhabitant fights)");
+        }
         return out;
     }
 
@@ -277,7 +283,8 @@ final class PopulationFile {
      * Repairs what Gson leaves null (explicit JSON nulls) and rejects what cannot be repaired without
      * guessing. Fields that are simply absent were already defaulted by the record classes' constructors.
      */
-    private static void normalise(StructureKey key, StructureRecord record, List<String> warnings) throws IOException {
+    private static int normalise(StructureKey key, StructureRecord record, List<String> warnings,
+                                 int headerVersion) throws IOException {
         if (record == null) {
             throw new MalformedJsonException("structure " + key + " has no record");
         }
@@ -290,8 +297,10 @@ final class PopulationFile {
             // heuristic the code used to rely on, so old records keep displaying exactly as before; only a
             // FRESH roll of exactly 0.0 against a genuinely 0% chance can now tell itself apart from "no data".
             record.rollDetailsKept = record.roll > 0 || record.occupiedChance > 0;
-            record.dataVersion = StructureRecord.CURRENT_DATA_VERSION;
         }
+        // A record that does not state its own version is judged by the file's header (written before the records).
+        boolean migrateFighters = record.dataVersion < 3 || headerVersion < 3;
+        record.dataVersion = StructureRecord.CURRENT_DATA_VERSION;
         if (record.status == null) {
             throw new MalformedJsonException("structure " + key + " has an unknown status");
         }
@@ -299,6 +308,7 @@ final class PopulationFile {
             record.bots = new ArrayList<>();
         }
         record.bots.removeIf(Objects::isNull);
+        int migrated = 0;
         for (BotRecord bot : record.bots) {
             if (bot.state == null) {
                 throw new MalformedJsonException("a bot of structure " + key + " has an unknown state");
@@ -306,7 +316,15 @@ final class PopulationFile {
             if (bot.name == null) {
                 warnings.add("a bot of structure " + key + " has no name; it cannot be found by name");
             }
+            // dataVersion 3 migration: profiles are authoritative and never regenerated, so a profile stored
+            // as a pacifist is corrected in place. Its path (attack=false upstream) is rebuilt with attack=true
+            // the next time the bot's patrol is (re)assigned, which happens on every restore.
+            if (migrateFighters && bot.profile != null && bot.profile.isLegacyPacifist()) {
+                bot.profile = bot.profile.asFighter();
+                migrated++;
+            }
         }
+        return migrated;
     }
 
     /** Streams the document to {@code file} and fsyncs it. The caller moves it into place. */

@@ -198,7 +198,10 @@ public final class PopulationEngine implements EngineControl {
 
         if (cfg.enabled && ctx.available()) {
             ctx.guard("roll", () -> rollQueued(now, cfg));
-            if (now - createdAtTick >= Math.max(0, EngineContext.processing(cfg).restoreSettleTicks)) {
+            if (now - createdAtTick < Math.max(0, EngineContext.processing(cfg).restoreSettleTicks)) {
+                // Still settling: only re-attach paths/followers of bots PvP BOT has already brought back.
+                ctx.guard("restore-settling", () -> roster.restoreSettling(cfg));
+            } else {
                 if (!settledSeen) {
                     settledSeen = true;
                     ctx.guard("roster", () -> roster.refreshAll(now));

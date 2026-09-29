@@ -37,7 +37,7 @@ final class PopulationStoreLoader {
      *                       file and/or from {@code abandoned.keys}
      * @param dirtyOnLoad    true when the in-memory state already differs from {@code populations.json} the
      *                       instant it is loaded (recovered from the backup/temp file, or a hand-edited ABANDONED
-     *                       record was found and must be moved out) and so needs rewriting at the next save
+     *                       record was found and must be moved out, or an older data version was migrated) and so needs rewriting at the next save
      */
     record Result(String unusableWhy, List<String> messages, PopulationStore.LoadSource source,
                   Map<StructureKey, StructureRecord> active, Set<StructureKey> abandonedKeys,
@@ -193,7 +193,8 @@ final class PopulationStoreLoader {
                     + PopulationStore.ABANDONED_FILE);
         }
 
-        boolean dirtyOnLoad = handEditedAbandoned || source == PopulationStore.LoadSource.BACKUP
+        boolean migratedFormat = parsed != null && parsed.dataVersion() < StructureRecord.CURRENT_DATA_VERSION;
+        boolean dirtyOnLoad = handEditedAbandoned || migratedFormat || source == PopulationStore.LoadSource.BACKUP
                 || source == PopulationStore.LoadSource.INTERRUPTED_SAVE;
         return new Result(null, List.copyOf(messages), source, active, abandonedKeys, decks,
                 abandonedRewriteNeeded, dirtyOnLoad);

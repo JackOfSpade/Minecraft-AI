@@ -310,8 +310,7 @@ public final class ProfileFormatter {
         out.add("Behaviour:");
         out.add(INDENT + "stance: " + b.stance() + stanceMeaning(b.stance()));
         out.add(INDENT + "walk type: " + b.walkType() + (b.usesPath() ? "" : " (only used while following a path)"));
-        out.add(INDENT + "combatant: " + (b.combatant() ? "yes" : "no")
-                + (b.usesPath() ? (b.combatant() ? "" : " (pacifist path follower)") : " (not applicable without a path)"));
+        out.add(INDENT + "combatant: yes (every inhabitant fights)");
         out.add(INDENT + "patrol radius: " + num(b.patrolRadius()) + " blocks");
         out.add(INDENT + "waypoints: " + b.waypointCount() + " planned, " + b.waypoints().size() + " placed");
         int n = 1;

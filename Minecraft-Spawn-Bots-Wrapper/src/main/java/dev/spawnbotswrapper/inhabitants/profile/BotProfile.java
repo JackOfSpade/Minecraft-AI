@@ -43,6 +43,31 @@ public record BotProfile(
         return new BotProfile(version, seed, archetype, loadout, vitals, b);
     }
 
+    /** The archetype label bots used to carry when they were pacifists (retired: nobody is passive any more). */
+    public static final String LEGACY_PACIFIST_ARCHETYPE = "Pacifist";
+    /** Archetype label given to a bot that used to be a pacifist and was migrated to a fighter. */
+    public static final String MIGRATED_ARCHETYPE = "Fighter";
+
+    /** True for a profile written before "all inhabitants fight": it still carries the pacifist flag or label. */
+    public boolean isLegacyPacifist() {
+        return !behavior.combatant() || LEGACY_PACIFIST_ARCHETYPE.equals(archetype);
+    }
+
+    /**
+     * This profile as a fighter: the behaviour flag is set and the informational archetype label "Pacifist"
+     * (which no longer exists) becomes {@link #MIGRATED_ARCHETYPE}. Loadout, vitals, stance and waypoints are
+     * untouched. Profiles are authoritative and never regenerated, so the store applies this in place through its
+     * data-version migration. Returns {@code this} when nothing changes.
+     */
+    public BotProfile asFighter() {
+        if (!isLegacyPacifist()) {
+            return this;
+        }
+        return new BotProfile(version, seed,
+                LEGACY_PACIFIST_ARCHETYPE.equals(archetype) ? MIGRATED_ARCHETYPE : archetype,
+                loadout, vitals, behavior.asFighter());
+    }
+
     /** Slot names used by {@link PlacedItem#slot()}. */
     public static final class Slot {
         public static final String HEAD = "head";
@@ -153,9 +178,12 @@ public record BotProfile(
 
     /**
      * @param stance        one of {@link Stance}
-     * @param combatant     false makes the bot a pacifist: PvP BOT skips its whole combat AI for path
-     *                      followers whose path has attack=false. Only effective when a path is used
-     *                      (every stance except STAND); ignored for STAND.
+     * @param combatant     LEGACY, no longer meaningful: every inhabitant is a fighter. It used to make a path
+     *                      follower a pacifist (PvP BOT skips its whole combat AI for a path with attack=false),
+     *                      which left a large share of guards and patrols that never attacked or retaliated. The
+     *                      generator always writes true, the path planner ignores the value (every path is built
+     *                      with attack=true), and the store migrates old records (see {@link #asFighter()}). The
+     *                      component stays only so persisted profiles keep their shape.
      * @param walkType      one of {@link WalkType}; only effective while following a path
      * @param patrolRadius  planned patrol radius in blocks (0 for STAND)
      * @param waypointCount planned number of waypoints (1 for GUARD_POST, 0 for STAND)
@@ -180,6 +208,11 @@ public record BotProfile(
 
         public Behavior withWaypoints(List<Waypoint> w) {
             return new Behavior(stance, combatant, walkType, patrolRadius, waypointCount, w);
+        }
+
+        /** The same behaviour with the legacy pacifist flag cleared: every inhabitant fights. */
+        public Behavior asFighter() {
+            return combatant ? this : new Behavior(stance, true, walkType, patrolRadius, waypointCount, waypoints);
         }
     }
 }

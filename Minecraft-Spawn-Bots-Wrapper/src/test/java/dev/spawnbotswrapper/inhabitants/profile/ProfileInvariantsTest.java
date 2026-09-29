@@ -605,9 +605,7 @@ class ProfileInvariantsTest {
             BotProfile p = g.profile();
             Facts f = g.facts();
             String label = p.archetype();
-            if (p.behavior().usesPath() && !p.behavior().combatant()) {
-                assertEquals(Archetypes.PACIFIST, label);
-            } else if (f.explosive() != Facts.ExplosiveKit.NONE) {
+            if (f.explosive() != Facts.ExplosiveKit.NONE) {
                 assertEquals(Archetypes.DEMOLITIONIST, label);
             } else if (f.meleeKind() == Facts.MeleeKind.MACE) {
                 assertTrue(label.equals(Archetypes.SMASHER) || label.equals(Archetypes.SKYFARER), label);

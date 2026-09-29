@@ -67,19 +67,17 @@ final class SettingData {
                                 + "10), so an operator warning is appropriate. Never changed."),
 
                 // ---- combat core and targeting
-                flag("combatEnabled", "combat", true).perBot(PATH,
-                        "behavior.combatant: false = pacifist path follower; behavior.stance: a path stance is "
-                                + "required",
-                        "Partial, path followers only. A follower of a path with attack=false skips PvP BOT's whole "
-                                + "combat AI (no targeting, no retaliation, no shield or weapon combat logic, no idle "
-                                + "wander); eating, totem, potions and mending still run. Varies: pacifist or fighter "
-                                + "for guarding and patrolling bots. Does not vary: STAND bots always follow the "
-                                + "global switch, and the lever can only turn combat off, never on. Trap: a follower "
-                                + "whose path vanished is silently pacified and stops moving."),
+                flag("combatEnabled", "combat", true).global(
+                        "No per-bot proxy any more: every inhabitant fights, so this addon builds every path with "
+                                + "attack=true. (A follower of a path with attack=false skips PvP BOT's whole combat AI "
+                                + "-- no targeting, no retaliation, no shield or weapon combat logic, no idle wander -- "
+                                + "which is what the retired 'pacifist' half of the behaviour deck did to roughly "
+                                + "half of all guards and patrols; the store migrates old pacifist profiles to "
+                                + "fighters.) The global switch still applies to everyone. Trap: a follower whose "
+                                + "path vanished is silently pacified and stops moving."),
                 flag("revengeEnabled", "revenge", true).global(
                         "No per-bot proxy: remembers the last living attacker for 30 s and targets it, bypassing the "
-                                + "three target filters. A pacifist path suppresses it but switches off ALL combat, so "
-                                + "it does not substitute; absorption or resistance suppress it only as a perverse "
+                                + "three target filters; absorption or resistance suppress it only as a perverse "
                                 + "side effect. With defaults inhabitants stay passive until hit."),
                 flag("autoTargetEnabled", "auto-target", false).global(
                         "No per-bot proxy: the default (off) is why inhabitants are passive until attacked; revenge, "
@@ -144,7 +142,11 @@ final class SettingData {
                                 + "attacks), so they are never varied."),
                 whole("criticalFallTicks", "crit-fall-ticks", 1, 10, 6).global(
                         "No per-bot proxy: consecutive falling ticks required before a crit hit. Attribute-sensitive "
-                                + "only in a perverse way (jump strength, gravity), so not varied."),
+                                + "only in a perverse way (jump strength, gravity), so not varied. The melee routine "
+                                + "only swings after a full jump-and-fall of this many ticks, so a large value makes "
+                                + "bots look passive at close range. This addon manages it: at every server start it runs "
+                                + "'pvpbot settings crit-fall-ticks 3' (config key criticalFallTicks, 0 = unmanaged) "
+                                + "instead of keeping upstream's 6."),
                 whole("bowMinDrawTime", "bow-draw-ticks", 5, 100, 40).global(
                         "No per-bot proxy: ticks a bow is drawn before release (crossbows use a fixed 25). Quick "
                                 + "Charge and Power enchantments are never consulted, so enchanting the bow does not "

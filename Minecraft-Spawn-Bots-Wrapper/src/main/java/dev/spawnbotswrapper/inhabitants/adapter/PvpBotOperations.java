@@ -122,8 +122,8 @@ public interface PvpBotOperations {
     // ---------------------------------------------------------------- per-bot behaviour (PvP BOT paths)
 
     /**
-     * Creates a PvP BOT path for this bot from {@code behavior.waypoints()} (using the stance, walk type
-     * and combatant flag) and starts the bot following it. Returns false when the behaviour has no path,
+     * Creates a PvP BOT path for this bot from {@code behavior.waypoints()} (using the stance and walk type;
+     * the path always has attack=true, every inhabitant fights) and starts the bot following it. Returns false when the behaviour has no path,
      * the waypoints are invalid, or upstream refused. Safe against upstream's known path traps (never a
      * single-point ping-pong loop; path fully built before following starts).
      */

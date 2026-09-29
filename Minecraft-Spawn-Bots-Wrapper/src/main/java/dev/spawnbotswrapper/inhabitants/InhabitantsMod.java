@@ -3,6 +3,7 @@ package dev.spawnbotswrapper.inhabitants;
 import dev.spawnbotswrapper.inhabitants.adapter.PvpBotAdapter;
 import dev.spawnbotswrapper.inhabitants.command.InhabitantsCommand;
 import dev.spawnbotswrapper.inhabitants.config.ConfigIO;
+import dev.spawnbotswrapper.inhabitants.mc.CombatLogger;
 import dev.spawnbotswrapper.inhabitants.mc.ConfigHolder;
 import dev.spawnbotswrapper.inhabitants.mc.GameMessageFilter;
 import dev.spawnbotswrapper.inhabitants.mc.McStructureLocator;
@@ -46,6 +47,7 @@ public final class InhabitantsMod implements ModInitializer {
     private ServerSession.Shared shared;
     private volatile ServerSession session;
     private final McTpsGateway tps = new McTpsGateway();
+    private final CombatLogger combat = new CombatLogger(() -> session, LOGGER);
 
     @Override
     public void onInitialize() {
@@ -65,6 +67,7 @@ public final class InhabitantsMod implements ModInitializer {
             ServerSession current = session;
             return current == null ? null : current.services();
         });
+        combat.register();
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
@@ -120,12 +123,14 @@ public final class InhabitantsMod implements ModInitializer {
         ServerSession current = session;
         if (current != null && current.server() == server) {
             shared.guard().run("server tick", current::tick);
+            combat.tick(server.getTicks());
         }
     }
 
     private void onServerStopping(MinecraftServer server) {
         ServerSession current = session;
         if (current != null && current.server() == server) {
+            combat.flush(server.getTicks());
             current.shutdown();
         }
     }

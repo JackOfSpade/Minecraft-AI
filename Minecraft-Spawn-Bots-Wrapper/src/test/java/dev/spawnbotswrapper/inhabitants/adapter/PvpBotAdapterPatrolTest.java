@@ -135,10 +135,22 @@ class PvpBotAdapterPatrolTest {
     }
 
     @Test
-    void aPacifistPathHasTheAttackFlagOff() {
+    void everyPathHasTheAttackFlagOnEvenForAProfileThatStillCarriesThePacifistFlag() {
         AdapterFixture f = AdapterFixture.probed();
         assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, false, "bhop", 3)));
-        assertFalse(BotPath.getPath("inh_inh_foo").attack);
+        assertTrue(BotPath.getPath("inh_inh_foo").attack, "a pacifist path would make PvP BOT skip the bot's whole combat AI");
+    }
+
+    @Test
+    void aStalePacifistPathLeftByAnEarlierSessionIsRebuiltWithTheAttackFlagOn() {
+        // Upstream persists paths, not followers: after a restart the old attack=false path is still on disk.
+        AdapterFixture f = AdapterFixture.probed();
+        BotPath.seed("inh_inh_foo", false, new Vec3d(0, 0, 0), new Vec3d(1, 0, 1));
+        BotPath.setAttack("inh_inh_foo", false);
+        assertFalse(BotPath.getPath("inh_inh_foo").attack, "setup: the persisted path is a pacifist path");
+        assertTrue(assign(f, "Inh_Foo", behavior(Stance.PATROL_CYCLE, true, "bhop", 3)));
+        assertTrue(BotPath.getPath("inh_inh_foo").attack);
+        assertEquals("inh_inh_foo", BotPath.followerOf("Inh_Foo"));
     }
 
     @Test

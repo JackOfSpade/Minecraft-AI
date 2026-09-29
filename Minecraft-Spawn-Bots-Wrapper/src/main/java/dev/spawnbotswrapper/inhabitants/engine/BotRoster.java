@@ -25,8 +25,9 @@ import java.util.Map;
  * tick. Bots known to be offline sit on a separate short watch list whose deadlines are checked every tick, so
  * the {@code goneConfirmTicks} timing stays precise without asking the server anything.
  * <p>
- * Nothing here runs before the settle period is over: upstream restores its bots one by one after a start, and a
- * bot that has merely not been restored yet must not be mistaken for a dead one.
+ * Nothing that concludes anything runs before the settle period is over: upstream restores its bots one by one
+ * after a start, and a bot that has merely not been restored yet must not be mistaken for a dead one. The single
+ * exception is {@link #restoreSettling}, which only gives already-restored bots their path back.
  */
 final class BotRoster {
     /** A complete pass over the roster takes this many ticks. */
@@ -198,6 +199,37 @@ final class BotRoster {
             }
             Tracked t = entries.get(cursor++);
             observe(t, now);
+            maybeRestore(t, cfg);
+        }
+    }
+
+    /**
+     * The only thing that runs DURING the settle period: gives a bot that PvP BOT has already brought back (online
+     * and listed) its path and follower again, so restored inhabitants patrol and fight within seconds of a restart
+     * instead of standing idle for the whole settle window. It deliberately stops there: it never starts an offline
+     * clock, never releases upstream state and never concludes anything about a bot that is not back yet, which is
+     * exactly what the settle period protects (a bot merely not restored yet must not be mistaken for a dead one).
+     * Same round-robin slice as {@link #tick}, so the cost per tick is the same; bots already restored cost nothing.
+     */
+    void restoreSettling(InhabitantsConfig cfg) {
+        int n = entries.size();
+        if (n == 0) {
+            return;
+        }
+        int slice = Math.min(n, Math.max(1, (n + SCAN_PERIOD_TICKS - 1) / SCAN_PERIOD_TICKS));
+        for (int i = 0; i < slice; i++) {
+            if (cursor >= entries.size()) {
+                cursor = 0;
+            }
+            Tracked t = entries.get(cursor++);
+            if (t.restored || t.bot.profile == null) {
+                continue;
+            }
+            Boolean online = ctx.online(t.bot.name);
+            if (online == null || !online) {
+                continue;
+            }
+            setOnline(t, true);
             maybeRestore(t, cfg);
         }
     }

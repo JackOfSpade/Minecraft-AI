@@ -4,6 +4,7 @@ import dev.spawnbotswrapper.inhabitants.adapter.PvpBotOperations;
 import dev.spawnbotswrapper.inhabitants.catalog.SettingCatalog;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
+import dev.spawnbotswrapper.inhabitants.config.StartupCommands;
 import dev.spawnbotswrapper.inhabitants.engine.PopulationEngine;
 import dev.spawnbotswrapper.inhabitants.profile.ProfileGenerator;
 import dev.spawnbotswrapper.inhabitants.spawn.DefaultSpawnPlanner;
@@ -122,17 +123,16 @@ public final class ServerSession {
      * first tick, well before this) still works. One command failing is logged and does not stop the rest.
      */
     private void runStartupCommands() {
-        List<String> commands = shared.config().get().startupCommands;
-        if (commands == null || commands.isEmpty()) {
+        // Managed PvP BOT settings (crit-fall-ticks) first, then the operator's list; see StartupCommands.
+        List<String> commands = StartupCommands.plan(shared.config().get());
+        if (commands.isEmpty()) {
             return;
         }
         ServerCommandSource source = server.getCommandSource().withSilent();
         for (String command : commands) {
-            if (command == null || command.isBlank()) {
-                continue;
-            }
             try {
-                server.getCommandManager().getDispatcher().execute(command, source);
+                int result = server.getCommandManager().getDispatcher().execute(command, source);
+                shared.log().info("startup command '{}' ran (result {})", command, result);
             } catch (OutOfMemoryError e) {
                 throw e;
             } catch (Throwable t) {

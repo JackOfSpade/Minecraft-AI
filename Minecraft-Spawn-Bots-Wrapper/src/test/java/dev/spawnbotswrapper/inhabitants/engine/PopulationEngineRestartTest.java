@@ -357,17 +357,18 @@ class PopulationEngineRestartTest {
     // ------------------------------------------------------------------ restoring state upstream does not persist
 
     @Test
-    void everyOnlineManagedBotIsRestoredOnceAfterTheSettlePeriodAndNotBefore() {
+    void everyOnlineManagedBotIsRestoredOncePromptlyEvenWhileTheSettlePeriodIsStillRunning() {
         Rig rig = new Rig();
         StructureSnapshot s = Rig.village(0, 0);
         StructureRecord r = populate(rig, s);
-        rig.cfg.processing.restoreSettleTicks = 100;
+        rig.cfg.processing.restoreSettleTicks = 1200;
         rig.restart(true);
 
-        rig.run(99);
-        assertTrue(rig.bots.restores.isEmpty(), "reconciling earlier would race upstream's own restore");
-        rig.run(BotRoster.SCAN_PERIOD_TICKS + 5);
-        assertEquals(3, rig.bots.restores.size());
+        // One roster pass (SCAN_PERIOD_TICKS) is enough: the patrol path and follower come back long before the
+        // 1200-tick settle window ends, so restored inhabitants walk and fight instead of idling for a minute.
+        rig.run(BotRoster.SCAN_PERIOD_TICKS + 2);
+        assertEquals(3, rig.bots.restores.size(), "restored during the settle period, not after it");
+        assertEquals(0, rig.bots.forgets.size());
         for (BotRecord b : r.bots) {
             FakeBots.Applied call = rig.bots.restores.stream().filter(a -> a.name().equals(b.name)).findFirst().orElseThrow();
             assertEquals(b.profile, call.profile(), "restored from the STORED profile");
@@ -375,6 +376,30 @@ class PopulationEngineRestartTest {
         rig.run(2000);
         assertEquals(3, rig.bots.restores.size(), "once per bot per session");
         assertEquals(0, rig.bots.applied.size() - 3, "and never re-dressed from a new profile");
+    }
+
+    @Test
+    void theSettlePeriodStillProtectsEverythingButTheRestore() {
+        Rig rig = new Rig();
+        StructureSnapshot s = Rig.village(0, 0);
+        StructureRecord r = populate(rig, s);
+        String missing = r.bots.get(0).name;
+        rig.cfg.processing.restoreSettleTicks = 300;
+        rig.cfg.processing.goneConfirmTicks = 200;
+        int requestsBefore = rig.bots.requests.size();
+        rig.restart(true);
+        rig.bots.kill(missing); // upstream has not brought this one back (yet)
+
+        rig.run(299);
+        assertEquals(2, rig.bots.restores.size(), "the two that are back are restored right away");
+        assertTrue(rig.bots.restores.stream().noneMatch(a -> a.name().equals(missing)), "an offline bot is never restored");
+        assertTrue(rig.bots.forgets.isEmpty(), "and no conclusion about the missing one is drawn while settling");
+        assertEquals(requestsBefore, rig.bots.requests.size(), "nothing is spawned while settling");
+
+        rig.bots.bringOnline(missing); // upstream restores its bots one by one
+        rig.run(BotRoster.SCAN_PERIOD_TICKS + 5);
+        assertEquals(3, rig.bots.restores.size(), "the late bot is restored as soon as it is back, still inside the window or right after");
+        assertTrue(rig.bots.forgets.isEmpty());
     }
 
     @Test

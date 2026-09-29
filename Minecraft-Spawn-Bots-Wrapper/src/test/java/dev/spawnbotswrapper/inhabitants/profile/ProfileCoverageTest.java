@@ -435,19 +435,15 @@ class ProfileCoverageTest {
         }
         assertShare("infinity", infinity, bows, 0.45, 0.55);
 
+        // Every inhabitant fights: the pacifist half of the old 50/50 combatant deck is retired.
         long pathFollowers = 0;
-        long combatants = 0;
         for (BotProfile p : fullProfiles) {
             if (p.behavior().usesPath()) {
                 pathFollowers++;
-                if (p.behavior().combatant()) {
-                    combatants++;
-                }
-            } else {
-                assertTrue(p.behavior().combatant(), "STAND bots are always combatants");
             }
+            assertTrue(p.behavior().combatant(), "no inhabitant may be a pacifist");
         }
-        assertShare("combatant", combatants, pathFollowers, 0.45, 0.55);
+        assertTrue(pathFollowers > 0, "the sample must contain path followers for the check above to mean something");
     }
 
     @Test

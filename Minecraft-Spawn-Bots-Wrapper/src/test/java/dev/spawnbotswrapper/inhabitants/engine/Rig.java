@@ -77,6 +77,9 @@ final class Rig {
         p.saveIntervalTicks = 100;
         p.restoreSettleTicks = 0;
         p.goneConfirmTicks = 200;
+        // The TPS governor reacts on the first reading in tests (the sustain window and dwell have their own tests).
+        c.tpsThrottle.sustainTicks = 0;
+        c.tpsThrottle.minDwellTicks = 0;
         return c;
     }
 

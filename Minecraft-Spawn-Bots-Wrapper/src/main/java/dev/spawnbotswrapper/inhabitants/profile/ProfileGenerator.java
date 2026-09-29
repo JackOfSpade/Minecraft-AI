@@ -119,7 +119,10 @@ public final class ProfileGenerator implements ProfileFactory {
         if (BotProfile.Stance.STAND.equals(stance)) {
             return BotProfile.Behavior.standing();
         }
-        boolean combatant = r.flag("profile.behavior.combatant");
+        // Every inhabitant fights. The card is still drawn (and dropped) so every other draw of a deterministic
+        // world keeps its place in the random stream; only the pacifist half of the deck has been retired.
+        r.flag("profile.behavior.combatant");
+        boolean combatant = true;
         String walk = r.pick("profile.behavior.walkType", WALK_TYPES);
         if (BotProfile.Stance.GUARD_POST.equals(stance)) {
             return new BotProfile.Behavior(stance, combatant, walk, 0.0, 1, List.of());

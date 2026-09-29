@@ -92,7 +92,7 @@ class ProfileFormatterTest {
             assertTrue(all.contains("food level: " + p.vitals().foodLevel() + "/20"));
             assertTrue(all.contains("stance: " + p.behavior().stance()));
             assertTrue(all.contains("walk type: " + p.behavior().walkType()));
-            assertTrue(all.contains("combatant: " + (p.behavior().combatant() ? "yes" : "no")));
+            assertTrue(all.contains("combatant: yes"), "every inhabitant fights");
             assertTrue(all.contains("waypoints: " + p.behavior().waypointCount() + " planned"));
             for (var attribute : p.vitals().attributes().entrySet()) {
                 String name = switch (attribute.getKey()) {
@@ -219,7 +219,8 @@ class ProfileFormatterTest {
         String out = text(profile(List.of(), new BotProfile.Vitals(1, 20, Map.of()), b), allOn());
         assertTrue(out.contains("stance: PATROL_PINGPONG (walks its waypoints back and forth)"), out);
         assertTrue(out.contains("walk type: walk"), out);
-        assertTrue(out.contains("combatant: no (pacifist path follower)"), out);
+        assertTrue(out.contains("combatant: yes (every inhabitant fights)"), out);
+        assertFalse(out.contains("pacifist"), "even a profile that still carries the retired flag is shown as a fighter: " + out);
         assertTrue(out.contains("patrol radius: 12.5 blocks"), out);
         assertTrue(out.contains("waypoints: 3 planned, 2 placed"), out);
         assertTrue(out.contains("#1 (10.5, 64, -3.5)"), out);
@@ -333,11 +334,11 @@ class ProfileFormatterTest {
     }
 
     @Test
-    void pacifistPathFollowersAreExplained() {
+    void nobodyIsExplainedAsAPacifist() {
         BotProfile.Behavior pacifist = new BotProfile.Behavior(BotProfile.Stance.GUARD_POST, false,
                 BotProfile.WalkType.WALK, 0, 1, List.of());
-        assertTrue(anyNoteContains(notes(profile(List.of(), new BotProfile.Vitals(1, 20, Map.of()), pacifist), allOn()),
-                "pacifist path follower"));
+        assertFalse(anyNoteContains(notes(profile(List.of(), new BotProfile.Vitals(1, 20, Map.of()), pacifist), allOn()),
+                "pacifist"), "the retired flag no longer produces a pacifist note");
         BotProfile.Behavior fighter = new BotProfile.Behavior(BotProfile.Stance.GUARD_POST, true,
                 BotProfile.WalkType.WALK, 0, 1, List.of());
         assertFalse(anyNoteContains(notes(profile(List.of(), new BotProfile.Vitals(1, 20, Map.of()), fighter), allOn()),

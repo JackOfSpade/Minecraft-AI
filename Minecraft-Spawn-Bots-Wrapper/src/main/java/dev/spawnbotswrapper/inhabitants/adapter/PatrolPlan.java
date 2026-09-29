@@ -12,7 +12,7 @@ import java.util.List;
  * @param pathName upstream path name, see {@link UpstreamPathPlanner#pathName}
  * @param points   waypoints in walking order; never empty
  * @param loop     upstream "loop" flag: TRUE means walk back and forth (ping-pong), FALSE means restart (ring)
- * @param attack   upstream "attack" flag: FALSE makes the follower a pacifist
+ * @param attack   upstream "attack" flag: FALSE makes the follower a pacifist; this addon always builds TRUE
  * @param walkType one of bhop, sprint, walk
  * @param notes    what the planner adjusted (diagnostics only)
  */

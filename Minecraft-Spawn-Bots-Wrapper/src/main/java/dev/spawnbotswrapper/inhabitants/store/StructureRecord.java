@@ -11,8 +11,15 @@ import java.util.List;
  * abandoned structure is still represented by a {@code StructureRecord} with status ABANDONED.
  */
 public final class StructureRecord {
-    /** Bump when the meaning of stored fields changes incompatibly. */
-    public static final int CURRENT_DATA_VERSION = 2;
+    /**
+     * Bump when the meaning of stored fields changes incompatibly. History:
+     * <ul>
+     *   <li>2: {@code rollDetailsKept} exists (older records are backfilled on load);</li>
+     *   <li>3: every inhabitant is a fighter. {@code profile.behavior.combatant} is legacy and ignored; records
+     *       below 3 have their pacifist profiles rewritten to fighters on load (see {@code PopulationFile}).</li>
+     * </ul>
+     */
+    public static final int CURRENT_DATA_VERSION = 3;
 
     public int dataVersion = CURRENT_DATA_VERSION;
     public StructureStatus status = StructureStatus.OCCUPIED_PENDING;

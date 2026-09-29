@@ -172,11 +172,98 @@ PvP BOT keeps every combat setting in **one process-wide singleton**; this addon
 never silently changes the behaviour of bots that already exist. Per-bot variety therefore comes only from
 what a bot **carries** (PvP BOT chooses its weapon mode, shield/totem/potion/food/mending behaviour from
 its inventory), from the few vanilla **attributes** PvP BOT actually reads, and from PvP BOT's own **patrol
-path** system (stance, walk type, and a pacifist flag).
+path** system (stance and walk type; every path has its attack flag on, see "Every inhabitant fights" below).
 
 The full table — every one of PvP BOT's 68 settings, whether it can vary per bot, and exactly how — is in
 [docs/SETTINGS.md](docs/SETTINGS.md). The architecture and the reasoning behind it are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Every inhabitant fights
+
+PvP BOT only runs its combat AI for a path-following bot when the path's `attack` flag is on. Earlier
+versions rolled that flag from a balanced 50/50 "combatant" deck, so roughly half of all guards and
+patrols were **pacifists**: they never targeted, attacked or retaliated. That half of the deck is retired:
+
+* the generator always rolls a fighter (the archetype label "Pacifist" no longer exists);
+* every path is built with `attack=true`, whatever an old persisted profile says — the legacy
+  `behavior.combatant` flag is kept in the file only for shape and is ignored;
+* **migration**: `populations.json` is now `dataVersion` 3. On load, every profile of an older file that was a
+  pacifist is rewritten in place to a fighter (loadout, vitals, stance and waypoints untouched; archetype
+  "Pacifist" becomes "Fighter"), one summary line is logged (`data migration to version 3: N inhabitant
+  profile(s) ...`) and the file is rewritten at the next save. A v3 file is refused by older builds;
+* stale upstream paths (PvP BOT stores paths in its own file, with `attack=false` for old pacifists) are
+  replaced: restoring a bot deletes and rebuilds its `inh_` path with `attack=true` before it starts following.
+
+## Managed PvP BOT setting: critical-hit fall phase
+
+PvP BOT's melee routine only swings after a jump-crit with `crit-fall-ticks` ticks of descent (its default is
+6), so bots looked passive at close range. The addon manages this one setting itself: at every server start it
+runs PvP BOT's own command `pvpbot settings crit-fall-ticks <criticalFallTicks>` (config key
+`criticalFallTicks`, default **3**, `0` = leave PvP BOT alone), through the same console mechanism as
+`startupCommands`. Criticals stay enabled. The addon never edits PvP BOT's settings files. An explicit
+`pvpbot settings crit-fall-ticks N` in your own `startupCommands` wins over the managed value.
+
+## Lag governor (`tpsThrottle`)
+
+The governor sheds inhabitants (farthest from the nearest real player first, permanently, like a death) and
+blocks new spawns only while the server is **genuinely** degraded. The measured metric is the rolling average
+wall-clock ms between ticks, which never reads below ~50 and sits at 53-59 ms on a busy modded server; the old
+fixed 55.6 ms threshold therefore fired during ordinary load. The trigger is now a small state machine
+(`engine.TickHealth`):
+
+* **enter level** = `max(degradedFloorMillis, baseline x degradedFactor)` (defaults 65 ms, x1.25). The
+  baseline is the server's own typical tick time: a slow moving average (`baselineWindowTicks`, default 6000)
+  updated only while not degraded and only from readings below the enter level, capped at `baselineMaxMillis`
+  (60), so the enter level lies between 65 and 75 ms;
+* degraded only after the reading stays above the enter level, uninterrupted, for `sustainTicks` (600);
+* **exit level** = `max(recoveredFloorMillis, baseline x recoveredFactor)` (58 ms, x1.10), always at least 2 ms
+  below the enter level and above the 50 ms floor, so recovery is reachable; it must hold for `sustainTicks`
+  and at least `minDwellTicks` (1200) must have been spent degraded;
+* while degraded, each check above the enter level sheds `despawnBatchSize` x (consecutive rounds); between the
+  exit and enter levels nothing more is shed but spawns stay blocked;
+* every transition and every shed round is logged at INFO with the numbers (`TPS governor: server DEGRADED ...`,
+  `... RECOVERED ...`, `... shed N of M inhabitant(s) [names] ...`).
+
+Config keys (all under `tpsThrottle`): new `degradedFloorMillis`, `degradedFactor`, `recoveredFloorMillis`,
+`recoveredFactor`, `baselineMaxMillis`, `baselineWindowTicks`, `sustainTicks`, `minDwellTicks`; unchanged
+`enabled`, `checkIntervalTicks`, `despawnBatchSize`; **removed** `healthyMillis` / `degradedMillis` (still
+accepted in a file, ignored, with a config warning at startup — delete them).
+
+## Combat log
+
+Nothing used to log what bots did in a fight. The addon now writes structured, rate-limited lines for every
+fight that involves an inhabitant (recognised by the addon's own roster, never by PvP BOT classes), through
+Fabric's `AFTER_DAMAGE` / `AFTER_DEATH` events:
+
+```
+Combat: DuskRaven (inhabitant) hit Steve (player) 7 times for 31.5 damage (largest 6.0) with iron_sword [player], last at 2.1 blocks; Steve health now 6.0 (over 3.4 s)
+Combat: zombie (mob) hit DuskRaven (inhabitant) 2 times for 6.0 damage with none [mob], last at 1.3 blocks; DuskRaven health now 14.0
+Combat: DuskRaven (inhabitant) was killed by Steve (player) (player, diamond_sword, 1.8 blocks away)
+Combat: DuskRaven (inhabitant) killed zombie (mob) (player, iron_sword, 1.2 blocks away)
+Combat: DuskRaven (inhabitant) died (fall)
+```
+
+* hits between the same attacker and victim are **coalesced** into one INFO summary line per `combatLog.coalesceTicks`
+  (default 100 = 5 s): count, total and largest damage, damage source type, weapon, last distance, health after;
+* at most `combatLog.maxLinesPerMinute` (30) summary lines per minute; the excess is counted and reported once
+  (`N more combat line(s) were suppressed ...`);
+* kills and deaths (with the killer) are always logged;
+* **`debug: true`** additionally writes every single hit immediately with full detail
+  (`Combat hit: A (kind) -> B (kind): dmg (base before armor) [blocked] via <source> with <weapon> at <dist>; health now h`),
+  including damage with no attacker (fall, fire, ...);
+* `combatLog.enabled: false` switches it off. Target acquisition ("bot X targets Y") is deliberately not logged:
+  PvP BOT keeps its current target in internal state the adapter does not read, so the first hit line of a fight
+  is the observable record of who engaged whom.
+
+## Restart: restored bots patrol and fight at once
+
+After a restart PvP BOT brings its bots back one by one with no completion signal, so the addon waits
+`processing.restoreSettleTicks` (default 1200) before concluding anything (starting "gone" clocks, releasing leftovers,
+spawning, dormancy, the lag governor). That wait used to also delay re-attaching each bot's path and follower —
+PvP BOT persists paths but not who follows them — leaving restored inhabitants idle for over a minute. Now, during
+the settle window, every bot that is already online *and* listed by PvP BOT gets its path rebuilt and its follower
+re-attached (and, if `profiles.reapplyOnRestore`, its profile re-applied) within one roster pass (~1 s); a bot
+PvP BOT has not restored yet is simply retried, never treated as gone, so the reconcile/orphan logic is unchanged.
 
 ## Admin / testing commands
 

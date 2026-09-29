@@ -279,7 +279,6 @@ class SettingCatalogTest {
 
     private static final Map<String, Mechanism> PER_BOT_DECISIONS = Map.ofEntries(
             Map.entry("autoEquipArmor", Mechanism.LOADOUT),
-            Map.entry("combatEnabled", Mechanism.PATH),
             Map.entry("meleeRange", Mechanism.ATTRIBUTE),
             Map.entry("attackCooldown", Mechanism.ATTRIBUTE),
             Map.entry("rangedEnabled", Mechanism.LOADOUT),
@@ -310,8 +309,6 @@ class SettingCatalogTest {
 
     @Test
     void perBotLeversPointAtTheProfileFieldsThatExpressThem() {
-        assertTrue(spec("combatEnabled").profileFacet().contains("behavior.combatant"));
-        assertTrue(spec("combatEnabled").note().contains("path"), "combat is only switchable through a path");
         assertTrue(spec("bhopEnabled").profileFacet().contains("behavior.walkType"));
         assertTrue(spec("idleWanderEnabled").profileFacet().contains("behavior.stance"));
         assertTrue(spec("idleWanderRadius").profileFacet().contains("behavior.patrolRadius"));
@@ -330,7 +327,7 @@ class SettingCatalogTest {
     }
 
     private static final List<String> MUST_STAY_GLOBAL = List.of(
-            "autoEquipWeapon", "dropWorseArmor", "dropWorseWeapons",
+            "autoEquipWeapon", "dropWorseArmor", "dropWorseWeapons", "combatEnabled",
             "revengeEnabled", "autoTargetEnabled", "targetPlayers", "targetHostileMobs", "targetOtherBots",
             "maxTargetDistance", "rangedMinRange", "rangedOptimalRange", "rangedMaxRange", "maceRange",
             "moveSpeed", "criticalsEnabled", "criticalFallTicks", "bowMinDrawTime", "spearRange", "spearChargeRange",
@@ -374,7 +371,7 @@ class SettingCatalogTest {
     @Test
     void settingsWhoseBehaviourNeedsAGlobalSwitchNameThatSwitch() {
         assertTrue(spec("spearEnabled").note().contains("dormant at the default"));
-        assertTrue(spec("combatEnabled").note().contains("never on"));
+        assertTrue(spec("combatEnabled").note().contains("attack=true"), "every path is built as a fighter's path");
         assertTrue(spec("shieldMace").note().contains("OPPONENT"), "the trigger is the opponent, not the bot");
     }
 
@@ -423,8 +420,8 @@ class SettingCatalogTest {
         }
 
         assertEquals(68, total);
-        assertEquals(22, parts.get(Category.PER_BOT_RANDOMIZABLE).size());
-        assertEquals(37, parts.get(Category.GLOBAL_ONLY).size());
+        assertEquals(21, parts.get(Category.PER_BOT_RANDOMIZABLE).size());
+        assertEquals(38, parts.get(Category.GLOBAL_ONLY).size());
         assertEquals(9, parts.get(Category.ADMIN_OPERATIONAL).size());
         assertEquals(0, parts.get(Category.UNSUPPORTED).size());
     }

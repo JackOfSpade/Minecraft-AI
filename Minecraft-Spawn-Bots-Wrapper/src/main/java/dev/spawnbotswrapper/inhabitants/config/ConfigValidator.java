@@ -94,6 +94,13 @@ public final class ConfigValidator {
             w.add("'connection' section missing; using built-in defaults");
         }
 
+        c.criticalFallTicks = clamp(w, "criticalFallTicks", c.criticalFallTicks, 0, 10);
+        if (c.startupCommands == null) {
+            c.startupCommands = new ArrayList<>();
+        }
+        validateTpsThrottle(c, w);
+        validateCombatLog(c, w);
+
         if (c.spawning == null) {
             c.spawning = new InhabitantsConfig.Spawning();
         }
@@ -110,7 +117,46 @@ public final class ConfigValidator {
         return w;
     }
 
-    /** A '#tag' under 'structures' belongs in 'tags'; a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */
+    private static void validateTpsThrottle(InhabitantsConfig c, List<String> w) {
+        if (c.tpsThrottle == null) {
+            c.tpsThrottle = new InhabitantsConfig.TpsThrottle();
+        }
+        InhabitantsConfig.TpsThrottle t = c.tpsThrottle;
+        if (t.healthyMillis != null || t.degradedMillis != null) {
+            w.add("tpsThrottle.healthyMillis / tpsThrottle.degradedMillis are no longer used (the fixed 52.6 / 55.6 ms "
+                    + "levels were below this kind of server's normal tick time and shed bots while it was merely busy); "
+                    + "the governor now uses degradedFloorMillis/degradedFactor and recoveredFloorMillis/recoveredFactor "
+                    + "around the server's own measured baseline. Remove the old keys.");
+            t.healthyMillis = null;
+            t.degradedMillis = null;
+        }
+        t.degradedFloorMillis = clamp(w, "tpsThrottle.degradedFloorMillis", t.degradedFloorMillis, 50.0, 1000.0);
+        t.degradedFactor = clamp(w, "tpsThrottle.degradedFactor", t.degradedFactor, 1.0, 10.0);
+        t.recoveredFloorMillis = clamp(w, "tpsThrottle.recoveredFloorMillis", t.recoveredFloorMillis, 50.0, 1000.0);
+        t.recoveredFactor = clamp(w, "tpsThrottle.recoveredFactor", t.recoveredFactor, 1.0, 10.0);
+        t.baselineMaxMillis = clamp(w, "tpsThrottle.baselineMaxMillis", t.baselineMaxMillis, 50.0, 1000.0);
+        t.baselineWindowTicks = clamp(w, "tpsThrottle.baselineWindowTicks", t.baselineWindowTicks, 100, 1728000);
+        t.sustainTicks = clamp(w, "tpsThrottle.sustainTicks", t.sustainTicks, 0, 72000);
+        t.minDwellTicks = clamp(w, "tpsThrottle.minDwellTicks", t.minDwellTicks, 0, 1728000);
+        t.checkIntervalTicks = clamp(w, "tpsThrottle.checkIntervalTicks", t.checkIntervalTicks, 1, 72000);
+        t.despawnBatchSize = clamp(w, "tpsThrottle.despawnBatchSize", t.despawnBatchSize, 1, 1000);
+        if (t.recoveredFloorMillis >= t.degradedFloorMillis) {
+            double fixed = Math.max(50.0, t.degradedFloorMillis - 2.0);
+            w.add("tpsThrottle.recoveredFloorMillis (" + t.recoveredFloorMillis + ") must be below degradedFloorMillis ("
+                    + t.degradedFloorMillis + ") so the state has hysteresis; using " + fixed);
+            t.recoveredFloorMillis = fixed;
+        }
+    }
+
+    private static void validateCombatLog(InhabitantsConfig c, List<String> w) {
+        if (c.combatLog == null) {
+            c.combatLog = new InhabitantsConfig.CombatLog();
+        }
+        c.combatLog.coalesceTicks = clamp(w, "combatLog.coalesceTicks", c.combatLog.coalesceTicks, 1, 72000);
+        c.combatLog.maxLinesPerMinute = clamp(w, "combatLog.maxLinesPerMinute", c.combatLog.maxLinesPerMinute, 1, 100000);
+    }
+
+    /** A '#tag' under 'structures' belongs in 'tags';a bare id under 'tags' gets its '#'. Fix rather than silently ignore. */
     private static void moveMisplacedKeys(InhabitantsConfig c, List<String> w) {
         Map<String, InhabitantsConfig.RuleOverride> fixedStructures = new LinkedHashMap<>();
         Map<String, InhabitantsConfig.RuleOverride> fixedTags = new LinkedHashMap<>();

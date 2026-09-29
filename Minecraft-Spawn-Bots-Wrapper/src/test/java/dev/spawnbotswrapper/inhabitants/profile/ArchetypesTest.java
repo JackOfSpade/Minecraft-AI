@@ -28,14 +28,16 @@ class ArchetypesTest {
     }
 
     @Test
-    void aPacifistIgnoresTheWholeLoadout() {
+    void thereIsNoPacifistLabelAndALegacyNonCombatantFlagChangesNothing() {
         Facts armed = facts(Facts.MeleeKind.MACE, Facts.RangedKind.BOW, 100, true, 3, Facts.ExplosiveKit.CRYSTAL,
                 true, 20, 100);
-        assertEquals(Archetypes.PACIFIST, Archetypes.label(armed, PEACEFUL));
+        assertEquals(Archetypes.DEMOLITIONIST, Archetypes.label(armed, PEACEFUL),
+                "the label follows the loadout even for a profile that still carries the retired flag");
+        assertFalse(Archetypes.ALL.contains("Pacifist"));
     }
 
     @Test
-    void aStandingBotIsNeverAPacifistEvenIfTheFlagWereOff() {
+    void aStandingBotWithTheLegacyFlagOffIsLabelledByItsLoadout() {
         BotProfile.Behavior standingNonCombatant = new BotProfile.Behavior(BotProfile.Stance.STAND, false,
                 BotProfile.WalkType.BHOP, 0, 0, List.of());
         assertEquals(Archetypes.DUELIST, Archetypes.label(melee(Facts.MeleeKind.SWORD), standingNonCombatant));
@@ -104,7 +106,7 @@ class ArchetypesTest {
     @Test
     void everyLabelIsListedAndDistinct() {
         assertEquals(Archetypes.ALL.size(), Archetypes.ALL.stream().distinct().count());
-        for (String label : List.of(Archetypes.PACIFIST, Archetypes.DEMOLITIONIST, Archetypes.SKYFARER, Archetypes.SMASHER,
+        for (String label : List.of(Archetypes.DEMOLITIONIST, Archetypes.SKYFARER, Archetypes.SMASHER,
                 Archetypes.LANCER, Archetypes.HARPOONER, Archetypes.ARCHER, Archetypes.SKIRMISHER, Archetypes.TANK,
                 Archetypes.BERSERKER, Archetypes.GUARD, Archetypes.SCOUT, Archetypes.DUELIST, Archetypes.BRAWLER,
                 Archetypes.UNEQUIPPED)) {

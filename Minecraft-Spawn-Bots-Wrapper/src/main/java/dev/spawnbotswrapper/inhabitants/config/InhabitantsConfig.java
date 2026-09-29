@@ -69,6 +69,8 @@ public final class InhabitantsConfig {
     public Spawning spawning = new Spawning();
     /** Despawns inhabitants when the server is struggling, farthest from the nearest real player first. */
     public TpsThrottle tpsThrottle = new TpsThrottle();
+    /** Rate-limited log lines about fights involving inhabitants (hits, kills, deaths); see {@link CombatLog}. */
+    public CombatLog combatLog = new CombatLog();
     /** Despawns inhabitants that have drifted far from every real player, and restores them later unchanged. */
     public Dormancy dormancy = new Dormancy();
     /** Holds newly-connecting players on their loading screen for a grace period after server start; see {@link Connection}. */
@@ -81,8 +83,22 @@ public final class InhabitantsConfig {
      * instead of retyped by hand after every new world. Each command is independent: one failing (unknown
      * command, bad argument) is logged and does not stop the rest from running. Example:
      * {@code ["pvpbot settings auto-target true", "pvpbot settings view-distance 16"]}.
+     * <p>
+     * Besides this list the addon manages one PvP BOT setting on its own, see {@link #criticalFallTicks}.
      */
     public List<String> startupCommands = new ArrayList<>();
+
+    /**
+     * The one PvP BOT setting this addon manages itself: {@code crit-fall-ticks}, applied through the same console
+     * mechanism as {@link #startupCommands} ({@code pvpbot settings crit-fall-ticks N}, run first at every server
+     * start; the addon never edits PvP BOT's settings files). PvP BOT's melee routine only swings after a
+     * jump-crit with this many ticks of descent; its own default is 6, which made bots look passive at close
+     * range, so the managed value is 3 (criticals themselves stay enabled). 0 = do not manage it. An explicit
+     * {@code crit-fall-ticks} command in {@link #startupCommands} wins over this value. Range 0..10.
+     */
+    public int criticalFallTicks = DEFAULT_CRITICAL_FALL_TICKS;
+
+    public static final int DEFAULT_CRITICAL_FALL_TICKS = 3;
 
     /**
      * Rolled once per structure: occupied or abandoned, and the minimum bot count if occupied. There is
@@ -200,7 +216,11 @@ public final class InhabitantsConfig {
         public int saveIntervalTicks = 600;
         /**
          * After a server start PvP BOT restores its bots one by one with no completion signal; the addon waits
-         * this many ticks before it reconciles (re-applies profiles / concludes anything about missing bots).
+         * this many ticks before it concludes anything about missing bots (offline clocks, releasing leftovers,
+         * spawning, dormancy, the TPS governor). It does NOT delay the important part: from the first tick a bot
+         * that PvP BOT has already brought back (online and listed) gets its patrol path and follower re-attached
+         * (with attack=true) and, if enabled, its profile re-applied, so restored inhabitants walk and fight
+         * promptly instead of idling for this whole window.
          */
         public int restoreSettleTicks = 1200;
         /**
@@ -229,7 +249,13 @@ public final class InhabitantsConfig {
      * since those are both the least noticed if removed and the least likely to be who the slowdown is actually
      * about. The batch escalates the longer the server stays degraded (a lone bad check sheds one base batch, a
      * second consecutive one sheds two, and so on, resetting the moment it recovers), so a brief blip is handled
-     * gently while a sustained, genuine overload converges quickly instead of nibbling forever. A despawn here
+     * gently while a sustained, genuine overload converges quickly instead of nibbling forever.
+     * <p>
+     * "Degraded" is deliberately hard to reach: a small state machine ({@code engine.TickHealth}) compares the
+     * smoothed tick time with a level derived from the server's OWN measured baseline (so a pack that idles at
+     * 55 ms per tick is not treated as overloaded), requires the excess to be sustained, uses separate enter and
+     * exit levels (hysteresis) and a minimum dwell, and logs every transition with the numbers. Shedding happens
+     * only while genuinely degraded. A despawn here
      * is permanent, exactly like a death: nothing here ever brings a bot back on its own. Unblocking new spawns
      * once the server is healthy again cannot by itself respawn anything either -- only a newly discovered
      * structure, or {@link Dormancy} restoring one it put to sleep, ever creates a new bot. See {@link Dormancy}
@@ -239,14 +265,50 @@ public final class InhabitantsConfig {
     public static final class TpsThrottle {
         /** Master switch. */
         public boolean enabled = true;
-        /** Rolling average ms/tick at or below which the server is healthy: new spawns are unblocked (fully,
-         * immediately -- see the class doc on why that is safe) and the shed-escalation level resets to zero.
-         * ~52.6ms/tick is ~19 TPS -- one TPS of hysteresis above {@link #degradedMillis} so a server sitting
-         * right at the target does not flip between the two states every check. */
-        public double healthyMillis = 52.6;
-        /** Rolling average ms/tick above which the server is degraded: new spawns are hard-blocked and shedding
-         * begins. ~55.6ms/tick is 18 TPS: this starts the moment the server drops below that. */
-        public double degradedMillis = 55.6;
+        /**
+         * LEGACY, ignored (a warning is logged when the key is present). The old fixed pair (52.6 / 55.6 ms) was
+         * tighter than this kind of server's NORMAL tick time -- a modded server idles at 53-59 ms per tick and
+         * the measured metric can never go below ~50 -- so it shed inhabitants while the server was merely busy.
+         * Replaced by {@link #degradedFloorMillis} / {@link #degradedFactor} and {@link #recoveredFloorMillis} /
+         * {@link #recoveredFactor}, which sit above the server's own measured baseline.
+         */
+        public Double healthyMillis;
+        /** LEGACY, ignored; see {@link #healthyMillis}. */
+        public Double degradedMillis;
+
+        /**
+         * Enter level, fixed part. The server counts as degraded only while the smoothed tick time stays above
+         * {@code max(degradedFloorMillis, baseline x degradedFactor)} for {@link #sustainTicks}. The floor sits
+         * well above a normal busy tick (53-59 ms) so ordinary load never triggers it.
+         */
+        public double degradedFloorMillis = 65.0;
+        /** Enter level, adaptive part: multiple of the server's own measured baseline tick time (see {@link #baselineWindowTicks}). */
+        public double degradedFactor = 1.25;
+        /**
+         * Exit (recovery) level, fixed part; hysteresis: must be lower than the enter level, and still
+         * reachable given that the measured tick time never drops below ~50 ms. Recovered means the smoothed tick
+         * time stays at or below {@code max(recoveredFloorMillis, baseline x recoveredFactor)} (never above
+         * enter level minus 2 ms) for {@link #sustainTicks} and at least {@link #minDwellTicks} were spent degraded.
+         */
+        public double recoveredFloorMillis = 58.0;
+        /** Exit level, adaptive part: multiple of the measured baseline. */
+        public double recoveredFactor = 1.10;
+        /**
+         * Cap for the measured baseline (ms/tick), so a server that happens to start (or spend its whole life)
+         * struggling cannot teach the governor that a genuinely awful tick time is "normal". With the defaults
+         * the enter level therefore never exceeds 60 x 1.25 = 75 ms.
+         */
+        public double baselineMaxMillis = 60.0;
+        /**
+         * Time constant (ticks) of the baseline: a slow moving average of the tick time, updated only while the
+         * server is NOT degraded and only from readings below the enter level, so load spikes never raise it.
+         * The very first readings are a plain running mean so it converges quickly after start-up.
+         */
+        public int baselineWindowTicks = 6000;
+        /** How long (ticks) the smoothed tick time must stay beyond a level, uninterrupted, before the state flips either way. */
+        public int sustainTicks = 600;
+        /** Minimum ticks spent in the degraded state before recovery is allowed (no flip-flopping). */
+        public int minDwellTicks = 1200;
         /** Ticks between checks, so one round's effect on the tick rate is fully measured before reacting again.
          * Matches {@code TpsGateway}'s own rolling sample window (100 ticks) on purpose: a shorter interval
          * would react to a reading still diluted by ticks from before the last shed. */
@@ -256,6 +318,22 @@ public final class InhabitantsConfig {
          * this base the moment the server is healthy again. No floor: can reduce the live population to 0 if
          * the problem persists (useful for narrowing down whether the inhabitants are even the cause). */
         public int despawnBatchSize = 3;
+    }
+
+    /**
+     * Structured, throttled logging of combat that involves an inhabitant, so "what did the bots do?" has an
+     * answer in the server log. Inhabitants are recognised by this addon's own roster (never by PvP BOT classes).
+     * Normal mode writes one INFO summary line per (attacker, victim) pair per {@link #coalesceTicks}, plus a line
+     * for every kill and death, all under a global line budget; {@code debug: true} additionally writes every
+     * single hit with full detail (damage, source type, weapon, distance, health after) and unattributed damage.
+     */
+    public static final class CombatLog {
+        /** Master switch. */
+        public boolean enabled = true;
+        /** Hits between the same attacker and victim are coalesced into one summary line per this many ticks. */
+        public int coalesceTicks = 100;
+        /** Hard cap on INFO combat lines per minute; lines beyond it are counted and reported once as "N suppressed". */
+        public int maxLinesPerMinute = 30;
     }
 
     /**

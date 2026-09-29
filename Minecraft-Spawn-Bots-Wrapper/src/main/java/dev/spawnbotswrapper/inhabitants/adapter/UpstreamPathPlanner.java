@@ -18,8 +18,11 @@ import java.util.Locale;
  *   <li>PATROL_PINGPONG: loop=true, two or more points</li>
  * </ul>
  * A cycle or ping-pong that only has ONE usable point is downgraded to a guard post instead of being
- * refused: refusing would leave the bot with no path at all, and a pacifist ({@code combatant=false})
- * would silently turn into a fighter.
+ * refused: refusing would leave the bot with no path at all.
+ * <p>
+ * Every path is built with {@code attack=true}: a path with attack=false makes PvP BOT skip its whole combat AI for
+ * the follower, so the bot would never target, attack or retaliate. All inhabitants are fighters, so the legacy
+ * {@link BotProfile.Behavior#combatant()} flag of an old persisted profile is deliberately ignored here.
  */
 final class UpstreamPathPlanner {
 
@@ -30,6 +33,8 @@ final class UpstreamPathPlanner {
     /** No stance needs more; upstream rewrites its whole paths file on every point added. */
     static final int MAX_WAYPOINTS = 64;
     static final String DEFAULT_WALK_TYPE = BotProfile.WalkType.BHOP;
+    /** The upstream "attack" flag of every path: true, because no inhabitant is a pacifist. */
+    static final boolean ATTACK = true;
 
     private UpstreamPathPlanner() {
     }
@@ -137,6 +142,6 @@ final class UpstreamPathPlanner {
                 return Outcome.rejected("unknown stance '" + behavior.stance() + "'");
             }
         }
-        return Outcome.accepted(new PatrolPlan(pathName, points, loop, behavior.combatant(), walkType, notes));
+        return Outcome.accepted(new PatrolPlan(pathName, points, loop, ATTACK, walkType, notes));
     }
 }

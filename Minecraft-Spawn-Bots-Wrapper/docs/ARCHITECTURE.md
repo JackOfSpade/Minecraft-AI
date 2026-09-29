@@ -143,7 +143,7 @@ are:
 |---|---|---|
 | **Loadout** | PvP BOT chooses weapon mode, shield, totem, potion, food and mending behaviour from what a bot carries | armor tiers/enchants/wear, sword vs axe vs mace vs bow vs crossbow, arrows, shield, totems, food, potions, XP bottles, cobwebs |
 | **Vanilla attributes PvP BOT really reads** | attribute modifiers with fixed addon-owned ids | entity interaction range (melee reach), attack speed |
-| **PvP BOT's own path system** | per-bot path with waypoints, walk type and an attack flag | guard post / patrol / ring, patrol radius, bhop/sprint/walk, pacifist (attack flag off) |
+| **PvP BOT's own path system** | per-bot path with waypoints, walk type and an attack flag | guard post / patrol / ring, patrol radius, bhop/sprint/walk (the attack flag is always ON: every inhabitant fights) |
 | **Initial vitals** | health and hunger at spawn | injured or hungry bots so eat/retreat logic is exercised |
 
 Max health and knockback resistance are still varied on the profile (they are legitimate vanilla flavour -
