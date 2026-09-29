@@ -28,7 +28,6 @@ import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
 import io.github.zoyluo.minecraftai.task.LightAreaTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
-import io.github.zoyluo.minecraftai.task.SleepTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
@@ -108,8 +107,6 @@ public final class MinecraftAiTaskSubcommand {
                                                         .executes(context -> assignCraft(context, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("eat")
                                         .executes(MinecraftAiTaskSubcommand::assignEat))
-                                .then(literal("sleep")
-                                        .executes(MinecraftAiTaskSubcommand::assignSleep))
                                 .then(literal("light_area")
                                         .executes(context -> assignLightArea(context, 8, 8))
                                         .then(argument("radius", IntegerArgumentType.integer(2))
@@ -275,10 +272,6 @@ public final class MinecraftAiTaskSubcommand {
 
     private static int assignEat(CommandContext<ServerCommandSource> context) {
         return assign(context, bot -> new EatTask());
-    }
-
-    private static int assignSleep(CommandContext<ServerCommandSource> context) {
-        return assign(context, bot -> new SleepTask());
     }
 
     private static int assignLightArea(CommandContext<ServerCommandSource> context, int radius, int maxTorches) {

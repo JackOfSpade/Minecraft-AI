@@ -196,7 +196,7 @@ Acceptance:
 - strict-mode code paths cannot invoke privileged capabilities;
 - operator-mode enhanced behavior is auditable and can be disabled.
 
-Completion result: The config, the `MINECRAFTAI_PROFILE` environment variable, the server-side snapshot, and the control panel all use the same effective policy. Resource/entity discovery first goes through `ObservableWorldQuery`; under strict, hidden scanning, emergency teleport, forced pickup, and manual teleport are disabled, death returns the bot to the world spawn point, sleep respects the server quorum, and remote placement and container/furnace mutation are constrained by reach/visibility. Operator's four toggles can each be disabled independently, and every allow/deny decision produces a throttled, structured decision log entry.
+Completion result: The config, the `MINECRAFTAI_PROFILE` environment variable, the server-side snapshot, and the control panel all use the same effective policy. Resource/entity discovery first goes through `ObservableWorldQuery`; under strict, hidden scanning, emergency teleport, forced pickup, and manual teleport are disabled, death returns the bot to the world spawn point, and remote placement and container/furnace mutation are constrained by reach/visibility. Operator's four toggles can each be disabled independently, and every allow/deny decision produces a throttled, structured decision log entry.
 
 ## P0-07: Fast Test Pyramid and CI
 

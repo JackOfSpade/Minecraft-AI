@@ -47,7 +47,7 @@ public final class BrainCoordinator {
             "craft", "eat", "smelt", "gather", "clear_grass", "break_blocks", "fish", "trade", "set_base",
             "deposit_all", "strip_mine", "mine_vein", "mine_ore", "mine_valuables_in_radius", "achieve_goal", "harvest_crop",
             "provision_food", "forage", "achieve_armor", "achieve_workstation", "build_house",
-            "stockpile", "deposit", "withdraw", "equip_armor", "attack", "sleep", "light_area",
+            "stockpile", "deposit", "withdraw", "equip_armor", "attack", "light_area",
             "follow", "hold", "guard", "farm", "harvest", "breed", "attack_entity", "post_job",
             "tell_bot", "remember", "forget", "mark_place", "goto_place", "resume_mining",
             "mine_and_stockpile", "recover_drops", "set_goal", "advance_goal", "assign_task",
@@ -60,7 +60,7 @@ public final class BrainCoordinator {
             "clear_grass", "break_blocks", "fish", "trade", "deposit_all", "strip_mine", "mine_vein",
             "mine_ore", "mine_valuables_in_radius", "achieve_goal", "harvest_crop", "provision_food", "forage",
             "achieve_armor", "achieve_workstation", "build_house", "stockpile", "deposit",
-            "withdraw", "attack", "sleep", "light_area", "follow", "hold", "guard", "farm",
+            "withdraw", "attack", "light_area", "follow", "hold", "guard", "farm",
             "harvest", "breed", "attack_entity", "goto_place", "resume_mining",
             "mine_and_stockpile", "recover_drops", "assign_task", "launch_boat", "board_boat",
             "boat_follow", "exit_boat", "give_item");

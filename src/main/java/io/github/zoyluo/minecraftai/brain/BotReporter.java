@@ -143,7 +143,6 @@ public final class BotReporter {
             case "smelt" -> "smelting " + objectAfter(description, "Smelting ");
             case "move" -> "moving to " + description.replace("Walking to ", "");
             case "eat" -> "eating";
-            case "sleep" -> "sleeping";
             case "combat" -> "fighting";
             case "evade" -> "avoiding danger";
             case "light_area" -> "lighting this area";

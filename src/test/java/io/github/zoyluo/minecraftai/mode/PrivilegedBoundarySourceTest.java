@@ -105,7 +105,6 @@ class PrivilegedBoundarySourceTest {
                 "task/RecoverDropsTask.java",
                 "task/ResupplyTask.java",
                 "task/SiteFinder.java",
-                "task/SleepTask.java",
                 "task/SmeltTask.java",
                 "task/StockpileTask.java",
                 "task/StripMineTask.java")) {
@@ -158,7 +157,7 @@ class PrivilegedBoundarySourceTest {
         assertTrue(container.contains("ObservableWorldQuery.canObserveBlock(bot, containerPos)"));
 
         assertTrue(matchingSources(Pattern.compile("setTimeOfDay\\s*\\(")).isEmpty(),
-                "sleep tasks must respect the server's vanilla sleep quorum");
+                "no bot task may rewrite the time of day: night skipping belongs to the vanilla sleep vote among human players");
     }
 
     @Test

@@ -53,7 +53,6 @@ import io.github.zoyluo.minecraftai.task.LightAreaTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MineValuablesTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
-import io.github.zoyluo.minecraftai.task.SleepTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
@@ -515,12 +514,6 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("sleep", "Find or place a bed, sleep through night, and wake up in the morning", objectSchema().build(), (bot, args) -> {
-            Task task = new SleepTask();
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
-
         register("light_area", "Place torches around the bot where block light is below the configured threshold", objectSchema()
                 .property("radius", integerSchema("scan radius"))
                 .property("max_torches", integerSchema("maximum torches to place"))
@@ -880,8 +873,8 @@ public final class ToolRegistry {
 
     /** assign_task and the task lifecycle tools it shares status/cancellation with. */
     private void registerTaskLifecycleTools() {
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, water travel, and container work. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly. Legacy strip_mine and mine_vein routes are operator-only and are rejected in strict_survival. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw; legacy operator-only: strip_mine, mine_vein"))
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, and container work. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; count always means NEW/additional inventory items, never the total already carried. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly. Legacy strip_mine and mine_vein routes are operator-only and are rejected in strict_survival. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_valuables, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw; legacy operator-only: strip_mine, mine_vein"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -974,7 +967,6 @@ public final class ToolRegistry {
             case "fish" -> new FishTask(optionalInt(params, "max_catches", 1), optionalInt(params, "max_ticks", 6000));
             case "trade" -> new TradeTask(optionalItem(params, "target_item"), optionalInt(params, "max_distance", 16));
             case "stockpile" -> new StockpileTask(optionalBoolean(params, "all_except_tools", true));
-            case "sleep" -> new SleepTask();
             case "light_area" -> new LightAreaTask(optionalInt(params, "radius", 8), optionalInt(params, "max_torches", 8));
             case "follow" -> new FollowTask(optionalString(params, "player_name", ""));
             case "launch_boat" -> new BoatLaunchTask(optionalBoolean(params, "board", false));

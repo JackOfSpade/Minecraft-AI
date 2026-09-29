@@ -52,7 +52,6 @@ public final class BotCommandBridge {
             case "craft" -> "minecraftai task assign " + botName + " craft " + arg1 + " " + count;
             case "smelt" -> "minecraftai task assign " + botName + " smelt " + arg1 + " " + arg2 + " " + count;
             case "eat" -> "minecraftai task assign " + botName + " eat";
-            case "sleep" -> "minecraftai task assign " + botName + " sleep";
             case "abort" -> "minecraftai task abort " + botName;
             case "pause" -> "minecraftai task pause " + botName;
             case "resume" -> "minecraftai task resume " + botName;

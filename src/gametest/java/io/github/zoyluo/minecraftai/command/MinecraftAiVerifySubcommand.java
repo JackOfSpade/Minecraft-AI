@@ -49,7 +49,6 @@ import io.github.zoyluo.minecraftai.task.IrrigateTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.RaidCropsTask;
-import io.github.zoyluo.minecraftai.task.SleepTask;
 import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
@@ -110,7 +109,6 @@ public final class MinecraftAiVerifySubcommand {
             "persist",
             "container",
             "combat",
-            "sleep",
             "farm",
             "strip_mine",
             "build",
@@ -530,7 +528,6 @@ public final class MinecraftAiVerifySubcommand {
             case "job" -> verifyJob();
             case "container" -> assignContainer(bot);
             case "combat" -> assignCombat(bot);
-            case "sleep" -> assignSleep(bot);
             case "farm" -> assignFarm(bot);
             case "strip_mine" -> assignStripMine(bot);
             case STRICT_STRIP_MINE_REJECTION_FEATURE -> assignStripMineStrictRejection(bot);
@@ -750,14 +747,6 @@ public final class MinecraftAiVerifySubcommand {
         return assignTask(bot, "combat", new CombatTask(EntityType.ZOMBIE, 1, MinecraftAiConfig.get().combat().retreatHp()),
                 600,
                 ignored -> !zombie.isAlive());
-    }
-
-    private static Result assignSleep(AIPlayerEntity bot) {
-        prepareArea(bot);
-        clearInventory(bot);
-        InventoryAction.giveItem(bot, new ItemStack(Items.RED_BED, 1));
-        bot.getEntityWorld().setTimeOfDay(13000L);
-        return assignTask(bot, "sleep", new SleepTask(), 260, ignored -> bot.getEntityWorld().isDay());
     }
 
     private static Result assignFarm(AIPlayerEntity bot) {
@@ -3625,7 +3614,7 @@ public final class MinecraftAiVerifySubcommand {
 
     private static void prepareArea(AIPlayerEntity bot) {
         ServerWorld world = bot.getEntityWorld();
-        world.setTimeOfDay(1000L); // set to daytime: later in a suite it turns to night, and the nighttime sleep reflex would preempt the scenario task (observed farm_irrigate sporadically aborted)
+        world.setTimeOfDay(1000L); // set to daytime: later in a suite it turns to night, and the night lighting reflex would preempt the scenario task (observed farm_irrigate sporadically aborted)
         // When multiple scenarios run in sequence within a suite, the bot's position carries over from the previous scenario (wandered off hunting, etc.) → a scenario that assumes a "clean spawn point" would be thrown off
         // (observed in food_suite: during farm_wheat the bot had drifted to 9,-2, the pre-placed ripe wheat wasn't surveyed, and was treated as empty ground to plant on → FAIL).
         // Resetting to a fixed origin at the start guarantees determinism; y is taken from the world origin's natural surface — it used to be hardcoded to y=6 (the old test world's spawn point),

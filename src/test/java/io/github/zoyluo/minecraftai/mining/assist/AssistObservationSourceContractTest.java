@@ -458,16 +458,6 @@ class AssistObservationSourceContractTest {
     }
 
     @Test
-    void sleepTaskReportsBothBedCellsAfterPlacingThem() throws IOException {
-        String source = read(MAIN.resolve("task/SleepTask.java"));
-        int foot = source.indexOf("world.setBlockState(placement.foot(), foot, Block.NOTIFY_ALL);");
-        int head = source.indexOf("world.setBlockState(placement.head(), head, Block.NOTIFY_ALL);");
-        int noteFoot = source.indexOf("BotEdits.notePlaced(world, placement.foot());");
-        int noteHead = source.indexOf("BotEdits.notePlaced(world, placement.head());");
-        assertTrue(foot > 0 && head > foot && noteFoot > head && noteHead > noteFoot);
-    }
-
-    @Test
     void hooksStartWithTheStaticModeCheckAndCannotThrow() throws IOException {
         String hooks = read(ASSIST.resolve("MiningAssistHooks.java"));
         int method = hooks.indexOf("public static void onBotBreak(");

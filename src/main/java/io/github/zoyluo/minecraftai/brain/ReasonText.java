@@ -80,7 +80,6 @@ public final class ReasonText {
             case "smelt" -> "smelting";
             case "move" -> "moving";
             case "eat" -> "eating";
-            case "sleep" -> "sleeping";
             case "combat" -> "fighting";
             case "evade" -> "avoiding danger";
             case "light_area" -> "lighting the area";

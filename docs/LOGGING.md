@@ -40,7 +40,7 @@ gap; that would defeat the purpose of "log only what's needed".
 `task_failed` (including `failureReason()`) — so even a task that doesn't write a single log line
 of its own still has start/end records. Following the self-improvement principle above, we went
 through the task classes that had zero logging or noticeably thin logging at the time
-(`FarmTask`, `FollowTask`, `SleepTask`, `GuardTask`, `StripMineTask`, `CraftTask`, and about 29
+(`FarmTask`, `FollowTask`, `GuardTask`, `StripMineTask`, `CraftTask`, and about 29
 others in total), using the standard "if this request actually failed, can you tell which step and
 why from the logs alone, without reading the source?" Conclusions were handled case by case: where
 a single generic failure-reason string was being reused across multiple distinct causes, the

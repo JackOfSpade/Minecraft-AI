@@ -25,7 +25,6 @@ import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
-import io.github.zoyluo.minecraftai.task.SleepTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
@@ -315,7 +314,6 @@ public final class MinecraftAiServerNetworking {
             case "craft" -> assign(bot, new CraftTask(requiredItem(payload.arg1()), count(payload)));
             case "smelt" -> assign(bot, new SmeltTask(requiredItem(payload.arg1()), requiredItem(payload.arg2()), count(payload)));
             case "eat" -> assign(bot, new EatTask());
-            case "sleep" -> assign(bot, new SleepTask());
             case "abort" -> {
                 IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.PLAYER_PANEL, "panel_abort");
             }
