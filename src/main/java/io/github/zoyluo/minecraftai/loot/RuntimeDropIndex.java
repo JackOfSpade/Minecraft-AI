@@ -37,7 +37,7 @@ import java.util.Set;
  * probabilistic sources kept only as a lower-priority fallback (e.g. gathering flint by breaking
  * gravel when nothing else drops it reliably).
  *
- * <p>Built lazily/once per server start (see RuntimeLifecycleCoordinator), thread-safe, cleared on
+ * <p>Armed at server start (see RuntimeLifecycleCoordinator) and built lazily once on first server-thread use, thread-safe, cleared on
  * server stop -- same shape as RuntimeRecipeIndex. A caller that reads it before the first
  * {@link #rebuild} (unit tests / very early startup) gets {@link Optional#empty()} and should fall
  * back to its own minimal default.
@@ -54,8 +54,30 @@ public final class RuntimeDropIndex {
     private static final Map<Item, Set<Block>> DETERMINISTIC = new HashMap<>();
     private static final Map<Item, Set<Block>> PROBABILISTIC = new HashMap<>();
     private static volatile boolean ready;
+    private static volatile MinecraftServer armedServer;
 
     private RuntimeDropIndex() {
+    }
+
+    /**
+     * Registers the server without building: the build costs 200-350 ms (build_ms in
+     * runtime_drop_index_built), too long for the server-start critical path, so it happens lazily
+     * on the first query made from the server thread (all gather tasks are created there). A query
+     * from any other thread before that simply sees "not built" and uses the caller's fallback.
+     */
+    public static void arm(MinecraftServer server) {
+        armedServer = server;
+        ready = false;
+    }
+
+    private static void ensureBuilt() {
+        if (ready) {
+            return;
+        }
+        MinecraftServer server = armedServer;
+        if (server != null && server.isOnThread()) {
+            rebuild(server);
+        }
     }
 
     public static void rebuild(MinecraftServer server) {
@@ -100,6 +122,7 @@ public final class RuntimeDropIndex {
             PROBABILISTIC.clear();
         }
         ready = false;
+        armedServer = null;
     }
 
     /**
@@ -109,6 +132,7 @@ public final class RuntimeDropIndex {
      * should use their own fallback rather than treating that as "no sources".
      */
     public static Optional<Set<Block>> deterministicSourcesFor(Item item) {
+        ensureBuilt();
         if (!ready) {
             return Optional.empty();
         }
@@ -119,6 +143,7 @@ public final class RuntimeDropIndex {
 
     /** Lower-priority fallback sources that only sometimes drop {@code item} (e.g. gravel -> flint). */
     public static Optional<Set<Block>> probabilisticSourcesFor(Item item) {
+        ensureBuilt();
         if (!ready) {
             return Optional.empty();
         }

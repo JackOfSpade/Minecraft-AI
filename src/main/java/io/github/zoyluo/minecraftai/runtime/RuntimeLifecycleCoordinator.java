@@ -57,7 +57,7 @@ public final class RuntimeLifecycleCoordinator {
         PoiAdvisor.INSTANCE.configure(config);
         BotPersistence.INSTANCE.resumeWrites();
         RuntimeRecipeIndex.rebuild(server);
-        RuntimeDropIndex.rebuild(server);
+        RuntimeDropIndex.arm(server);
         KnowledgeBase.INSTANCE.attachServer(server);
         BotEdits.loadFromDisk(BotEdits.defaultSidecarPath());
         int restored = BotPersistence.INSTANCE.loadAndRespawn(server);
