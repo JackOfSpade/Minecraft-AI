@@ -66,6 +66,7 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0014-per-player-break-place-permission` | IPlayerContext, CalculationContext, MineProcess, PathExecutor, MovementParkour | `IPlayerContext` gets defaulted `allowBreak()`/`allowPlace()` (the global `Settings` values); the cost model, mine process and executor ask the player context, so one bot can be allowed to place or break and another not (`Settings` is one object for the JVM) |
 | `0015-scanning-process-permission` | IPlayerContext, MineProcess, GetToBlockProcess, FarmProcess, ExploreProcess, BuilderProcess | `IPlayerContext.allowScanningProcess(name)` (default true): the processes that pick their targets by scanning loaded chunks ask it before they start and do nothing when refused (see "Strict-survival rules" below) |
 | `0016-tool-policy-host-hook` | ToolSet, CalculationContext | a cost model prices a break with the tool the host says it will really equip (`HostEnvironment.ToolPolicy`, judged on a snapshot of the inventory taken on the game thread when the cost model is created) (a model for another thread snapshots when created, one for the game thread only on its first break-time query, so the per-tick sprint and bucket checks copy no inventory), not with the fastest tool on the hotbar; no policy set = upstream behaviour (see "Tools" below) |
+| `0017-per-player-water-bucket-fall` | IPlayerContext, CalculationContext | `IPlayerContext.allowWaterBucketFall()` (default: the `allowWaterBucketFall` setting, as upstream): the cost model asks the player context, so a bot in a place where water evaporates (Baritone only excludes the Nether) never plans a fall that ends in a bucket click the policy would refuse (see "Capabilities") |
 
 ## Excluded from the build (see `exclude.txt`)
 
@@ -146,7 +147,8 @@ size the work (rehearsal results for 1.21.10 and 26.1 are in the commit that int
 | `BaritoneRegistry` | (new) one instance per bot keyed by UUID; `get`, `find`, `tick`, `reset` (death, runtime reset), `forget` (delete/unload), `clearAll`; wired into `RuntimeLifecycleCoordinator` so an instance never outlives its bot |
 | `BaritonePlanner` | (new) plan-only use: `plan(baritone, goal)` runs an A* on the shared pool over a snapshot taken on the server thread and returns a `Plan` (result, movements, search and queue time); one search per bot, superseded or cancelled with the bot |
 | `BaritoneExecutor` | (new) the shared worker pool behind `HostEnvironment.executor()`: `min(4, max(2, cores/2))` daemon threads, FIFO queue, queue-wait and concurrency counters |
-| `BaritoneSettings` | (new) the fixed global settings (no parkour, no water-bucket fall, no chunk cache, no avoidance, free look off, output to `BotLog`) and the ones derived from the mod's navigation config (`maxFallHeightNoWater` = `nav.maxSafeFall`) |
+| `BaritoneSettings` | (new) the fixed global settings (no chunk cache for good, no spawner avoidance, free look off, output to `BotLog`) and the ones derived from the mod's navigation config at every plan request (`maxFallHeightNoWater` = `nav.maxSafeFall`, and the `nav.baritone.*` capability switches: parkour, parkour-place, parkour-ascend, water-bucket fall, vines, mob avoidance; see "Capabilities") |
+| `BaritoneWaterFall` | (new) the water-bucket fall: the one item use without a block that is allowed (only inside a `MovementFall`), and the safety net that takes placed water back |
 | `BaritoneDriver` | (new) the tick driver, called from `AIPlayerEntity.tick()`: `beforePhysics` (refresh observable entities, `TickEvent`, input bridge) runs before `super.tick()`/`doTick()`, `afterPhysics` (`PlayerUpdateEvent` PRE = Baritone applies its look target, look bridge, fall check, POST) after it; the order is the client's, so Baritone's own timing assumptions hold. Only a bot Baritone is busy with is ticked |
 | `BotInputBridge` | (new) `InputOverrideHandler` state -> `zza`/`xxa`/jump/sneak/sprint of the bot. Sneak scaling (0.3) applied exactly once; sprint only with a forward input, food > 6, not sneaking/using an item/blind, and it ends on a wall hit (the server never clears the flag itself) |
 | look bridge (in `BaritoneDriver`) | Baritone's rotation becomes head and body rotation through `LookAction.setYawPitch`; `MiningController.driven(..)` (used for Baritone's breaks) neither re-aims nor re-selects the tool |
@@ -164,6 +166,37 @@ Covered by `BaritoneNavigationGameTests` (end to end, a bot walks through Barito
 palettes, drops matched by loot table and item hash; and by the unit tests `BaritoneVendorIntegrityTest`,
 `BaritoneServerOnlyClassesTest` (no client reference in the class files) and `BaritoneSourceGeneratorTest` (every way the pipeline
 must refuse). The physics behind the input bridge is pinned by `BaritoneInputPhysicsProbeGameTests` (section below).
+
+## Capabilities (`nav.baritone.*`)
+
+Baritone can do more than the bots were first allowed. Each move below is something a player does and stays inside the survival
+rules; each has a config switch (section `nav.baritone` of `config/minecraftai.json`, defaults in `MinecraftAiConfig.BaritoneCaps`,
+also in `docs/NAVIGATION_ENGINE.md`) and its own GameTests (`BaritoneCapabilityGameTests`, each with the switch on and with it off).
+The switches are copied into Baritone's global `Settings` by `BaritoneSettings.applyNavLimits()` at every instance creation and plan
+request, so a hand-edited `baritone/settings.txt` cannot turn a move on behind the config's back, and a config reload takes effect at
+the next plan.
+
+| Switch (default) | Baritone setting | What the bot does and how it stays legal |
+|---|---|---|
+| `parkour` (on) | `allowParkour` | Sprint jumps over gaps of 2 and 3 blocks (`MovementParkour`; a wider gap is never planned, so there is no jump the physics cannot make: the probe suite shows 2 and 3 succeed at the edge, 4 needs a late jump). A gap of 3 needs the sprint (food above 6), otherwise only 2 is planned. Tests: 2, 3, a refused 4, off |
+| `parkourAscend` (on, needs `parkour`) | `allowParkourAscend` | The same jump landing one block higher. Test: a 2-gap up |
+| `parkourPlace` (on, needs `parkour`) | `allowParkourPlace` | A block placed in mid-jump to land on (a 4-wide gap whose far edge can carry it). It is an ordinary placement (`ServerPlayerController#processRightClickBlock`: throwaway blocks only, the bot's `BaritonePolicy` must allow placing, the support face must pass the perception proof), so a bot that may not place, or has no blocks, never plans it. Test: one placed block over a 4-gap |
+| `waterBucketFall` (on), `maxBucketFall` (12) | `allowWaterBucketFall`, `maxFallHeightBucket` | A fall above `nav.maxSafeFall` is planned only when the bot carries a water bucket in its hotbar (Baritone's cost model looks at the bot's own inventory) and is not in the Nether or another place where water evaporates (patch 0017). The bucket is used through the real item-use path (`BucketItem#use` by the bot's real look direction), allowed by `BaritoneBreakPlacePolicy` only inside a `MovementFall`, for the water bucket aimed at the landing column and for the empty bucket that takes the water back. `BaritoneWaterFall` remembers the placed source; Baritone's movement picks it up as soon as it lands in it, and when that does not happen (the bot drifted, the route was cancelled) the driver takes it back with the empty bucket once the bot is within reach, and logs `baritone_water_left` when it cannot within 400 ticks. Never left silently. Tests: a 10-block fall lands without damage, no water is left, the bucket is full again; off: the bot stays on the cliff |
+| `vines` (on) | `allowVines` | Climbing a vine column up and down works with the switch off too (vines are climbable blocks for Baritone's pillar and descend moves, like ladders); the setting adds vines as blocks the bot may *stand* on while planning. Upstream calls it a gimmick that can trap a bot in odd geometry, so it is a switch. Tests: up, down (6 blocks, no damage), off |
+| `mobAvoidance` (on) | `avoidance` (radius 6, coefficient 2.0) | Routes cost twice as much within 6 blocks of a hostile mob. Baritone's `Avoidance` reads mobs only through `IPlayerContext#entities()`, which for a bot is the observation-filtered list (`ServerPlayerContext#refreshEntities`: the bot, the dropped items and, while the switch is on, `Enemy` mobs the bot can observe (`ObservableWorldQuery#canObserveEntity`: in perception range and in line of sight)), rebuilt at most every 5 ticks while the bot is driven. A mob behind a wall is never seen and never avoided. Measured cost: 0.03 ms per server tick for three bots with six hostiles in view each. Tests: a route bends 6 blocks around a visible mob (closest 6.1 blocks, against 0.1 with the switch off), a mob sealed behind bedrock changes nothing, the cost |
+
+Note the interplay with `DangerWatcher`: a hostile the watcher treats as a threat (`CombatCore.hostileTo`) sends the bot evading and
+takes the bot from Baritone; avoidance is the cheap first line that keeps a route away from a mob before that happens. The tests use a
+size-1 slime (an `Enemy` the watcher ignores) so that the route itself is what is measured.
+
+**Not a switch: the world cache.** `chunkCaching` stays off. The cache would remember terrain the bot never loaded or saw and plan
+over it (and needs a packer thread and region files per dimension); planning stays over loaded terrain, like a vanilla mob's. Mob
+spawner avoidance (`mobSpawnerAvoidanceCoefficient`) reads its spawner list from that cache, so it is fixed at 1.0 (off): a bot
+plans around spawners only through mobs it can see.
+
+**What the tests do not cover:** the physics and the plan are the vendored Baritone's; the tests prove that our bots execute them
+(inputs, look bridge, fall damage, item use) and that the rules hold. A 4-block parkour gap is not attempted (a player can make it
+with a late jump; Baritone never plans it).
 
 ## Physics probes and the input contract
 
@@ -188,9 +221,9 @@ measured and the expected value. When a Minecraft or Baritone upgrade moves one 
 * **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache` (its region packer and saver
   are two daemon threads per dimension); nothing closes it when the last bot goes away. With `chunkCaching` off it only holds
   waypoints and empty region files.
-* **Restoring the capabilities that are switched off** (parkour, water-bucket falls, vines, the on-disk chunk cache) is planned with the
-  obstacle-course comparison of legacy against Baritone (phase P2 of `docs/NAVIGATION_BARITONE_PLAN.md`), each under its own tests,
-  before the default of `nav.engine` is flipped.
+* **Capabilities.** Parkour, the water-bucket fall, vines and mob avoidance are back behind `nav.baritone.*` (next section). The on-disk
+  chunk cache stays off for good (decision below); the obstacle-course comparison of legacy against Baritone and the flip of the default
+  of `nav.engine` (phase P2 of `docs/NAVIGATION_BARITONE_PLAN.md`) are still open.
 * **Policy per bot.** Baritone reads `Baritone.settings()` live (a global, see `BaritoneAPI.getSettings()`), so everything that
   differs per bot goes through the player context (patches 0014 and 0015: `allowBreak`, `allowPlace`, `allowScanningProcess`),
   never through mutated global settings. Anything new that must differ per bot follows the same route.
@@ -221,7 +254,7 @@ and fed into Baritone's planning; every refusal is a `baritone_refused` line in 
 | break a block (`clickBlock`, `onPlayerDamageBlock`) | only natural terrain by the mod-wide `BreakRule` (a tag-driven whitelist: every kind of stone incl. tuff, deepslate, basalt, sandstone, terracotta, ice, dripstone, soul sand, sculk, dirt, sand, gravel, ores incl. `c:ores`, `c:stones` modded stone, leaves, small plants) that is observable (`ObservableWorldQuery`) and only if the bot's `BaritonePolicy` allows breaking. Never a block entity (chest, furnace, bed, spawner, sign, barrel ...), a crafting table or other utility block, a fluid, a dangerous block, bedrock, or anything that is not natural terrain (planks, glass, wool, concrete, the brick family incl. cracked/mossy/chiseled stone bricks, slabs, stairs, walls, doors: structures and player builds), and infested blocks. A placed cobblestone cannot be told from a natural one, as for a player |
 | plan a route | the block-level part of the rule is installed as `Settings.blocksToDisallowBreaking` (a hash-cached view, `BaritoneBreakPlacePolicy.installPlanningRules`), so searches plan around protected blocks (or report no path) instead of planning through them and being vetoed at execution. `allowBreakAnyway` is emptied |
 | place a block / click a block (`processRightClickBlock`) | the support face must pass the legacy perception proof (`BuildAction.supportFaceRefusal`: in reach, in perception range, an eye ray strikes exactly that face); only Baritone's throwaway blocks (`acceptableThrowawayItems`); only if the policy allows placing; never against a chest, bed, crafting table, door, lever ... The same click may open a door or trapdoor whose `BlockSetType` lets a hand open it (never iron) or a fence gate, unless the item wins over the block (vanilla `useItemOn`: a sneaking bot with something in either hand would use the item instead of the block, so that click gets no allowance and is refused like any other non-throwaway use; a sneaking bot with both hands empty still opens it) |
-| use an item without a block (`processRightClick`) | refused unless in `BaritoneBreakPlacePolicy.USE_ITEM_ALLOWLIST`, which is empty (water bucket, ender pearl, food ... are all refused) |
+| use an item without a block (`processRightClick`) | refused unless in `BaritoneBreakPlacePolicy.USE_ITEM_ALLOWLIST`, which is empty (ender pearl, food, potions ... are all refused), or it is the bucket of a water-bucket fall inside that very movement (`BaritoneWaterFall`, see "Capabilities": the water bucket aimed at the landing column, the empty bucket that takes the water back; never where water evaporates); the water bucket anywhere else is refused as `not_in_fall_movement` |
 | move inventory items (`windowClick`) | refused unless `allowInventory` is on (`BaritoneSettings` keeps it off) and then only a hotbar swap in the bot's own inventory |
 | scan the world for targets (`MineProcess`, `GetToBlockProcess`, `FarmProcess`, `ExploreProcess`, `BuilderProcess`) | **do not start** (patch 0015, `ServerPlayerContext.allowScanningProcess`) unless the bot holds the hidden-scan privilege (`PrivilegedCapability.HIDDEN_BLOCK_SCAN`, never in strict survival). They find ores, crops and blocks by reading every loaded chunk, i.e. X-ray |
 

@@ -151,6 +151,11 @@ public record MinecraftAiConfig(
         return new MinecraftAiConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage());
     }
 
+    /** A copy with another navigation section (tests swap the Baritone capability switches with it). */
+    public MinecraftAiConfig withNav(Nav nav) {
+        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav, pickup(), conversation(), storage());
+    }
+
     private MinecraftAiConfig withProfile(OperatingProfile profile) {
         return new MinecraftAiConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage());
     }
@@ -212,7 +217,7 @@ public record MinecraftAiConfig(
                 new Night(true, 8),
                 new Mining(2, 0.10D, true),
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
-                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue()),
+                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue(), BaritoneCaps.defaults()),
                 new Pickup(2.75D, 2.5D, 8.0D), // measured 1.5/1.0 as too small: tree-drop items with a vertical gap >1 don't get pulled in → countSoFar=0 infinite loop
                 new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
                 new Storage(64, 16, 3, 24, true));
@@ -512,10 +517,24 @@ public record MinecraftAiConfig(
                       double sprintMinDist,
                       int maxSafeFall,
                       // "legacy" (default) or "baritone": which navigator answers ordinary walk requests. See docs/NAVIGATION_ENGINE.md.
-                      String engine) {
+                      String engine,
+                      // The Baritone movement capabilities (parkour, water-bucket falls, vines, mob avoidance). See docs/NAVIGATION_ENGINE.md.
+                      BaritoneCaps baritone) {
+        /** Source-compatible constructor for callers that predate the Baritone capability section. */
+        public Nav(double jumpReach, int sidleAfter, int sidleLimit, int hardLimit, int lookahead, int nodeRetry,
+                   double sprintMinDist, int maxSafeFall, String engine) {
+            this(jumpReach, sidleAfter, sidleLimit, hardLimit, lookahead, nodeRetry, sprintMinDist, maxSafeFall, engine,
+                    BaritoneCaps.defaults());
+        }
+
         /** The configured engine; a missing or unknown value is {@link NavEngine#LEGACY}. */
         public NavEngine engineChoice() {
             return NavEngine.parse(engine);
+        }
+
+        /** The Baritone capabilities; never null. */
+        public BaritoneCaps baritoneCaps() {
+            return baritone == null ? BaritoneCaps.defaults() : baritone;
         }
 
         Nav withDefaults(Nav defaults) {
@@ -528,7 +547,75 @@ public record MinecraftAiConfig(
                     positiveOrDefault(nodeRetry, defaults.nodeRetry),
                     positiveDoubleOrDefault(sprintMinDist, defaults.sprintMinDist),
                     positiveOrDefault(maxSafeFall, defaults.maxSafeFall),
-                    NavEngine.parse(engine).configValue());
+                    NavEngine.parse(engine).configValue(),
+                    baritone == null ? defaults.baritoneCaps() : baritone.withDefaults(defaults.baritoneCaps()));
+        }
+    }
+
+    /**
+     * Moves the Baritone navigation engine may use ({@code nav.baritone}); each is a legitimate move of a player and stays inside
+     * the survival rules (see tools/baritone/README.md). They are applied to Baritone's global settings at every plan request
+     * ({@code BaritoneSettings.applyNavLimits}), so a reload takes effect at the next plan.
+     *
+     * <ul>
+     *   <li>{@code parkour}: jumps over gaps of 2 and 3 blocks (a sprint jump; a wider gap is never planned).</li>
+     *   <li>{@code parkourPlace}: a block placed in mid-air jump to land on (needs throwaway blocks and permission to place).</li>
+     *   <li>{@code parkourAscend}: a jump over a gap that lands one block higher.</li>
+     *   <li>{@code waterBucketFall}: a fall too high to survive is broken by placing water from a carried water bucket, which is
+     *       picked up again; never in the Nether. {@code maxBucketFall} is the highest fall planned that way.</li>
+     *   <li>{@code vines}: vines and other climbable blocks may be stood on while climbing (Baritone's {@code allowVines}).</li>
+     *   <li>{@code mobAvoidance}: routes keep away from hostile mobs the bot can see (never from ones it cannot observe).</li>
+     * </ul>
+     */
+    public record BaritoneCaps(Boolean parkour,
+                               Boolean parkourPlace,
+                               Boolean parkourAscend,
+                               Boolean waterBucketFall,
+                               int maxBucketFall,
+                               Boolean vines,
+                               Boolean mobAvoidance) {
+        public static BaritoneCaps defaults() {
+            return new BaritoneCaps(true, true, true, true, 12, true, true);
+        }
+
+        /** Every capability switched off (the behaviour of the engine before these switches existed). */
+        public static BaritoneCaps allOff() {
+            return new BaritoneCaps(false, false, false, false, 12, false, false);
+        }
+
+        BaritoneCaps withDefaults(BaritoneCaps defaults) {
+            return new BaritoneCaps(
+                    boolOrDefault(parkour, defaults.parkour),
+                    boolOrDefault(parkourPlace, defaults.parkourPlace),
+                    boolOrDefault(parkourAscend, defaults.parkourAscend),
+                    boolOrDefault(waterBucketFall, defaults.waterBucketFall),
+                    positiveOrDefault(maxBucketFall, defaults.maxBucketFall),
+                    boolOrDefault(vines, defaults.vines),
+                    boolOrDefault(mobAvoidance, defaults.mobAvoidance));
+        }
+
+        public boolean parkourEnabled() {
+            return Boolean.TRUE.equals(parkour);
+        }
+
+        public boolean parkourPlaceEnabled() {
+            return Boolean.TRUE.equals(parkourPlace);
+        }
+
+        public boolean parkourAscendEnabled() {
+            return Boolean.TRUE.equals(parkourAscend);
+        }
+
+        public boolean waterBucketFallEnabled() {
+            return Boolean.TRUE.equals(waterBucketFall);
+        }
+
+        public boolean vinesEnabled() {
+            return Boolean.TRUE.equals(vines);
+        }
+
+        public boolean mobAvoidanceEnabled() {
+            return Boolean.TRUE.equals(mobAvoidance);
         }
     }
 

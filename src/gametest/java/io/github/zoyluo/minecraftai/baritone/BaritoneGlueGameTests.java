@@ -235,11 +235,15 @@ public final class BaritoneGlueGameTests {
         BaritoneSettings.applyNavLimits();
         Settings s = BaritoneAPI.getSettings();
         int safeFall = MinecraftAiConfig.get().nav().maxSafeFall();
-        require(context, !s.allowParkour.value && !s.allowParkourPlace.value && !s.allowParkourAscend.value, "parkour is on");
-        require(context, !s.allowWaterBucketFall.value, "the water-bucket fall is on");
+        MinecraftAiConfig.BaritoneCaps caps = MinecraftAiConfig.get().nav().baritoneCaps();
+        require(context, s.allowParkour.value == caps.parkourEnabled() && s.allowParkourPlace.value == (caps.parkourEnabled() && caps.parkourPlaceEnabled())
+                && s.allowParkourAscend.value == (caps.parkourEnabled() && caps.parkourAscendEnabled()), "parkour does not follow nav.baritone");
+        require(context, s.allowWaterBucketFall.value == caps.waterBucketFallEnabled(), "the water-bucket fall does not follow nav.baritone");
+        require(context, s.allowVines.value == caps.vinesEnabled(), "vines do not follow nav.baritone");
+        require(context, s.mobSpawnerAvoidanceCoefficient.value == 1.0D, "mob spawners are avoided (that needs the world cache)");
         require(context, s.maxFallHeightNoWater.value == safeFall, "maxFallHeightNoWater=" + s.maxFallHeightNoWater.value + " nav safe fall=" + safeFall);
         require(context, !s.chunkCaching.value, "chunk caching is on");
-        require(context, !s.avoidance.value, "mob avoidance is on");
+        require(context, s.avoidance.value == caps.mobAvoidanceEnabled(), "mob avoidance does not follow nav.baritone");
         require(context, !s.freeLook.value && !s.blockFreeLook.value, "free look is on");
         require(context, !s.chatDebug.value && !s.logAsToast.value && !s.desktopNotifications.value, "chat/toast/desktop output is on");
         context.succeed();

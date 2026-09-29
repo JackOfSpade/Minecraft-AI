@@ -17,11 +17,14 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 
 /**
  * Server-side counterpart of upstream's client {@code BaritonePlayerController} (which drives the local
@@ -100,6 +103,12 @@ public final class ServerPlayerController implements IPlayerController {
     @Override
     public InteractionResult processRightClickBlock(Player player, Level world, InteractionHand hand, BlockHitResult result) {
         AIPlayerEntity self = bot.get();
+        ItemStack inHand = self.getItemInHand(hand);
+        if ((inHand.isEmpty() || BaritoneWaterFall.isFallBucket(inHand.getItem())) && BaritoneWaterFall.runningFall(self) != null) {
+            // A bucket does nothing on a block: its use is the item use that follows (processRightClick, checked by BaritoneWaterFall).
+            // The empty other hand of the same click has nothing to place either. Neither is a refusal.
+            return InteractionResult.PASS;
+        }
         if (!BaritoneBreakPlacePolicy.checkClickBlock(self, result, hand).allowed()) {
             return InteractionResult.FAIL;
         }
@@ -119,7 +128,23 @@ public final class ServerPlayerController implements IPlayerController {
             return InteractionResult.FAIL;
         }
         BotLog.action(self, "baritone_use_item", "item", BuiltInRegistries.ITEM.getKey(self.getItemInHand(hand).getItem()));
-        return self.gameMode.useItem(self, world, self.getItemInHand(hand), hand);
+        Item used = self.getItemInHand(hand).getItem();
+        if (used == Items.WATER_BUCKET) {
+            HitResult ray = self.pick(self.blockInteractionRange(), 1.0F, false);
+            if (ray instanceof BlockHitResult block) {
+                BlockPos first = block.getBlockPos();
+                BlockPos second = first.relative(block.getDirection());
+                boolean[] wasSource = {world.getFluidState(first).isSource(), world.getFluidState(second).isSource()};
+                InteractionResult result = self.gameMode.useItem(self, world, self.getItemInHand(hand), hand);
+                BaritoneWaterFall.afterWaterBucketUse(self, block, wasSource);
+                return result;
+            }
+        }
+        InteractionResult result = self.gameMode.useItem(self, world, self.getItemInHand(hand), hand);
+        if (used == Items.BUCKET) {
+            BaritoneWaterFall.afterEmptyBucketUse(self);
+        }
+        return result;
     }
 
     @Override

@@ -49,6 +49,41 @@ reached over the loaded terrain), is `GOAL_UNREACHABLE`. A partial path (far goa
 across water. A search that used its whole budget for nothing proves nothing (cold start, busy server) and lets the route start.
 The first request of a session runs one warm-up search so class loading does not eat the admission budget.
 
+## Movement capabilities (`nav.baritone`, only with `engine = baritone`)
+
+```json
+{
+  "nav": {
+    "engine": "baritone",
+    "baritone": {
+      "parkour": true,
+      "parkourAscend": true,
+      "parkourPlace": true,
+      "waterBucketFall": true,
+      "maxBucketFall": 12,
+      "vines": true,
+      "mobAvoidance": true
+    }
+  }
+}
+```
+
+Every switch is a move a player makes and stays inside the survival rules; a missing key keeps the default shown, and `false`
+gives the behaviour the engine had before the switch existed. They are read at every plan request, so a reload applies to the next
+route. Details, the rules and the tests are in `tools/baritone/README.md` ("Capabilities").
+
+| Key | Effect |
+|---|---|
+| `parkour` | sprint jumps over gaps of 2 and 3 blocks; a gap of 4 or more is never planned |
+| `parkourAscend` | (needs `parkour`) the same jump landing one block higher |
+| `parkourPlace` | (needs `parkour`) a block placed in mid-jump to land on; only with throwaway blocks and permission to place |
+| `waterBucketFall` | a fall above `maxSafeFall` is taken with a water bucket from the hotbar and the water is picked up again; never in the Nether or where water evaporates |
+| `maxBucketFall` | the highest fall planned with the bucket (blocks), default 12 |
+| `vines` | vines count as blocks the bot may stand on (climbing a vine column works without it) |
+| `mobAvoidance` | routes stay 6 blocks away from hostile mobs the bot can *see* (a mob it cannot observe is ignored) |
+
+The chunk cache of Baritone stays off whatever the config says (it would plan over terrain the bot never saw).
+
 ## Fail-soft and lazy bootstrap
 
 * Nothing Baritone-related is initialised until a request with the Baritone engine needs it (`BaritoneRegistry.get` creates the

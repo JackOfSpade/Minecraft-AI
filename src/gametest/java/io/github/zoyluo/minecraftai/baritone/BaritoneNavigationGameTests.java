@@ -217,7 +217,7 @@ public final class BaritoneNavigationGameTests {
     // Placing: bridge a gap, pillar up; only when the policy allows it
     // ---------------------------------------------------------------------------------------------------------------
 
-    @GameTest(maxTicks = 1000)
+    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_bridges_gap_when_placing_is_allowed", maxTicks = 1000)
     public void bridgesGapWhenPlacingIsAllowed(GameTestHelper context) {
         Course c = gapCourse(context, "NavBridgeGT", 5);
         c.giveBlocks(Items.COBBLESTONE, 16);
@@ -240,7 +240,7 @@ public final class BaritoneNavigationGameTests {
         });
     }
 
-    @GameTest(maxTicks = 500)
+    @GameTest(environment = "minecraftai-gametest:baritone_navigation_game_tests_does_not_bridge_gap_when_placing_is_forbidden", maxTicks = 500)
     public void doesNotBridgeGapWhenPlacingIsForbidden(GameTestHelper context) {
         Course c = gapCourse(context, "NavNoBridgeGT", 6);
         c.giveBlocks(Items.COBBLESTONE, 16);
@@ -541,6 +541,8 @@ public final class BaritoneNavigationGameTests {
 
     /** x=-2..14, z=-3..3; a full-width gap at x=+4..+6 that is six deep (the bots' safe fall is three), floor beyond it. */
     private static Course gapCourse(GameTestHelper context, String name, int layer) {
+        // The subject here is bridging by placing blocks; with parkour on the bot would simply jump this 3-wide gap (BaritoneCapabilityGameTests).
+        BaritoneCapabilityGameTests.installCaps(io.github.zoyluo.minecraftai.MinecraftAiConfig.BaritoneCaps.allOff());
         Course c = Course.begin(context, name, layer, -2, 14, 3);
         for (int dx = 4; dx <= 6; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
@@ -674,6 +676,7 @@ public final class BaritoneNavigationGameTests {
                         check.accept(run);
                     } finally {
                         AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+                        BaritoneCapabilityGameTests.restoreConfig();
                     }
                     require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null, "the bot's Baritone instance outlived the bot");
                     context.succeed();
@@ -681,6 +684,7 @@ public final class BaritoneNavigationGameTests {
                     run.done = true;
                     String where = describe();
                     AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
+                    BaritoneCapabilityGameTests.restoreConfig();
                     require(context, false, name + ": still busy after " + limit + " ticks, " + where);
                 }
             });

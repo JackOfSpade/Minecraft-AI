@@ -62,6 +62,9 @@ public final class BaritoneRegistry {
         /** The last path event Baritone reported and the server tick it arrived in (how a route that ended short of its goal failed). */
         volatile PathEvent lastEvent;
         volatile int lastEventTick = -1;
+        /** The water source a bucket fall placed and has not taken back yet, and the server tick it was placed in ({@link BaritoneWaterFall}). */
+        volatile net.minecraft.core.BlockPos placedWater;
+        volatile int placedWaterTick;
         /** Where the bot stood when its last driven physics tick began (for the fall-damage check after it). */
         double startX;
         double startY;

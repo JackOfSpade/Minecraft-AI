@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.baritone;
 
+import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.cache.IWorldData;
 import baritone.api.utils.BetterBlockPos;
@@ -9,6 +10,7 @@ import baritone.api.utils.RayTraceUtils;
 import baritone.api.utils.Rotation;
 import baritone.behavior.LookBehavior;
 import baritone.utils.accessor.IClientChunkProvider;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import java.util.ArrayList;
@@ -17,7 +19,9 @@ import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SlabBlock;
@@ -80,8 +84,8 @@ public final class ServerPlayerContext implements IPlayerContext {
     }
 
     /**
-     * The bot itself and the dropped items it can observe, which is everything Baritone asks for (the mine and farm
-     * processes look for {@code ItemEntity}s; nothing else reads this list). Observability is the mod's own rule
+     * The bot itself, the dropped items it can observe (the mine and farm processes look for {@code ItemEntity}s) and, while mob
+     * avoidance is on, the hostile mobs it can observe (Baritone's {@code Avoidance} reads mobs from this list and nowhere else). Observability is the mod's own rule
      * ({@link ObservableWorldQuery#canObserveEntity}): a strict-survival bot sees what is in range and in line of sight, a
      * bot with the hidden-scan privilege sees everything in range.
      *
@@ -114,6 +118,17 @@ public final class ServerPlayerContext implements IPlayerContext {
         for (ItemEntity item : world().getEntitiesOfClass(ItemEntity.class, self.getBoundingBox().inflate(ENTITY_RANGE))) {
             if (ObservableWorldQuery.canObserveEntity(self, item)) {
                 observed.add(item);
+            }
+        }
+        if (BaritoneAPI.getSettings().avoidance.value) {
+            // Baritone's mob avoidance (Avoidance#create) reads mobs from this very list, so it can only ever steer around what the
+            // bot observes: a hostile mob in range and in line of sight (canObserveEntity). Hostile only: a cow is not a threat, and
+            // this is the whole cost of the feature (one entity query and a few rays per refresh, only while the bot is driven).
+            int range = Math.max(1, MinecraftAiConfig.get().perception().radius());
+            for (Mob mob : world().getEntitiesOfClass(Mob.class, self.getBoundingBox().inflate(range), mob -> mob instanceof Enemy && mob.isAlive())) {
+                if (ObservableWorldQuery.canObserveEntity(self, mob)) {
+                    observed.add(mob);
+                }
             }
         }
         observedEntities = List.copyOf(observed);
@@ -179,6 +194,20 @@ public final class ServerPlayerContext implements IPlayerContext {
     @Override
     public boolean allowScanningProcess(String process) {
         return BaritoneBreakPlacePolicy.allowScanningProcess(player(), process);
+    }
+
+    /**
+     * Whether the bot may plan a fall broken by a water bucket (patch 0017): the switch (Baritone's setting, which follows
+     * {@code nav.baritone.waterBucketFall}) and a place where water does not evaporate. Baritone itself only excludes the Nether; the
+     * bucket click would be refused anywhere else water evaporates ({@link BaritoneWaterFall}), and a fall planned on it would be a fall to damage.
+     */
+    @Override
+    public boolean allowWaterBucketFall() {
+        if (!BaritoneAPI.getSettings().allowWaterBucketFall.value) {
+            return false;
+        }
+        AIPlayerEntity self = player();
+        return !minecraft().isSameThread() || !BaritoneWaterFall.waterEvaporates(self, self.blockPosition());
     }
 
     @Override

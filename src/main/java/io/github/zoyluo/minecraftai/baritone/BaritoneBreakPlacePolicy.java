@@ -55,8 +55,8 @@ import net.minecraft.world.phys.BlockHitResult;
  * The same click may open a wooden door, a trapdoor or a fence gate; that passes the same proof and nothing else is used.</p>
  *
  * <p><b>Item use without a block</b> ({@code processRightClick}: buckets, ender pearls, food, potions ...) is refused unless the
- * item is in {@link #USE_ITEM_ALLOWLIST}, which is empty: the settings the bots run with (no water-bucket fall, no elytra) need
- * nothing. <b>Inventory moves</b> ({@code windowClick}) are only the hotbar swap of the bot's own inventory, and only when
+ * item is in {@link #USE_ITEM_ALLOWLIST} (empty) or is the bucket of a water-bucket fall inside that very movement ({@link BaritoneWaterFall}:
+ * the water bucket aimed at the landing column, the empty bucket that takes the water back; never in a dimension where water evaporates). <b>Inventory moves</b> ({@code windowClick}) are only the hotbar swap of the bot's own inventory, and only when
  * Baritone's {@code allowInventory} is on, which {@link BaritoneSettings} keeps off.</p>
  *
  * <p><b>Scanning processes</b> (mine, get-to-block, farm, explore, build) choose their targets by scanning loaded chunks, that
@@ -65,7 +65,10 @@ import net.minecraft.world.phys.BlockHitResult;
  * ({@link BaritoneGoals}) that the caller has already proven observable.</p>
  */
 public final class BaritoneBreakPlacePolicy {
-    /** Items {@code processRightClick} may use with no block. Empty: nothing the bots' Baritone settings do needs one. */
+    /**
+     * Items {@code processRightClick} may use with no block, whenever they are asked for. Empty: the only item use the bots' Baritone
+     * settings need is the bucket of a water-bucket fall, which is allowed only inside that movement ({@link BaritoneWaterFall}).
+     */
     public static final Set<Item> USE_ITEM_ALLOWLIST = Set.of();
 
     /** The processes that scan loaded chunks for targets; see {@link #allowScanningProcess}. */
@@ -208,7 +211,12 @@ public final class BaritoneBreakPlacePolicy {
         if (USE_ITEM_ALLOWLIST.contains(item)) {
             return Decision.ALLOWED;
         }
-        return refuse(bot, BaritoneRefusals.Op.USE_ITEM, null, "item_not_allowed", BuiltInRegistries.ITEM.getKey(item).toString());
+        // The bucket of a water-bucket fall: allowed for exactly that movement (see BaritoneWaterFall for the conditions).
+        String reason = BaritoneWaterFall.refusalOf(bot, item);
+        if (reason == null) {
+            return Decision.ALLOWED;
+        }
+        return refuse(bot, BaritoneRefusals.Op.USE_ITEM, null, reason, BuiltInRegistries.ITEM.getKey(item).toString());
     }
 
     /** Whether Baritone may make this container click: only a hotbar swap in the bot's own inventory, and only if it is switched on. */

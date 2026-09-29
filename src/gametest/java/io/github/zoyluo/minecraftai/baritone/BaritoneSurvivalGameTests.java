@@ -421,7 +421,9 @@ public final class BaritoneSurvivalGameTests {
             require(context, s.bot.getMainHandItem().is(item) && s.bot.getMainHandItem().getCount() == 1, item + " was consumed");
         }
         List<BaritoneRefusals.Refusal> uses = BaritoneRefusals.of(s.bot.getUUID(), BaritoneRefusals.Op.USE_ITEM);
-        require(context, uses.size() == 4 && uses.stream().allMatch(r -> r.reason().equals("item_not_allowed")), "item use refusals: " + uses);
+        // The water bucket is refused too: outside a fall movement (BaritoneWaterFall) it is an item like any other.
+        require(context, uses.size() == 4 && uses.stream().allMatch(r -> r.reason().equals(r.detail().equals("minecraft:water_bucket") ? "not_in_fall_movement" : "item_not_allowed")),
+                "item use refusals: " + uses);
         for (int dx = -1; dx <= 1; dx++) {
             require(context, s.world.getBlockState(s.at(dx, 0, 0)).isAir(), "water or something else appeared on the floor: " + s.world.getBlockState(s.at(dx, 0, 0)));
         }

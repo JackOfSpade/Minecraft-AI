@@ -1,0 +1,36 @@
+IPlayerContext.allowWaterBucketFall() (default: the allowWaterBucketFall setting, as upstream): the cost model asks the player context whether the bot may plan a fall broken by a water bucket, so a host can refuse it per player (a dimension where water evaporates, other than the Nether that Baritone already excludes) instead of through the one JVM-wide setting.
+
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+index b537b07..826b0ad 100644
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -132,6 +132,16 @@ public interface IPlayerContext {
+         return true;
+     }
+ 
++    /**
++     * Whether this player may plan a fall that is broken by placing water from a carried water bucket ({@link baritone.api.Settings#allowWaterBucketFall}
++     * is one value for the whole JVM). Defaults to that setting; a host whose players may not place water where they stand (a dimension
++     * in which water evaporates that is not the Nether, which Baritone already excludes) or that has switched the move off for one player
++     * overrides it per player.
++     */
++    default boolean allowWaterBucketFall() {
++        return BaritoneAPI.getSettings().allowWaterBucketFall.value;
++    }
++
+     default Rotation playerRotations() {
+         return new Rotation(player().getYRot(), player().getXRot());
+     }
+diff --git a/src/main/java/baritone/pathing/movement/CalculationContext.java b/src/main/java/baritone/pathing/movement/CalculationContext.java
+index cfaa50f..3f0acc0 100644
+--- a/src/main/java/baritone/pathing/movement/CalculationContext.java
++++ b/src/main/java/baritone/pathing/movement/CalculationContext.java
+@@ -101,7 +101,7 @@ public class CalculationContext {
+         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+         this.toolSet = new ToolSet(player, true, forUseOnAnotherThread);
+         this.hasThrowaway = baritone.getPlayerContext().allowPlace() && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
+-        this.hasWaterBucket = Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
++        this.hasWaterBucket = baritone.getPlayerContext().allowWaterBucketFall() && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
+         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
+         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
+         this.allowBreak = baritone.getPlayerContext().allowBreak();

@@ -85,19 +85,20 @@ public final class BaritonePlanningGameTests {
     @GameTest(maxTicks = 200)
     public void plansAroundPitTooDeepToFallInto(GameTestHelper context) {
         Scenario s = Scenario.begin(context, "BaritonePitGT", 3);
-        // A 2-wide pit four blocks deep (one more than the bots' safe fall of 3) across x=+3..+4 for z=-7..+3, floor at -5.
-        for (int dx = 3; dx <= 4; dx++) {
+        // A 4-wide pit four blocks deep (one more than the bots' safe fall of 3) across x=+3..+6 for z=-7..+3, floor at -5. Four wide, because
+        // a pit of 2 or 3 is a parkour jump now (nav.baritone.parkour, see BaritoneCapabilityGameTests) and the subject here is the fall.
+        for (int dx = 3; dx <= 6; dx++) {
             for (int dz = -RADIUS; dz <= 3; dz++) {
                 carvePit(s.world, s.feet, dx, dz, 4);
             }
         }
-        BlockPos goal = s.feet.offset(6, 0, 0);
+        BlockPos goal = s.feet.offset(7, 0, 0);
         s.plan(new GoalBlock(goal), plan -> {
             require(context, plan.reachesGoal(), "pit detour: " + plan.type());
             List<BetterBlockPos> positions = plan.path().positions();
             require(context, positions.stream().allMatch(p -> p.getY() == s.feet.getY()),
                     "the path leaves the level of the platform (it went into the pit): " + positions);
-            require(context, positions.stream().anyMatch(p -> p.getX() == s.feet.getX() + 3 && p.getZ() >= s.feet.getZ() + 4),
+            require(context, positions.stream().anyMatch(p -> p.getX() >= s.feet.getX() + 3 && p.getX() <= s.feet.getX() + 6 && p.getZ() >= s.feet.getZ() + 4),
                     "the path does not cross at the solid part: " + positions);
             require(context, plan.movements().size() <= 18, "detour too long: " + plan.movements().size());
             require(context, WALKING.containsAll(plan.movements()), "only walking moves were expected: " + plan.movements());
@@ -107,12 +108,12 @@ public final class BaritonePlanningGameTests {
     @GameTest(maxTicks = 200)
     public void doesNotEnterPitThatSpansTheWholeWidth(GameTestHelper context) {
         Scenario s = Scenario.begin(context, "BaritoneDeepPitGT", 4);
-        for (int dx = 3; dx <= 4; dx++) {
+        for (int dx = 3; dx <= 6; dx++) { // four wide: two or three would be a parkour jump
             for (int dz = -RADIUS; dz <= RADIUS; dz++) {
                 carvePit(s.world, s.feet, dx, dz, 4);
             }
         }
-        s.plan(new GoalBlock(s.feet.offset(6, 0, 0)), plan -> {
+        s.plan(new GoalBlock(s.feet.offset(7, 0, 0)), plan -> {
             require(context, !plan.reachesGoal(), "a path across a four-deep pit was reported (no blocks to bridge with): " + plan.movements());
             if (plan.path() != null) {
                 require(context, plan.path().positions().stream()

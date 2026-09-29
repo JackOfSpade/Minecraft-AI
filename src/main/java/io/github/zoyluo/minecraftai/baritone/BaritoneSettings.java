@@ -22,21 +22,23 @@ import io.github.zoyluo.minecraftai.log.BotLog;
  * </ul>
  */
 public final class BaritoneSettings {
+    /** How far from a hostile mob a route is made more expensive (blocks), and by how much (a multiplier of each step). */
+    static final int MOB_AVOIDANCE_RADIUS = 6;
+    static final double MOB_AVOIDANCE_COEFFICIENT = 2.0D;
+
     private BaritoneSettings() {
     }
 
     public static void applyFixed() {
         Settings settings = BaritoneAPI.getSettings();
 
-        // -- Moves our bots do not do, or do not do safely.
-        // Parkour needs sprint-jump timing that depends on the exact tick a jump input lands; we have verified that the
-        // physics is identical to a player's, but a failed 4-block jump is a fall into whatever is below. Off, all three.
-        settings.allowParkour.value = false;
-        settings.allowParkourPlace.value = false;
-        settings.allowParkourAscend.value = false;
-        // The water-bucket clutch places water mid-fall and picks it up again; the bots have no such routine and a wrong
-        // guess is a death, so falls are only taken when they are safe on their own (see applyNavLimits).
-        settings.allowWaterBucketFall.value = false;
+        // -- Moves that are config switches (nav.baritone.*): parkour, parkour-place, parkour-ascend, the water-bucket fall, vines and
+        // mob avoidance. They are derived from the config at every plan request (applyNavLimits), not fixed here, so a hand-edited
+        // baritone/settings.txt cannot turn them on behind the config's back. What is fixed here is what the config does not offer:
+        // a mob spawner is never avoided (the spawner list of Baritone's avoidance comes from its world cache, which stays off below).
+        settings.mobSpawnerAvoidanceCoefficient.value = 1.0D;
+        settings.mobAvoidanceRadius.value = MOB_AVOIDANCE_RADIUS;
+        settings.mobAvoidanceCoefficient.value = MOB_AVOIDANCE_COEFFICIENT;
 
         // -- Strict survival (BaritoneBreakPlacePolicy): what a bot may break is decided by the mod's rules, not by a hand-edited
         // settings file. Nothing is broken "anyway" without allowBreak, inventory moves are off (the controller refuses them too),
@@ -56,9 +58,8 @@ public final class BaritoneSettings {
 
         // -- No world cache: a bot only ever plans over chunks that are loaded right now, and the cached-chunk machinery
         // (a packer thread and 512x512 region files per dimension) would give it knowledge of terrain it cannot currently observe.
+        // Decision: this stays off for good, it is not a capability switch (planning is over loaded terrain, like a vanilla mob's).
         settings.chunkCaching.value = false;
-        // Mob avoidance is a per-tick entity scan on the server thread for a cost term we do not use.
-        settings.avoidance.value = false;
 
         // -- A bot's yaw is its real yaw (ActionPack and vanilla movement read it directly), so Baritone must set it for real
         // instead of the "free look" trick that only changes the direction of the next move.
@@ -75,10 +76,26 @@ public final class BaritoneSettings {
 
     public static void applyNavLimits() {
         Settings settings = BaritoneAPI.getSettings();
-        int maxSafeFall = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
-        // Without a bucket this is the only fall limit that is consulted; the bucket limit is set to the same number so
-        // that it can never exceed what the mod considers survivable even if a bucket ever gets into the picture.
+        MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
+        MinecraftAiConfig.BaritoneCaps caps = nav.baritoneCaps();
+        int maxSafeFall = Math.max(1, nav.maxSafeFall());
+        // Without a bucket this is the only fall limit that is consulted.
         settings.maxFallHeightNoWater.value = maxSafeFall;
-        settings.maxFallHeightBucket.value = maxSafeFall;
+        // With a water bucket in the hotbar (Baritone's cost model checks the bot's own inventory and refuses the Nether) a higher fall
+        // is planned, and only then; without the switch the bucket limit is the same number, so it can never exceed what the mod
+        // considers survivable. The click itself is allowed by BaritoneBreakPlacePolicy only inside the fall movement.
+        settings.allowWaterBucketFall.value = caps.waterBucketFallEnabled();
+        settings.maxFallHeightBucket.value = caps.waterBucketFallEnabled() ? Math.max(maxSafeFall, caps.maxBucketFall()) : maxSafeFall;
+
+        // Parkour is a sprint jump a player makes; the physics probes (BaritoneInputPhysicsProbeGameTests) pin that a bot's jump is
+        // a player's. Baritone plans gaps of 2 and 3 blocks (never wider) and refuses to plan one when it cannot sprint.
+        settings.allowParkour.value = caps.parkourEnabled();
+        settings.allowParkourPlace.value = caps.parkourEnabled() && caps.parkourPlaceEnabled();
+        settings.allowParkourAscend.value = caps.parkourEnabled() && caps.parkourAscendEnabled();
+
+        settings.allowVines.value = caps.vinesEnabled();
+        // Mob avoidance reads the mobs through IPlayerContext#entities(), which is the bot's observation-filtered list
+        // (ServerPlayerContext#refreshEntities: hostile mobs it can see, nothing else), so an unseen mob is never avoided.
+        settings.avoidance.value = caps.mobAvoidanceEnabled();
     }
 }

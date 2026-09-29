@@ -71,7 +71,7 @@ public final class BaritoneDriver {
             return false;
         }
         IBaritone baritone = entry.baritone;
-        if (!entry.driven && !busy(baritone)) {
+        if (!entry.driven && !busy(baritone) && entry.placedWater == null) {
             return false;
         }
         if (!bot.isAlive() || bot.isRemoved()) {
@@ -80,6 +80,12 @@ public final class BaritoneDriver {
         boolean wasDriven = entry.driven;
         try {
             entry.bot = bot;
+            if (entry.placedWater != null) {
+                BaritoneWaterFall.recover(bot, entry); // a water source a bucket fall left behind is taken back (also when not driven)
+            }
+            if (!wasDriven && !busy(baritone)) {
+                return false;
+            }
             entry.context.refreshEntities();
             injectTestFault("before_physics");
             baritone.getGameEventHandler().onTick(nextTick(EventState.PRE));
