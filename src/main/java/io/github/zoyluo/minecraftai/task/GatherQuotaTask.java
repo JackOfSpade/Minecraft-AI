@@ -143,6 +143,10 @@ public final class GatherQuotaTask extends AbstractTask {
     private int bootstrapPickupTicks;
     private static final int BOOTSTRAP_PICKUP_TICKS = 100;
     private int bootstrapPickupBaseline;
+    // The cell of the log just broken by hand: a factual coordinate from our own break, the fail-closed
+    // fallback when the drop popped out of sight behind the remaining logs (see bootstrapPickup).
+    private BlockPos bootstrapPickupOrigin;
+    private boolean bootstrapOriginApproachLogged;
     private int searchRadius = SEARCH_RADIUS;
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
@@ -1260,6 +1264,8 @@ public final class GatherQuotaTask extends AbstractTask {
             // GatherToolPolicy.bootstrapLogsByHand would never reach zero and every remaining log
             // would be broken with the bare hand.
             bootstrapPickupBaseline = countAccepted(bot);
+            bootstrapPickupOrigin = cleared.immutable();
+            bootstrapOriginApproachLogged = false;
             bootstrapPickupTicks = BOOTSTRAP_PICKUP_TICKS;
             bot.getActionPack().stopAll();
             phase = Phase.BOOTSTRAP_PICKUP;
@@ -1284,11 +1290,26 @@ public final class GatherQuotaTask extends AbstractTask {
                     && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
                 HarvestCore.approachDropPhysically(bot, visibleDrop.get());
             }
+            // The drop can pop behind the logs that are still standing (out of line of sight, so
+            // "not observable" and never chased). Our own break cell is a factual coordinate, exactly as
+            // in pickup(): walk (never dig or pillar) to where the drop must be instead of giving up
+            // and breaking another log by hand for want of the one that was just lost.
+            if (bootstrapPickupOrigin != null
+                    && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                boolean started = HarvestCore.approachKnownPickupCell(bot, bootstrapPickupOrigin);
+                if (started && !bootstrapOriginApproachLogged) {
+                    bootstrapOriginApproachLogged = true;
+                    BotLog.action(bot, "gather_bootstrap_origin_approach",
+                            "origin", bootstrapPickupOrigin.toShortString(),
+                            "from", bot.blockPosition().toShortString());
+                }
+            }
             return;
         }
         if (!collected) {
             BotLog.action(bot, name() + "_bootstrap_pickup_miss", "block", exactBreakTargetLabel);
         }
+        bootstrapPickupOrigin = null;
         bot.getActionPack().stopAll();
         resetSurveyWatchdog();
         phase = Phase.SURVEY;
