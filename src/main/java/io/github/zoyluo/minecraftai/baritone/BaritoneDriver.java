@@ -106,7 +106,12 @@ public final class BaritoneDriver {
             LookAction.setYawPitch(bot, bot.getYRot(), bot.getXRot());
             // 6. ServerPlayer only checks falls when a client's move packet arrives; a bot has none, so without this a bot
             // takes no fall damage at all and fallDistance stays 0. The deltas are this tick's physics movement.
+            double fallBefore = bot.fallDistance;
+            float healthBefore = bot.getHealth();
             bot.doCheckFallDamage(bot.getX() - entry.startX, bot.getY() - entry.startY, bot.getZ() - entry.startZ, bot.onGround());
+            if (fallBefore > 0.0D && bot.onGround()) {
+                BotLog.danger(bot, "baritone_landing", "fall", fallBefore, "damage", healthBefore - bot.getHealth(), "fall_after", bot.fallDistance);
+            }
             // 7.
             baritone.getGameEventHandler().onPlayerUpdate(new PlayerUpdateEvent(EventState.POST));
             baritone.getGameEventHandler().onPostTick(nextTick(EventState.POST));

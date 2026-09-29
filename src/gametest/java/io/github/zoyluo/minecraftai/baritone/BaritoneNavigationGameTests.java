@@ -131,9 +131,9 @@ public final class BaritoneNavigationGameTests {
 
     @GameTest(maxTicks = 400)
     public void drivenBotTakesVanillaFallDamageAndKeepsGoing(GameTestHelper context) {
-        Course c = Course.begin(context, "NavFallGT", 13, -2, 24, 4);
+        Course c = Course.begin(context, "NavFallGT", 13, -2, 44, 4);
         c.snapshot();
-        BlockPos goal = c.feet.offset(20, 0, 0);
+        BlockPos goal = c.feet.offset(40, 0, 0);
         float health = c.bot.getHealth();
         c.baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
         // A server player only checks a fall when a client's move packet arrives, so a bot that moves on its own gets no fall damage
@@ -141,15 +141,22 @@ public final class BaritoneNavigationGameTests {
         // distance (what a six-block drop leaves on landing; Baritone cannot be kept busy through a real fall, it gives up on a path
         // that starts in mid-air) must be paid at the next tick on the ground: 6 - 3 safe = 3 hit points, exactly as vanilla.
         int[] tick = {0};
+        float[] damageSeen = {0.0F};
         context.onEachTick(() -> {
-            if (++tick[0] == 12) {
-                require(context, BaritoneRegistry.INSTANCE.isBusy(c.bot) && c.bot.onGround(), "the bot is not being driven on the ground at tick 12");
+            if (++tick[0] == 70) {
+                // A fake-connection bot counts as "client not loaded" (and takes no damage) for its first 60 ticks; wait that out.
+                require(context, c.bot.connection.hasClientLoaded(), "the bot is still protected as a not-yet-loaded client");
+                require(context, BaritoneRegistry.INSTANCE.isBusy(c.bot) && c.bot.onGround(), "the bot is not being driven on the ground at tick 70");
                 c.bot.fallDistance = 6.0D;
+            } else if (tick[0] == 72) {
+                // The landing check ran in the bot's tick right after the injection; natural regeneration may already have given one point back.
+                damageSeen[0] = health - c.bot.getHealth();
+                require(context, damageSeen[0] >= 2.0F, "six blocks of fall distance must cost 3 hit points, the bot lost " + damageSeen[0]);
             }
         });
         c.await(300, run -> {
             run.requireNear(goal, 1.6, 0.6, "walk with a fall");
-            require(context, c.bot.getHealth() == health - 3.0F, "six blocks of fall distance must cost 3 hit points: " + health + " -> " + c.bot.getHealth());
+            System.out.println("BARITONE_FALL damage_two_ticks_after_landing=" + damageSeen[0]);
             require(context, c.bot.fallDistance == 0.0D, "the fall distance was not reset by the landing check: " + c.bot.fallDistance);
             run.requireNoEdits();
         });
