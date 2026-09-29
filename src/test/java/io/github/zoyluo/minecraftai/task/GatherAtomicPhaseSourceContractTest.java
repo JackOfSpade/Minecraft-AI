@@ -24,7 +24,8 @@ final class GatherAtomicPhaseSourceContractTest {
                 "physical pickup confirmation must reset the consecutive-miss ledger");
         assertTrue(source.contains("private BlockPos pickupOrigin"),
                 "gather must retain the factual break coordinate until pickup resolves");
-        assertTrue(source.contains("HarvestCore.approachKnownPickupCell(bot, pickupOrigin)"),
+        assertTrue(source.contains("new KnownCellPickupSweep(pickupOrigin)")
+                        && source.contains("pickupOriginSweep.step(bot)"),
                 "an occluded drop must fall back to the remembered break coordinate");
         assertTrue(source.contains("Stats.ITEM_PICKED_UP"),
                 "vanilla pickup stats must distinguish collection from concurrent inventory consumption");
@@ -33,5 +34,23 @@ final class GatherAtomicPhaseSourceContractTest {
         int survey = source.indexOf("phase = Phase.SURVEY", miss);
         assertTrue(watchdogReset > miss && watchdogReset < survey,
                 "a real pickup miss must receive a fresh local-survey watchdog window");
+    }
+
+    @Test
+    void bootstrapAndPickupSweepAroundTheBreakCellWithoutDiggingOrPillaring() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
+        assertTrue(source.contains("new KnownCellPickupSweep(bootstrapPickupOrigin)")
+                        && source.contains("bootstrapOriginSweep.step(bot)"),
+                "a hand-broken bootstrap log's hidden drop must be searched around its break cell");
+        String sweep = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/action/KnownCellPickupSweep.java"));
+        assertTrue(sweep.contains("HarvestCore.startExactPickupPath(bot, target)")
+                        && sweep.contains("HarvestCore.approachKnownPickupCell(bot, origin)"),
+                "the sweep must move through exact surface routes and the plain remembered-cell approach");
+        for (String forbidden : new String[] {"placeBlock", "startMining", "breakBlock", "descendInto", "pillarUp"}) {
+            assertTrue(!sweep.contains(forbidden),
+                    "the sweep must never dig or pillar (found " + forbidden + ")");
+        }
     }
 }

@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.KnownCellPickupSweep;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -121,6 +122,9 @@ public final class GatherQuotaTask extends AbstractTask {
     private BlockPos pickupOrigin;
     private long pickupStatBeforeHarvest;
     private boolean pickupOriginApproachLogged;
+    // Bounded walk around pickupOrigin when the drop is not observable (see KnownCellPickupSweep).
+    private KnownCellPickupSweep pickupOriginSweep;
+    private int pickupOriginSweepLogged;
     private int pickupMisses; // Count of consecutive "broke it but didn't pick up the drop" events; only ruled pickup_timeout past this limit (avoids failing the whole gather over one missed pickup)
     private boolean pickupSweepAttempted;
     private StockpileTask stockpileTask;
@@ -147,6 +151,8 @@ public final class GatherQuotaTask extends AbstractTask {
     // fallback when the drop popped out of sight behind the remaining logs (see bootstrapPickup).
     private BlockPos bootstrapPickupOrigin;
     private boolean bootstrapOriginApproachLogged;
+    private KnownCellPickupSweep bootstrapOriginSweep;
+    private int bootstrapOriginSweepLogged;
     private int searchRadius = SEARCH_RADIUS;
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
@@ -306,6 +312,8 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupOriginApproachLogged = false;
         bootstrapPickupOrigin = null;
         bootstrapOriginApproachLogged = false;
+        bootstrapOriginSweep = null;
+        pickupOriginSweep = null;
         breaksCount = 0;
         pickupsCount = 0;
         pickupMissesTotal = 0;
@@ -1267,6 +1275,8 @@ public final class GatherQuotaTask extends AbstractTask {
             // would be broken with the bare hand.
             bootstrapPickupBaseline = countAccepted(bot);
             bootstrapPickupOrigin = cleared.immutable();
+            bootstrapOriginSweep = new KnownCellPickupSweep(bootstrapPickupOrigin);
+            bootstrapOriginSweepLogged = 0;
             bootstrapOriginApproachLogged = false;
             bootstrapPickupTicks = BOOTSTRAP_PICKUP_TICKS;
             bot.getActionPack().stopAll();
@@ -1296,14 +1306,24 @@ public final class GatherQuotaTask extends AbstractTask {
             // "not observable" and never chased). Our own break cell is a factual coordinate, exactly as
             // in pickup(): walk (never dig or pillar) to where the drop must be instead of giving up
             // and breaking another log by hand for want of the one that was just lost.
-            if (bootstrapPickupOrigin != null
+            // The sweep starts with that walk and, when the drop is still not in reach (it came to rest a
+            // cell or two away, hidden behind the standing logs), keeps walking the standable cells around
+            // the break cell (see KnownCellPickupSweep).
+            if (bootstrapPickupOrigin != null && bootstrapOriginSweep != null
                     && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-                boolean started = HarvestCore.approachKnownPickupCell(bot, bootstrapPickupOrigin);
+                boolean started = bootstrapOriginSweep.step(bot);
                 if (started && !bootstrapOriginApproachLogged) {
                     bootstrapOriginApproachLogged = true;
                     BotLog.action(bot, "gather_bootstrap_origin_approach",
                             "origin", bootstrapPickupOrigin.toShortString(),
                             "from", bot.blockPosition().toShortString());
+                }
+                if (bootstrapOriginSweep.cellsVisited() > bootstrapOriginSweepLogged) {
+                    bootstrapOriginSweepLogged = bootstrapOriginSweep.cellsVisited();
+                    BotLog.action(bot, "gather_bootstrap_origin_sweep",
+                            "origin", bootstrapPickupOrigin.toShortString(),
+                            "cells", bootstrapOriginSweepLogged,
+                            "at", bot.blockPosition().toShortString());
                 }
             }
             return;
@@ -1312,6 +1332,7 @@ public final class GatherQuotaTask extends AbstractTask {
             BotLog.action(bot, name() + "_bootstrap_pickup_miss", "block", exactBreakTargetLabel);
         }
         bootstrapPickupOrigin = null;
+        bootstrapOriginSweep = null;
         bot.getActionPack().stopAll();
         resetSurveyWatchdog();
         phase = Phase.SURVEY;
@@ -1360,12 +1381,26 @@ public final class GatherQuotaTask extends AbstractTask {
         if (pickupOrigin != null
                 && bot.getActionPack().isPathExecutorIdle()
                 && bot.getActionPack().isWalkToIdle()) {
-            boolean started = HarvestCore.approachKnownPickupCell(bot, pickupOrigin);
+            // The sweep starts with that walk and, when the drop is still not in reach (it came to rest
+            // a cell or two away, hidden behind standing blocks), keeps walking the standable cells
+            // around the break cell instead of nudging in one spot until the window expires.
+            if (pickupOriginSweep == null || !pickupOriginSweep.origin().equals(pickupOrigin)) {
+                pickupOriginSweep = new KnownCellPickupSweep(pickupOrigin);
+                pickupOriginSweepLogged = 0;
+            }
+            boolean started = pickupOriginSweep.step(bot);
             if (started && !pickupOriginApproachLogged) {
                 pickupOriginApproachLogged = true;
                 BotLog.action(bot, "gather_pickup_origin_approach",
                         "origin", pickupOrigin.toShortString(),
                         "from", bot.blockPosition().toShortString());
+            }
+            if (pickupOriginSweep.cellsVisited() > pickupOriginSweepLogged) {
+                pickupOriginSweepLogged = pickupOriginSweep.cellsVisited();
+                BotLog.action(bot, "gather_pickup_origin_sweep",
+                        "origin", pickupOrigin.toShortString(),
+                        "cells", pickupOriginSweepLogged,
+                        "at", bot.blockPosition().toShortString());
             }
         }
         if (pickupTicks <= 0) {
@@ -1456,6 +1491,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private void clearPickupLedger() {
         pickupOrigin = null;
         pickupOriginApproachLogged = false;
+        pickupOriginSweep = null;
     }
 
     private void resetSurveyWatchdog() {
@@ -1601,6 +1637,7 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupOrigin = targetPos == null ? null : targetPos.immutable();
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
+        pickupOriginSweep = null;
         HarvestCore.startMining(bot, targetPos);
         phase = Phase.HARVEST;
     }

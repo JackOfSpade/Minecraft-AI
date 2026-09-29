@@ -295,6 +295,45 @@ public final class GatherPickupGameTests {
         });
     }
 
+    @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_origin_sweep_collects_drop_resting_beyond_reach_of_the_first_stand_cell", maxTicks = 400)
+    public void originSweepCollectsDropRestingBeyondReachOfTheFirstStandCell(GameTestHelper context) {
+        // A log broken with another log still standing above it leaves a break cell nobody can stand in,
+        // and its drop can come to rest a cell further out, hidden behind the standing logs. Parking in
+        // the nearest standable cell and nudging leaves that item just outside pickup reach for the whole
+        // window; the sweep must walk the other standable cells around the break cell (no digging, no
+        // pillaring) until the item is collected.
+        Fixture fixture = fixture(context, "GatherOriginSweepGT", new BlockPos(2, 2, 2), 5);
+        AIPlayerEntity bot = fixture.bot();
+        BlockPos origin = fixture.start().east(2);
+        BlockPos cap = origin.above();
+        bot.level().setBlock(cap, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        require(context, !io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), origin),
+                "fixture: the break cell must not be standable");
+        BlockPos resting = origin.east();
+        ItemEntity drop = new ItemEntity(bot.level(), resting.getX() + 0.65D, resting.getY(),
+                resting.getZ() + 0.65D, new ItemStack(Items.OAK_LOG));
+        drop.setDeltaMovement(Vec3.ZERO);
+        bot.level().addFreshEntity(drop);
+        int before = InventoryAction.countItem(bot, Items.OAK_LOG);
+        io.github.zoyluo.minecraftai.action.KnownCellPickupSweep sweep =
+                new io.github.zoyluo.minecraftai.action.KnownCellPickupSweep(origin);
+
+        context.failIfEver(() -> {
+            require(context, bot.level().getBlockState(cap).is(Blocks.OAK_LOG),
+                    "the sweep must never dig the standing log");
+            require(context, bot.blockPosition().getY() == fixture.start().getY(),
+                    "the sweep must not pillar or climb: " + bot.blockPosition());
+            if (InventoryAction.countItem(bot, Items.OAK_LOG) > before) {
+                finish(context, fixture);
+                return;
+            }
+            if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                require(context, sweep.step(bot),
+                        "the sweep ran out of cells before collecting the drop");
+            }
+        });
+    }
+
     private static Fixture fixture(GameTestHelper context, String name, BlockPos relativeStart, int east) {
         var world = context.getLevel();
         BlockPos start = context.absolutePos(relativeStart);
