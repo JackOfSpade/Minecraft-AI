@@ -537,14 +537,41 @@ class OreDigDetourEngineTest {
     }
 
     @Test
+    void settleDropKeepsWaitingForAnItemStillFallingPastTheNoDropTick() {
+        // Real-server flake root cause: a popped item can take 12+ ticks to land one block lower, so it
+        // is still airborne (stand == null, atRest == false) at SETTLE_NO_DROP_TICKS. That tick only
+        // settles "no visible drop"; it must not turn a still-falling item into no_stand.
+        FakeDetourHost host = new FakeDetourHost();
+        host.pickupEnabled = false;
+        BlockPos seed = new BlockPos(1, 40, 0);
+        java.util.concurrent.atomic.AtomicInteger observeCalls = new java.util.concurrent.atomic.AtomicInteger();
+        int airborneObservations = OreDigDetourEngine.SETTLE_NO_DROP_TICKS + 4;
+        host.dropViewFn = cell -> {
+            if (observeCalls.getAndIncrement() < airborneObservations) {
+                return new DetourHost.DropView(true, null, false);
+            }
+            host.inventoryTotal++;
+            return new DetourHost.DropView(true, host.feet(), true);
+        };
+        DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.start(host, sel);
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("done", r.reason());
+        assertEquals(0, engine.dropsLost(), "an item still falling after the no-drop tick is not a lost drop");
+        assertTrue(observeCalls.get() > airborneObservations, "the drop must be re-observed until it lands");
+    }
+
+    @Test
     void settleDropDeclaresNoStandOnceTheStillAirborneGraceWindowElapses() {
         // The other half of the same fix: the "not yet known" grace period is bounded by
-        // SETTLE_NO_DROP_TICKS, so a drop that is STILL not at rest by then is finally written off
+        // SETTLE_AIRBORNE_TICKS, so a drop that is STILL not at rest by then is finally written off
         // instead of being chased forever (design 4.9's "at most 60 ticks" cap is not the only bound).
         FakeDetourHost host = new FakeDetourHost();
         host.pickupEnabled = false;
         BlockPos seed = new BlockPos(1, 40, 0);
-        // Always airborne, stand never computed -- exercises the "before SETTLE_NO_DROP_TICKS" bound
+        // Always airborne, stand never computed -- exercises the "before SETTLE_AIRBORNE_TICKS" bound
         // rather than the "at rest" one.
         host.dropViewFn = cell -> new DetourHost.DropView(true, null, false);
         DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");

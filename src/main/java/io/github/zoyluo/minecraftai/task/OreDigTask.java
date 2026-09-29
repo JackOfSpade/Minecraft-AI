@@ -6026,6 +6026,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
             }
             if (best == null) {
+                dropRestGate.reset(); // nothing tracked any more: a later item starts from scratch
                 return DropView.NONE;
             }
             BlockPos stand = best.getBlockPos();

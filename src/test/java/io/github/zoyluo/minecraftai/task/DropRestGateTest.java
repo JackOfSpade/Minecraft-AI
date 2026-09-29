@@ -56,4 +56,37 @@ final class DropRestGateTest {
         assertTrue(new DropRestGate().atRest(A, 5, false, true, 1.0E-6D));
         assertFalse(new DropRestGate().atRest(A, 5, false, true, 0.01D));
     }
+
+    @Test
+    void twoSlowSamplesFarApartNeverCombine() {
+        DropRestGate gate = new DropRestGate();
+        assertFalse(gate.atRest(A, 5, false, false, 1.0E-6D));
+        assertFalse(gate.atRest(A, 5 + DropRestGate.MAX_SAMPLE_GAP_TICKS + 1, false, false, 1.0E-6D),
+                "the ticks in between were never observed: the item may have been falling");
+        assertTrue(gate.atRest(A, 5 + DropRestGate.MAX_SAMPLE_GAP_TICKS + 2, false, false, 1.0E-6D),
+                "a fresh close pair after the gap is a real rest");
+    }
+
+    @Test
+    void aSlowSampleWithinTheGapBoundCombines() {
+        DropRestGate gate = new DropRestGate();
+        assertFalse(gate.atRest(A, 5, false, false, 1.0E-6D));
+        assertTrue(gate.atRest(A, 5 + DropRestGate.MAX_SAMPLE_GAP_TICKS, false, false, 1.0E-6D));
+    }
+
+    @Test
+    void aBackwardsClockNeverCombines() {
+        DropRestGate gate = new DropRestGate();
+        assertFalse(gate.atRest(A, 50, false, false, 1.0E-6D));
+        assertFalse(gate.atRest(A, 49, false, false, 1.0E-6D));
+    }
+
+    @Test
+    void resetForgetsTheTrackedItem() {
+        DropRestGate gate = new DropRestGate();
+        assertFalse(gate.atRest(A, 5, false, false, 1.0E-6D));
+        gate.reset();
+        assertFalse(gate.atRest(A, 6, false, false, 1.0E-6D), "the streak must not survive a reset");
+        assertTrue(gate.atRest(A, 7, false, false, 1.0E-6D));
+    }
 }

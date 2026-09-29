@@ -82,6 +82,8 @@ final class OreDigDetourEngine {
     /** SETTLE_DROP: least ticks before a settle counts, tick at which "no visible drop" settles, and the cap. */
     static final int SETTLE_MIN_TICKS = 5;
     static final int SETTLE_NO_DROP_TICKS = 10;
+    /** SETTLE_DROP: an item that is not yet at rest keeps its "not yet known" verdict (no no_stand) until this tick: a pop from the break cell can take 12+ ticks to land one block lower, so the 10-tick no-drop tick is too early for it. */
+    static final int SETTLE_AIRBORNE_TICKS = 30;
     static final int SETTLE_TOTAL_TICKS = 60;
     /** Drop chase: route attempts per drop. */
     static final int CHASE_ATTEMPTS = 2;
@@ -964,11 +966,11 @@ final class OreDigDetourEngine {
             }
             if (dv.visible()) {
                 // A null stand while the item is still airborne (not yet at rest) and before
-                // SETTLE_NO_DROP_TICKS just means the item has not finished falling out of the break
+                // SETTLE_AIRBORNE_TICKS just means the item has not finished falling out of the break
                 // cell yet -- keep settling instead of writing the drop off (SETTLE_TOTAL_TICKS still
                 // bounds the wait). Once it settles down (or that grace period elapses), a null stand
                 // is a real "no reachable floor" verdict, same as a stand the fluid probe put in noStep.
-                boolean stillFalling = dv.stand() == null && !dv.atRest() && t < SETTLE_NO_DROP_TICKS;
+                boolean stillFalling = dv.stand() == null && !dv.atRest() && t < SETTLE_AIRBORNE_TICKS;
                 if (!stillFalling && (dv.stand() == null || noStep.contains(dv.stand()))) {
                     dropsLost++;
                     host.log("ore_dig_detour_drop_lost", "reason", "no_stand", "pos", debt.cell);
