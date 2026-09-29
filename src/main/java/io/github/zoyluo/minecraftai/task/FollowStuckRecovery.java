@@ -51,13 +51,13 @@ import net.minecraft.util.math.Direction;
  * outright on a waiting task either way, so it can never fire while this class still owns the
  * problem, and no change to {@code StuckWatcher} itself was needed or made.
  *
- * <p><b>Extension point for r11a (swim/oxygen/dig-out-when-stuck, layered on top of this):</b>
- * {@link #attemptStep} is the single place that enumerates and executes a recovery move; it is
- * deliberately a short, ordered list of candidate moves (today: verified-standable adjacent
- * walk/step-up/step-down). A future worker adding e.g. "dig the one blocking block" should add it
- * as another candidate step tried from here (or a sibling method {@code attemptStep} falls back
- * to), not a parallel state machine -- {@link RecoveryClock} already owns all the timing/backoff
- * decisions and should not need to change to add a new kind of step.
+ * <p><b>Dig-out (the last step):</b> {@link #attemptStep} is the single place that enumerates and
+ * executes a recovery move. It tries the verified-standable adjacent walk/step-up/step-down first;
+ * only when none of those got anywhere does it hand over to {@link FollowDigOut}, which tunnels
+ * through observable natural whitelist blocks with a tool that can break them (see its header for
+ * the full safety envelope). A dig-out owns its ticks until it has gone through or given up; it is a
+ * new kind of step, not a parallel state machine -- {@link RecoveryClock} still owns all the
+ * timing/backoff decisions and needed no change.
  */
 final class FollowStuckRecovery {
     /** Real position/target-distance improvement, in blocks, that resolves recovery outright. */
@@ -72,8 +72,10 @@ final class FollowStuckRecovery {
     private BlockPos lastPos;
     private double recoveryStartDistance = Double.NaN;
     private boolean forceRepathPending;
+    private final FollowDigOut digOut = new FollowDigOut();
 
     void reset(AIPlayerEntity bot, int nowTick) {
+        digOut.cancel(bot);
         lastPos = bot.getBlockPos().toImmutable();
         recoveryStartDistance = Double.NaN;
         forceRepathPending = false;
@@ -92,6 +94,18 @@ final class FollowStuckRecovery {
         boolean positionChanged = !current.equals(lastPos);
         if (positionChanged) {
             lastPos = current;
+        }
+        if (digOut.isActive()) {
+            // A dig-out is deliberate progress in its own right (cells being broken and entered):
+            // it owns the tick, and the stall clock must not count it as being stuck.
+            clock.tick(elapsed, true);
+            if (digOut.tick(bot)) {
+                return true;
+            }
+            // Finished or abandoned this tick: hand it back to the ordinary path logic.
+            lastPos = bot.getBlockPos().toImmutable();
+            forceRepathPending = true;
+            return false;
         }
         boolean wasRecovering = clock.isRecovering();
         boolean targetCloser = wasRecovering
@@ -186,8 +200,15 @@ final class FollowStuckRecovery {
                 }
             }
         }
-        if (best != null) {
-            FakePlayerMotion.stepToStandable(bot, best, "follow_recovery_step");
+        if (best != null && FakePlayerMotion.stepToStandable(bot, best, "follow_recovery_step")) {
+            return;
+        }
+        // LAST recovery step before "I am stuck": no adjacent verified step got any closer (or the
+        // one found was refused), so with a tool that can break it, tunnel through the natural
+        // terrain in the way. FollowDigOut is deliberately narrow (see its header): observable
+        // natural whitelist blocks only, horizontal only, never near fluid, never onto a drop.
+        if (digOut.start(bot, target)) {
+            digOut.tick(bot);
         }
     }
 }

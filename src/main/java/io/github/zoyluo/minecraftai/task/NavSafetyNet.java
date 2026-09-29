@@ -40,12 +40,21 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class NavSafetyNet {
     public static final NavSafetyNet INSTANCE = new NavSafetyNet();
 
-    private static final int AIR_SURFACE_THRESHOLD = 120; // Max is 300; below this while underwater -> surface to breathe
+    static final int AIR_SURFACE_THRESHOLD = 120; // Max is 300; below this while underwater -> surface to breathe
     private static final int EMERGENCY_AIR = 60;           // Below this with no hope of surfacing -> emergency teleport to a breathable landing spot
     // FollowTask renews this tiny lease only while it is physically swimming toward a waterborne
-    // player and still has a generous oxygen margin.  It is deliberately not a general "ignore
-    // water" switch: expiry, target transitions, and low air immediately restore normal rescue.
-    private static final int FOLLOW_SWIM_LEASE_TICKS = 6;
+    // player (or climbing out after one) and still has a generous oxygen margin.  It is
+    // deliberately not a general "ignore water" switch: expiry, target transitions, and low air
+    // immediately restore normal rescue.
+    //
+    // Ownership protocol (no ping-pong between follow and the crisis machine below): while the
+    // lease is valid follow owns every decision, including turning up for breath early
+    // (FollowOxygen.SURFACE_FLOOR_AIR sits above AIR_SURFACE_THRESHOLD, so follow always gets there
+    // first).  The moment air reaches AIR_SURFACE_THRESHOLD the lease ends and the crisis machine
+    // owns the bot; follow then makes NO movement at all, so neither undoes the other's step.
+    // 20 ticks (not 6): a task tick skipped under server lag must not let the lease lapse mid-swim
+    // and hand a healthy swimmer to the shore-rescue, which follow would then swim back out of.
+    private static final int FOLLOW_SWIM_LEASE_TICKS = 20;
     private static final int BREATHE_SCAN_UP = 5;          // Number of cells scanned upward above the head to find air
     private static final int RESCUE_RADIUS_H = 16;
     private static final int RESCUE_RADIUS_V = 16;
@@ -372,7 +381,7 @@ public final class NavSafetyNet {
         return null;
     }
 
-    private static List<BlockPos> waterEscapeNeighbors(BlockPos current) {
+    static List<BlockPos> waterEscapeNeighbors(BlockPos current) {
         java.util.ArrayList<BlockPos> result = new java.util.ArrayList<>(14);
         result.add(current.up());
         for (Direction direction : Direction.Type.HORIZONTAL) {
@@ -384,7 +393,7 @@ public final class NavSafetyNet {
         return result;
     }
 
-    private static boolean passableWaterColumn(ServerWorld world, BlockPos candidate) {
+    static boolean passableWaterColumn(ServerWorld world, BlockPos candidate) {
         BlockState feet = world.getBlockState(candidate);
         BlockState head = world.getBlockState(candidate.up());
         return feet.getCollisionShape(world, candidate).isEmpty()
@@ -394,12 +403,12 @@ public final class NavSafetyNet {
                 && (isWaterSwimCell(world, candidate) || isDryStandableCell(world, candidate));
     }
 
-    private static boolean isWaterSwimCell(ServerWorld world, BlockPos candidate) {
+    static boolean isWaterSwimCell(ServerWorld world, BlockPos candidate) {
         return world.getFluidState(candidate).isIn(FluidTags.WATER)
                 || world.getFluidState(candidate.up()).isIn(FluidTags.WATER);
     }
 
-    private static boolean isDryStandableCell(ServerWorld world, BlockPos candidate) {
+    static boolean isDryStandableCell(ServerWorld world, BlockPos candidate) {
         return world.getFluidState(candidate).isEmpty()
                 && world.getFluidState(candidate.up()).isEmpty()
                 && Standability.isStandable(world, candidate);

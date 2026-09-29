@@ -65,9 +65,11 @@ public final class FakePlayerMotion {
                     "from", from, "to", target);
             return false;
         }
-        if (hasLandingEntityCollision(bot, landingBox)) {
+        net.minecraft.entity.Entity occupant = landingOccupant(bot, landingBox);
+        if (occupant != null) {
             BotLog.action(bot, "fake_player_step_rejected", "reason", "entity_occupied:" + reason,
-                    "from", from, "to", target);
+                    "from", from, "to", target,
+                    "occupant", net.minecraft.registry.Registries.ENTITY_TYPE.getId(occupant.getType()) + ":" + occupant.getName().getString());
             return false;
         }
         bot.getActionPack().stopMovement();
@@ -386,6 +388,16 @@ public final class FakePlayerMotion {
      * rejecting an otherwise valid physical step.
      */
     private static boolean hasLandingEntityCollision(AIPlayerEntity bot, Box landingBox) {
+        return landingOccupant(bot, landingBox) != null;
+    }
+
+    /**
+     * The first entity that blocks a landing box, or null. The bot itself, the vehicle it rides and
+     * anything riding it can never block its own step (a rider stepping off a boat overlaps the hull
+     * by construction), so they are excluded; the occupant is reported so a rejected step is
+     * diagnosable from the log.
+     */
+    private static net.minecraft.entity.Entity landingOccupant(AIPlayerEntity bot, Box landingBox) {
         var world = bot.getEntityWorld();
         var manager = ((ServerWorldEntityManagerAccessorMixin) (Object) world)
                 .minecraftai$getEntityManager();
@@ -405,18 +417,20 @@ public final class FakePlayerMotion {
                     if (section == null || section.isEmpty()) {
                         continue;
                     }
-                    boolean occupied = section.stream().anyMatch(entity ->
+                    net.minecraft.entity.Entity occupant = section.stream().filter(entity ->
                             entity != bot
+                                    && entity != bot.getVehicle()
+                                    && !bot.hasPassenger(entity)
                                     && !entity.isRemoved()
                                     && landingBox.intersects(entity.getBoundingBox())
                                     && (entity instanceof LivingEntity living && living.isAlive()
-                                    || EntityPredicates.CAN_COLLIDE.test(entity)));
-                    if (occupied) {
-                        return true;
+                                    || EntityPredicates.CAN_COLLIDE.test(entity))).findFirst().orElse(null);
+                    if (occupant != null) {
+                        return occupant;
                     }
                 }
             }
         }
-        return false;
+        return null;
     }
 }

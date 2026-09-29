@@ -296,7 +296,7 @@ public final class NeighborEnumerator {
                 pos.toImmutable(), p -> OreScan.observeDangerFluid(bot, p));
     }
 
-    private static boolean isMineable(ServerWorld world, BlockPos pos) {
+    public static boolean isMineable(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.getHardness(world, pos) < 0.0F || world.getBlockEntity(pos) != null) {
             return false;

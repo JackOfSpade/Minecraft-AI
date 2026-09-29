@@ -101,7 +101,7 @@ public final class DigNav {
     // allowed through, left to the reactive re-check at the moment of breaking through (see the DONE
     // branch inside digStep) as a safety net, rather than reading neighbor fluid state ungated like the
     // old version did (which could "see" lava/water through rock that had never been dug).
-    private static boolean adjacentHazardFluid(AIPlayerEntity bot, BlockPos pos) {
+    public static boolean adjacentHazardFluid(AIPlayerEntity bot, BlockPos pos) {
         FluidState here = bot.getEntityWorld().getFluidState(pos);
         if (here.isIn(FluidTags.LAVA) || here.isIn(FluidTags.WATER)) {
             return true;

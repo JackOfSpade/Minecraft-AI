@@ -40,7 +40,10 @@ final class BoatFollowSourceContractTest {
         assertTrue(follow.contains("boolean targetSwimming = !targetInBoat"));
         assertTrue(follow.contains("BoatFollowTask.automatic(targetName, abandonedBoats)"));
         assertTrue(follow.contains("followSwimming(bot, target)"));
-        assertTrue(follow.contains("FakePlayerMotion.swimStepTo(bot, candidate, \"follow_swim\")"));
+        String swim = read("task/FollowSwimming.java");
+        assertTrue(swim.contains("FakePlayerMotion.swimStepTo(bot, candidate, \"follow_swim\")"));
+        assertFalse(swim.contains("BoatLaunchTask") || swim.contains("BoatFollowTask") || swim.contains("findLaunchSite"),
+                "swim follow enters at a plain water edge: no boat launch, no launch-site pairing");
         int swimming = follow.indexOf("private void followSwimming");
         int land = follow.indexOf("private void followLand", swimming);
         String swimmingBody = follow.substring(swimming, land);
@@ -51,7 +54,7 @@ final class BoatFollowSourceContractTest {
         String boatSupport = read("task/BoatSupport.java");
         assertTrue(boatSupport.contains("nearbySafeDismountShore"),
                 "boat-to-land follow must wait for a real dry shore before dismounting");
-        assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 6"));
+        assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 20"));
         assertTrue(safety.contains("void renewFollowSwim(AIPlayerEntity bot)"));
         assertTrue(safety.contains("void clearFollowSwim(AIPlayerEntity bot)"));
         assertTrue(safety.contains("bot.getAir() <= AIR_SURFACE_THRESHOLD"),

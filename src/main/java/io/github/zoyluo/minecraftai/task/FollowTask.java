@@ -7,18 +7,12 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -38,7 +32,6 @@ public final class FollowTask extends AbstractTask {
     // Retry delay after a "pathfinding_throttled" answer (ActionPack's success cooldown is 5 ticks).
     private static final int THROTTLED_RETRY_TICKS = 5;
     private static final double SWIM_STOP_DISTANCE = 3.5D;
-    private static final int SWIM_REPATH_TICKS = 30;
     private static final double BOAT_TURN_ONLY_ANGLE = 82.0D;
     // How close a boat paddling to a dry shore aims before dismounting. This was the land STOP_DISTANCE
     // (2.0) until r10 widened that to 3.0 and, unintentionally, this standoff with it; the shore
@@ -60,6 +53,9 @@ public final class FollowTask extends AbstractTask {
     // every time -- this is the "follow_boat_fallback_swim churn" from the live diagnosis. Back off
     // for a few real seconds between attempts, walking toward water in the meantime instead.
     private static final int BOAT_ACQUIRE_COOLDOWN_TICKS = 60;
+    // Failed acquisitions (while the target is boating) before a bot with no boat material swims after
+    // it instead of walking to the shore and trying again.
+    private static final int BOAT_SWIM_AFTER_FAILURES = 2;
     // Throttles the walk-toward-water helper's own findLaunchSite scan the same way followLand
     // throttles its repathing, so backing off from a failed acquisition does not just trade one
     // every-tick scan for another.
@@ -68,7 +64,6 @@ public final class FollowTask extends AbstractTask {
 
     private final String targetName;
     private int nextRepathTick;
-    private int nextSwimRepathTick;
     private boolean waiting;
     // Set only when a full pathfind failed with the target still farther than the direct-walk
     // fallback range, so we deliberately wait out nextRepathTick instead of retrying an expensive
@@ -77,6 +72,7 @@ public final class FollowTask extends AbstractTask {
     private boolean repathBackoff;
     private BoatFollowTask boatFollow;
     private int nextBoatAttemptTick;
+    private int boatAcquireFailures;
     private int nextBoatWaterScanTick;
     // Reason the last acquisition failed, and boats already given up on (beached/wedged): both
     // outlive the BoatFollowTask instance that produced them.
@@ -85,6 +81,7 @@ public final class FollowTask extends AbstractTask {
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
     private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
     private int directWalkCount;
+    private final FollowSwimming swimming = new FollowSwimming();
 
     public FollowTask(String targetName) {
         this.targetName = FollowTargetResolver.normalize(targetName);
@@ -120,11 +117,12 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         nextRepathTick = 0;
-        nextSwimRepathTick = 0;
+        swimming.reset();
         waiting = false;
         repathBackoff = false;
         boatFollow = null;
         nextBoatAttemptTick = 0;
+        boatAcquireFailures = 0;
         nextBoatWaterScanTick = 0;
         lastBoatFailure = "";
         abandonedBoats.clear();
@@ -178,6 +176,12 @@ public final class FollowTask extends AbstractTask {
             waiting = true;
             return;
         }
+        // The player has left the water but the bot is still in it: swim to a dry landing near
+        // them first (this renews the narrow swim lease itself), then ordinary land follow runs.
+        if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)) {
+            waiting = swimming.isWaiting();
+            return;
+        }
         followLand(bot, target);
     }
 
@@ -223,6 +227,7 @@ public final class FollowTask extends AbstractTask {
             // watchdog gave up on a stuck/beached one), back off for a few seconds and walk toward
             // water in the meantime rather than immediately retrying the same failing scan.
             lastBoatFailure = String.valueOf(boatFollow.failureReason());
+            boatAcquireFailures++;
             BotLog.action(bot, "follow_boat_acquire_failed_backoff", "reason", lastBoatFailure);
             boatFollow = null;
             nextBoatAttemptTick = elapsed + BOAT_ACQUIRE_COOLDOWN_TICKS;
@@ -231,14 +236,18 @@ public final class FollowTask extends AbstractTask {
     }
 
     /**
-     * One tick of following while the next boat acquisition attempt is backed off.  A bot that
-     * cannot get any boat at all (no boat item and no planks for one) or is already in the water
-     * keeps following the boating player by swimming, exactly as before; otherwise it walks toward
-     * the water so that the next attempt starts from a shore.
+     * One tick of following while the next boat acquisition attempt is backed off.  A bot that is
+     * already in the water keeps following the boating player by swimming, and so does one that
+     * cannot get any boat at all (no boat item and no planks for one) once it has retried from the
+     * shore; otherwise it walks toward the water so that the next attempt starts from a shore.
      */
     private void boatAcquireBackoffStep(AIPlayerEntity bot, ServerPlayerEntity target) {
         boolean noBoatMaterial = lastBoatFailure.contains(BoatLaunchTask.FAIL_NEED_BOAT_OR_PLANKS);
-        if (noBoatMaterial || bot.isTouchingWater() || bot.isSubmergedInWater()) {
+        // A bot with no boat material only gives up on boarding/launching and swims after the boating
+        // player once it has retried the acquisition from the water's edge as well (BOAT_SWIM_AFTER_FAILURES):
+        // rushing into the lake on the first failure walks it past an empty boat it could still board.
+        boolean swimInstead = noBoatMaterial && boatAcquireFailures >= BOAT_SWIM_AFTER_FAILURES;
+        if (swimInstead || bot.isTouchingWater() || bot.isSubmergedInWater()) {
             followSwimming(bot, target);
             return;
         }
@@ -288,60 +297,9 @@ public final class FollowTask extends AbstractTask {
             waiting = true;
             return;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        if (isSwimCell(world, feet)) {
-            NavSafetyNet.INSTANCE.renewFollowSwim(bot);
-            double distanceSquared = bot.squaredDistanceTo(target);
-            if (distanceSquared <= SWIM_STOP_DISTANCE * SWIM_STOP_DISTANCE) {
-                bot.getActionPack().stopMovement();
-                waiting = true;
-                return;
-            }
-            waiting = !swimStepToward(bot, target);
-            return;
-        }
-
-        // Enter water only at a local visible shore.  The one-cell FakePlayerMotion move is the
-        // same collision-validated primitive used by the safety net, not an invented teleport.
-        BoatSupport.LaunchSite site = BoatSupport.findLaunchSite(bot).orElse(null);
-        if (site == null) {
-            if (elapsed % 200 == 1) {
-                BotLog.action(bot, "follow_swim_no_launch_site");
-            }
-            waiting = true;
-            return;
-        }
-        if (feet.equals(site.shore())) {
-            NavSafetyNet.INSTANCE.renewFollowSwim(bot);
-            waiting = !FakePlayerMotion.swimStepTo(bot, site.water(), "follow_swim_enter");
-            return;
-        }
-        if (elapsed >= nextSwimRepathTick) {
-            ActionResult path = bot.getActionPack().startPathTo(site.shore());
-            if (path.isFailed()) {
-                bot.getActionPack().startWalkTo(site.shore().toCenterPos(), 1.0D);
-            }
-            nextSwimRepathTick = elapsed + SWIM_REPATH_TICKS;
-        }
-        waiting = false;
-    }
-
-    private boolean swimStepToward(AIPlayerEntity bot, ServerPlayerEntity target) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos current = bot.getBlockPos();
-        double before = bot.squaredDistanceTo(target);
-        List<BlockPos> choices = new ArrayList<>(6);
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            choices.add(current.offset(direction));
-        }
-        choices.add(current.up());
-        choices.add(current.down());
-        return choices.stream()
-                .filter(candidate -> isSafeSwimCell(world, candidate))
-                .filter(candidate -> candidate.getSquaredDistance(target.getBlockPos()) + 0.01D < before)
-                .sorted(Comparator.comparingDouble(candidate -> candidate.getSquaredDistance(target.getBlockPos())))
-                .anyMatch(candidate -> FakePlayerMotion.swimStepTo(bot, candidate, "follow_swim"));
+        // Swim after the player (entering the water at the nearest observable edge, diving with
+        // them under oxygen management, no boat); see FollowSwimming.
+        waiting = swimming.follow(bot, target, elapsed, SWIM_STOP_DISTANCE);
     }
 
     private void followLand(AIPlayerEntity bot, ServerPlayerEntity target) {
@@ -494,6 +452,7 @@ public final class FollowTask extends AbstractTask {
     }
 
     private void abandonBoatChild(AIPlayerEntity bot) {
+        boatAcquireFailures = 0;
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.cancel(bot, "follow_mode_changed");
         }
@@ -502,20 +461,6 @@ public final class FollowTask extends AbstractTask {
 
     private static boolean isWaterborne(ServerPlayerEntity target) {
         return target.isTouchingWater() || target.isSubmergedInWater();
-    }
-
-    private static boolean isSwimCell(ServerWorld world, BlockPos pos) {
-        return BoatSupport.isWater(world, pos) || BoatSupport.isWater(world, pos.up());
-    }
-
-    private static boolean isSafeSwimCell(ServerWorld world, BlockPos pos) {
-        if (!isSwimCell(world, pos)
-                || !world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()
-                || !world.getBlockState(pos.up()).getCollisionShape(world, pos.up()).isEmpty()) {
-            return false;
-        }
-        return !world.getFluidState(pos).isIn(net.minecraft.registry.tag.FluidTags.LAVA)
-                && !world.getFluidState(pos.up()).isIn(net.minecraft.registry.tag.FluidTags.LAVA);
     }
 
     private static void stopBoatAndActions(AIPlayerEntity bot) {
