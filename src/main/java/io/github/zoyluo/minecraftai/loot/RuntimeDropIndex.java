@@ -37,8 +37,10 @@ import java.util.Set;
  * probabilistic sources kept only as a lower-priority fallback (e.g. gathering flint by breaking
  * gravel when nothing else drops it reliably).
  *
- * <p>Armed at server start (see RuntimeLifecycleCoordinator) and built lazily once on first server-thread use, thread-safe, cleared on
- * server stop -- same shape as RuntimeRecipeIndex. A caller that reads it before the first
+ * <p>Armed at server start (see RuntimeLifecycleCoordinator), built once by an idle-time warm-up
+ * {@link #WARMUP_DELAY_TICKS} ticks later (MinecraftAiMod's END_SERVER_TICK hook) or, if a query
+ * arrives first, lazily on the first server-thread use; thread-safe, cleared on server stop --
+ * same shape as RuntimeRecipeIndex. A caller that reads it before the first
  * {@link #rebuild} (unit tests / very early startup) gets {@link Optional#empty()} and should fall
  * back to its own minimal default.
  */
@@ -59,15 +61,38 @@ public final class RuntimeDropIndex {
     private RuntimeDropIndex() {
     }
 
+    /** Server ticks after {@link #arm} at which the idle warm-up build runs (5 s at 20 tps). */
+    static final int WARMUP_DELAY_TICKS = 100;
+
+    // Only ever touched on the server thread (arm from SERVER_STARTED, tickWarmup from the tick hook).
+    private static int warmupTicksLeft;
+
     /**
      * Registers the server without building: the build costs 200-350 ms (build_ms in
-     * runtime_drop_index_built), too long for the server-start critical path, so it happens lazily
-     * on the first query made from the server thread (all gather tasks are created there). A query
-     * from any other thread before that simply sees "not built" and uses the caller's fallback.
+     * runtime_drop_index_built; ~660 ms cold), too long for the server-start critical path. It is
+     * built by {@link #tickWarmup} a few seconds after start (an idle moment, on the server thread)
+     * so the hitch does not land inside the player's first gather request; the lazy build on the
+     * first server-thread query stays as the fallback for a request that arrives before the warm-up
+     * fires. A query from any other thread before either has run simply sees "not built" and uses
+     * the caller's fallback.
      */
     public static void arm(MinecraftServer server) {
         armedServer = server;
         ready = false;
+        warmupTicksLeft = WARMUP_DELAY_TICKS;
+    }
+
+    /**
+     * Server-thread tick hook: counts down from {@link #arm} and builds the index once when the
+     * warm-up delay elapses (no-op if a first query already built it lazily). Cheap when idle.
+     */
+    public static void tickWarmup(MinecraftServer server) {
+        if (warmupTicksLeft <= 0) {
+            return;
+        }
+        if (--warmupTicksLeft == 0 && !ready && server == armedServer) {
+            rebuild(server);
+        }
     }
 
     private static void ensureBuilt() {
@@ -123,6 +148,7 @@ public final class RuntimeDropIndex {
         }
         ready = false;
         armedServer = null;
+        warmupTicksLeft = 0;
     }
 
     /**
