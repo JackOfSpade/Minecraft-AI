@@ -30,9 +30,12 @@ public final class SensingArena {
     private SensingArena() {
     }
 
-    /** The bot's own structured-log lines, or null when the writer or the file is unavailable. */
+    /** The bot's own structured-log lines, or null when the writer or the file is unavailable. The writer thread is
+     * asynchronous, so this first waits for it to catch up: a line the server thread queued a moment ago (often in
+     * the same tick as the state a test just asserted on) would otherwise be missing from the file. */
     public static List<String> botLog(String botName) {
         try {
+            BotLogWriter.INSTANCE.awaitDrainedForTest(2000L);
             Path base = BotLogWriter.INSTANCE.baseDir();
             if (base == null) {
                 return null;

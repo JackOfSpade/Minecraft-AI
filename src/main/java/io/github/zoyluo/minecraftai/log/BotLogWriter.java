@@ -38,6 +38,10 @@ public final class BotLogWriter {
     private final ArrayBlockingQueue<LogEntry> queue = new ArrayBlockingQueue<>(4096);
     private final ArrayDeque<LogEntry> bootstrapEntries = new ArrayDeque<>();
     private final AtomicLong droppedCount = new AtomicLong();
+    // Entries accepted into the queue vs entries the writer has finished (or given up on): lets a test wait
+    // for the asynchronous writer to catch up before it reads a log file (see awaitDrainedForTest).
+    private final AtomicLong enqueuedCount = new AtomicLong();
+    private final AtomicLong writtenCount = new AtomicLong();
     private final Map<String, BufferedWriter> botWriters = new ConcurrentHashMap<>();
 
     private MinecraftAiConfig.Logging config = MinecraftAiConfig.defaults().logging();
@@ -79,6 +83,8 @@ public final class BotLogWriter {
             allWriter = Files.newBufferedWriter(baseDir.resolve("all.log"), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
             pruneOldSessions(sessionsDir);
             stopRequested = false;
+            enqueuedCount.set(0L);
+            writtenCount.set(0L);
             workerThread = new Thread(this::workerLoop, "MinecraftAiLogWriter");
             workerThread.setDaemon(true);
             workerThread.start();
@@ -168,7 +174,9 @@ public final class BotLogWriter {
         if (!started || !config.enabled() || level.toInt() < thresholds.getOrDefault(category, Level.INFO).toInt()) {
             return;
         }
+        enqueuedCount.incrementAndGet();
         if (!queue.offer(entry)) {
+            enqueuedCount.decrementAndGet();
             droppedCount.incrementAndGet();
             if (security) {
                 MIRROR.error("[Minecraft-AI] SECURITY log queue full; denial remained mirrored but structured copy was dropped");
@@ -206,6 +214,28 @@ public final class BotLogWriter {
         drainQueue();
         closeWriters();
         started = false;
+    }
+
+    /**
+     * Test hook: blocks until every entry accepted before this call has been written to disk (or the timeout
+     * or a writer shutdown), so a test that reads a log file right after the server thread logged something
+     * does not race the asynchronous writer thread. Returns whether the writer caught up.
+     */
+    public boolean awaitDrainedForTest(long timeoutMs) {
+        long target = enqueuedCount.get();
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (writtenCount.get() < target) {
+            if (!started || System.nanoTime() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(1L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
     }
 
     public void forceRotateForTest() {
@@ -281,7 +311,9 @@ public final class BotLogWriter {
             if (entry.level().toInt() < thresholds.getOrDefault(entry.category(), Level.INFO).toInt()) {
                 continue;
             }
+            enqueuedCount.incrementAndGet();
             if (!queue.offer(entry)) {
+                enqueuedCount.decrementAndGet();
                 droppedCount.incrementAndGet();
             }
         }
@@ -321,6 +353,14 @@ public final class BotLogWriter {
     }
 
     private void writeEntry(LogEntry entry) {
+        try {
+            writeEntryUnchecked(entry);
+        } finally {
+            writtenCount.incrementAndGet();
+        }
+    }
+
+    private void writeEntryUnchecked(LogEntry entry) {
         try {
             maybeRotateForDate();
             String line = format(entry);

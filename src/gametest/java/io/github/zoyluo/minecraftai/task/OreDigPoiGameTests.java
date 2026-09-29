@@ -44,6 +44,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
@@ -989,10 +991,9 @@ public final class OreDigPoiGameTests {
         });
         PoiConsultBudget.clearAll();
         PoiCache.clearAll();
-        PoiAdvisor.setTestTransport(payload -> {
-            Thread.sleep(250L); // real time, on the advisor's own worker thread, never the server thread
-            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "mineshaft", "high", "gametest stub stop");
-        });
+        GatedStub gate = new GatedStub(new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "mineshaft", "high", "gametest stub stop"));
+        h.onCleanup(gate::free);
+        PoiAdvisor.setTestTransport(gate.transport());
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
@@ -1026,7 +1027,7 @@ public final class OreDigPoiGameTests {
                 if (!resolved) {
                     h.require(TaskManager.INSTANCE.isUserPaused(bot),
                             "the bot must stay paused for the whole hold, until the verdict resolves it");
-                    h.require(p.tick < 250, "the stub verdict (250ms delay) never resolved within the test budget");
+                    gate.advance(h, p.tick, GatedStub.HOLD_TICKS, "the stub verdict never resolved within the test budget");
                     return;
                 }
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "a STOP verdict must leave the bot paused");
@@ -1058,10 +1059,9 @@ public final class OreDigPoiGameTests {
         });
         PoiConsultBudget.clearAll();
         PoiCache.clearAll();
-        PoiAdvisor.setTestTransport(payload -> {
-            Thread.sleep(250L);
-            return new PoiPrompt.Verdict(PoiPrompt.Decision.CONTINUE, "natural_cave", "medium", "gametest stub continue");
-        });
+        GatedStub gate = new GatedStub(new PoiPrompt.Verdict(PoiPrompt.Decision.CONTINUE, "natural_cave", "medium", "gametest stub continue"));
+        h.onCleanup(gate::free);
+        PoiAdvisor.setTestTransport(gate.transport());
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
@@ -1091,7 +1091,7 @@ public final class OreDigPoiGameTests {
                 List<String> lines = botLog(botName);
                 boolean resolved = lines != null && hasEvent(lines, "poi_continue");
                 if (!resolved) {
-                    h.require(p.tick < 250, "the stub verdict (250ms delay) never resolved within the test budget");
+                    gate.advance(h, p.tick, GatedStub.HOLD_TICKS, "the stub verdict never resolved within the test budget");
                     return;
                 }
                 h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a CONTINUE verdict must resume the bot");
@@ -1128,10 +1128,11 @@ public final class OreDigPoiGameTests {
         });
         PoiConsultBudget.clearAll();
         PoiCache.clearAll();
-        PoiAdvisor.setTestTransport(payload -> {
-            Thread.sleep(400L);
-            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "dungeon", "high", "gametest stub late stop");
-        });
+        // Released only after the player's resume (phase 2 first tick), so the verdict deterministically
+        // arrives after the player's action, which is the whole point of this test.
+        GatedStub gate = new GatedStub(new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "dungeon", "high", "gametest stub late stop"));
+        h.onCleanup(gate::free);
+        PoiAdvisor.setTestTransport(gate.transport());
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
@@ -1170,7 +1171,7 @@ public final class OreDigPoiGameTests {
                 if (!resolved) {
                     h.require(!TaskManager.INSTANCE.isUserPaused(bot),
                             "a late verdict must never re-pause a bot the player already resumed");
-                    h.require(p.tick < 300, "the stub verdict (400ms delay) never resolved within the test budget");
+                    gate.advance(h, p.tick, 0, "the stub verdict never resolved within the test budget");
                     return;
                 }
                 h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a late STOP must never claim the pause back");
@@ -1210,10 +1211,10 @@ public final class OreDigPoiGameTests {
         });
         PoiConsultBudget.clearAll();
         PoiCache.clearAll();
-        PoiAdvisor.setTestTransport(payload -> {
-            Thread.sleep(3000L);
-            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "stronghold", "low", "gametest stub too-slow stop");
-        });
+        // Held back until the coordinator's own deadline fallback has fired (phase 2), then released.
+        GatedStub gate = new GatedStub(new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "stronghold", "low", "gametest stub too-slow stop"));
+        h.onCleanup(gate::free);
+        PoiAdvisor.setTestTransport(gate.transport());
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
@@ -1252,12 +1253,16 @@ public final class OreDigPoiGameTests {
                 return;
             }
             if (phase[0] == 2) {
-                // Give the (now-stale) 3s-delayed stub a further margin to answer, then confirm it changed
-                // nothing: still exactly one poi_stop line, still paused, no second consult attempt logged.
-                if (p.tick < 450) {
+                // Release the (now-stale) stub and wait until the coordinator has actually processed its verdict
+                // (the "poi_advisor_verdict already_resolved=true" line), then confirm it changed nothing:
+                // still exactly one poi_stop line, still paused, no second consult attempt logged.
+                List<String> lines = botLog(botName);
+                if (lines == null || !hasEvent(lines, "poi_advisor_verdict")) {
+                    gate.advance(h, p.tick, 0, "the released stub's late verdict never reached the coordinator");
                     return;
                 }
-                List<String> lines = botLog(botName);
+                h.require(lines.stream().anyMatch(l -> l.contains("event=poi_advisor_verdict") && l.contains("already_resolved='true'")),
+                        "the late verdict must be recognised as arriving after the deadline resolved the case");
                 int stopCount = lines == null ? 0 : (int) lines.stream().filter(l -> l.contains("event=poi_stop ") || l.endsWith("event=poi_stop")).count();
                 h.require(stopCount == 1, "a late, already-superseded verdict must never add a second poi_stop, saw " + stopCount);
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "the bot must still be paused from the deadline's own stop");
@@ -1353,10 +1358,9 @@ public final class OreDigPoiGameTests {
         });
         PoiConsultBudget.clearAll();
         PoiCache.clearAll();
-        PoiAdvisor.setTestTransport(payload -> {
-            Thread.sleep(250L);
-            return new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "mineshaft", "high", "gametest stub stop");
-        });
+        GatedStub gate = new GatedStub(new PoiPrompt.Verdict(PoiPrompt.Decision.STOP, "mineshaft", "high", "gametest stub stop"));
+        h.onCleanup(gate::free);
+        PoiAdvisor.setTestTransport(gate.transport());
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
@@ -1394,7 +1398,7 @@ public final class OreDigPoiGameTests {
                 if (!resolved) {
                     h.require(BrainCoordinator.INSTANCE.isAwaitingTaskForTest(bot),
                             "the wake source must survive the whole hold, not just its first tick");
-                    h.require(p.tick < 250, "the stub verdict (250ms delay) never resolved within the test budget");
+                    gate.advance(h, p.tick, GatedStub.HOLD_TICKS, "the stub verdict never resolved within the test budget");
                     return;
                 }
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "a STOP verdict must leave the bot paused");
@@ -1424,7 +1428,7 @@ public final class OreDigPoiGameTests {
      * the fallback left it (paused, one {@code poi_stop} line, never resumed), while the cache still gets the
      * real verdict so a later candidate in the same coarse cell benefits from it.
      */
-    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 3800)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 700)
     public void lateVerdictIsNotifyOnly(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(190, -3, 3, -3, 3, 3);
@@ -1440,10 +1444,10 @@ public final class OreDigPoiGameTests {
         });
         PoiConsultBudget.clearAll();
         PoiCache.clearAll();
-        PoiAdvisor.setTestTransport(payload -> {
-            Thread.sleep(3000L);
-            return new PoiPrompt.Verdict(PoiPrompt.Decision.CONTINUE, "natural_cave", "medium", "gametest stub late continue");
-        });
+        // Held back until the coordinator's own deadline fallback has fired (phase 2), then released.
+        GatedStub gate = new GatedStub(new PoiPrompt.Verdict(PoiPrompt.Decision.CONTINUE, "natural_cave", "medium", "gametest stub late continue"));
+        h.onCleanup(gate::free);
+        PoiAdvisor.setTestTransport(gate.transport());
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         String cacheKey = PoiCache.keyFor(dim, anchor.getX(), anchor.getY(), anchor.getZ(), List.of());
@@ -1485,20 +1489,17 @@ public final class OreDigPoiGameTests {
                 return;
             }
             if (phase[0] == 2) {
-                // Give the 3s-delayed stub (a genuine CONTINUE, disagreeing with the fallback's STOP) a
-                // further margin to answer, then confirm design 6.6's late-reply rule was actually applied,
-                // not just silently dropped (which would look identical on the stopCount alone). This
-                // headless GameTest server ticks far faster than the usual 20/s (empirically close to an
-                // order of magnitude faster), so a margin sized for real 20-tick-per-second play (450 ticks
-                // was intended as ~22s, comfortably past the stub's fixed 3s sleep) instead elapses in only
-                // a couple of real seconds here -- racing the wall-clock sleep and tearing the bot down
-                // (maxTicks) before the late verdict can ever arrive. 3000 ticks reliably clears several
-                // real seconds of margin at the pace actually observed, independent of tick rate.
-                if (p.tick < 3000) {
+                // Release the stub (a genuine CONTINUE, disagreeing with the fallback's STOP) and wait until
+                // the coordinator has processed it, then confirm design 6.6's late-reply rule was actually
+                // applied, not just silently dropped (which would look identical on the stopCount alone). The
+                // reply is gated by the test instead of a wall-clock sleep: the headless GameTest server ticks
+                // at roughly 1000/s, so any tick-count margin raced the stub's sleep (see GatedStub).
+                List<String> lines = botLog(botName);
+                if (lines == null || !hasEvent(lines, "poi_late_check")) {
+                    gate.advance(h, p.tick, 0, "the released stub's late verdict never reached the coordinator");
                     return;
                 }
-                List<String> lines = botLog(botName);
-                h.require(lines != null && hasEvent(lines, "poi_late_check"),
+                h.require(hasEvent(lines, "poi_late_check"),
                         "a late verdict after the coordinator's own deadline fallback must log poi_late_check, "
                                 + "design 6.6: \"a late stop after the fallback or after the player acted...\"");
                 boolean loggedAsContinueViaDeadline = lines.stream().anyMatch(
@@ -1715,6 +1716,80 @@ public final class OreDigPoiGameTests {
         int tick;
         int assignedAt = -1;
         int chunkWaitStart = -1;
+    }
+
+    /**
+     * A stub advisor transport whose reply is released by the test, never by wall-clock time. The headless
+     * GameTest server ticks at close to 1000 ticks per second (and that rate varies with machine load and
+     * with how heavy each tick is), so a {@code Thread.sleep(N)} in the stub races every tick-count budget
+     * in the test: a 3s stub could not answer inside a 3000-tick margin, and a 400ms stub not inside 300
+     * ticks. Gating the reply on a latch keeps the ordering the sleeps were standing in for ("the reply
+     * arrives after the hold/deadline/player action, and before the test gives up") while removing the
+     * dependence on the tick rate. The test releases the stub, blocks the server thread (harmless: the stub
+     * never needs it) until the worker has returned the verdict, and only then counts ticks for the
+     * server-thread callback the advisor queues.
+     */
+    private static final class GatedStub {
+        /** Ticks the server thread gets, after the worker returned, to run the queued advisor callback. */
+        private static final int CALLBACK_TICK_BUDGET = 100;
+        /** Ticks a reply is held back once the consult started, so the hold is visibly in force first. */
+        static final int HOLD_TICKS = 10;
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final CountDownLatch returned = new CountDownLatch(1);
+        private final PoiPrompt.Verdict verdict;
+        private int firstTick = -1;
+        private int releasedAt = -1;
+
+        GatedStub(PoiPrompt.Verdict verdict) {
+            this.verdict = verdict;
+        }
+
+        PoiAdvisor.Transport transport() {
+            return payload -> {
+                try {
+                    // Bounded so a test that dies before releasing cannot pin a shared advisor worker.
+                    release.await(30L, TimeUnit.SECONDS);
+                } finally {
+                    returned.countDown();
+                }
+                return verdict;
+            };
+        }
+
+        /** Cleanup: never leave the worker blocked (the bounded await would otherwise pin a shared advisor worker). */
+        void free() {
+            release.countDown();
+        }
+
+        /**
+         * One call per test tick while the verdict has not been observed yet. Holds the reply back for
+         * {@code holdTicks} ticks, then releases it and waits for the worker; afterwards each call spends
+         * one tick of {@link #CALLBACK_TICK_BUDGET} (with a tiny real sleep so the budget also covers
+         * scheduling jitter) and fails with {@code neverArrived} when the callback still did not run.
+         */
+        void advance(Harness h, int tick, int holdTicks, String neverArrived) {
+            try {
+                if (releasedAt < 0) {
+                    if (firstTick < 0) {
+                        firstTick = tick;
+                    }
+                    if (tick - firstTick < holdTicks) {
+                        return;
+                    }
+                    release.countDown();
+                    if (!returned.await(10L, TimeUnit.SECONDS)) {
+                        h.fail("the stub advisor transport was never invoked (or never returned) after release: " + neverArrived);
+                    }
+                    releasedAt = tick;
+                    return;
+                }
+                h.require(tick < releasedAt + CALLBACK_TICK_BUDGET, neverArrived);
+                Thread.sleep(2L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                h.fail("interrupted while waiting for the stub advisor: " + neverArrived);
+            }
+        }
     }
 
     /** Cleanup-on-failure, strict-capability and POI-mode config plumbing shared by every test. */
