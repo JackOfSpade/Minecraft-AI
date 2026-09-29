@@ -256,12 +256,19 @@ public final class PathExecutor {
 
     /**
      * Executes a real, multi-tick vanilla fall for a clientless bot instead of teleporting one
-     * block per tick. Server-side {@code travel()}/gravity has been empirically confirmed to run
-     * for this entity independent of any {@link FakePlayerMotion} intervention (see the
-     * accompanying commit message), so this method only steers the horizontal drift toward the
-     * landing column and watches for a real, physically-resolved landing; vanilla's own collision
-     * and gravity integration produce the same accelerating multi-tick descent, arrival position
-     * and fall damage a real player would experience for an identical drop.
+     * block per tick. Server-side {@code travel()}/gravity runs for this entity independent of any
+     * {@link FakePlayerMotion} intervention (a bot ticks its own physics), so this method only steers
+     * the horizontal drift toward the landing column and watches for a real, physically-resolved
+     * landing; vanilla's own collision and gravity integration produce the same accelerating
+     * multi-tick descent and arrival position a real player would have for an identical drop.
+     *
+     * <p>Fall <em>damage</em> is not part of that physics: {@code Entity.move} skips the fall check for
+     * a server-side player (vanilla lets the client's move packet drive it), and until
+     * {@code AIPlayerEntity.tick} began to run {@code doCheckFallDamage} itself (every tick, see
+     * {@code BotFallAndKnockbackGameTests}) a bot took no damage from any drop. The earlier note here
+     * that the damage had been "empirically confirmed" was wrong: only the gravity was. A drop now
+     * costs the vanilla {@code ceil(distance - 3)} hit points, which is why the planner's
+     * {@code nav.maxSafeFall} (3, damage free) is a real safety bound and not a formality.</p>
      */
     private ActionResult tickDrop(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();

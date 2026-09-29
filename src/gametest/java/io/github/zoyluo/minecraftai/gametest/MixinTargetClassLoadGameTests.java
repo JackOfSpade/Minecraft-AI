@@ -52,6 +52,18 @@ public final class MixinTargetClassLoadGameTests {
     }
 
     /**
+     * BotMeleeKnockbackMixin: a MixinExtras @WrapOperation on the {@code hurtMarked} read in {@code Player.causeExtraKnockback}, the place where
+     * vanilla throws a ServerPlayer target's server-side knockback away (a bot has no client to apply it).
+     */
+    @GameTest(maxTicks = 20)
+    public void botMeleeKnockbackMixinTargetLoadsWithTheMixinApplied(GameTestHelper context) {
+        Class<?> target = load(context, "net.minecraft.world.entity.player.Player");
+        require(context, Arrays.stream(target.getDeclaredMethods()).anyMatch(m -> m.getName().contains("minecraftai$botKeepsItsKnockback")),
+                "BotMeleeKnockbackMixin's @WrapOperation handler was not merged into " + target.getName());
+        context.succeed();
+    }
+
+    /**
      * The Baritone mixins are applied to vanilla classes at start-up whatever the navigation engine is: the palette accessor (no
      * static initialiser that can crash start-up: the reflective scan is a lazy holder), the loot-context wrapper (a non-exclusive
      * WrapOperation) and the item-stack hash (a field write on damage, computed on read).

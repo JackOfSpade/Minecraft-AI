@@ -23,7 +23,8 @@
     "BaritonePalettedContainerDataMixin",
     "BaritoneItemStackMixin",
     "BaritoneLootTableMixin",
-    "BaritoneLootContextBuilderMixin"
+    "BaritoneLootContextBuilderMixin",
+    "BotMeleeKnockbackMixin"
   ],
   "client": [],
   "server": [],

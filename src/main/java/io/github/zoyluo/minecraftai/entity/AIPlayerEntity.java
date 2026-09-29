@@ -23,6 +23,11 @@ public class AIPlayerEntity extends ServerPlayer {
     private final ActionPack actionPack = new ActionPack(this);
     private final DamageLogCoalescer damageLog = new DamageLogCoalescer();
     private final java.util.Map<String, Integer> damageSinceSample = new java.util.LinkedHashMap<>();
+    // Where this tick began, and whether the fall check of this tick has run (see checkFallDamageOnce).
+    private double tickFromX;
+    private double tickFromY;
+    private double tickFromZ;
+    private boolean fallChecked;
 
     public AIPlayerEntity(MinecraftServer server,
                           ServerLevel world,
@@ -42,6 +47,11 @@ public class AIPlayerEntity extends ServerPlayer {
             this.level().getChunkSource().move(this);
         }
 
+        this.fallChecked = false;
+        this.tickFromX = this.getX();
+        this.tickFromY = this.getY();
+        this.tickFromZ = this.getZ();
+
         try {
             // While a Baritone process drives this bot it writes the inputs (before the physics tick below, like a client's
             // input handling) and aims; the legacy executor is idle and writes nothing. See BaritoneDriver.
@@ -51,7 +61,9 @@ public class AIPlayerEntity extends ServerPlayer {
             this.doTick();
             if (baritoneDrives) {
                 baritoneAfterPhysics();
+                checkFallDamageOnce(); // a no-op when the driver checked
             } else {
+                checkFallDamageOnce();
                 this.actionPack.onUpdate();
             }
             logDamageSummary(damageLog.flushIfIdle(this.tickCount));
@@ -85,6 +97,7 @@ public class AIPlayerEntity extends ServerPlayer {
     /** The driver hook after the physics tick, for a bot the hook before it reported as driven (same containment). */
     private void baritoneAfterPhysics() {
         if (!NavEngineSelector.baritoneActive()) {
+            checkFallDamageOnce();
             this.actionPack.onUpdate();
             return;
         }
@@ -92,8 +105,38 @@ public class AIPlayerEntity extends ServerPlayer {
             BaritoneDriver.afterPhysics(this);
         } catch (Throwable failure) {
             NavEngineSelector.handleFailure("baritone_after_physics", failure);
+            checkFallDamageOnce();
             this.actionPack.onUpdate();
         }
+    }
+
+    /**
+     * Fall damage for a bot. In 1.21.11 {@code Entity.move} skips {@code checkFallDamage} for a server-side player (it is not the
+     * "local instance authoritative" one and a player is client authoritative): vanilla expects the client's move packet to drive
+     * {@code doCheckFallDamage} on the server. A bot has no client, so without this it never accumulated fall distance and never took
+     * fall damage, however far it dropped. This is what the move packet handler does: it passes the tick's movement and the ground flag
+     * to {@code doCheckFallDamage}, which accumulates the fall distance while airborne and, on landing, applies the vanilla damage of
+     * the block landed on (armour, feather falling, honey, hay, water and so on are all vanilla's).
+     *
+     * <p>Runs at most once per tick: the Baritone driver checks in its own step (before the PlayerUpdate POST event, as the client's
+     * packet precedes it) and marks the tick, so a driven bot is never charged twice. Not for a passenger (the vehicle's own physics
+     * decide) and not for a dead bot. A teleport ({@code FakePlayerMotion}, safety moves) happens outside the physics tick measured here
+     * and clears the fall distance itself.</p>
+     */
+    private void checkFallDamageOnce() {
+        if (this.fallChecked) {
+            return;
+        }
+        this.fallChecked = true;
+        if (!this.isAlive() || this.isRemoved() || this.isPassenger()) {
+            return;
+        }
+        this.doCheckFallDamage(this.getX() - this.tickFromX, this.getY() - this.tickFromY, this.getZ() - this.tickFromZ, this.onGround());
+    }
+
+    /** The Baritone driver has run this tick's fall check (with its own measured movement); the bot's tick must not run it again. */
+    public void markFallChecked() {
+        this.fallChecked = true;
     }
 
     /**

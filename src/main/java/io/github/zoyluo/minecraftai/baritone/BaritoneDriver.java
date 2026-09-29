@@ -112,11 +112,13 @@ public final class BaritoneDriver {
             // the body follow the way LookAction turns a bot, so what other players see and what the legacy aim reads agree.
             baritone.getGameEventHandler().onPlayerUpdate(new PlayerUpdateEvent(EventState.PRE));
             LookAction.setYawPitch(bot, bot.getYRot(), bot.getXRot());
-            // 6. ServerPlayer only checks falls when a client's move packet arrives; a bot has none, so without this a bot
-            // takes no fall damage at all and fallDistance stays 0. The deltas are this tick's physics movement.
+            // 6. ServerPlayer only checks falls when a client's move packet arrives; a bot has none, so this is what the packet does:
+            // the fall distance and the damage. The deltas are this tick's physics movement. AIPlayerEntity.tick makes the same check
+            // for every tick that is not driven, and skips its own for this one (markFallChecked), so nothing is charged twice.
             double fallBefore = bot.fallDistance;
             float healthBefore = bot.getHealth();
             bot.doCheckFallDamage(bot.getX() - entry.startX, bot.getY() - entry.startY, bot.getZ() - entry.startZ, bot.onGround());
+            bot.markFallChecked(); // the bot's own per-tick check (every legacy tick) must not charge this tick again
             if (fallBefore > 0.0D && bot.onGround()) {
                 BotLog.danger(bot, "baritone_landing", "fall", fallBefore, "damage", healthBefore - bot.getHealth(), "fall_after", bot.fallDistance);
             }
