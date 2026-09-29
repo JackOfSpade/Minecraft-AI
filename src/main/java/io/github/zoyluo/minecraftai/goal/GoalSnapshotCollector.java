@@ -136,39 +136,37 @@ public final class GoalSnapshotCollector {
         return counts;
     }
 
+    /**
+     * Item totals in storage as the bot itself last saw them: its container ledger, which is written
+     * only when the bot opened a container (deposit, withdraw or inspect). Nothing is read out of a
+     * closed container, so a goal cannot be satisfied by peeking into chests from a distance.
+     */
     private static Map<String, Integer> containerCounts(AIPlayerEntity bot, Context context) {
-        List<BlockPos> positions = context.boundContainers().isEmpty()
-                ? scanContainerPositions(bot, context.origin())
-                : List.copyOf(context.boundContainers());
-        Set<Container> unique = Collections.newSetFromMap(new IdentityHashMap<>());
+        String dimension = bot.level().dimension().identifier().toString();
+        var ledger = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID()).containers();
         Map<String, Integer> counts = new HashMap<>();
-        for (BlockPos pos : positions) {
-            if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
-                continue;
-            }
-            Container inventory = ContainerAction.resolve(bot, pos).orElse(null);
-            if (inventory == null || !unique.add(inventory)) {
-                continue;
-            }
-            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-                ItemStack stack = inventory.getItem(slot);
-                if (!stack.isEmpty()) {
-                    counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+        Set<BlockPos> seen = new HashSet<>();
+        if (context.boundContainers().isEmpty()) {
+            for (var entry : ledger.inDimension(dimension)) {
+                if (entry.pos().distManhattan(context.origin()) <= CONTAINER_RADIUS * 2) {
+                    addLedgerEntry(counts, entry);
                 }
             }
+            return counts;
+        }
+        for (BlockPos bound : context.boundContainers()) {
+            BlockPos canonical = ContainerAction.canonicalPos(bot.level(), bound);
+            if (!seen.add(canonical)) {
+                continue;
+            }
+            ledger.get(dimension, canonical).or(() -> ledger.get(dimension, bound)).ifPresent(entry -> addLedgerEntry(counts, entry));
         }
         return counts;
     }
 
-    private static List<BlockPos> scanContainerPositions(AIPlayerEntity bot, BlockPos origin) {
-        List<BlockPos> positions = new ArrayList<>();
-        for (BlockPos pos : BlockPos.withinManhattan(origin, CONTAINER_RADIUS, 6, CONTAINER_RADIUS)) {
-            if (ObservableWorldQuery.canObserveBlock(bot, pos)
-                    && bot.level().getBlockEntity(pos) instanceof Container) {
-                positions.add(pos.immutable());
-            }
-        }
-        return positions;
+    private static void addLedgerEntry(Map<String, Integer> counts,
+                                       io.github.zoyluo.minecraftai.memory.ContainerLedger.Entry entry) {
+        entry.items().forEach((id, count) -> counts.merge(id, count, Integer::sum));
     }
 
     private static boolean nearlyBroken(ItemStack stack) {

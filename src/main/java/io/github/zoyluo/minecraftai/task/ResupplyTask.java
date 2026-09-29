@@ -166,14 +166,11 @@ public final class ResupplyTask extends AbstractTask {
 
     private void findContainer(AIPlayerEntity bot) {
         containers.clear();
-        BlockPos.betweenClosedStream(basePos.offset(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.offset(BASE_RADIUS, 4, BASE_RADIUS))
-                .map(BlockPos::immutable)
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
-                .forEach(containers::add);
-        containers.sort(Comparator
-                .comparing((BlockPos pos) -> !containsSupply(bot, pos))
-                .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())));
+        // Storage in sight plus containers this bot remembers opening here. Ranking uses only the
+        // ledger (what the bot saw when it last opened each one); the contents of an unopened
+        // container are never read from a distance.
+        containers.addAll(StorageTargets.aroundBase(bot, basePos, BASE_RADIUS, false,
+                (pos, observed) -> ledgerHasSupply(bot, pos, observed)));
         containerIndex = 0;
         if (containers.isEmpty()) {
             walkToBaseOrCraft(bot);
@@ -192,7 +189,7 @@ public final class ResupplyTask extends AbstractTask {
             return;
         }
         containerPos = containers.get(containerIndex++);
-        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
+        if (ContainerAction.inReachAndSight(bot, containerPos)) {
             phase = Phase.WITHDRAWING;
             return;
         }
@@ -240,11 +237,20 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private void walk(AIPlayerEntity bot) {
-        if (containerPos == null || ContainerAction.resolve(bot, containerPos).isEmpty()) {
+        if (containerPos == null) {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
+        if (ContainerAction.canSee(bot, containerPos)
+                && !ContainerAction.isOpenableStorage(bot.level(), containerPos)) {
+            // Seen gone (or its lid is now blocked): forget what we knew and move on to the next one.
+            if (!(bot.level().getBlockEntity(containerPos) instanceof Container)) {
+                ContainerAction.forget(bot, containerPos);
+            }
+            selectNextContainer(bot);
+            return;
+        }
+        if (ContainerAction.inReachAndSight(bot, containerPos)) {
             bot.getActionPack().stopAll();
             phase = Phase.WITHDRAWING;
             return;
@@ -255,13 +261,12 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private void withdraw(AIPlayerEntity bot) {
-        if (containerPos == null
-                || bot.getEyePosition().distanceToSqr(containerPos.getCenter()) > REACH_SQUARED
-                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
+        if (containerPos == null || !ContainerAction.inReachAndSight(bot, containerPos)) {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        Container container = ContainerAction.resolve(bot, containerPos).orElse(null);
+        // Opening the container is what shows the bot its contents (and updates its ledger).
+        Container container = ContainerAction.open(bot, containerPos, false).orElse(null);
         if (container == null) {
             selectNextContainer(bot);
             return;
@@ -281,7 +286,7 @@ public final class ResupplyTask extends AbstractTask {
         if (requestedItem == null) {
             return false;
         }
-        ContainerAction.TransferResult result = ContainerAction.withdrawOne(container, bot, requestedItem, 1);
+        ContainerAction.TransferResult result = ContainerAction.withdraw(bot, containerPos, container, requestedItem, 1);
         if (!result.movedAny()) {
             note = result.reason();
             return false;
@@ -294,7 +299,7 @@ public final class ResupplyTask extends AbstractTask {
         if (food == null) {
             return false;
         }
-        ContainerAction.TransferResult result = ContainerAction.withdrawOne(container, bot, food, 16);
+        ContainerAction.TransferResult result = ContainerAction.withdraw(bot, containerPos, container, food, 16);
         if (!result.movedAny()) {
             note = result.reason();
             return false;
@@ -413,14 +418,20 @@ public final class ResupplyTask extends AbstractTask {
         return true;
     }
 
-    private boolean containsSupply(AIPlayerEntity bot, BlockPos pos) {
-        Container inventory = ContainerAction.resolve(bot, pos).orElse(null);
-        if (inventory == null) {
+    /** Whether the ledger remembers supply in the container at {@code pos}; never reads the container itself. */
+    private boolean ledgerHasSupply(AIPlayerEntity bot, BlockPos pos, boolean observed) {
+        var entry = StorageTargets.entry(bot, pos, observed).orElse(null);
+        if (entry == null) {
             return false;
         }
         return switch (need) {
-            case TOOL -> requestedItem != null && ContainerSupport.containsItem(inventory, requestedItem);
-            case FOOD -> firstFood(inventory) != null;
+            case TOOL -> requestedItem != null
+                    && entry.count(BuiltInRegistries.ITEM.getKey(requestedItem).toString()) > 0;
+            case FOOD -> entry.items().keySet().stream().anyMatch(id -> {
+                Item candidate = BuiltInRegistries.ITEM
+                        .getOptional(net.minecraft.resources.Identifier.parse(id)).orElse(null);
+                return candidate != null && InventoryAction.isEatableFood(new ItemStack(candidate));
+            });
         };
     }
 

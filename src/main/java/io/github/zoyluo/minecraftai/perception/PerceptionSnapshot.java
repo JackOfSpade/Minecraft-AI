@@ -12,7 +12,9 @@ public record PerceptionSnapshot(
         List<NearbyBlock> blocks,
         List<NearbyEntity> entities,
         List<NearbyItem> items,
-        TimeInfo time
+        TimeInfo time,
+        /** Up to three nearest containers this bot remembers opening (null, hence omitted from the JSON, when none). */
+        List<String> knownStorage
 ) {
     private static final Gson GSON = new Gson();
 

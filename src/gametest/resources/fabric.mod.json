@@ -61,6 +61,7 @@
       "io.github.zoyluo.minecraftai.task.PermissionsIntegrationGameTests",
       "io.github.zoyluo.minecraftai.task.VeinMinerPackGameTests",
       "io.github.zoyluo.minecraftai.task.CraftTaskTablePlacementGameTests",
+      "io.github.zoyluo.minecraftai.task.ContainerLedgerGameTests",
       "io.github.zoyluo.minecraftai.task.GiveItemTaskGameTests",
       "io.github.zoyluo.minecraftai.task.HungerEatToFullGameTests",
       "io.github.zoyluo.minecraftai.task.SurvivalReflexGameTests",

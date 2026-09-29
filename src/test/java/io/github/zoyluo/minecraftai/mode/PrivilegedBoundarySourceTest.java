@@ -86,6 +86,7 @@ class PrivilegedBoundarySourceTest {
     @Test
     void resourceAndEntityDiscoveryUsesObservableBoundary() throws IOException {
         for (String relative : Set.of(
+                "action/ContainerAction.java",
                 "action/HarvestCore.java",
                 "brain/ToolRegistry.java",
                 "goal/GoalSnapshotCollector.java",
@@ -108,7 +109,9 @@ class PrivilegedBoundarySourceTest {
                 "task/SmeltTask.java",
                 "task/StockpileTask.java",
                 "task/StripMineTask.java")) {
-            assertTrue(read(relative).contains("ObservableWorldQuery"), relative);
+            String source = read(relative);
+            // Container tasks reach the boundary through ContainerAction.canSee, which wraps ObservableWorldQuery.
+            assertTrue(source.contains("ObservableWorldQuery") || source.contains("ContainerAction.canSee"), relative);
         }
 
         String prospector = read("mining/OreProspector.java");
@@ -153,8 +156,13 @@ class PrivilegedBoundarySourceTest {
                 "invalid blueprint IDs must fail closed before touching world state");
 
         String container = read("task/ContainerTask.java");
-        assertTrue(container.contains("distanceToSqr(containerPos.getCenter()) > REACH_SQUARED"));
-        assertTrue(container.contains("ObservableWorldQuery.canObserveBlock(bot, containerPos)"));
+        assertTrue(container.contains("ContainerAction.inReachAndSight(bot, containerPos)"),
+                "a transfer must be gated on reach and line of sight");
+        assertTrue(container.contains("ContainerAction.open(bot, containerPos"),
+                "contents are only learned by really opening the container");
+        String containerAction = read("action/ContainerAction.java");
+        assertTrue(containerAction.contains("distanceToSqr(pos.getCenter()) <= REACH_SQUARED"));
+        assertTrue(containerAction.contains("ObservableWorldQuery.canObserveCell(bot, pos)"));
 
         assertTrue(matchingSources(Pattern.compile("setDayTime\\s*\\(")).isEmpty(),
                 "no bot task may rewrite the time of day: night skipping belongs to the vanilla sleep vote among human players");

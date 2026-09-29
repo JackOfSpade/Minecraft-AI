@@ -472,21 +472,61 @@ public final class ToolRegistry {
 
     /** Container/deposit work plus combat and the remaining action tools (boats, farming, guard). */
     private void registerContainerAndCombatTools() {
-        register("find_container", "Find the nearest reachable inventory container such as a chest", objectSchema()
+        register("find_container", "Find the nearest storage container (chest, barrel, shulker box) that is in sight and can be opened; radius is clamped to 1..16. Says nothing about its contents.", objectSchema()
                 .property("radius", integerSchema("search radius"))
                 .build(), (bot, args) -> ContainerTask.nearestContainer(bot, optionalInt(args, "radius", 8))
                 .map(pos -> ok("{\"x\":" + pos.getX() + ",\"y\":" + pos.getY() + ",\"z\":" + pos.getZ() + "}"))
                 .orElseGet(() -> fail("no_container")));
 
-        register("deposit", "Deposit items into a nearby or specified container. Use all_except_tools=true to store surplus materials while keeping damageable tools/equipment.", objectSchema()
-                .property("item", stringSchema("optional item id to deposit, for example minecraft:cobblestone"))
-                .property("count", integerSchema("optional item count; omit or <=0 means all matching items"))
-                .property("all_except_tools", booleanSchema("deposit all non-damageable items"))
+        register("find_item_in_storage", "Answer where an item is stored, from what this bot itself saw the last time it opened storage containers (chests, barrels, shulker boxes). Returns the few best remembered containers with count, free slots and age; it never looks inside a container from a distance, so a result can be stale. Use before withdraw when you are unsure which chest holds the item.", objectSchema()
+                .property("item", stringSchema("item id, for example minecraft:cobblestone"))
+                .required("item")
+                .build(), (bot, args) -> {
+            net.minecraft.world.item.Item wanted = requiredItem(args, "item");
+            String id = BuiltInRegistries.ITEM.getKey(wanted).toString();
+            var hits = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID()).containers()
+                    .find(bot.level().dimension().identifier().toString(), id, bot.blockPosition(), 1, 3);
+            if (hits.isEmpty()) {
+                return fail("not_in_known_storage: " + id);
+            }
+            long now = bot.level().getGameTime();
+            com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+            for (var entry : hits) {
+                JsonObject row = new JsonObject();
+                row.addProperty("x", entry.pos().getX());
+                row.addProperty("y", entry.pos().getY());
+                row.addProperty("z", entry.pos().getZ());
+                row.addProperty("block", entry.block());
+                row.addProperty("count", entry.count(id));
+                row.addProperty("free_slots", entry.freeSlots());
+                row.addProperty("seen_seconds_ago", Math.max(0L, now - entry.lastVerified()) / 20L);
+                array.add(row);
+            }
+            return ok(array.toString());
+        });
+
+        register("inspect_container", "Walk to a storage container in sight (or the one at chest_x/chest_y/chest_z), open it and look inside. What it holds is then remembered for find_item_in_storage. Use to learn what a chest contains before withdrawing.", objectSchema()
                 .property("chest_x", integerSchema("optional container x"))
                 .property("chest_y", integerSchema("optional container y"))
                 .property("chest_z", integerSchema("optional container z"))
                 .build(), (bot, args) -> {
-            Task task = ContainerTask.deposit(
+            Task task = ContainerTask.inspect(optionalBlockPos(args, "chest_x", "chest_y", "chest_z"));
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("deposit", "Deposit items into a nearby or specified container. Use all_except_tools=true to store surplus materials while keeping damageable tools/equipment, or junk=true to stow only surplus filler blocks (dirt, cobblestone, gravel, netherrack, ...) beyond the throwaway budget the bot keeps for building.", objectSchema()
+                .property("item", stringSchema("optional item id to deposit, for example minecraft:cobblestone"))
+                .property("count", integerSchema("optional item count; omit or <=0 means all matching items"))
+                .property("all_except_tools", booleanSchema("deposit all non-damageable items"))
+                .property("junk", booleanSchema("stow only surplus junk blocks and keep everything else"))
+                .property("chest_x", integerSchema("optional container x"))
+                .property("chest_y", integerSchema("optional container y"))
+                .property("chest_z", integerSchema("optional container z"))
+                .build(), (bot, args) -> {
+            Task task = optionalBoolean(args, "junk", false)
+                    ? ContainerTask.depositJunk(optionalBlockPos(args, "chest_x", "chest_y", "chest_z"))
+                    : ContainerTask.deposit(
                     optionalBlockPos(args, "chest_x", "chest_y", "chest_z"),
                     optionalItem(args, "item"),
                     optionalInt(args, "count", 0),
@@ -1038,7 +1078,9 @@ public final class ToolRegistry {
                     optionalBlockPos(params, "depot_x", "depot_y", "depot_z"),
                     optionalBlocksCsv(params, "target_ores"));
             case "mine_vein" -> StripMineTask.mineNearbyVein(optionalBlocksCsv(params, "target_ores"));
-            case "deposit" -> ContainerTask.deposit(
+            case "deposit" -> optionalBoolean(params, "junk", false)
+                    ? ContainerTask.depositJunk(optionalBlockPos(params, "chest_x", "chest_y", "chest_z"))
+                    : ContainerTask.deposit(
                     optionalBlockPos(params, "chest_x", "chest_y", "chest_z"),
                     optionalItem(params, "item"),
                     optionalInt(params, "count", 0),

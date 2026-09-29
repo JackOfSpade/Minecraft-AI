@@ -94,7 +94,9 @@ public final class PerceptionCollector {
                 rawEntities,
                 rawItems,
                 new PerceptionSnapshot.TimeInfo(world.getDayTime() % 24000L, world.isBrightOutside(), world.getMaxLocalRawBrightness(center),
-                        world.isRaining(), world.isThundering()));
+                        world.isRaining(), world.isThundering()),
+                io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID()).containers()
+                        .nearestLines(world.dimension().identifier().toString(), center, world.getGameTime(), 3));
     }
 
     /** Lightweight self-only state for routing; unlike collect, this never scans the world. */

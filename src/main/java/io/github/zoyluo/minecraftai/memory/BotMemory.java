@@ -20,8 +20,14 @@ public final class BotMemory {
     private final Map<String, String> facts = new LinkedHashMap<>();
     private final Map<String, Place> places = new LinkedHashMap<>();
     private final Deque<String> goalSteps = new ArrayDeque<>();
+    private final ContainerLedger containerLedger = new ContainerLedger();
     private int goalCursor;
     private String goalTitle = "";
+
+    /** What this bot has personally seen inside storage containers (written only when it really opened one). */
+    public ContainerLedger containers() {
+        return containerLedger;
+    }
 
     public void remember(String key, String value) {
         facts.put(cleanKey(key), value == null ? "" : value.trim());
@@ -220,6 +226,9 @@ public final class BotMemory {
         ListTag steps = new ListTag();
         goalSteps.forEach(step -> steps.add(StringTag.valueOf(step)));
         root.put("goalSteps", steps);
+        if (!containerLedger.isEmpty()) {
+            root.put("containerLedger", containerLedger.toNbt());
+        }
         return root;
     }
 
@@ -247,6 +256,7 @@ public final class BotMemory {
             goalSteps.addLast(steps.getStringOr(index, ""));
         }
         goalCursor = Math.min(goalCursor, goalSteps.size());
+        containerLedger.load(root.getListOrEmpty("containerLedger"));
     }
 
     private static String cleanKey(String key) {

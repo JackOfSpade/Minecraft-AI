@@ -36,7 +36,7 @@ public final class BrainCoordinator {
     // unknown tool is harmless: a newly added tool must opt in here before it can complete a
     // question-only turn.
     private static final Set<String> READ_ONLY_TOOLS = Set.of(
-            "inventory", "plan_craft", "find_container", "list_jobs",
+            "inventory", "plan_craft", "find_container", "find_item_in_storage", "list_jobs",
             "recall", "goal_status", "get_task_status", "lookup_recipe");
     // These are the known ways an LLM response can begin or perform requested work. This is a
     // positive list deliberately paired with runtime-work checks below: non-action tools cannot
@@ -46,7 +46,7 @@ public final class BrainCoordinator {
             "craft", "eat", "smelt", "gather", "clear_grass", "break_blocks", "fish", "trade", "set_base",
             "deposit_all", "strip_mine", "mine_vein", "mine_ore", "mine_valuables_in_radius", "achieve_goal", "harvest_crop",
             "provision_food", "forage", "achieve_armor", "achieve_workstation", "build_house",
-            "stockpile", "deposit", "withdraw", "equip_armor", "attack", "light_area",
+            "stockpile", "deposit", "withdraw", "inspect_container", "equip_armor", "attack", "light_area",
             "follow", "hold", "guard", "farm", "harvest", "breed", "attack_entity", "post_job",
             "tell_bot", "remember", "forget", "mark_place", "goto_place", "resume_mining",
             "mine_and_stockpile", "recover_drops", "set_goal", "advance_goal", "assign_task",
@@ -58,7 +58,7 @@ public final class BrainCoordinator {
             "move_to", "mine_block", "place_block", "craft", "eat", "smelt", "gather",
             "clear_grass", "break_blocks", "fish", "trade", "deposit_all", "strip_mine", "mine_vein",
             "mine_ore", "mine_valuables_in_radius", "achieve_goal", "harvest_crop", "provision_food", "forage",
-            "achieve_armor", "achieve_workstation", "build_house", "stockpile", "deposit",
+            "achieve_armor", "achieve_workstation", "build_house", "stockpile", "deposit", "inspect_container",
             "withdraw", "attack", "light_area", "follow", "hold", "guard", "farm",
             "harvest", "breed", "attack_entity", "goto_place", "resume_mining",
             "mine_and_stockpile", "recover_drops", "assign_task", "launch_boat", "board_boat",

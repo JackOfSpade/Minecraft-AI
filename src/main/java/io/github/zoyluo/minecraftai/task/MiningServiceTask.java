@@ -2499,8 +2499,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         int pendingBefore = pendingChannelPickaxes(bot);
-        ContainerAction.TransferResult result = ContainerAction.depositOne(
-                container, bot, depositFilter(bot), 64);
+        ContainerAction.TransferResult result = ContainerAction.deposit(
+                bot, depot, container, depositFilter(bot), 64);
         if (isRareDescentKit() && result.movedAny()
                 && pendingChannelPickaxes(bot) > pendingBefore) {
             fail("mining_service_mission_depot_retirement_weakened_channel_pool");
@@ -2511,7 +2511,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             int surplus = Math.max(0,
                     emergencyBlocks - protectedStoneLikeForPendingCrafts(bot));
             if (surplus > 0) {
-                result = ContainerAction.depositOne(container, bot,
+                result = ContainerAction.deposit(bot, depot, container,
                         stack -> stack.is(Items.COBBLESTONE)
                                 || stack.is(Items.COBBLED_DEEPSLATE)
                                 || stack.is(Items.BLACKSTONE),
@@ -2845,8 +2845,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return false;
         }
         int requested = MiningFoodReserve.itemsForUnits(reserveItem.get(), missingUnits);
-        ContainerAction.TransferResult result = ContainerAction.withdrawOne(
-                container, bot, reserveItem.get(), requested);
+        ContainerAction.TransferResult result = ContainerAction.withdraw(
+                bot, depot, container, reserveItem.get(), requested);
         if (!result.movedAny()) {
             return false;
         }
@@ -2964,7 +2964,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (container == null) {
             return false;
         }
-        return ContainerAction.withdrawOne(container, bot, item, count).movedAny();
+        return ContainerAction.withdraw(bot, depot, container, item, count).movedAny();
     }
 
     private int withdrawStoneLikeFromDepot(AIPlayerEntity bot, int count) {
@@ -2978,8 +2978,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             if (moved >= count) {
                 break;
             }
-            ContainerAction.TransferResult result = ContainerAction.withdrawOne(
-                    container, bot, item, count - moved);
+            ContainerAction.TransferResult result = ContainerAction.withdraw(
+                    bot, depot, container, item, count - moved);
             moved += result.count();
         }
         return moved;

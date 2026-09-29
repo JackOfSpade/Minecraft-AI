@@ -43,7 +43,8 @@ public record MinecraftAiConfig(
         Goal goal,
         Nav nav,
         Pickup pickup,
-        Conversation conversation
+        Conversation conversation,
+        Storage storage
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     /** Environment variable that overrides the API key from the config file (any provider). */
@@ -147,11 +148,11 @@ public record MinecraftAiConfig(
     }
 
     public MinecraftAiConfig withLlm(Llm llm) {
-        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
+        return new MinecraftAiConfig(profile(), operatorCapabilities(), llm, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage());
     }
 
     private MinecraftAiConfig withProfile(OperatingProfile profile) {
-        return new MinecraftAiConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation());
+        return new MinecraftAiConfig(profile, operatorCapabilities(), llm(), perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup(), conversation(), storage());
     }
 
     private MinecraftAiConfig withDefaults() {
@@ -173,7 +174,8 @@ public record MinecraftAiConfig(
                 goal == null ? defaults.goal : goal.withDefaults(defaults.goal),
                 nav == null ? defaults.nav : nav.withDefaults(defaults.nav),
                 pickup == null ? defaults.pickup : pickup.withDefaults(defaults.pickup),
-                conversation == null ? defaults.conversation : conversation.withDefaults(defaults.conversation));
+                conversation == null ? defaults.conversation : conversation.withDefaults(defaults.conversation),
+                storage == null ? defaults.storage : storage.withDefaults(defaults.storage));
     }
 
     public static MinecraftAiConfig defaults() {
@@ -212,7 +214,8 @@ public record MinecraftAiConfig(
                 new Goal(24, true, true), // S7: recipe auto-fill made chains deeper (cooked food/shield/diamond gear, etc.), raised 16→24 for headroom
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3, NavEngine.LEGACY.configValue()),
                 new Pickup(2.75D, 2.5D, 8.0D), // measured 1.5/1.0 as too small: tree-drop items with a vertical gap >1 don't get pulled in → countSoFar=0 infinite loop
-                new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100));
+                new Conversation(true, 12000, 200, 0.03D, 1, 4, 200.0D, 0.15D, 2.0D, 25.0D, 100),
+                new Storage(64, 16, 3, 24, true));
     }
 
     private static void logProfileResolution(ProfileResolver.Resolution resolution,
@@ -440,6 +443,38 @@ public record MinecraftAiConfig(
                     boolOrDefault(autoLight, defaults.autoLight),
                     positiveOrDefault(torchLightThreshold, defaults.torchLightThreshold));
         }
+    }
+
+    /**
+     * Pack-mule policy. {@code junkKeepStone} / {@code junkKeepOther} are the throwaway budgets kept
+     * for building and pillaring (stone-like blocks vs. dirt/gravel/sand/netherrack...); only the
+     * surplus is ever stowed. {@code nearlyFullFreeSlots}: at or below this many free main slots the
+     * bot stows junk on its own when it is idle or follows a player past a storage block within reach.
+     * {@code stowRadius}: how far an idle bot will walk to a remembered/observed storage block for it.
+     */
+    public record Storage(int junkKeepStone, int junkKeepOther, int nearlyFullFreeSlots, int stowRadius,
+                          Boolean autoStowJunk) {
+        Storage withDefaults(Storage defaults) {
+            return new Storage(
+                    positiveOrDefault(junkKeepStone, defaults.junkKeepStone),
+                    positiveOrDefault(junkKeepOther, defaults.junkKeepOther),
+                    positiveOrDefault(nearlyFullFreeSlots, defaults.nearlyFullFreeSlots),
+                    positiveOrDefault(stowRadius, defaults.stowRadius),
+                    boolOrDefault(autoStowJunk, defaults.autoStowJunk));
+        }
+
+        public boolean autoStowJunkEnabled() {
+            return Boolean.TRUE.equals(autoStowJunk);
+        }
+    }
+
+    /** Source-compatible constructor for callers that predate the storage section. */
+    public MinecraftAiConfig(OperatingProfile profile, OperatorCapabilities operatorCapabilities, Llm llm,
+                             Perception perception, Brain brain, Watchdog watchdog, Logging logging,
+                             Survival survival, Combat combat, Night night, Mining mining, Goal goal, Nav nav,
+                             Pickup pickup, Conversation conversation) {
+        this(profile, operatorCapabilities, llm, perception, brain, watchdog, logging, survival, combat, night,
+                mining, goal, nav, pickup, conversation, new Storage(64, 16, 3, 24, true));
     }
 
     public record Mining(int returnWhenFreeSlots, double toolDurabilityFloor, Boolean placeTorches) {

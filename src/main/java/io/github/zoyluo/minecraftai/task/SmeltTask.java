@@ -700,7 +700,8 @@ public final class SmeltTask extends AbstractTask {
                 return;
             }
             for (BlockPos pos : fuelContainers(bot, base, fuel)) {
-                Container container = ContainerAction.resolve(bot, pos).orElse(null);
+                // Opening it is what shows the bot the contents; ranking above used the ledger only.
+                Container container = ContainerAction.open(bot, pos, false).orElse(null);
                 if (container == null) {
                     continue;
                 }
@@ -708,7 +709,7 @@ public final class SmeltTask extends AbstractTask {
                 if (missing <= 0) {
                     return;
                 }
-                ContainerAction.TransferResult result = ContainerAction.withdrawOne(container, bot, fuel, missing);
+                ContainerAction.TransferResult result = ContainerAction.withdraw(bot, pos, container, fuel, missing);
                 if (result.movedAny() && InventoryAction.countItem(bot, fuel) >= needed) {
                     return;
                 }
@@ -716,13 +717,13 @@ public final class SmeltTask extends AbstractTask {
         }
     }
 
+    /** Storage in reach and sight of the bot near the base, ledger-known holders of this fuel first, then nearest. */
     private static java.util.List<BlockPos> fuelContainers(AIPlayerEntity bot, BlockPos base, Item fuel) {
-        return BlockPos.betweenClosedStream(base.offset(-BASE_FUEL_RADIUS, -3, -BASE_FUEL_RADIUS), base.offset(BASE_FUEL_RADIUS, 4, BASE_FUEL_RADIUS))
-                .map(BlockPos::immutable)
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> bot.getEyePosition().distanceToSqr(pos.getCenter()) <= REACH_SQUARED)
-                .filter(pos -> ContainerSupport.containsItem(bot, pos, fuel))
-                .sorted(Comparator.comparingDouble(pos -> pos.distSqr(bot.blockPosition())))
+        return StorageTargets.observedStorage(bot, base, BASE_FUEL_RADIUS, false).stream()
+                .filter(pos -> ContainerAction.inReachAndSight(bot, pos))
+                .sorted(Comparator
+                        .comparing((BlockPos pos) -> StorageTargets.ledgerCount(bot, pos, true, fuel) <= 0)
+                        .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())))
                 .toList();
     }
 

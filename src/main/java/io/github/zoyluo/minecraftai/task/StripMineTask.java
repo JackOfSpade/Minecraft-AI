@@ -610,7 +610,7 @@ public final class StripMineTask extends AbstractTask {
             fail("depot_missing");
             return;
         }
-        ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, depositFilter(), 64);
+        ContainerAction.TransferResult result = ContainerAction.deposit(bot, activeDepotChest, container, depositFilter(), 64);
         if (result.movedAny()) {
             return;
         }

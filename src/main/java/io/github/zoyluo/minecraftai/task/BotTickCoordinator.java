@@ -38,7 +38,9 @@ public final class BotTickCoordinator {
                 if (!io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler.isScreenOpen(bot)) {
                     io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
                 }
-                IdleCoordinator.INSTANCE.tickBot(bot);
+                if (!StorageJanitor.INSTANCE.tickBot(bot)) {
+                    IdleCoordinator.INSTANCE.tickBot(bot);
+                }
             }
         }
     }

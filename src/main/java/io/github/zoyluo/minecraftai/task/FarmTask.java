@@ -364,14 +364,10 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         depositContainers.clear();
-        BlockPos.betweenClosedStream(basePos.offset(-DEPOSIT_RADIUS, -3, -DEPOSIT_RADIUS), basePos.offset(DEPOSIT_RADIUS, 4, DEPOSIT_RADIUS))
-                .map(BlockPos::immutable)
-                .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
-                .forEach(depositContainers::add);
-        depositContainers.sort(Comparator
-                .comparing((BlockPos pos) -> !ContainerSupport.containsItem(bot, pos, item))
-                .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())));
+        // Storage in sight (kind, lid and spawner rules) plus containers remembered from earlier
+        // deposits; ranked by the ledger only, so the produce merges into a stack the bot itself saw.
+        depositContainers.addAll(StorageTargets.aroundBase(bot, basePos, DEPOSIT_RADIUS, true,
+                (pos, observed) -> StorageTargets.ledgerCount(bot, pos, observed, item) > 0));
         depositContainerIndex = 0;
         selectDepositContainer(bot);
     }
@@ -390,7 +386,7 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         depositContainerPos = depositContainers.get(depositContainerIndex++);
-        if (bot.getEyePosition().distanceToSqr(depositContainerPos.getCenter()) <= REACH_SQUARED) {
+        if (ContainerAction.inReachAndSight(bot, depositContainerPos)) {
             phase = Phase.DEPOSIT_TRANSFER;
             return;
         }
@@ -409,7 +405,9 @@ public final class FarmTask extends AbstractTask {
     }
 
     private void goToDepositContainer(AIPlayerEntity bot) {
-        if (depositContainerPos == null || ContainerAction.resolve(bot, depositContainerPos).isEmpty()) {
+        if (depositContainerPos == null
+                || (ContainerAction.canSee(bot, depositContainerPos)
+                        && !ContainerAction.isOpenableStorage(bot.level(), depositContainerPos))) {
             phase = Phase.DEPOSIT;
             return;
         }
@@ -426,11 +424,11 @@ public final class FarmTask extends AbstractTask {
     private void depositTransfer(AIPlayerEntity bot) {
         if (depositContainerPos == null
                 || bot.getEyePosition().distanceToSqr(depositContainerPos.getCenter()) > REACH_SQUARED
-                || !ObservableWorldQuery.canObserveBlock(bot, depositContainerPos)) {
+                || !ContainerAction.canSee(bot, depositContainerPos)) {
             phase = Phase.DEPOSIT;
             return;
         }
-        Container container = ContainerAction.resolve(bot, depositContainerPos).orElse(null);
+        Container container = ContainerAction.open(bot, depositContainerPos, false).orElse(null);
         if (container == null) {
             selectDepositContainer(bot);
             return;
@@ -440,7 +438,7 @@ public final class FarmTask extends AbstractTask {
             finishDeposit();
             return;
         }
-        ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, stack -> stack.is(item), maxDepositCount(bot, item));
+        ContainerAction.TransferResult result = ContainerAction.deposit(bot, depositContainerPos, container, stack -> stack.is(item), maxDepositCount(bot, item));
         if (result.movedAny()) {
             note = "deposited " + item + " x" + result.count();
             return;

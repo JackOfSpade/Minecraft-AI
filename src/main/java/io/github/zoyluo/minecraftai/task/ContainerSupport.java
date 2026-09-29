@@ -1,18 +1,16 @@
 package io.github.zoyluo.minecraftai.task;
 
-import io.github.zoyluo.minecraftai.action.ContainerAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.Container;
-import net.minecraft.world.item.Item;
 
 /**
- * Shared, byte-identical helpers that were previously reimplemented independently in several
- * task files (SmeltTask, ResupplyTask, StockpileTask, ContainerTask, RaidCropsTask): finding a
- * standable cell adjacent to a container/work-block, and checking whether a container at a
- * position (or an already-resolved inventory) holds a given item.
+ * Shared helper for the container/work-block tasks (SmeltTask, ResupplyTask, StockpileTask,
+ * ContainerTask, RaidCropsTask): finding a standable cell adjacent to a container/work-block.
+ * The former "does the container at pos hold item" helpers were removed on purpose: they read the
+ * contents of containers the bot had not opened. What a bot knows about container contents comes
+ * from its container ledger (see the memory package), written only when it opens one.
  */
 final class ContainerSupport {
     private ContainerSupport() {
@@ -27,24 +25,5 @@ final class ContainerSupport {
             }
         }
         return null;
-    }
-
-    /** True if the container at {@code pos} (if any) holds at least one stack of {@code item}. */
-    static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
-        Container inventory = ContainerAction.resolve(bot, pos).orElse(null);
-        if (inventory == null) {
-            return false;
-        }
-        return containsItem(inventory, item);
-    }
-
-    /** True if {@code inventory} holds at least one stack of {@code item}. */
-    static boolean containsItem(Container inventory, Item item) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            if (inventory.getItem(slot).is(item)) {
-                return true;
-            }
-        }
-        return false;
     }
 }

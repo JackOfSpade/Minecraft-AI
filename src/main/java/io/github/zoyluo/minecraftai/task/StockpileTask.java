@@ -104,14 +104,11 @@ public final class StockpileTask extends AbstractTask {
     private void findContainer(AIPlayerEntity bot) {
         containers.clear();
         Item preferred = nextDepositItem(bot);
-        BlockPos.betweenClosedStream(basePos.offset(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.offset(BASE_RADIUS, 4, BASE_RADIUS))
-                .map(BlockPos::immutable)
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
-                .forEach(containers::add);
-        containers.sort(Comparator
-                .comparing((BlockPos pos) -> !ContainerSupport.containsItem(bot, pos, preferred))
-                .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())));
+        // Storage in sight plus containers this bot remembers opening here. A container already
+        // known (from the ledger, i.e. from having opened it) to hold this item is preferred so
+        // stacks merge; containers known to be full are skipped. Unopened contents are never read.
+        containers.addAll(StorageTargets.aroundBase(bot, basePos, BASE_RADIUS, true,
+                (pos, observed) -> preferred != null && StorageTargets.ledgerCount(bot, pos, observed, preferred) > 0));
         if (containers.isEmpty()) {
             fail("no_base_container");
             return;
@@ -130,7 +127,7 @@ public final class StockpileTask extends AbstractTask {
             return;
         }
         containerPos = containers.get(containerIndex++);
-        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
+        if (ContainerAction.inReachAndSight(bot, containerPos)) {
             phase = Phase.TRANSFERRING;
             return;
         }
@@ -149,11 +146,20 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private void walk(AIPlayerEntity bot) {
-        if (containerPos == null || ContainerAction.resolve(bot, containerPos).isEmpty()) {
+        if (containerPos == null) {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
+        if (ContainerAction.canSee(bot, containerPos)
+                && !ContainerAction.isOpenableStorage(bot.level(), containerPos)) {
+            // Seen gone (or its lid is now blocked): forget what we knew and move on to the next one.
+            if (!(bot.level().getBlockEntity(containerPos) instanceof Container)) {
+                ContainerAction.forget(bot, containerPos);
+            }
+            selectNextContainer(bot);
+            return;
+        }
+        if (ContainerAction.inReachAndSight(bot, containerPos)) {
             bot.getActionPack().stopAll();
             phase = Phase.TRANSFERRING;
             return;
@@ -164,18 +170,16 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private void transfer(AIPlayerEntity bot) {
-        if (containerPos == null
-                || bot.getEyePosition().distanceToSqr(containerPos.getCenter()) > REACH_SQUARED
-                || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
+        if (containerPos == null || !ContainerAction.inReachAndSight(bot, containerPos)) {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        Container container = ContainerAction.resolve(bot, containerPos).orElse(null);
+        Container container = ContainerAction.open(bot, containerPos, false).orElse(null);
         if (container == null) {
             selectNextContainer(bot);
             return;
         }
-        ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, depositFilter(), 64);
+        ContainerAction.TransferResult result = ContainerAction.deposit(bot, containerPos, container, depositFilter(), 64);
         if (result.movedAny()) {
             transferred += result.count();
             depositedContainers.add(containerPos.immutable());
