@@ -326,11 +326,29 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine the ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps.", objectSchema()
+        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine the ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps. Two modes: mode=count (default) mines `count` ore blocks and will strip-mine to find more. mode=vein is for 'mine the whole/entire vein', 'this vein', 'all of this ore', 'until the vein is gone': it mines exactly the connected vein of the nearest ore of that type the bot can see (or of the ore at x/y/z), then STOPS and reports how many were mined -- no branch mining, no digging down, no other veins. count is ignored in vein mode. Vein mode needs a suitable pickaxe already in the inventory and a visible ore.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
-                .property("count", integerSchema("how many ore blocks to mine"))
+                .property("count", integerSchema("how many ore blocks to mine (mode=count only)"))
+                .property("mode", enumStringSchema("count (default): mine `count` ores, searching further if needed. vein: mine the whole connected vein of one visible ore and stop when it is exhausted", "count", "vein"))
+                .property("x", integerSchema("vein mode only: x of an ore in the vein the player means (optional; default nearest visible ore)"))
+                .property("y", integerSchema("vein mode only: y of an ore in the vein the player means (give x, y and z together)"))
+                .property("z", integerSchema("vein mode only: z of an ore in the vein the player means"))
                 .required("ore")
                 .build(), (bot, args) -> {
+            if ("vein".equalsIgnoreCase(optionalString(args, "mode", "count"))
+                    || optionalBoolean(args, "until_vein_exhausted", false)) {
+                Set<Block> veinOres = oreTargetsFrom(requiredString(args, "ore"));
+                if (veinOres.stream().noneMatch(ore -> io.github.zoyluo.minecraftai.mining.ToolTier
+                        .canHarvestWithInventory(bot, ore.getDefaultState()))) {
+                    return fail("need_better_tool: vein mode needs "
+                            + io.github.zoyluo.minecraftai.mining.ToolTier.requiredPickaxeItemId(veinOres)
+                            + " in the inventory; use achieve_goal for that pickaxe first, then retry mine_ore mode=vein");
+                }
+                BlockPos veinHint = hasBlockPos(args, "x", "y", "z") ? blockPos(args) : null;
+                Task task = OreDigTask.untilVeinExhausted(veinOres, veinHint);
+                assignLlm(bot, task);
+                return ok("assigned: mine_ore vein (stops when the vein is exhausted)");
+            }
             if (!MinecraftAiConfig.get().goal().autoToolFillEnabled()) {
                 Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
                 assignLlm(bot, task);

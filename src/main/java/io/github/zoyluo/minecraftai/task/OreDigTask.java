@@ -192,6 +192,21 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      */
     private final Map<BlockPos, BlockPos> rememberedHighWorkPoses = new HashMap<>();
 
+    /**
+     * Vein mode ("mine the whole vein"): the task mines the connected same-type ore vein around one
+     * observed seed ore and then completes instead of strip/branch mining for more ore. Runtime only:
+     * these ledgers are neither checkpointed nor restored, so a vein-mode task is not a durable mission.
+     */
+    private boolean veinMode;
+    private BlockPos veinSeedHint;
+    private boolean veinSeeded;
+    private int veinEmptyScans;
+    private int veinReseeds;
+    private boolean veinFinalSwept;
+    private int veinPickupGrace;
+    private final Set<BlockPos> veinBroken = new java.util.LinkedHashSet<>();
+    private final Deque<BlockPos> veinSweep = new ArrayDeque<>();
+
     private int invBaseline;
     private int collected;
     private int lastProgressBudget;
@@ -319,6 +334,28 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 MiningBudget.EMERGENCY_STONE_LIKE, Map.of());
     }
 
+    /**
+     * Vein mode: mine the connected vein of the nearest observable target ore (or of the observable
+     * ore nearest {@code seedHint} when given) and stop when no further observable connected member
+     * remains. No open-ended strip/branch mining, prospecting or descent; other veins and passing
+     * ores are left alone.
+     */
+    public static OreDigTask untilVeinExhausted(Set<Block> targetOres, BlockPos seedHint) {
+        OreDigTask task = new OreDigTask(targetOres, VEIN_CAP);
+        task.veinMode = true;
+        task.veinSeedHint = seedHint == null ? null : seedHint.toImmutable();
+        return task;
+    }
+
+    public boolean isVeinMode() {
+        return veinMode;
+    }
+
+    /** Number of ore blocks this vein-mode task has broken so far. */
+    public int veinMined() {
+        return veinBroken.size();
+    }
+
     public OreDigTask(Set<Block> targetOres, int targetCount, Map<String, String> checkpoint) {
         this(targetOres, targetCount, 0,
                 MiningBudget.EMERGENCY_STONE_LIKE, checkpoint);
@@ -415,6 +452,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     public String describe() {
+        if (veinMode) {
+            return "OreDig vein " + veinBroken.size() + " mined, " + veinQueue.size() + " queued"
+                    + (targetOre == null ? "" : " ->" + targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ());
+        }
         return "OreDig " + collected + "/" + targetCount
                 + (restoringFace ? " (returning to saved face)" : "")
                 + " branch=" + stripLegIndex + ":" + stripStepsLeft
@@ -425,6 +466,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     public double progress() {
         if (state == TaskState.COMPLETED) {
             return 1.0D;
+        }
+        if (veinMode) {
+            return Math.min(0.95D, (double) veinBroken.size() / (veinBroken.size() + veinQueue.size() + 1));
         }
         if (targetCount == 0) {
             return 0.95D;
@@ -1042,9 +1086,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             collected = total;
             noteProgress();
             BotLog.action(bot, "ore_dig_collected", "total", collected + "/" + targetCount);
-            io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
-                    "Collected " + Registries.ITEM.getId(targetDrops.iterator().next())
-                            .getPath().replace('_', ' ') + ": " + collected + "/" + targetCount + ".");
+            if (!veinMode) {
+                io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
+                        "Collected " + Registries.ITEM.getId(targetDrops.iterator().next())
+                                .getPath().replace('_', ' ') + ": " + collected + "/" + targetCount + ".");
+            }
         }
         // Clear the durable physical-drop debt before either opening another ore or declaring the
         // final quota complete.  Completing immediately on the last inventory increment left a
@@ -1055,7 +1101,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (recoverPendingTargetDrop(bot)) {
             return;
         }
-        if (collected >= targetCount) {
+        if (!veinMode && collected >= targetCount) {
             miner.cancel(bot);
             HarvestCore.sweepPickupAnyOf(bot, targetDrops, 16);
             if (pickupGrace++ >= PICKUP_GRACE_TICKS
@@ -1127,6 +1173,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
 
+        if (veinMode) {
+            tickVeinDiscovery(bot, world);
+        }
+
         // 1) First drain the adjacent-vein queue (after mining one ore block, clear out same-vein neighbors along with it).
         if (targetOre == null && advanceVein(bot, world)) {
             clearStripMovementOwnership();
@@ -1147,7 +1197,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // reset a slower channel block every scan interval. Dense copper beside an iron branch was
         // a deterministic starvation case in seed 3000.
         boolean minerBusy = miner.target() != null || hasStagedBlindFootWork(bot);
-        if (bonusOre == null && !minerBusy && bonusMined < BONUS_CAP
+        if (!veinMode && bonusOre == null && !minerBusy && bonusMined < BONUS_CAP
                 && bot.getEntityWorld().getServer().getTicks() - lastBonusScanTick >= SCAN_INTERVAL
                 && !HarvestCore.isInventoryFull(bot)) {
             lastBonusScanTick = bot.getEntityWorld().getServer().getTicks();
@@ -1306,7 +1356,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // distances.
             boolean miningNow = miningTarget;
             int nowRe = bot.getEntityWorld().getServer().getTicks();
-            if (!miningNow && nowRe - lastReLockTick >= SCAN_INTERVAL) {
+            if (!veinMode && !miningNow && nowRe - lastReLockTick >= SCAN_INTERVAL) {
                 lastReLockTick = nowRe;
                 BlockPos nearer = nearestOre(bot, world);
                 if (nearer != null && !nearer.equals(targetOre)
@@ -1411,41 +1461,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // the lava source with a low-value block (one tick, one cell); only abandon the ore
                 // safely if there's no block left to seal with (life is worth more than ore).
                 if (!miningTarget) {
-                    AdjacentFluidObservation adjacentFluid = adjacentDangerFluidOf(bot, targetOre);
-                    if (adjacentFluid.state() == OreScan.Observation.UNKNOWN) {
-                        // UNKNOWN changes no target action: an occluded stone neighbour and an
-                        // occluded fluid neighbour are indistinguishable. A newly exposed fluid is
-                        // rechecked and sealed before the following target-mining settlement.
+                    FluidSealStep sealStep = sealAdjacentFluidBeforeMining(bot, targetOre);
+                    if (sealStep == FluidSealStep.UNSEALABLE) {
+                        targetOre = null;
+                        return;
                     }
-                    if (adjacentFluid.state() == OreScan.Observation.OBSERVED_PRESENT) {
-                        BlockPos lava = adjacentFluid.position();
-                        var blockSlot = MaterialPalette.pickSacrificialBlockSlot(
-                                bot, protectedStoneLikeReserve);
-                        if (blockSlot.isEmpty()) {
-                            BotLog.action(bot, "ore_dig_fluid_unsealable",
-                                    "ore", targetOre.toShortString(),
-                                    "protected_stone", protectedStoneLikeReserve);
-                            excludeOre(bot, targetOre);
-                            targetOre = null;
-                            return;
-                        }
-                        // The observable-fluid API already proves one exact inset face inside the
-                        // real interaction range. Do not reject that legal edge ray by comparing
-                        // block centers; BuildAction repeats the final vanilla placement proof.
-                        InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
-                        ActionResult sealResult = BuildAction.placeBlockAt(bot, lava);
-                        if (!sealResult.isFailed()) {
-                            BotLog.action(bot, "ore_dig_fluid_seal", "sealed", lava.toShortString());
-                            noteProgress(); // Sealing also counts as progress
-                        } else {
-                            BotLog.action(bot, "ore_dig_seal_fail",
-                                    "lava", lava.toShortString(), "reason", sealResult.reason());
-                        }
-                        if (sealResult.isFailed()
-                                && bot.getActionPack().isPathExecutorIdle()) {
-                            bot.getActionPack().startDigPathTo(
-                                    targetOre.down(), protectedStoneLikeReserve); // Close in until sealing is reachable
-                        }
+                    if (sealStep == FluidSealStep.WORKING) {
                         return;
                     }
                 }
@@ -1486,6 +1507,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // next tick; APPROACH_LIMIT still handles circuit-breaking for ore that truly can't be
             // reached.
             approachTargetOre(bot, world, targetOre);
+            return;
+        }
+
+        if (veinMode) {
+            tickVeinWithoutTarget(bot, world);
             return;
         }
 
@@ -2674,6 +2700,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return true;
             }
         }
+        if (!miningVein) {
+            // A queued vein member obeys the same pre-break fluid seal as the locked target: an ore
+            // touching lava or water is sealed first, or released when nothing is left to seal with.
+            FluidSealStep sealStep = sealAdjacentFluidBeforeMining(bot, v);
+            if (sealStep == FluidSealStep.UNSEALABLE) {
+                forgetRememberedHighWorkPose(v);
+                veinQueue.pollFirst();
+                return true;
+            }
+            if (sealStep == FluidSealStep.WORKING) {
+                return true;
+            }
+        }
         if (!passesTargetDropCommitGate(bot, world, v)) {
             return true;
         }
@@ -2706,6 +2745,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         BlockPos workPose = approachGoalFor(bot, world, ore);
+        if (workPose == null && veinMode) {
+            // A vein member hidden behind the ore just mined is usually reachable by walking into the cell
+            // that ore left behind. Prefer that already-open same-level stance over carving a channel.
+            BlockPos side = veinSideStance(bot, ore);
+            if (side != null) {
+                ActionResult sideRoute = bot.getActionPack().startSurfacePathTo(side);
+                // A throttled planner is not a route failure: wait and retry instead of carving a channel.
+                if (!sideRoute.isFailed() || "pathfinding_throttled".equals(sideRoute.reason())) {
+                    return;
+                }
+            }
+        }
         if (workPose == null) {
             if (tryRememberedHighWorkPoseRoute(bot, world, ore)) {
                 return;
@@ -2742,6 +2793,32 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // without weakening the close-break invariant.
             digTowardStep(bot, world, ore, TunnelIntent.TARGET_APPROACH);
         }
+    }
+
+    /**
+     * Vein mode only: a cell horizontally beside {@code ore} that this task itself opened by mining an
+     * earlier vein member (typically the pit that member left) and that shows no observed adjacent fluid.
+     * Its hidden stone neighbours make the aggregate hazard UNKNOWN, which is accepted here (an observed
+     * fluid was sealed or skipped before that member was mined). The cell is not required to be visible
+     * from the bot's current pose (a diagonal ray squeezes past the wall corner); the surface planner
+     * still verifies the route and stance before any movement. Nearest to the bot first.
+     */
+    private BlockPos veinSideStance(AIPlayerEntity bot, BlockPos ore) {
+        BlockPos best = null;
+        long bestDistance = Long.MAX_VALUE;
+        for (Direction direction : STRIP_DIRS) {
+            BlockPos candidate = ore.offset(direction);
+            if (!veinBroken.contains(candidate)
+                    || OreScan.adjacentHazard(bot, candidate) == OreScan.Observation.OBSERVED_PRESENT) {
+                continue;
+            }
+            long distance = squaredBlockDistance(bot.getBlockPos(), candidate);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = candidate.toImmutable();
+            }
+        }
+        return best;
     }
 
     /**
@@ -2903,6 +2980,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private void finishTargetBreak(AIPlayerEntity bot, BlockPos pos, int inventoryBeforeBreak) {
+        if (veinMode) {
+            veinBroken.add(pos.toImmutable());
+            veinSweep.addLast(pos.toImmutable());
+            veinFinalSwept = false;
+            veinPickupGrace = 0;
+        }
         miner.cancel(bot);
         forgetRememberedHighWorkPose(pos);
         // Removing a lower vein member can expose a high side staircase for only the short physical
@@ -3298,6 +3381,167 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
+
+    private enum FluidSealStep {
+        CLEAR,
+        WORKING,
+        UNSEALABLE
+    }
+
+    /**
+     * One tick of the pre-break fluid seal shared by the locked target and every queued vein member.
+     * CLEAR: no adjacent fluid observed, proceed. WORKING: this tick was spent sealing or closing in.
+     * UNSEALABLE: no sacrificial block is left; the ore has been excluded and must be released.
+     * UNKNOWN neighbours change nothing: an occluded stone neighbour and an occluded fluid neighbour are
+     * indistinguishable, and a newly exposed fluid is rechecked before the next break settlement.
+     */
+    private FluidSealStep sealAdjacentFluidBeforeMining(AIPlayerEntity bot, BlockPos ore) {
+        AdjacentFluidObservation adjacentFluid = adjacentDangerFluidOf(bot, ore);
+        if (adjacentFluid.state() != OreScan.Observation.OBSERVED_PRESENT) {
+            return FluidSealStep.CLEAR;
+        }
+        BlockPos lava = adjacentFluid.position();
+        var blockSlot = MaterialPalette.pickSacrificialBlockSlot(
+                bot, protectedStoneLikeReserve);
+        if (blockSlot.isEmpty()) {
+            BotLog.action(bot, "ore_dig_fluid_unsealable",
+                    "ore", ore.toShortString(),
+                    "protected_stone", protectedStoneLikeReserve);
+            excludeOre(bot, ore);
+            return FluidSealStep.UNSEALABLE;
+        }
+        // The observable-fluid API already proves one exact inset face inside the
+        // real interaction range. Do not reject that legal edge ray by comparing
+        // block centers; BuildAction repeats the final vanilla placement proof.
+        InventoryAction.equipFromSlot(bot, blockSlot.getAsInt());
+        ActionResult sealResult = BuildAction.placeBlockAt(bot, lava);
+        if (!sealResult.isFailed()) {
+            BotLog.action(bot, "ore_dig_fluid_seal", "sealed", lava.toShortString());
+            noteProgress(); // Sealing also counts as progress
+        } else {
+            BotLog.action(bot, "ore_dig_seal_fail",
+                    "lava", lava.toShortString(), "reason", sealResult.reason());
+        }
+        if (sealResult.isFailed()
+                && bot.getActionPack().isPathExecutorIdle()) {
+            bot.getActionPack().startDigPathTo(
+                    ore.down(), protectedStoneLikeReserve); // Close in until sealing is reachable
+        }
+        return FluidSealStep.WORKING;
+    }
+
+    // ── Vein mode ("mine the whole vein"): observation-gated, finite, no strip/branch mining ──
+    private static final int VEIN_EMPTY_SCAN_LIMIT = 3;
+    private static final double VEIN_SEED_HINT_RADIUS_SQUARED = 36.0D;
+
+    /**
+     * Runs once per tick before the queue drains: rechecks the 26 neighbours of one freshly broken vein
+     * cell through ordinary perception. A member whose only exposed face was the cell just opened is
+     * invisible to the pre-break flood, so this is what lets the vein continue through stone. Only cells
+     * the bot can observe are ever queued; nothing hidden is read.
+     */
+    private void tickVeinDiscovery(AIPlayerEntity bot, ServerWorld world) {
+        if (veinBroken.size() >= VEIN_CAP) {
+            veinSweep.clear();
+            if (miner.target() == null && activeTargetBreakPos == null) {
+                veinQueue.clear();
+            }
+            return;
+        }
+        BlockPos center = veinSweep.pollFirst();
+        if (center != null) {
+            discoverVeinAround(bot, world, center);
+        }
+    }
+
+    private void discoverVeinAround(AIPlayerEntity bot, ServerWorld world, BlockPos center) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    BlockPos n = center.add(dx, dy, dz).toImmutable();
+                    if (veinBroken.contains(n)
+                            || veinQueue.contains(n)
+                            || n.equals(targetOre)
+                            || oreExcluded(bot, n)
+                            || OreScan.observeOre(bot, n, targetOres)
+                            != OreScan.Observation.OBSERVED_PRESENT) {
+                        continue;
+                    }
+                    if (veinBroken.size() + veinQueue.size() >= VEIN_CAP) {
+                        return;
+                    }
+                    rememberObservedHighWorkPose(bot, world, n);
+                    veinQueue.addLast(n);
+                    BotLog.action(bot, "ore_dig_vein_member", "pos", n.toShortString(),
+                            "via", center.toShortString(), "queued", veinQueue.size());
+                    queueVeinAround(bot, world, n);
+                }
+            }
+        }
+    }
+
+    /**
+     * Vein mode with no locked ore and an empty queue: choose the seed, or decide the vein is exhausted.
+     * Exhaustion = every broken cell's neighbourhood was rechecked after the last break and nothing
+     * observable, unexcluded and same-type remains.
+     */
+    private void tickVeinWithoutTarget(AIPlayerEntity bot, ServerWorld world) {
+        if (!veinSeeded) {
+            int now = bot.getEntityWorld().getServer().getTicks();
+            if (now - lastScanTick < SCAN_INTERVAL) {
+                return;
+            }
+            lastScanTick = now;
+            BlockPos seed = nearestOre(bot, world, veinSeedHint);
+            if (seed == null) {
+                if (++veinEmptyScans >= VEIN_EMPTY_SCAN_LIMIT) {
+                    BotLog.action(bot, "ore_dig_vein_no_seed",
+                            "hint", veinSeedHint == null ? "none" : veinSeedHint.toShortString());
+                    fail("vein_not_found: no observable "
+                            + Registries.BLOCK.getId(targetOres.iterator().next()).getPath()
+                            + " in view; move closer to the ore or give its x/y/z");
+                }
+                return;
+            }
+            clearStripMovementOwnership();
+            targetOre = seed;
+            veinSeeded = true;
+            lastTargetDist = Double.MAX_VALUE;
+            targetApproachTick = elapsed;
+            BotLog.action(bot, "ore_dig_vein_seed", "pos", seed.toShortString());
+            return;
+        }
+        if (!veinSweep.isEmpty()) {
+            return;
+        }
+        if (veinBroken.isEmpty()) {
+            // The seed was released (unreachable, unsafe, lava it could not seal) before anything was
+            // mined. Never wander off to a different vein: report it.
+            fail("vein_seed_unreachable");
+            return;
+        }
+        if (!veinFinalSwept) {
+            veinFinalSwept = true;
+            veinSweep.addAll(veinBroken);
+            return;
+        }
+        HarvestCore.sweepPickupAnyOf(bot, targetDrops, 16);
+        if (veinPickupGrace++ < PICKUP_GRACE_TICKS) {
+            return;
+        }
+        BotLog.action(bot, "ore_dig_vein_done", "mined", veinBroken.size(),
+                "collected", collected, "capped", veinBroken.size() >= VEIN_CAP);
+        io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
+                "Vein finished: mined " + veinBroken.size() + " "
+                        + Registries.BLOCK.getId(targetOres.iterator().next()).getPath().replace('_', ' ')
+                        + " block" + (veinBroken.size() == 1 ? "" : "s")
+                        + (veinBroken.size() >= VEIN_CAP ? " (vein cap reached)" : "")
+                        + "; no more of this vein is in view.");
+        complete();
+    }
     // ── Dig one tunnel cell toward the target (only the cell within reach, driven by BlockMiner) ──
     private void digTowardStep(AIPlayerEntity bot,
                                ServerWorld world,
@@ -4922,6 +5166,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * volatile read and a return (M30, design 8.2 hook 9/13).
      */
     private boolean tickOpportunistic(AIPlayerEntity bot, ServerWorld world) {
+        if (veinMode) {
+            return false;                                     // vein mode never detours to other ore
+        }
         boolean live = detour != null && detour.isActive();
         if (!live && (!MiningAssistRuntime.senseConfigured() || !MiningAssistRuntime.config().detourActive())) {
             return false;                                     // mode off / SENSE: two static reads, no behaviour change
@@ -5891,12 +6138,25 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private BlockPos nearestOre(AIPlayerEntity bot, ServerWorld world) {
-        BlockPos origin = bot.getBlockPos();
-        BlockPos min = origin.add(-SCAN_RADIUS, -VERTICAL_SCAN, -SCAN_RADIUS);
-        BlockPos max = origin.add(SCAN_RADIUS, VERTICAL_SCAN, SCAN_RADIUS);
+        return nearestOre(bot, world, null);
+    }
+
+    /**
+     * Nearest observable target ore. With a {@code hint} (vein mode's "the ore at x/y/z") candidates are
+     * ranked by distance to the hint and must lie within a few blocks of it; without one, by distance to
+     * the bot.
+     */
+    private BlockPos nearestOre(AIPlayerEntity bot, ServerWorld world, BlockPos hint) {
+        BlockPos origin = hint != null ? hint : bot.getBlockPos();
+        BlockPos scanOrigin = bot.getBlockPos();
+        BlockPos min = scanOrigin.add(-SCAN_RADIUS, -VERTICAL_SCAN, -SCAN_RADIUS);
+        BlockPos max = scanOrigin.add(SCAN_RADIUS, VERTICAL_SCAN, SCAN_RADIUS);
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
         for (BlockPos pos : BlockPos.iterate(min, max)) {
+            if (hint != null && hint.getSquaredDistance(pos) > VEIN_SEED_HINT_RADIUS_SQUARED) {
+                continue;
+            }
             if (oreExcluded(bot, pos)
                     || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
                     || !OreScan.isOre(world.getBlockState(pos), targetOres)) {
