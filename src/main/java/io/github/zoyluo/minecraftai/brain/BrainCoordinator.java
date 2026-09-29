@@ -960,7 +960,7 @@ public final class BrainCoordinator {
             String requestDetail = conversation.lastInstruction.isBlank()
                     ? ""
                     : " (the request was: " + conversation.lastInstruction + ")";
-            conversation.history.add(ChatMessage.user(
+            conversation.history.add(wakeUserMessage(bot, conversation, 
                     "The threat that blocked your request is handled. If the player's request is still unfinished, "
                     + "start it now with the appropriate task tool" + requestDetail
                     + ". Do not tell the player about the delay again."
@@ -988,7 +988,7 @@ public final class BrainCoordinator {
             TaskStatus status = TaskManager.INSTANCE.status(bot);
             PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
             conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-            conversation.history.add(ChatMessage.user(
+            conversation.history.add(wakeUserMessage(bot, conversation, 
                     "The previous task ended: " + status.name() + " (state " + status.state() + ": " + status.description()
                     + "). If the player's overall request is complete, use say to report that in English and stop; "
                     + "otherwise continue with the next high-level task.\n\nCurrent state:\n" + snapshot.toJson()));
@@ -1478,7 +1478,7 @@ public final class BrainCoordinator {
                     String executableHint = executableFailureHint(failure);
                     PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
                     conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-                    conversation.history.add(ChatMessage.user("The previous task failed: "
+                    conversation.history.add(wakeUserMessage(bot, conversation, "The previous task failed: "
                             + failure.name()
                             + ", reason: "
                             + failure.reason()
@@ -1537,13 +1537,30 @@ public final class BrainCoordinator {
         }
         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
         conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-        conversation.history.add(ChatMessage.user(reason
+        conversation.history.add(wakeUserMessage(bot, conversation, reason
                 + "\n\nLong-term goal status:\n"
                 + goal
                 + "\n\nCurrent state:\n"
                 + snapshot.toJson()));
         BotLog.comm(bot, "goal_continuation_injected", "reason", reason);
         return true;
+    }
+
+    /**
+     * The user message of an autonomous wake (failure report, deferred request, goal continuation, task finished).
+     * A wake never carries the recent chat, but when the conversation has no user context yet (a fresh or reset
+     * history) the first one is prefixed with the conversation-memory block, under the same "background only"
+     * header a player instruction uses, so a bot that wakes on its own still knows what was said before. Later
+     * wakes find a user message already in the history and add nothing (the block is not repeated every round).
+     */
+    private ChatMessage wakeUserMessage(AIPlayerEntity bot, BotConversation conversation, String text) {
+        boolean hasUserContext = conversation.history.stream().anyMatch(message -> "user".equals(message.role()));
+        return wakeUserMessage(hasUserContext, hasUserContext ? "" : memoryContextBlock(bot), text);
+    }
+
+    /** Pure form of {@link #wakeUserMessage(AIPlayerEntity, BotConversation, String)}, for unit tests. */
+    static ChatMessage wakeUserMessage(boolean hasUserContext, String memoryBlock, String text) {
+        return ChatMessage.user((hasUserContext ? "" : memoryBlock) + text);
     }
 
     private boolean shouldWakeForGoal(AIPlayerEntity bot, boolean hasGoal) {
