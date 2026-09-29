@@ -15,19 +15,17 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
@@ -62,8 +60,6 @@ import java.util.UUID;
  */
 public final class OreDigFrontierGameTests {
 
-    private static final int SHELL = 3;
-    private static final BlockState STONE = Blocks.STONE.getDefaultState();
     private static final BlockState AIR = Blocks.AIR.getDefaultState();
     private static final String ENV_PREFIX = "minecraftai-gametest:ore_dig_frontier_game_tests_";
 
@@ -533,71 +529,6 @@ public final class OreDigFrontierGameTests {
         JsonObject root = new JsonObject();
         root.add(MiningAssistConfig.FILE_SECTION, section);
         return MiningAssistConfig.parse(root, key -> null, AssistMode.DETOUR, true);
-    }
-
-    /** A sealed stone box with an air interior ({@code MiningAssistSenseGameTests.Room}'s pattern), plus a
-     *  {@link #contains(BlockPos)} query the invariant checks in this file need and the sibling files do not. */
-    private static final class Room {
-        final ServerWorld world;
-        final BlockPos feet;
-        private final int minDx;
-        private final int maxDx;
-        private final int minDz;
-        private final int maxDz;
-        private final int height;
-
-        Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
-            this.world = context.getWorld();
-            this.feet = context.getAbsolutePos(new BlockPos(3, relY, 3)).toImmutable();
-            this.minDx = minDx;
-            this.maxDx = maxDx;
-            this.minDz = minDz;
-            this.maxDz = maxDz;
-            this.height = height;
-            fill(minDx - SHELL, -SHELL, minDz - SHELL, maxDx + SHELL, height - 1 + SHELL, maxDz + SHELL, STONE);
-            fill(minDx, 0, minDz, maxDx, height - 1, maxDz, AIR);
-            discardEntities();
-        }
-
-        void clear() {
-            fill(minDx - SHELL, -SHELL, minDz - SHELL, maxDx + SHELL, height - 1 + SHELL, maxDz + SHELL, AIR);
-            discardEntities();
-        }
-
-        private void discardEntities() {
-            BlockPos low = at(minDx - SHELL, -SHELL, minDz - SHELL);
-            BlockPos high = at(maxDx + SHELL + 1, height + SHELL, maxDz + SHELL + 1);
-            Box box = new Box(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
-            for (Entity entity : world.getEntitiesByClass(Entity.class, box, e -> !(e instanceof PlayerEntity))) {
-                entity.discard();
-            }
-        }
-
-        BlockPos at(int dx, int dy, int dz) {
-            return feet.add(dx, dy, dz);
-        }
-
-        void set(int dx, int dy, int dz, Block block) {
-            world.setBlockState(at(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_ALL);
-        }
-
-        /** True when {@code pos} is inside this room's own carved-out interior (not its shell). */
-        boolean contains(BlockPos pos) {
-            int dx = pos.getX() - feet.getX();
-            int dy = pos.getY() - feet.getY();
-            int dz = pos.getZ() - feet.getZ();
-            return dx >= minDx && dx <= maxDx && dy >= 0 && dy <= height - 1 && dz >= minDz && dz <= maxDz;
-        }
-
-        private void fill(int x0, int y0, int z0, int x1, int y1, int z1, BlockState state) {
-            for (int x = x0; x <= x1; x++) {
-                for (int y = y0; y <= y1; y++) {
-                    for (int z = z0; z <= z1; z++) {
-                        world.setBlockState(at(x, y, z), state, Block.NOTIFY_ALL);
-                    }
-                }
-            }
-        }
     }
 
     /** Cleanup-on-failure, strict-capability and DETOUR-mode config plumbing shared by every test. */

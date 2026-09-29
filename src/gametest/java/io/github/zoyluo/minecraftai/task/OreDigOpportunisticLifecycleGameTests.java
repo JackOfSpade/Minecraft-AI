@@ -3,7 +3,6 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.assist.AssistMode;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
@@ -18,30 +17,24 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,6 +43,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
+import static io.github.zoyluo.minecraftai.task.SensingArena.hasSpawnLine;
 
 /**
  * Real-Minecraft GameTests for the P1 walk-only opportunistic valuables detour (design {@code d4_r1_detour.md},
@@ -74,9 +70,7 @@ import java.util.regex.Pattern;
  */
 public final class OreDigOpportunisticLifecycleGameTests {
     private static final Logger LOG = LoggerFactory.getLogger("minecraftai-detour-gametest");
-    private static final int SHELL = 3;
     private static final BlockState STONE = Blocks.STONE.getDefaultState();
-    private static final BlockState AIR = Blocks.AIR.getDefaultState();
     private static final Pattern EVENT = Pattern.compile("event=(ore_dig_detour_[a-z_]+)");
 
     // ---------------------------------------------------------------------------------------------
@@ -1127,29 +1121,6 @@ public final class OreDigOpportunisticLifecycleGameTests {
         return lines.stream().anyMatch(line -> line.contains("event=ore_dig_detour_skip") && line.contains(reasonNeedle));
     }
 
-    private static List<String> botLog(String botName) {
-        try {
-            Path base = BotLogWriter.INSTANCE.baseDir();
-            if (base == null) {
-                return null;
-            }
-            Path file = base.resolve("by-bot").resolve(botName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".log");
-            if (!Files.isRegularFile(file)) {
-                return null;
-            }
-            String needle = " bot=" + botName + " ";
-            try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
-                return lines.filter(line -> line.contains(needle)).toList();
-            }
-        } catch (IOException | RuntimeException failure) {
-            return null;
-        }
-    }
-
-    private static boolean hasSpawnLine(List<String> lines) {
-        return lines.stream().anyMatch(line -> line.contains("event=bot_spawned"));
-    }
-
     private static List<String> detourEvents(List<String> lines) {
         List<String> events = new ArrayList<>();
         for (String line : lines) {
@@ -1159,73 +1130,6 @@ public final class OreDigOpportunisticLifecycleGameTests {
             }
         }
         return events;
-    }
-
-    /** A sealed stone box with an air interior, matching {@code mining.assist.MiningAssistSenseGameTests.Room}. */
-    private static final class Room {
-        final ServerWorld world;
-        final BlockPos feet;
-        private final int minDx;
-        private final int maxDx;
-        private final int minDz;
-        private final int maxDz;
-        private final int height;
-        private final int shellH;
-
-        Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
-            this.world = context.getWorld();
-            this.feet = context.getAbsolutePos(new BlockPos(3, relY, 3)).toImmutable();
-            this.minDx = minDx;
-            this.maxDx = maxDx;
-            this.minDz = minDz;
-            this.maxDz = maxDz;
-            this.height = height;
-            this.shellH = SHELL;
-            fill(minDx - shellH, -SHELL, minDz - shellH, maxDx + shellH, height - 1 + SHELL, maxDz + shellH, STONE);
-            fill(minDx, 0, minDz, maxDx, height - 1, maxDz, AIR);
-            discardEntities();
-        }
-
-        void clear() {
-            fill(minDx - shellH, -SHELL, minDz - shellH, maxDx + shellH, height - 1 + SHELL, maxDz + shellH, AIR);
-            discardEntities();
-        }
-
-        private void discardEntities() {
-            BlockPos low = at(minDx - shellH, -SHELL, minDz - shellH);
-            BlockPos high = at(maxDx + shellH + 1, height + SHELL, maxDz + shellH + 1);
-            Box box = new Box(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
-            for (Entity entity : world.getEntitiesByClass(Entity.class, box, e -> !(e instanceof PlayerEntity))) {
-                entity.discard();
-            }
-        }
-
-        BlockPos at(int dx, int dy, int dz) {
-            return feet.add(dx, dy, dz);
-        }
-
-        void set(int dx, int dy, int dz, Block block) {
-            world.setBlockState(at(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_ALL);
-        }
-
-        /** Seals the whole cross-section (interior and shell) at this X plane: a walk-only route cannot pass it. */
-        void wall(int dx) {
-            for (int y = -1; y <= height; y++) {
-                for (int z = minDz - shellH; z <= maxDz + shellH; z++) {
-                    world.setBlockState(at(dx, y, z), STONE, Block.NOTIFY_ALL);
-                }
-            }
-        }
-
-        private void fill(int x0, int y0, int z0, int x1, int y1, int z1, BlockState state) {
-            for (int x = x0; x <= x1; x++) {
-                for (int y = y0; y <= y1; y++) {
-                    for (int z = z0; z <= z1; z++) {
-                        world.setBlockState(at(x, y, z), state, Block.NOTIFY_ALL);
-                    }
-                }
-            }
-        }
     }
 
     private static final class Progress {

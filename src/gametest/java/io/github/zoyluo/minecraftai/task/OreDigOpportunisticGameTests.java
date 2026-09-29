@@ -4,7 +4,6 @@ import com.google.gson.JsonObject;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.assist.AssistGate;
 import io.github.zoyluo.minecraftai.mining.assist.AssistMode;
@@ -17,33 +16,32 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+
+import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
+import static io.github.zoyluo.minecraftai.task.SensingArena.hasSpawnLine;
 
 /**
  * Real-Minecraft GameTests for mining-assist phase P1 (design {@code d4_r1_detour.md}, {@code d9_tests.md},
@@ -62,10 +60,8 @@ import java.util.UUID;
  * read the same way {@code MiningAssistCoordinator} reads it, never the engine's private per-instance fields.</p>
  */
 public final class OreDigOpportunisticGameTests {
-
-    private static final int SHELL = 3;
+    private static final Logger LOG = LoggerFactory.getLogger("minecraftai-detour-gametest");
     private static final BlockState STONE = Blocks.STONE.getDefaultState();
-    private static final BlockState AIR = Blocks.AIR.getDefaultState();
     private static final String ENV_PREFIX = "minecraftai-gametest:ore_dig_opportunistic_game_tests_";
 
     // ---------------------------------------------------------------------------------------------
@@ -1081,62 +1077,6 @@ public final class OreDigOpportunisticGameTests {
         }
     }
 
-    /** A sealed stone box with an air interior ({@code MiningAssistSenseGameTests.Room}'s pattern). */
-    private static final class Room {
-        final ServerWorld world;
-        final BlockPos feet;
-        private final int minDx;
-        private final int maxDx;
-        private final int minDz;
-        private final int maxDz;
-        private final int height;
-
-        Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
-            this.world = context.getWorld();
-            this.feet = context.getAbsolutePos(new BlockPos(3, relY, 3)).toImmutable();
-            this.minDx = minDx;
-            this.maxDx = maxDx;
-            this.minDz = minDz;
-            this.maxDz = maxDz;
-            this.height = height;
-            fill(minDx - SHELL, -SHELL, minDz - SHELL, maxDx + SHELL, height - 1 + SHELL, maxDz + SHELL, STONE);
-            fill(minDx, 0, minDz, maxDx, height - 1, maxDz, AIR);
-            discardEntities();
-        }
-
-        void clear() {
-            fill(minDx - SHELL, -SHELL, minDz - SHELL, maxDx + SHELL, height - 1 + SHELL, maxDz + SHELL, AIR);
-            discardEntities();
-        }
-
-        private void discardEntities() {
-            BlockPos low = at(minDx - SHELL, -SHELL, minDz - SHELL);
-            BlockPos high = at(maxDx + SHELL + 1, height + SHELL, maxDz + SHELL + 1);
-            Box box = new Box(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
-            for (Entity entity : world.getEntitiesByClass(Entity.class, box, e -> !(e instanceof PlayerEntity))) {
-                entity.discard();
-            }
-        }
-
-        BlockPos at(int dx, int dy, int dz) {
-            return feet.add(dx, dy, dz);
-        }
-
-        void set(int dx, int dy, int dz, Block block) {
-            world.setBlockState(at(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_ALL);
-        }
-
-        private void fill(int x0, int y0, int z0, int x1, int y1, int z1, BlockState state) {
-            for (int x = x0; x <= x1; x++) {
-                for (int y = y0; y <= y1; y++) {
-                    for (int z = z0; z <= z1; z++) {
-                        world.setBlockState(at(x, y, z), state, Block.NOTIFY_ALL);
-                    }
-                }
-            }
-        }
-    }
-
     /** Cleanup-on-failure, strict-capability and DETOUR-mode config plumbing shared by every test. */
     private static final class Harness {
         final TestContext context;
@@ -1261,6 +1201,10 @@ public final class OreDigOpportunisticGameTests {
         void assertNoAllowedCapabilityDecision(AIPlayerEntity bot) {
             List<String> lines = botLog(bot.getGameProfile().name());
             if (lines == null || !hasSpawnLine(lines)) {
+                // No in-memory equivalent exists (CapabilityTally only counts allowed FORCED_PICKUP and denied
+                // decisions; an open MiningEvidenceAudit session closes the assist gate), so say so in the log
+                // instead of passing without a trace. Deliberately not a failure.
+                LOG.info("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());
                 return;
             }
             long allowed = lines.stream()
@@ -1269,29 +1213,5 @@ public final class OreDigOpportunisticGameTests {
             require(allowed == 0,
                     "a privileged capability was ALLOWED for " + bot.getGameProfile().name() + " during the run");
         }
-    }
-
-    /** The bot's own structured-log lines, or null when the writer or the file is unavailable. */
-    private static List<String> botLog(String botName) {
-        try {
-            Path base = BotLogWriter.INSTANCE.baseDir();
-            if (base == null) {
-                return null;
-            }
-            Path file = base.resolve("by-bot").resolve(botName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".log");
-            if (!Files.isRegularFile(file)) {
-                return null;
-            }
-            String needle = " bot=" + botName + " ";
-            try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
-                return lines.filter(line -> line.contains(needle)).toList();
-            }
-        } catch (IOException | RuntimeException failure) {
-            return null;
-        }
-    }
-
-    private static boolean hasSpawnLine(List<String> lines) {
-        return lines.stream().anyMatch(line -> line.contains("event=bot_spawned"));
     }
 }

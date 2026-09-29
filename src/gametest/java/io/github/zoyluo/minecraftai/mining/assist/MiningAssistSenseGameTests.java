@@ -6,7 +6,6 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
@@ -20,6 +19,7 @@ import io.github.zoyluo.minecraftai.task.DigDownTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MineValuablesTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
@@ -27,10 +27,8 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -38,16 +36,11 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +50,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
+import static io.github.zoyluo.minecraftai.task.SensingArena.hasSpawnLine;
 
 /**
  * Real-world proof of mining assist phase P0 (sense in shadow). Until these tests the sensor had only been
@@ -75,11 +71,7 @@ import java.util.regex.Pattern;
 public final class MiningAssistSenseGameTests {
     private static final Logger LOG = LoggerFactory.getLogger("minecraftai-assist-gametest");
 
-    /** Thickness of the stone shell around every fixture: an ore two layers deep is enclosed on every side. */
-    private static final int SHELL = 3;
     private static final int SWEEP_RAYS = SphereSchedule.LATTICE_SIZE;
-    private static final BlockState STONE = Blocks.STONE.getDefaultState();
-    private static final BlockState AIR = Blocks.AIR.getDefaultState();
     private static final Pattern EVENT = Pattern.compile("event=(assist_[a-z_]+)");
 
     // ---------------------------------------------------------------------------------------------
@@ -1490,73 +1482,6 @@ public final class MiningAssistSenseGameTests {
     // Fixture and harness plumbing
     // ---------------------------------------------------------------------------------------------
 
-    /** A sealed stone box with an air interior. {@code feet} is the interior origin (the bot's feet cell). */
-    private static final class Room {
-        final ServerWorld world;
-        final BlockPos feet;
-        private final int minDx;
-        private final int maxDx;
-        private final int minDz;
-        private final int maxDz;
-        private final int height;
-        private final int shellH;
-
-        Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
-            this(context, relY, minDx, maxDx, minDz, maxDz, height, SHELL);
-        }
-
-        /** {@code shellH} is the horizontal thickness of the stone around the interior (the vertical one is {@link #SHELL}). */
-        Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height, int shellH) {
-            this.world = context.getWorld();
-            this.feet = context.getAbsolutePos(new BlockPos(3, relY, 3)).toImmutable();
-            this.minDx = minDx;
-            this.maxDx = maxDx;
-            this.minDz = minDz;
-            this.maxDz = maxDz;
-            this.height = height;
-            this.shellH = shellH;
-            fill(minDx - shellH, -SHELL, minDz - shellH, maxDx + shellH, height - 1 + SHELL, maxDz + shellH, STONE);
-            fill(minDx, 0, minDz, maxDx, height - 1, maxDz, AIR);
-            discardEntities();
-        }
-
-        /**
-         * Hands the space back as air. Every GameTest of this suite shares one set of absolute coordinates with the
-         * others, so a stone shell left standing would enclose whatever a later test builds at the same place.
-         */
-        void clear() {
-            fill(minDx - shellH, -SHELL, minDz - shellH, maxDx + shellH, height - 1 + SHELL, maxDz + shellH, AIR);
-            discardEntities();
-        }
-
-        private void discardEntities() {
-            BlockPos low = at(minDx - shellH, -SHELL, minDz - shellH);
-            BlockPos high = at(maxDx + shellH + 1, height + SHELL, maxDz + shellH + 1);
-            Box box = new Box(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
-            for (Entity entity : world.getEntitiesByClass(Entity.class, box, e -> !(e instanceof PlayerEntity))) {
-                entity.discard();
-            }
-        }
-
-        BlockPos at(int dx, int dy, int dz) {
-            return feet.add(dx, dy, dz);
-        }
-
-        void set(int dx, int dy, int dz, Block block) {
-            world.setBlockState(at(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_ALL);
-        }
-
-        private void fill(int x0, int y0, int z0, int x1, int y1, int z1, BlockState state) {
-            for (int x = x0; x <= x1; x++) {
-                for (int y = y0; y <= y1; y++) {
-                    for (int z = z0; z <= z1; z++) {
-                        world.setBlockState(at(x, y, z), state, Block.NOTIFY_ALL);
-                    }
-                }
-            }
-        }
-    }
-
     private record OreSpot(String id, int value, BlockPos pos) {
     }
 
@@ -1689,6 +1614,8 @@ public final class MiningAssistSenseGameTests {
         void assertNoAllowedCapabilityDecision(AIPlayerEntity bot) {
             List<String> lines = botLog(bot.getGameProfile().name());
             if (lines == null || !hasSpawnLine(lines)) {
+                // Same unavailable-log skip as OreDigOpportunisticGameTests: say so instead of passing silently.
+                LOG.info("[capability-canary skipped: no per-bot log] {}", bot.getGameProfile().name());
                 return;
             }
             long allowed = lines.stream()
@@ -1857,31 +1784,6 @@ public final class MiningAssistSenseGameTests {
 
     private static String fmt(double value) {
         return String.format(Locale.ROOT, "%.3f", value);
-    }
-
-    /** The bot's own structured-log lines, or null when the writer or the file is unavailable. */
-    private static List<String> botLog(String botName) {
-        try {
-            Path base = BotLogWriter.INSTANCE.baseDir();
-            if (base == null) {
-                return null;
-            }
-            Path file = base.resolve("by-bot").resolve(botName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".log");
-            if (!Files.isRegularFile(file)) {
-                return null;
-            }
-            String needle = " bot=" + botName + " ";
-            try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
-                return lines.filter(line -> line.contains(needle)).toList();
-            }
-        } catch (IOException | RuntimeException failure) {
-            return null;
-        }
-    }
-
-    /** The log covers this bot's whole life only if its spawn line is in it (the file can rotate under a long run). */
-    private static boolean hasSpawnLine(List<String> lines) {
-        return lines.stream().anyMatch(line -> line.contains("event=bot_spawned"));
     }
 
     private static List<String> assistEvents(List<String> lines) {

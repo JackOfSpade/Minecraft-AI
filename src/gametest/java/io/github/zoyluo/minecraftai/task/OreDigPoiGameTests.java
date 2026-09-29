@@ -28,32 +28,26 @@ import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.mob.WardenEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.test.TestContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
 
 /**
  * Real-Minecraft GameTests for the P2 (R3 deterministic POI) stop/notify flow (mining-assist design 6.1-6.5,
@@ -110,9 +104,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class OreDigPoiGameTests {
 
-    private static final int SHELL = 3;
-    private static final BlockState STONE = Blocks.STONE.getDefaultState();
-    private static final BlockState AIR = Blocks.AIR.getDefaultState();
     /** See {@link #wardenRiskAlwaysStops}'s javadoc: outside DangerWatcher's 10-block close-hostile-pressure
      * envelope, inside the POI sensor's default 16-block perception radius. */
     private static final int WARDEN_STANDOFF_BLOCKS = 12;
@@ -1720,88 +1711,11 @@ public final class OreDigPoiGameTests {
         return count;
     }
 
-    /** The bot's own structured-log lines, or null when the writer or the file is unavailable (matches the
-     * sibling files' own {@code botLog} helper exactly). */
-    private static List<String> botLog(String botName) {
-        try {
-            Path base = BotLogWriter.INSTANCE.baseDir();
-            if (base == null) {
-                return null;
-            }
-            Path file = base.resolve("by-bot").resolve(botName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".log");
-            if (!Files.isRegularFile(file)) {
-                return null;
-            }
-            String needle = " bot=" + botName + " ";
-            try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
-                return lines.filter(line -> line.contains(needle)).toList();
-            }
-        } catch (IOException | RuntimeException failure) {
-            return null;
-        }
-    }
-
     /** Per-test tick bookkeeping (mirrors {@code MiningAssistSenseGameTests.Progress}). */
     private static final class Progress {
         int tick;
         int assignedAt = -1;
         int chunkWaitStart = -1;
-    }
-
-    /** A sealed stone box with an air interior ({@code MiningAssistSenseGameTests.Room}'s pattern). */
-    private static final class Room {
-        final ServerWorld world;
-        final BlockPos feet;
-        private final int minDx;
-        private final int maxDx;
-        private final int minDz;
-        private final int maxDz;
-        private final int height;
-
-        Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
-            this.world = context.getWorld();
-            this.feet = context.getAbsolutePos(new BlockPos(3, relY, 3)).toImmutable();
-            this.minDx = minDx;
-            this.maxDx = maxDx;
-            this.minDz = minDz;
-            this.maxDz = maxDz;
-            this.height = height;
-            fill(minDx - SHELL, -SHELL, minDz - SHELL, maxDx + SHELL, height - 1 + SHELL, maxDz + SHELL, STONE);
-            fill(minDx, 0, minDz, maxDx, height - 1, maxDz, AIR);
-            discardEntities();
-        }
-
-        void clear() {
-            fill(minDx - SHELL, -SHELL, minDz - SHELL, maxDx + SHELL, height - 1 + SHELL, maxDz + SHELL, AIR);
-            discardEntities();
-        }
-
-        private void discardEntities() {
-            BlockPos low = at(minDx - SHELL, -SHELL, minDz - SHELL);
-            BlockPos high = at(maxDx + SHELL + 1, height + SHELL, maxDz + SHELL + 1);
-            Box box = new Box(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
-            for (Entity entity : world.getEntitiesByClass(Entity.class, box, e -> !(e instanceof PlayerEntity))) {
-                entity.discard();
-            }
-        }
-
-        BlockPos at(int dx, int dy, int dz) {
-            return feet.add(dx, dy, dz);
-        }
-
-        void set(int dx, int dy, int dz, Block block) {
-            world.setBlockState(at(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_ALL);
-        }
-
-        private void fill(int x0, int y0, int z0, int x1, int y1, int z1, BlockState state) {
-            for (int x = x0; x <= x1; x++) {
-                for (int y = y0; y <= y1; y++) {
-                    for (int z = z0; z <= z1; z++) {
-                        world.setBlockState(at(x, y, z), state, Block.NOTIFY_ALL);
-                    }
-                }
-            }
-        }
     }
 
     /** Cleanup-on-failure, strict-capability and POI-mode config plumbing shared by every test. */
