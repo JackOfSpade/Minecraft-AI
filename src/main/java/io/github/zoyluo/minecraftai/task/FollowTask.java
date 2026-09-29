@@ -429,6 +429,8 @@ public final class FollowTask extends AbstractTask {
                 return;
             }
             if (!path.isFailed()) {
+                // A route exists again: a later loss of it is a new no-route episode worth announcing.
+                noRouteAnnounced = false;
                 if (pack.activePathGoal() != null && pack.activePathGoal().equals(bot.blockPosition())) {
                     // The goal resolved onto the very cell the bot stands in (the nearest standable
                     // cell to the stand-off point IS this one): a zero-length route that "completes"
@@ -478,7 +480,9 @@ public final class FollowTask extends AbstractTask {
             pack.stopNavigation();
             repathBackoff = true;
             waiting = true;
-            announceNoRoute(bot, standNear, path.reason());
+            if (FollowNoRoute.isGenuine(path.reason())) {
+                announceNoRoute(bot, standNear, path.reason());
+            }
             return;
         }
 
@@ -489,7 +493,10 @@ public final class FollowTask extends AbstractTask {
 
     /**
      * No route to the player and no verified straight walk: the bot stays dry where it is (it swims only to follow
-     * a player who is themselves in the water), keeps re-planning on the normal schedule, and says so once.
+     * a player who is themselves in the water), keeps re-planning on the normal schedule, and says so once per
+     * episode. Only called for a genuine no-route result ({@link FollowNoRoute}); a transient or budget failure
+     * (search limit, timeout, no start cell) does not claim there is no dry way, and the flag is re-armed when a
+     * route is found again.
      */
     private void announceNoRoute(AIPlayerEntity bot, BlockPos standNear, String reason) {
         if (noRouteAnnounced) {
