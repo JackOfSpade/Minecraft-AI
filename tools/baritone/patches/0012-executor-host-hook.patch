@@ -1,0 +1,60 @@
+Baritone runs its searches and rescans on a private, unbounded, non-daemon pool, and parks two never-ending cache loops (region packer, periodic save) in it. The host now supplies the executor (HostEnvironment.executor(): bounded, named, daemon) and the two long-lived loops get their own daemon threads, so they cannot occupy a slot of the bounded pool.
+
+diff --git a/src/main/java/baritone/Baritone.java b/src/main/java/baritone/Baritone.java
+index c9000ee..a799f2b 100644
+--- a/src/main/java/baritone/Baritone.java
++++ b/src/main/java/baritone/Baritone.java
+@@ -43,9 +43,6 @@ import java.nio.file.Path;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.concurrent.Executor;
+-import java.util.concurrent.SynchronousQueue;
+-import java.util.concurrent.ThreadPoolExecutor;
+-import java.util.concurrent.TimeUnit;
+ import java.util.function.Function;
+ 
+ /**
+@@ -54,12 +51,6 @@ import java.util.function.Function;
+  */
+ public class Baritone implements IBaritone {
+ 
+-    private static final ThreadPoolExecutor threadPool;
+-
+-    static {
+-        threadPool = new ThreadPoolExecutor(4, Integer.MAX_VALUE, 60L, TimeUnit.SECONDS, new SynchronousQueue<>());
+-    }
+-
+     private final Path directory;
+ 
+     private final GameEventHandler gameEventHandler;
+@@ -249,6 +240,6 @@ public class Baritone implements IBaritone {
+     }
+ 
+     public static Executor getExecutor() {
+-        return threadPool;
++        return HostEnvironment.executor();
+     }
+ }
+diff --git a/src/main/java/baritone/cache/CachedWorld.java b/src/main/java/baritone/cache/CachedWorld.java
+index 037cc35..9d19468 100644
+--- a/src/main/java/baritone/cache/CachedWorld.java
++++ b/src/main/java/baritone/cache/CachedWorld.java
+@@ -23,6 +23,7 @@ import baritone.api.IBaritone;
+ import baritone.api.cache.ICachedWorld;
+ import baritone.api.cache.IWorldData;
+ import baritone.api.utils.Helper;
++import baritone.api.utils.HostEnvironment;
+ import com.google.common.cache.CacheBuilder;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+@@ -89,8 +90,8 @@ public final class CachedWorld implements ICachedWorld, Helper {
+         this.dimension = dimension;
+         this.dimensionId = dimensionId;
+         System.out.println("Cached world directory: " + directory);
+-        Baritone.getExecutor().execute(new PackerThread());
+-        Baritone.getExecutor().execute(() -> {
++        HostEnvironment.startDaemon("baritone-cache-packer", new PackerThread());
++        HostEnvironment.startDaemon("baritone-cache-saver", () -> {
+             try {
+                 Thread.sleep(30000);
+                 while (true) {

@@ -1,0 +1,23 @@
+A search cancelled while it waits for a worker must not run: calculate() reset cancelRequested to false on entry, so a cancel that arrived first was lost and the search ran to its timeout for a bot that no longer wanted it (with a bounded, queueing executor that wait is real). A search cannot be reused, so the reset served nothing. The flag is also written by the server thread and read in the search's inner loop, so it is volatile.
+
+diff --git a/src/main/java/baritone/pathing/calc/AbstractNodeCostSearch.java b/src/main/java/baritone/pathing/calc/AbstractNodeCostSearch.java
+index 0bfb6ac..a67e8f1 100644
+--- a/src/main/java/baritone/pathing/calc/AbstractNodeCostSearch.java
++++ b/src/main/java/baritone/pathing/calc/AbstractNodeCostSearch.java
+@@ -58,7 +58,7 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
+ 
+     private volatile boolean isFinished;
+ 
+-    protected boolean cancelRequested;
++    protected volatile boolean cancelRequested;
+ 
+     /**
+      * This is really complicated and hard to explain. I wrote a comment in the old version of MineBot but it was so
+@@ -101,7 +101,6 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
+         if (isFinished) {
+             throw new IllegalStateException("Path finder cannot be reused!");
+         }
+-        cancelRequested = false;
+         try {
+             IPath path = calculate0(primaryTimeout, failureTimeout).map(IPath::postProcess).orElse(null);
+             if (cancelRequested) {

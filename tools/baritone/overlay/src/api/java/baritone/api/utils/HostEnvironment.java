@@ -2,6 +2,9 @@ package baritone.api.utils;
 
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import net.minecraft.server.level.ServerLevel;
@@ -23,6 +26,8 @@ public final class HostEnvironment {
     private static volatile Path gameDirectory = Path.of("").toAbsolutePath();
     private static volatile Consumer<Runnable> gameThreadExecutor = Runnable::run;
     private static volatile Supplier<ServerLevel> lootLevel = () -> null;
+
+    private static volatile Executor executor;
 
     private HostEnvironment() {}
 
@@ -57,5 +62,38 @@ public final class HostEnvironment {
 
     public static void setLootLevel(Supplier<ServerLevel> level) {
         lootLevel = Objects.requireNonNull(level, "level");
+    }
+
+    /**
+     * Where Baritone runs its short background jobs: path searches, block rescans (mine, farm, get-to-block, explore),
+     * region loads. Upstream keeps a private, unbounded, non-daemon pool here; a host that runs many bots wants the number
+     * of concurrent searches capped and its threads named and daemonised. Defaults to a cached pool of daemon threads.
+     * <p>
+     * Every task must be short-lived: the two never-ending cache loops go to {@link #startDaemon} instead, so they do not
+     * occupy a slot of a bounded executor for good.
+     */
+    public static Executor executor() {
+        Executor current = executor;
+        return current != null ? current : DefaultExecutor.INSTANCE;
+    }
+
+    public static void setExecutor(Executor newExecutor) {
+        executor = Objects.requireNonNull(newExecutor, "executor");
+    }
+
+    /** Starts a background thread that lives as long as its loop does (the cache packer and the periodic cache save). */
+    public static void startDaemon(String name, Runnable task) {
+        Thread thread = new Thread(task, name);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static final class DefaultExecutor {
+        private static final AtomicInteger COUNTER = new AtomicInteger();
+        static final Executor INSTANCE = Executors.newCachedThreadPool(task -> {
+            Thread thread = new Thread(task, "baritone-worker-" + COUNTER.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 }
