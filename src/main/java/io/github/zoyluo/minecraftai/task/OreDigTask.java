@@ -2800,7 +2800,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * earlier vein member (typically the pit that member left) and that shows no observed adjacent fluid.
      * Its hidden stone neighbours make the aggregate hazard UNKNOWN, which is accepted here (an observed
      * fluid was sealed or skipped before that member was mined). The cell is not required to be visible
-     * from the bot's current pose (a diagonal ray squeezes past the wall corner); the surface planner
+     * from the bot's current pose (a diagonal ray squeezes past the wall corner), but it must be standable; the surface planner
      * still verifies the route and stance before any movement. Nearest to the bot first.
      */
     private BlockPos veinSideStance(AIPlayerEntity bot, BlockPos ore) {
@@ -2809,6 +2809,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         for (Direction direction : STRIP_DIRS) {
             BlockPos candidate = ore.offset(direction);
             if (!veinBroken.contains(candidate)
+                    || !io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)
                     || OreScan.adjacentHazard(bot, candidate) == OreScan.Observation.OBSERVED_PRESENT) {
                 continue;
             }
