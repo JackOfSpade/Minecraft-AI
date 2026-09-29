@@ -413,7 +413,9 @@ public final class CombatCore {
      * proportionally longer walk ({@link #STEP_TIMEOUT_TICKS} times the reciprocal).
      */
     private static final float STEP_ITEM_USE_SLOWDOWN = 0.2F;
-    private static final int STEP_SLOWED_TIMEOUT_TICKS = (int) (STEP_TIMEOUT_TICKS / STEP_ITEM_USE_SLOWDOWN);
+    /** A full-speed tick costs this many budget units and a slowed tick one, so the budget is {@code STEP_TIMEOUT_TICKS} full-speed ticks. */
+    private static final int STEP_FULL_TICK_COST = Math.round(1.0F / STEP_ITEM_USE_SLOWDOWN);
+    private static final int STEP_TIMEOUT_BUDGET = STEP_TIMEOUT_TICKS * STEP_FULL_TICK_COST;
     /** A step ends once the bot stands this close to the centre of its cell (and has settled). */
     private static final double STEP_CENTER_TOLERANCE = 0.35D;
     /** Horizontal blocks per tick below which the bot counts as settled on its cell. */
@@ -442,7 +444,8 @@ public final class CombatCore {
         private final boolean keepAim;
         private final boolean sprint;
         private int ticks;
-        private boolean slowed;
+        /** Timeout budget spent: {@link #STEP_FULL_TICK_COST} per full-speed tick, 1 per item-use-slowed tick. */
+        private int budgetSpent;
         private Vec3 lastPosition;
         private String failure;
 
@@ -524,8 +527,8 @@ public final class CombatCore {
             return StepStatus.ARRIVED;
         }
         boolean usingItem = bot.isUsingItem();
-        step.slowed |= usingItem;
-        if (step.ticks > (step.slowed ? STEP_SLOWED_TIMEOUT_TICKS : STEP_TIMEOUT_TICKS)) {
+        step.budgetSpent += usingItem ? 1 : STEP_FULL_TICK_COST;
+        if (step.budgetSpent > STEP_TIMEOUT_BUDGET) {
             return failStep(bot, step, "timeout");
         }
         if (inCell && distance <= STEP_CENTER_TOLERANCE || distance <= speed * STEP_BRAKE_FACTOR) {

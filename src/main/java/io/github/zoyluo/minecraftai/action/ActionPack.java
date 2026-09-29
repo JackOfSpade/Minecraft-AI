@@ -839,7 +839,8 @@ public final class ActionPack {
         stopMining();
         this.walkTo = null;
         stopMovement();
-        player.releaseUsingItem();
+        // Cancel, never release: releasing a drawn bow fires it, and stopAll is an interruption, not a shot.
+        player.stopUsingItem();
     }
 
     public boolean hasActiveActions() {

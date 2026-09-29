@@ -173,6 +173,11 @@ public final class CombatTask extends AbstractTask {
         return "combat";
     }
 
+    /** True while the bow is latched out of the plan because a friend kept blocking the line of fire. */
+    boolean isBowSuppressed() {
+        return bowSuppressedUntil > 0 && elapsed < bowSuppressedUntil;
+    }
+
     @Override
     public String describe() {
         return "Attacking " + BuiltInRegistries.ENTITY_TYPE.getKey(targetType) + " " + kills + "/" + targetKills + " phase=" + phase;
@@ -539,9 +544,9 @@ public final class CombatTask extends AbstractTask {
         BotLog.action(bot, "bow_suppressed", "reason", "friendly_on_line_of_fire",
                 "until", bowSuppressedUntil);
         cancelPeekStep(bot);
-        if (bot.isUsingItem()) {
-            bot.releaseUsingItem();
-        }
+        // CANCEL the draw, never release it: releasing a charged bow fires it, and the reason for
+        // giving up is a friend standing on the line of fire.
+        bot.stopUsingItem();
         finishRangedLoadout(bot);
         CombatCore.ensureMeleeWeapon(bot);
         phase = Phase.APPROACH;
@@ -800,7 +805,7 @@ public final class CombatTask extends AbstractTask {
         }
         kills++;
         finishRangedLoadout(bot);
-        bot.releaseUsingItem();
+        bot.stopUsingItem();
         eating = false;
 
         LivingEntity pressure = refreshRetreatThreat(bot);
@@ -1104,9 +1109,8 @@ public final class CombatTask extends AbstractTask {
         if (!shouldUseBow(bot)) {
             // The bow left the plan (a friend kept blocking the line, or the target closed in): leave cover.
             cancelPeekStep(bot);
-            if (bot.isUsingItem()) {
-                bot.releaseUsingItem();
-            }
+            // Cancel the draw (never release it: releasing a drawn bow fires it without the line-of-fire check).
+            bot.stopUsingItem();
             finishRangedLoadout(bot);
             CombatCore.ensureMeleeWeapon(bot);
             phase = Phase.APPROACH;
@@ -1184,7 +1188,7 @@ public final class CombatTask extends AbstractTask {
     private void coverPeek(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
             cancelPeekStep(bot);
-            bot.releaseUsingItem();
+            bot.stopUsingItem(); // the target is gone: cancel the draw, never fire it into the void
             kills++;
             finishOrAcquire(bot);
             return;
@@ -1200,7 +1204,7 @@ public final class CombatTask extends AbstractTask {
             if (status == CombatCore.StepStatus.FAILED) {
                 String why = peekStep.failure();
                 peekStep = null;
-                bot.releaseUsingItem();
+                bot.stopUsingItem(); // the peek was not completed: cancel the draw, no unchecked shot
                 abandonPeekaboo(bot, "peekaboo_peek_step_failed:" + why);
                 return;
             }

@@ -160,9 +160,34 @@ final class CombatHardeningSourceContractTest {
         assertTrue(core.contains("STEP_ITEM_USE_SLOWDOWN = 0.2F"), "vanilla's item-use slowdown is 0.2");
         assertTrue(body.contains("bot.isUsingItem()") && body.contains("forward * scale") && body.contains("left * scale"),
                 "a drawn bow or raised shield scales the walk inputs like a player's");
-        assertTrue(body.contains("STEP_SLOWED_TIMEOUT_TICKS"), "the step timeout grows with the slowdown");
+        assertTrue(body.contains("STEP_TIMEOUT_BUDGET") && body.contains("budgetSpent += usingItem ? 1 : STEP_FULL_TICK_COST"),
+                "the step timeout is a budget spent per tick, the slowed ticks costing a fifth (not a sticky flag)");
     }
 
+
+    @Test
+    void everyBowExitCancelsTheDrawAndOnlyTheCheckedShotsRelease() throws IOException {
+        String combat = read("task/CombatTask.java");
+        // releaseUsingItem() FIRES a charged bow; only the two line-of-fire-checked shots and the shield/reactive-shield
+        // releases may use it, every give-up and abort path cancels with stopUsingItem().
+        for (String method : new String[]{"private void giveUpBowForFriendlyLine(", "private void coverHide(",
+                "private boolean settleDeadPrimary("}) {
+            int start = combat.indexOf(method);
+            assertTrue(start > 0, method);
+            int end = combat.indexOf("\n    }\n", start);
+            assertFalse(combat.substring(start, end).contains("releaseUsingItem"),
+                    method + " must cancel a drawn bow, not fire it");
+        }
+        int peek = combat.indexOf("private void coverPeek(");
+        String peekBody = combat.substring(peek, combat.indexOf("private boolean shouldBlock("));
+        assertTrue(peekBody.split("releaseUsingItem", -1).length - 1 == 1,
+                "the peek may release exactly once: the shot that passed the friendly line-of-fire check");
+        assertTrue(peekBody.indexOf("releaseUsingItem") > peekBody.indexOf("} else {\n                friendlyBlockedPeeks = 0;"),
+                "that release sits in the friend-free branch");
+        assertTrue(read("action/ActionPack.java").contains("player.stopUsingItem();")
+                        && !read("action/ActionPack.java").contains("player.releaseUsingItem();"),
+                "stopAll is an interruption: it must cancel a drawn bow, not fire it");
+    }
     @Test
     void coverPhasesCountFriendlyBlockedPeeksAndLeaveThroughTheRangedGiveUpPath() throws IOException {
         String combat = read("task/CombatTask.java");

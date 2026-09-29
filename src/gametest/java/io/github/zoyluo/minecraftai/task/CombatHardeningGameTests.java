@@ -821,6 +821,324 @@ public final class CombatHardeningGameTests {
     }
 
 
+    // ------------------------------------------------------------------ bow give-up: cancel, never fire
+
+    /** Arrow entities the bot itself loosed (a stray arrow of another test in the same world does not count). */
+    private static int botArrows(GameTestHelper context, AIPlayerEntity bot) {
+        return context.getLevel().getEntitiesOfClass(
+                net.minecraft.world.entity.projectile.arrow.AbstractArrow.class,
+                bot.getBoundingBox().inflate(64.0D), arrow -> arrow.getOwner() == bot).size();
+    }
+
+    /**
+     * A friend (the owner) stands on the line of fire of a bow that is drawn fully: the bot must hold, then
+     * give the bow up by CANCELLING the draw. Releasing it would fire the arrow into the owner, which is
+     * exactly what the guard exists to prevent, so no Arrow entity may ever exist and no arrow leaves the
+     * inventory, while the fight goes on without the bow.
+     */
+    @GameTest(environment = ENV + "friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot", maxTicks = 320)
+    public void friendlyOwnerOnTheLineOfFireGivesTheBowUpWithoutAShot(GameTestHelper context) {
+        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        AIPlayerEntity bot = spawnCorridor(context, "FriendLineGT", 170, -4, 16, owner.getUUID());
+        var world = context.getLevel();
+        BlockPos origin = bot.blockPosition().immutable();
+        bot.getInventory().clearContent();
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
+        InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
+        InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 16));
+        bot.setHealth(20.0F);
+        bot.getFoodData().setFoodLevel(20);
+        Husk husk = spawnHusk(context, origin.east(12));
+        owner.teleportTo(world, origin.getX() + 6.5D, origin.getY(), origin.getZ() + 0.5D,
+                Set.of(), 0.0F, 0.0F, true);
+        require(context, StrikeLegality.friendlyOnLineOfFire(bot, husk),
+                "the fixture owner was not on the line of fire");
+        int arrowsBefore = arrows(bot);
+        CombatTask combat = new CombatTask(EntityType.HUSK, 1, 6.0F);
+        TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_line"));
+
+        boolean[] sawFullDraw = {false};
+        int[] giveUpTick = {-1};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "the bot died: " + combat.describe());
+            require(context, botArrows(context, bot) == 0,
+                    "an arrow was spawned with the owner on the line of fire: " + combat.describe());
+            require(context, arrows(bot) >= arrowsBefore,
+                    "an arrow left the inventory (a shot) with the owner on the line of fire");
+            if (giveUpTick[0] < 0) {
+                // The owner stays on the line for the whole hold.
+                owner.teleportTo(world, origin.getX() + 6.5D, origin.getY(), origin.getZ() + 0.5D,
+                        Set.of(), 0.0F, 0.0F, true);
+                if (bot.isUsingItem() && bot.getTicksUsingItem() >= 20
+                        && combat.describe().contains("phase=RANGED")) {
+                    sawFullDraw[0] = true;
+                }
+                if (combat.isBowSuppressed()) {
+                    giveUpTick[0] = (int) context.getTick();
+                    require(context, sawFullDraw[0],
+                            "the bow was given up without ever being fully drawn: the give-up was not the "
+                                    + "dangerous one (bow drawn at full pull)");
+                    require(context, !bot.isUsingItem(),
+                            "the bow is still drawn after the give-up: " + combat.describe());
+                    require(context, !combat.describe().contains("phase=RANGED"),
+                            "the bot did not fall back from the ranged phase: " + combat.describe());
+                }
+            } else if (context.getTick() >= giveUpTick[0] + 25) {
+                husk.discard();
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_line_done");
+                despawnAndComplete(context, bot);
+            }
+            if (giveUpTick[0] < 0 && context.getTick() >= 290) {
+                context.fail(Component.nullToEmpty("the bow was never given up: sawFullDraw=" + sawFullDraw[0]
+                        + " " + combat.describe() + " using=" + bot.isUsingItem()
+                        + " ticks=" + bot.getTicksUsingItem()));
+            }
+        });
+    }
+
+    /**
+     * The same guard on the cover-peek path: with the owner standing on the line of fire at the end of each
+     * peek the drawn bow must never be released; after a few blocked peeks it is given up by cancelling.
+     */
+    @GameTest(environment = ENV + "friendly_owner_on_the_peek_line_gives_the_bow_up_without_a_shot", maxTicks = 900)
+    public void friendlyOwnerOnThePeekLineGivesTheBowUpWithoutAShot(GameTestHelper context) {
+        ServerPlayer owner = context.makeMockServerPlayerInLevel();
+        AIPlayerEntity bot = spawnCorridor(context, "FriendPeekGT", 182, -4, 16, owner.getUUID());
+        var world = context.getLevel();
+        BlockPos origin = bot.blockPosition().immutable();
+        givePeekabooKit(bot);
+        owner.teleportTo(world, origin.getX() - 2.5D, origin.getY(), origin.getZ() + 2.5D,
+                Set.of(), 0.0F, 0.0F, true);
+        var first = spawnArmedSkeleton(context, origin.east(11).north());
+        var second = spawnArmedSkeleton(context, origin.east(11).south());
+        first.setNoAi(true);
+        second.setNoAi(true);
+        require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
+                "the skeleton fixtures were not two observable ranged threats");
+        int arrowsBefore = arrows(bot);
+        CombatTask combat = new CombatTask(EntityType.SKELETON, 2, 6.0F);
+        TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_peek"));
+
+        int[] peekTicks = {0};
+        int[] giveUpTick = {-1};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "the bot died: " + combat.describe());
+            require(context, botArrows(context, bot) == 0,
+                    "an arrow was spawned with the owner on the peek line: " + combat.describe());
+            require(context, arrows(bot) >= arrowsBefore,
+                    "an arrow left the inventory (a shot) with the owner on the peek line");
+            if (giveUpTick[0] < 0) {
+                if (combat.describe().contains("phase=COVER_PEEK")) {
+                    peekTicks[0]++;
+                    placeOnLineOfFire(owner, bot, first.distanceTo(bot) <= second.distanceTo(bot) ? first : second);
+                }
+                if (combat.isBowSuppressed()) {
+                    giveUpTick[0] = (int) context.getTick();
+                    require(context, peekTicks[0] > 0, "the bow was given up before any peek: " + combat.describe());
+                    require(context, !bot.isUsingItem() && !combat.describe().contains("phase=COVER"),
+                            "the bot is still in cover with the bow drawn after the give-up: " + combat.describe());
+                }
+            } else if (context.getTick() >= giveUpTick[0] + 25) {
+                first.discard();
+                second.discard();
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_peek_done");
+                despawnAndComplete(context, bot);
+            }
+            if (giveUpTick[0] < 0 && context.getTick() >= 840) {
+                context.fail(Component.nullToEmpty("the peek bow was never given up: peekTicks=" + peekTicks[0]
+                        + " " + combat.describe() + " " + combat.state()));
+            }
+        });
+    }
+
+    /**
+     * The bow leaves the plan while the bot sits in cover with the bow already drawing (the threats close in
+     * to melee range): the cover-hide exit must cancel the draw. Releasing it would loose an arrow that
+     * skipped the line-of-fire check.
+     */
+    @GameTest(environment = ENV + "cover_hide_exit_with_the_bow_drawn_fires_no_arrow", maxTicks = 420)
+    public void coverHideExitWithTheBowDrawnFiresNoArrow(GameTestHelper context) {
+        AIPlayerEntity bot = spawnCorridor(context, "CoverExitGT", 194, -4, 16);
+        BlockPos origin = bot.blockPosition().immutable();
+        givePeekabooKit(bot);
+        var first = spawnArmedSkeleton(context, origin.east(11).north());
+        var second = spawnArmedSkeleton(context, origin.east(11).south());
+        first.setNoAi(true);
+        second.setNoAi(true);
+        require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
+                "the skeleton fixtures were not two observable ranged threats");
+        int arrowsBefore = arrows(bot);
+        CombatTask combat = new CombatTask(EntityType.SKELETON, 2, 6.0F);
+        TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_cover_exit"));
+
+        int[] exitTick = {-1};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "the bot died: " + combat.describe());
+            require(context, botArrows(context, bot) == 0,
+                    "an arrow was loosed by the cover-hide exit: " + combat.describe());
+            require(context, arrows(bot) >= arrowsBefore, "an arrow left the inventory on the cover-hide exit");
+            if (exitTick[0] < 0) {
+                if (combat.describe().contains("phase=COVER_HIDE") && bot.isUsingItem()
+                        && bot.getTicksUsingItem() >= 6) {
+                    // The threats close in: the bow leaves the plan (shouldUseBow turns false) with the bow drawing.
+                    first.snapTo(origin.getX() + 3.5D, origin.getY(), origin.getZ() + 0.5D, 90.0F, 0.0F);
+                    second.snapTo(origin.getX() + 3.5D, origin.getY(), origin.getZ() + 1.5D, 90.0F, 0.0F);
+                    exitTick[0] = (int) context.getTick();
+                }
+            } else if (context.getTick() >= exitTick[0] + 12) {
+                require(context, !combat.describe().contains("phase=COVER"),
+                        "the bot stayed in cover after the bow left the plan: " + combat.describe());
+                first.discard();
+                second.discard();
+                TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_cover_exit_done");
+                despawnAndComplete(context, bot);
+            }
+            if (exitTick[0] < 0 && context.getTick() >= 380) {
+                context.fail(Component.nullToEmpty("never reached a drawn bow in cover: " + combat.describe()
+                        + " " + combat.state()));
+            }
+        });
+    }
+
+    /**
+     * The walked step keeps vanilla's item-use slowdown: the same one-block walk takes several times as long,
+     * and moves several times slower, with a bow drawn. A step that was slowed only for a few ticks keeps no
+     * slowed timeout afterwards (the budget is spent per tick, not latched).
+     */
+    @GameTest(environment = ENV + "walked_step_slows_with_a_drawn_bow_and_times_out_on_a_budget", maxTicks = 400)
+    public void walkedStepSlowsWithADrawnBowAndTimesOutOnABudget(GameTestHelper context) {
+        AIPlayerEntity bot = spawnCorridor(context, "StepSlowGT", 206, -4, 16);
+        var world = context.getLevel();
+        BlockPos origin = bot.blockPosition().immutable();
+        bot.getInventory().clearContent();
+        InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
+        InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 16));
+        bot.getActionPack().stopAll();
+        // Face east once; every step below keeps that aim.
+        io.github.zoyluo.minecraftai.action.LookAction.lookHorizontallyAt(bot,
+                new Vec3(origin.getX() + 10.5D, bot.getY(), origin.getZ() + 0.5D));
+
+        int[] stage = {0};
+        CombatCore.InputStep[] step = {null};
+        int[] freeTicks = {0};
+        int[] slowedTicks = {0};
+        double[] freePeak = {0.0D};
+        double[] slowedPeak = {0.0D};
+        Vec3[] last = {bot.position()};
+        Vec3[] pin = {null};
+        context.failIfEver(() -> {
+            Vec3 now = bot.position();
+            double speed = Math.hypot(now.x - last[0].x, now.z - last[0].z);
+            last[0] = now;
+            switch (stage[0]) {
+                case 0 -> { // an ordinary one-block step east
+                    if (step[0] == null) {
+                        step[0] = CombatCore.beginStepByInput(origin.east(), true, false);
+                    }
+                    freePeak[0] = Math.max(freePeak[0], speed);
+                    CombatCore.StepStatus status = CombatCore.stepByInput(bot, step[0]);
+                    require(context, status != CombatCore.StepStatus.FAILED,
+                            "the plain step failed: " + step[0].failure());
+                    if (status == CombatCore.StepStatus.ARRIVED) {
+                        freeTicks[0] = step[0].ticks();
+                        step[0] = null;
+                        stage[0] = 1;
+                    }
+                }
+                case 1 -> { // walk back, again unslowed, to the start
+                    if (step[0] == null) {
+                        step[0] = CombatCore.beginStepByInput(origin, true, false);
+                    }
+                    CombatCore.StepStatus status = CombatCore.stepByInput(bot, step[0]);
+                    require(context, status != CombatCore.StepStatus.FAILED,
+                            "the return step failed: " + step[0].failure());
+                    if (status == CombatCore.StepStatus.ARRIVED) {
+                        step[0] = null;
+                        InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
+                        stage[0] = 2;
+                    }
+                }
+                case 2 -> { // the same step east with the bow drawn
+                    require(context, bot.isUsingItem(), "the bow was not drawn for the slowed step");
+                    if (step[0] == null) {
+                        step[0] = CombatCore.beginStepByInput(origin.east(), true, false);
+                    }
+                    slowedPeak[0] = Math.max(slowedPeak[0], speed);
+                    CombatCore.StepStatus status = CombatCore.stepByInput(bot, step[0]);
+                    require(context, status != CombatCore.StepStatus.FAILED,
+                            "the slowed step failed: " + step[0].failure() + " after " + step[0].ticks() + " ticks");
+                    if (status == CombatCore.StepStatus.ARRIVED) {
+                        slowedTicks[0] = step[0].ticks();
+                        // A step is mostly acceleration and settling for the unslowed walk, so the tick ratio is well under the
+                        // 5x input ratio (10 vs 23 measured): the peak speed below is the exact measure.
+                        require(context, slowedTicks[0] >= 2 * freeTicks[0],
+                                "the drawn-bow step took " + slowedTicks[0] + " ticks against " + freeTicks[0]
+                                        + " unslowed: the item-use slowdown is not applied");
+                        require(context, slowedPeak[0] <= 0.35D * freePeak[0],
+                                "the drawn-bow step peaked at " + slowedPeak[0] + " blocks/tick against "
+                                        + freePeak[0] + " unslowed");
+                        bot.stopUsingItem();
+                        step[0] = null;
+                        stage[0] = 3;
+                    }
+                }
+                case 3 -> { // slowed for 5 ticks only, then the bow drops: the timeout must not stay at 50
+                    if (step[0] == null) {
+                        InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
+                        step[0] = CombatCore.beginStepByInput(origin, true, false);
+                        pin[0] = bot.position();
+                    }
+                    // The bot is held in place so the step can never arrive: only the timeout ends it.
+                    bot.teleportTo(world, pin[0].x, pin[0].y, pin[0].z, Set.of(), bot.getYRot(), bot.getXRot(), true);
+                    bot.setDeltaMovement(Vec3.ZERO);
+                    CombatCore.StepStatus status = CombatCore.stepByInput(bot, step[0]);
+                    if (step[0].ticks() == 5) {
+                        bot.stopUsingItem();
+                    }
+                    if (status == CombatCore.StepStatus.FAILED) {
+                        int failedAt = step[0].ticks();
+                        require(context, "timeout".equals(step[0].failure()),
+                                "the pinned step failed for the wrong reason: " + step[0].failure());
+                        require(context, failedAt >= 12 && failedAt <= 20,
+                                "a step slowed for 5 ticks then free timed out after " + failedAt
+                                        + " ticks (about 15 expected, 51 with a sticky slowed flag)");
+                        despawnAndComplete(context, bot);
+                    } else if (step[0].ticks() > 60) {
+                        context.fail(Component.nullToEmpty("the pinned step never timed out"));
+                    }
+                }
+                default -> { }
+            }
+            if (context.getTick() >= 380) {
+                context.fail(Component.nullToEmpty("the step scenario stalled in stage " + stage[0]
+                        + " free=" + freeTicks[0] + " slowed=" + slowedTicks[0]));
+            }
+        });
+    }
+
+    private static void givePeekabooKit(AIPlayerEntity bot) {
+        bot.getInventory().clearContent();
+        InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
+        InventoryAction.giveItem(bot, new ItemStack(Items.BOW));
+        InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 64));
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HELMET));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_CHESTPLATE));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_LEGGINGS));
+        InventoryAction.giveItem(bot, new ItemStack(Items.IRON_BOOTS));
+        bot.setHealth(20.0F);
+        bot.getFoodData().setFoodLevel(20);
+    }
+
+    /** Stands {@code friend} three and a half blocks from the bot along its line of fire to {@code target}. */
+    private static void placeOnLineOfFire(ServerPlayer friend, AIPlayerEntity bot, LivingEntity target) {
+        Vec3 eye = bot.getEyePosition();
+        Vec3 aim = target.getBoundingBox().getCenter();
+        Vec3 flat = new Vec3(aim.x - eye.x, 0.0D, aim.z - eye.z).normalize();
+        Vec3 spot = new Vec3(bot.getX() + flat.x * 3.5D, bot.getY(), bot.getZ() + flat.z * 3.5D);
+        friend.teleportTo(bot.level(), spot.x, spot.y, spot.z, Set.of(), 0.0F, 0.0F, true);
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     private static net.minecraft.world.entity.monster.skeleton.Skeleton spawnArmedSkeleton(GameTestHelper context,
@@ -875,6 +1193,11 @@ public final class CombatHardeningGameTests {
     /** A five-wide stone strip {@code minDx..maxDx} blocks either side of the bot, three blocks of air above. */
     private static AIPlayerEntity spawnCorridor(GameTestHelper context, String name, int relativeY,
                                                  int minDx, int maxDx) {
+        return spawnCorridor(context, name, relativeY, minDx, maxDx, null);
+    }
+
+    private static AIPlayerEntity spawnCorridor(GameTestHelper context, String name, int relativeY,
+                                                 int minDx, int maxDx, UUID owner) {
         var world = context.getLevel();
         world.setDayTime(1000L);
         BlockPos feet = context.absolutePos(new BlockPos(3, relativeY, 3));
@@ -887,7 +1210,7 @@ public final class CombatHardeningGameTests {
                 }
             }
         }
-        return spawnBot(context, name, feet, null);
+        return spawnBot(context, name, feet, owner);
     }
 
     private static AIPlayerEntity spawnBot(GameTestHelper context, String name, BlockPos feet, UUID owner) {
