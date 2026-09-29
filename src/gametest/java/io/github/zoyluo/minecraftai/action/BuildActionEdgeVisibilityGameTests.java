@@ -237,8 +237,7 @@ public final class BuildActionEdgeVisibilityGameTests {
         boolean acceptsUnsupported = BuildAction.canAcceptPlacementAt(bot, unsupported);
 
         require(context, acceptsSupported, "the probe should accept an ordinary supported cell");
-        StringBuilder dbg = new StringBuilder(); for (Direction d : Direction.values()) { dbg.append(d).append("=").append(context.getWorld().getBlockState(unsupported.offset(d)).getBlock()).append(" "); }
-        require(context, !acceptsUnsupported, "the probe should reject a cell with no support face: pos=" + unsupported.toShortString() + " eye=" + bot.getEyePos() + " " + dbg);
+        require(context, !acceptsUnsupported, "the probe should reject a cell with no support face");
         require(context, bot.getYaw() == yaw && bot.getPitch() == pitch,
                 "canAcceptPlacementAt turned the bot's head: yaw " + yaw + "->" + bot.getYaw()
                         + " pitch " + pitch + "->" + bot.getPitch());
