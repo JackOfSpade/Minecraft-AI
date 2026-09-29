@@ -159,6 +159,25 @@ final class InstructionRoundEvaluatorTest {
     }
 
     @Test
+    void aPausedMissionKeepsItsCursorButNeverBuysSilenceForAnUnstartedInstruction() {
+        // finishCallBudget counts a paused mission as work for the report (workActive = runtime work OR paused),
+        // and as a reason not to reset; only the request-started fact decides what the player hears.
+        assertFalse(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(false, true),
+                "a paused mission's cursor must survive the budget end");
+        assertFalse(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(true, false));
+        assertFalse(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(true, true));
+        assertTrue(InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(false, false));
+
+        boolean workActiveBecauseOfPausedMission = true;
+        assertEquals(BudgetReport.COULD_NOT_START,
+                InstructionRoundEvaluator.budgetReport(false, workActiveBecauseOfPausedMission, false, true, false),
+                "the paused frame protects the mission, not the silence");
+        assertEquals(BudgetReport.SILENT,
+                InstructionRoundEvaluator.budgetReport(false, workActiveBecauseOfPausedMission, true, true, false),
+                "a started instruction whose mission is merely paused stays quiet");
+    }
+
+    @Test
     void theBudgetEndIsReportedAtMostOnceAndNeverForAnAutomaticWakeOrANonInstruction() {
         assertEquals(BudgetReport.SILENT, InstructionRoundEvaluator.budgetReport(true, false, false, true, false));
         // An automatic wake is not a request that "never started".

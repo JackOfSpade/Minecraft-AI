@@ -107,6 +107,18 @@ final class InstructionRoundEvaluator {
         return neverStarted ? BudgetReport.COULD_NOT_START : BudgetReport.COULD_NOT_WORK_OUT;
     }
 
+    /**
+     * Whether the end of the model-call budget may wipe the bot's runtime state (goal plan, task
+     * stack, actions). Running work protects it, and so does a mission that a safety task paused:
+     * resetting would destroy that paused cursor although DangerWatcher resumes it once the threat
+     * is gone. This only guards the state; whether the player is told anything is decided by
+     * {@link #budgetReport} from the request-started fact alone, so a paused mission never buys
+     * silence for an instruction that never started.
+     */
+    static boolean shouldResetToIdleAtBudgetEnd(boolean runtimeWork, boolean pausedMission) {
+        return !runtimeWork && !pausedMission;
+    }
+
     /** What a pending task failure does when the brain wakes for it. */
     enum FailureWake {
         /** No failure is pending. */

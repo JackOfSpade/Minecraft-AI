@@ -64,6 +64,20 @@ class EmergencyShelterEatingPolicyTest {
         assertFalse(EmergencyShelterTask.canRegenerateNaturally(20, false));
     }
 
+    // The hold-while-regenerating rule is not a promise of full health: each natural heal burns 6 exhaustion
+    // (about 1.5 hunger), so with no food and no saturation the bar drops below 18 after roughly two hit points
+    // and the very same bot becomes stalled. The predicate must flip exactly at the hunger-18 boundary.
+    @Test
+    void stalledFlipsExactlyAtTheHungerEighteenBoundaryWhenNoFoodIsLeft() {
+        assertFalse(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, false,
+                EmergencyShelterTask.canRegenerateNaturally(18, true)));
+        assertTrue(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, false,
+                EmergencyShelterTask.canRegenerateNaturally(17, true)));
+        assertTrue(EmergencyShelterTask.isHealingStalledWithoutFood(10.0F, 20.0F, false,
+                EmergencyShelterTask.canRegenerateNaturally(20, false)),
+                "the naturalRegeneration gamerule off stalls even a full hunger bar");
+    }
+
     // Point 6's 50%-HP exception: give up waiting and fight once at/above half health, otherwise
     // stay sealed and wait for a rescue.
     @Test

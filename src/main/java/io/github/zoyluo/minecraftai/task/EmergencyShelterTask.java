@@ -776,9 +776,12 @@ public final class EmergencyShelterTask extends AbstractTask {
      * True once healing has genuinely stalled: no food remains to eat, health is still below
      * max and vanilla natural regeneration cannot make up for it (hunger bar under 18, or the
      * gamerule off). A bot that just ate its last item to a full hunger bar keeps healing on its
-     * own and must simply hold until it is back at full health: treating it as stalled made it
-     * cry for help, or give up at 50 percent and leave the shelter half healed, with a full hunger
-     * bar. This is a materially different condition from simply having reached full health with
+     * own, so it holds sealed for as long as natural regeneration is actually running. That is
+     * not a promise to reach full health: every natural heal costs 6 exhaustion (about 1.5 hunger
+     * points), so with no food and no saturation the bar falls under 18 after roughly two hit
+     * points and the bot then IS stalled (rescue wait, or give up and fight from half health).
+     * Treating the full-bar phase as stalled made it cry for help, or give up at 50 percent and
+     * leave the shelter half healed, with a full hunger bar. This is a materially different condition from simply having reached full health with
      * food merely not (or no longer) toppable back up to twenty -- see
      * {@link #isRecoveredEnoughToExit}, which handles that case instead. Point 6 of the rescue
      * contract: "ran out of food while still hurt" must be distinguished from "reached full

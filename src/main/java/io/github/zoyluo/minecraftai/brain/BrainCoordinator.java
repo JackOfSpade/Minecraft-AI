@@ -1197,11 +1197,15 @@ public final class BrainCoordinator {
      * DangerWatcher resumes exactly that paused work once the threat is gone.
      */
     private void finishCallBudget(AIPlayerEntity bot, BotConversation conversation, String trigger) {
-        boolean workActive = TaskManager.INSTANCE.hasPaused(bot) || hasRuntimeWork(
+        boolean pausedMission = TaskManager.INSTANCE.hasPaused(bot);
+        boolean runtimeWork = hasRuntimeWork(
                 TaskManager.INSTANCE.getActive(bot).isPresent(),
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
                 bot.getActionPack().hasActiveActions());
+        // A paused mission protects the mission (no idle reset below), never the silence: the report
+        // still depends only on whether THIS instruction started.
+        boolean workActive = runtimeWork || pausedMission;
         BotLog.warn(LogCategory.COMM, bot, "model_call_budget_exhausted",
                 "calls_used", conversation.callBudget.callsUsed(),
                 "call_limit", conversation.callBudget.callsUsed() + conversation.callBudget.callsRemaining(),
@@ -1227,7 +1231,7 @@ public final class BrainCoordinator {
         }
         boolean requestNeverStarted = report == InstructionRoundEvaluator.BudgetReport.COULD_NOT_START;
         conversation.budgetExhaustionReported = true;
-        if (!workActive) {
+        if (InstructionRoundEvaluator.shouldResetToIdleAtBudgetEnd(runtimeWork, pausedMission)) {
             io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
             TaskManager.INSTANCE.resetToIdle(bot);
             bot.getActionPack().stopAll();
