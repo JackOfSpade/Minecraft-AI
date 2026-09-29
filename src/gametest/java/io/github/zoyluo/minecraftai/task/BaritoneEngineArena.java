@@ -69,6 +69,13 @@ final class BaritoneEngineArena {
                 }
             }
         }
+        // Light everywhere: bots attract natural spawns, and a hostile in view makes the danger watcher pause the task under test
+        // (a skeleton did that to a follow test). Invisible light blocks in a grid keep every cell of the course at light >= 8.
+        for (int dx = -halfX; dx <= halfX; dx += 4) {
+            for (int dz = -halfZ; dz <= halfZ; dz += 4) {
+                world.setBlock(origin.offset(dx, 3, dz), Blocks.LIGHT.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
         return new BaritoneEngineArena(context, origin, halfX, halfZ);
     }
 

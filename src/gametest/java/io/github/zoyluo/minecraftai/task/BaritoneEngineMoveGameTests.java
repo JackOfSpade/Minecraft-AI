@@ -198,6 +198,53 @@ public final class BaritoneEngineMoveGameTests {
         });
     }
 
+    /**
+     * Single writer: a legacy order in the middle of a Baritone route (a straight-line walk to somewhere else) cancels the route
+     * (recorded as cancelled by that order), Baritone lets go of the bot and never writes its inputs again while the legacy walk
+     * runs; when the walk is done a new request goes to Baritone again.
+     */
+    @GameTest(maxTicks = 500)
+    public void moveLegacyOrderTakesTheBotFromABaritoneRouteAndBackAgain(GameTestHelper context) {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 19, 24, 8);
+        AIPlayerEntity bot = arena.spawnOnBaritone("BeMoveHandOver", arena.cell(-20, 0, 0));
+        ActionPack pack = bot.getActionPack();
+        arena.require(pack.startPathTo(arena.cell(20, 0, 0)).isInProgress(), "the first route was not accepted");
+        BlockPos walkTarget = arena.cell(-14, 0, 6);
+        BlockPos secondGoal = arena.cell(-14, 0, -6);
+        int[] tick = {0};
+        int[] phase = {0};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            arena.require(now < 480, "the hand-over never completed, phase " + phase[0] + " at " + bot.position());
+            if (phase[0] == 0 && now == 30) {
+                arena.require(BaritoneRegistry.INSTANCE.isBusy(bot), "fixture: Baritone is not driving at tick 30");
+                arena.require(pack.startWalkTo(walkTarget.getCenter()).isInProgress(), "the legacy walk was not started");
+                NavOutcome outcome = pack.lastRouteOutcome();
+                arena.require(outcome != null && outcome.status() == NavOutcome.Status.CANCELLED && outcome.reason().contains("walk_to"),
+                        "the route was not recorded as cancelled by the walk: " + outcome);
+                arena.require(!BaritoneRegistry.INSTANCE.isBusy(bot) && !pack.hasBaritoneRoute(), "Baritone still owns the bot after the legacy order");
+                phase[0] = 1;
+                return;
+            }
+            if (phase[0] == 1) {
+                arena.require(!BaritoneRegistry.INSTANCE.isBusy(bot), "Baritone took the bot back while the legacy walk ran (tick " + now + ")");
+                arena.require(!pack.hasBaritoneRoute(), "a route reappeared while the legacy walk ran");
+                if (pack.isWalkToIdle()) {
+                    arena.require(bot.position().distanceTo(walkTarget.getCenter()) <= 1.5D, "the legacy walk stopped short: " + bot.position());
+                    arena.require(pack.startPathTo(secondGoal).isInProgress() && pack.hasBaritoneRoute(), "Baritone did not take the next request");
+                    phase[0] = 2;
+                }
+                return;
+            }
+            if (phase[0] == 2 && !pack.hasBaritoneRoute()) {
+                NavOutcome outcome = pack.lastRouteOutcome();
+                arena.require(outcome != null && outcome.status() == NavOutcome.Status.SUCCESS, "the second route did not succeed: " + outcome);
+                arena.require(bot.position().distanceTo(secondGoal.getCenter()) <= AT_GOAL, "not at the second goal: " + bot.position());
+                arena.finish(bot);
+            }
+        });
+    }
+
     @GameTest(maxTicks = 300)
     public void moveBotRemovedMidRouteLeavesNothingBehind(GameTestHelper context) {
         BaritoneEngineArena arena = BaritoneEngineArena.build(context, 15, 24, 6);
