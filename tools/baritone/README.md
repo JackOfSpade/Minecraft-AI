@@ -21,7 +21,7 @@ Minecraft common jar only         no net.minecraft.client on the classpath: a le
         |
         v
 src/main/java/.../minecraftai/baritone/   glue (ours): ServerPlayerContext, ServerPlayerController, LoadedChunkSnapshot, BaritoneHost
-src/main/java/.../minecraftai/mixin/      ServerChunkCacheBaritoneMixin, ChunkMapVisibleChunksAccessorMixin
+src/main/java/.../minecraftai/mixin/      Baritone*Mixin, ServerChunkCacheBaritoneMixin, ChunkMapVisibleChunksAccessorMixin
 ```
 
 ## Files
@@ -42,7 +42,7 @@ Gradle tasks: `generateBaritoneSources` (runs before `compileBaritoneJava`), `co
 belongs to the `minecraftai` mod in Loom, and is packed into the mod jar (and so remapped to intermediary with the rest).
 `javax.annotation` comes from `jsr305` (compileOnly), and there is deliberately **no nether-pathfinder** dependency.
 
-## The patch series (28 files, +92 / -241 lines)
+## The patch series (29 files, +96 / -242 lines)
 
 The edits are small and mostly deletions of client-only code. Two rules kept them small: types are *generalised*
 (`LocalPlayer` -> `Player`, `ClientChunkCache` -> `ChunkSource`, `ClientLevel` -> `Level`), and where behaviour must
@@ -60,6 +60,7 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0008-world-cache-directory` | WorldProvider | cache directory under `<game dir>/baritone/cache` instead of a client save/server-address layout |
 | `0009-baritone-instance-construction` | Baritone, BaritoneProvider | constructed from a player-context factory; no primary instance, no chat control; `NullElytraProcess`; commands and GUI unsupported |
 | `0010-block-optional-meta-no-client` | BlockOptionalMeta | the loot-table stub level no longer keeps a `Minecraft` reference |
+| `0011-world-scanner-chunk-snapshot` | FasterWorldScanner | scans run on worker threads (parallel stream, mine/farm rescans); they read the chunk source's thread-safe view instead of `ServerChunkCache.getChunk`, which waits for the server thread once per chunk |
 
 ## Excluded from the build (see `exclude.txt`)
 
@@ -73,7 +74,7 @@ Upstream's schematic *formats* (`.schematic`, `.schem`, `.litematic` files) are 
 
 ```
 tools/baritone/apply.sh generate --keep-repo   # build/baritone-src becomes a git repo: 'upstream', 'overlay', one commit per patch
-cd build/baritone-src && <edit> && git add -A && git commit -m 0011-some-concern -m "why"   # subject = patch name
+cd build/baritone-src && <edit> && git add -A && git commit -m 0012-some-concern -m "why"   # subject = patch name
 tools/baritone/apply.sh export                 # rewrites tools/baritone/patches from those commits
 ```
 
@@ -95,21 +96,35 @@ upstream counterpart goes to `overlay/`, not into a patch.
 `tools/baritone/apply.sh report --upstream <dir> --out <dir> [--3way]` tries the series on another version without stopping
 (rehearsal results for 1.21.10 and 26.1 are in the commit that introduced the series).
 
-## What the glue still has to provide before Baritone can walk a bot
+## The glue (new code in the mod, `src/main/java/.../minecraftai/baritone` and `.../mixin`)
 
-Compiling server-only is done; these are the runtime seams that upstream fills with client code and that the next stages
-build (all are new code in the mod, none needs another patch):
+| Class | Replaces (upstream, client) |
+|---|---|
+| `ServerPlayerContext` | `BaritonePlayerContext`: bot supplier, `ServerLevel`, `MinecraftServer` as the game-thread object, `getAllEntities()` |
+| `ServerPlayerController` | `BaritonePlayerController`: breaking through the mod's `MiningController`, placing through `useItemOn` |
+| `LoadedChunkSnapshot` + `ServerChunkCacheBaritoneMixin` + `ChunkMapVisibleChunksAccessorMixin` | the client's `MixinClientChunkProvider`/`MixinChunkArray`: an O(1), non-blocking, thread-safe view of the loaded chunks (`ChunkMap#visibleChunkMap` is published copy-on-write) |
+| `BaritonePalettedContainerMixin` (+ `...DataMixin`), `BaritoneItemStackMixin`, `BaritoneLootTableMixin`, `BaritoneLootContextBuilderMixin` | the client-only `MixinPalettedContainer`, `MixinItemStack`, `MixinLootTable`, `MixinLootContextBuilder` (same code, needed by ore scanning and drop matching) |
+| `BaritoneHost` | `BaritoneProvider`'s primary instance: `create(bot)`, `of(player)`, `destroy`, server-side default settings (`freeLook` off, no notifications) |
+
+Covered by `BaritoneServerGameTests` (real server, real bots): instance lifecycle, thread-safe chunk snapshot, A* on a worker thread
+(open floor and through a wall), the whole behavior stack ticking and producing inputs, ore scan through the snapshot and the raw
+palettes, drops matched by loot table and item hash; and by the unit tests `BaritoneVendorIntegrityTest`,
+`BaritoneServerOnlyClassesTest` (no client reference in the class files) and `BaritoneSourceGeneratorTest` (every way the pipeline
+must refuse).
+
+## What is still to build before Baritone drives a bot end to end
+
+None of this needs another patch; it is glue for the next stage.
 
 * **Tick driver and input bridge.** Write Baritone's forced inputs into `ActionPack` *before* `super.tick()` (`AIPlayerEntity.tick()`
-  currently runs `super.tick()`, then `actionPack.onUpdate()`, so inputs are one tick late). Dispatch `TickEvent`, `PlayerUpdateEvent`
-  (PRE after vanilla `tick`, POST) and `onWorldEvent` to `baritone.getGameEventHandler()`.
-* **Accessor mixins that upstream implements in `src/launch`:** `IPalettedContainer` (+ `IData`) on `PalettedContainer` (needed by
-  `FasterWorldScanner`, i.e. ore scanning), `IItemStack` on `ItemStack` and `ILootTable` on `LootTable` plus the `LootContext.Builder`
-  registry redirect (needed by `BlockOptionalMeta`, i.e. matching drops).
+  currently runs `super.tick()`, then `actionPack.onUpdate()`, so inputs are one tick late). Dispatch `TickEvent` (the GameTest
+  already does), `PlayerUpdateEvent` (PRE before the player's own tick so `LookBehavior` sets the real rotation, POST after) and
+  `onWorldEvent` to `baritone.getGameEventHandler()`.
 * **Jump/move rotation events** (`RotationMoveEvent` from `Entity.moveRelative` / `LivingEntity.jumpFromGround`) are only needed
   with `freeLook`; `BaritoneHost` turns `freeLook` off so Baritone sets the real yaw.
 * **Synchronous admission and thread bounds.** `PathingBehavior` searches on a static, unbounded thread pool (`Baritone.getExecutor()`);
-  a caller that needs a same-tick answer runs `AStarPathFinder` inline. `FasterWorldScanner` called from `FarmProcess`'s pool thread
-  reads `ServerChunkCache.getChunk`, which blocks on the server thread from another thread.
+  a caller that needs a same-tick answer runs `AStarPathFinder` inline (as `BaritoneServerGameTests` does).
 * **Policy per bot.** Baritone reads `Baritone.settings()` live (a global, see `BaritoneAPI.getSettings()`); per-bot rules
   (strict-survival, protected blocks) belong in a `CalculationContext` subclass, not in mutated global settings.
+* **Cache lifetime.** `WorldProvider` keeps one `WorldData` per dimension under `<game dir>/baritone/cache`; nothing closes it when
+  the last bot goes away.
