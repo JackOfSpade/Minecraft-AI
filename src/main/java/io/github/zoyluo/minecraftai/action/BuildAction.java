@@ -109,6 +109,31 @@ public final class BuildAction {
         return new Use(result, placed, destination);
     }
 
+    /**
+     * The perception proof {@link #placeBlock} demands, for a click a movement driver aimed itself (Baritone, whose right click
+     * placing a block or opening a door arrives as a ready-made {@code hit}): the clicked face must be inside the interaction
+     * reach and the configured perception radius, and a pure ray from the bot's eye to the hit point (no head turn, no state
+     * change) must strike exactly that face of that block, so a face hidden behind another block is refused. Returns null when
+     * the click is acceptable, otherwise the same failure reason {@link #placeBlock} would give
+     * ({@code support_out_of_reach_or_sight} or {@code support_face_not_visible}).
+     */
+    public static String supportFaceRefusal(AIPlayerEntity player, BlockHitResult hit) {
+        BlockPos against = hit.getBlockPos();
+        Direction face = hit.getDirection();
+        double sampleRange = exactPlacementSampleRange(
+                MinecraftAiConfig.get().perception().radius(), player.blockInteractionRange());
+        Vec3 eye = player.getEyePosition();
+        Vec3 target = hit.getLocation();
+        if (eye.distanceToSqr(target) > sampleRange * sampleRange || !player.isWithinBlockInteractionRange(against, 0.0D)) {
+            return "support_out_of_reach_or_sight";
+        }
+        BlockHitResult seen = rayTo(player, eye, target, sampleRange);
+        if (seen == null || seen.getType() != HitResult.Type.BLOCK || !against.equals(seen.getBlockPos()) || seen.getDirection() != face) {
+            return "support_face_not_visible";
+        }
+        return null;
+    }
+
     public static ActionResult placeBlockAt(AIPlayerEntity player, BlockPos pos) {
         ActionResult lastFailure = ActionResult.failed("no_adjacent_block");
         // Do not pre-filter supports through canObserveBlock's six face-center rays. A support

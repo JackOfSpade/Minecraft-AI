@@ -34,13 +34,16 @@ import net.minecraft.world.phys.BlockHitResult;
  * exactly like it drives the client controller: {@code clickBlock} to start, {@code onPlayerDamageBlock} once per tick
  * until {@link #hasBrokenBlock()} turns true again.</p>
  *
- * <p>Deciding <em>whether</em> a block may be broken or placed (strict-survival observability, protected blocks) is not
- * done here: Baritone's own settings and cost model decide what to plan, and the layer that hands Baritone its goals
- * decides what is allowed.</p>
+ * <p>Nothing here acts without asking {@link BaritoneBreakPlacePolicy} first: every break ({@code clickBlock}), every click on
+ * a block ({@code processRightClickBlock}), every item use without a block ({@code processRightClick}) and every inventory move
+ * ({@code windowClick}) is checked, and a refusal is logged and recorded in {@link BaritoneRefusals} and reported to Baritone as
+ * "did not happen". Baritone's cost model is fed the block-level part of the same rules so it plans around what would be refused.</p>
  */
 public final class ServerPlayerController implements IPlayerController {
     private final Supplier<? extends AIPlayerEntity> bot;
     private MiningController mining;
+    /** The state of the cell being broken when the rules were last applied to it. */
+    private BlockState checkedState;
     /** Mirrors {@code MultiPlayerGameMode#isDestroying}: Baritone toggles it around each tick, see BlockBreakHelper. */
     private boolean hitting;
 
@@ -81,6 +84,9 @@ public final class ServerPlayerController implements IPlayerController {
         if (menu.containerId != windowId) {
             return;
         }
+        if (!(player instanceof AIPlayerEntity self) || !BaritoneBreakPlacePolicy.checkWindowClick(self, windowId, slotId, mouseButton, type).allowed()) {
+            return;
+        }
         menu.clicked(slotId, mouseButton, type, player);
         menu.broadcastChanges();
     }
@@ -93,6 +99,9 @@ public final class ServerPlayerController implements IPlayerController {
     @Override
     public InteractionResult processRightClickBlock(Player player, Level world, InteractionHand hand, BlockHitResult result) {
         AIPlayerEntity self = bot.get();
+        if (!BaritoneBreakPlacePolicy.checkClickBlock(self, result, hand).allowed()) {
+            return InteractionResult.FAIL;
+        }
         String item = BuiltInRegistries.ITEM.getKey(self.getItemInHand(hand).getItem()).toString();
         BuildAction.Use use = BuildAction.useItemOnHit(self, result, hand);
         if (use.placed()) {
@@ -105,6 +114,10 @@ public final class ServerPlayerController implements IPlayerController {
     @Override
     public InteractionResult processRightClick(Player player, Level world, InteractionHand hand) {
         AIPlayerEntity self = bot.get();
+        if (!BaritoneBreakPlacePolicy.checkUseItem(self, hand).allowed()) {
+            return InteractionResult.FAIL;
+        }
+        BotLog.action(self, "baritone_use_item", "item", BuiltInRegistries.ITEM.getKey(self.getItemInHand(hand).getItem()));
         return self.gameMode.useItem(self, world, self.getItemInHand(hand), hand);
     }
 
@@ -112,8 +125,14 @@ public final class ServerPlayerController implements IPlayerController {
     public boolean clickBlock(BlockPos loc, Direction face) {
         if (mining != null) {
             mining.abort(bot.get());
+            mining = null;
+        }
+        hitting = false;
+        if (!BaritoneBreakPlacePolicy.checkBreak(bot.get(), loc).allowed()) {
+            return false;
         }
         mining = MiningController.driven(loc, face);
+        checkedState = bot.get().level().getBlockState(loc);
         return step();
     }
 
@@ -125,6 +144,17 @@ public final class ServerPlayerController implements IPlayerController {
     /** One tick of the current break: true while it goes on or just finished, false when it cannot be done. */
     private boolean step() {
         AIPlayerEntity self = bot.get();
+        BlockState now = self.level().getBlockState(mining.pos());
+        if (!now.equals(checkedState)) {
+            // The cell changed under the break (another block, a door swinging, a flow): the rules apply to what is there now.
+            checkedState = now;
+            if (!BaritoneBreakPlacePolicy.checkBreak(self, mining.pos()).allowed()) {
+                mining.abort(self);
+                mining = null;
+                hitting = false;
+                return false;
+            }
+        }
         ActionResult result = mining.tick(self.getActionPack());
         if (result.isSuccess()) {
             recordBreak(self, mining);

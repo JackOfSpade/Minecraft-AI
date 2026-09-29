@@ -172,6 +172,15 @@ public final class ServerPlayerContext implements IPlayerContext {
         return policy.allowPlace();
     }
 
+    /**
+     * The processes that pick their targets by scanning the loaded world (mine, get-to-block, farm, explore, build) start only for
+     * a bot that holds the hidden-scan privilege, which strict survival never grants (patch 0015, {@link BaritoneBreakPlacePolicy}).
+     */
+    @Override
+    public boolean allowScanningProcess(String process) {
+        return BaritoneBreakPlacePolicy.allowScanningProcess(player(), process);
+    }
+
     @Override
     public double mouseSensitivity() {
         return MOUSE_SENSITIVITY;

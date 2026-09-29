@@ -70,10 +70,12 @@ public final class BaritoneEdits {
     /** Forgets the bot's edits (its instance was destroyed). */
     static void clear(UUID botId) {
         EDITS.remove(botId);
+        BaritoneRefusals.clear(botId);
     }
 
     /** Test hook: forgets every bot's edits. */
     public static void clearAll() {
         EDITS.clear();
+        BaritoneRefusals.clearAll();
     }
 }

@@ -73,7 +73,8 @@
       "io.github.zoyluo.minecraftai.baritone.BaritonePlanningGameTests",
       "io.github.zoyluo.minecraftai.baritone.BaritoneGlueGameTests",
       "io.github.zoyluo.minecraftai.baritone.BaritoneNavigationGameTests",
-      "io.github.zoyluo.minecraftai.task.BaritoneInputPhysicsProbeGameTests"
+      "io.github.zoyluo.minecraftai.task.BaritoneInputPhysicsProbeGameTests",
+      "io.github.zoyluo.minecraftai.baritone.BaritoneSurvivalGameTests"
     ]
   },
   "depends": {

@@ -143,19 +143,24 @@ public final class BaritonePlanningGameTests {
         });
     }
 
+    /**
+     * An iron door is a player's build that a hand cannot open: strict survival does not break it (it is not natural terrain,
+     * {@link BaritoneBreakPlacePolicy}), so it is a wall, the same as a pit that cannot be crossed. (Before the strict-survival rules
+     * Baritone planned through it at ten times the cost; that plan is exactly what the rules exist to stop.)
+     */
     @GameTest(maxTicks = 200)
-    public void breaksThroughClosedIronDoorAtHighCost(GameTestHelper context) {
+    public void doesNotPlanThroughAClosedIronDoorBecauseItIsAPlayerBuild(GameTestHelper context) {
         Scenario s = Scenario.begin(context, "BaritoneIronDoorGT", 6);
         for (int dz = -RADIUS; dz <= RADIUS; dz++) {
             fill(s.world, s.feet, 3, dz, Blocks.BEDROCK, 0, 2);
         }
         placeClosedDoor(s.world, s.feet.offset(3, 0, 0), Blocks.IRON_DOOR.defaultBlockState());
         s.plan(new GoalBlock(s.feet.offset(6, 0, 0)), plan -> {
-            // An iron door cannot be opened by hand, but it can be broken (slowly, with bare hands): the only way through, so
-            // the plan exists and it is priced accordingly, an order of magnitude above the wooden door that is simply walked through.
-            require(context, plan.reachesGoal(), "iron door: " + plan.type());
-            require(context, plan.path().positions().contains(new BetterBlockPos(s.feet.offset(3, 0, 0))), "the path does not go through the door cell");
-            require(context, plan.estimatedTicks() >= 200.0, "breaking an iron door barehanded is expensive, got " + plan.estimatedTicks() + " ticks");
+            require(context, !plan.reachesGoal(), "a path through a closed iron door was reported: " + plan.movements());
+            if (plan.path() != null) {
+                require(context, plan.path().positions().stream().allMatch(p -> p.getX() < s.feet.getX() + 3),
+                        "the partial path enters the iron door: " + plan.path().positions());
+            }
         });
     }
 

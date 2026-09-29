@@ -38,6 +38,13 @@ public final class BaritoneSettings {
         // guess is a death, so falls are only taken when they are safe on their own (see applyNavLimits).
         settings.allowWaterBucketFall.value = false;
 
+        // -- Strict survival (BaritoneBreakPlacePolicy): what a bot may break is decided by the mod's rules, not by a hand-edited
+        // settings file. Nothing is broken "anyway" without allowBreak, inventory moves are off (the controller refuses them too),
+        // and the cost model is fed the block-level break rule so routes avoid protected blocks instead of being vetoed later.
+        settings.allowBreakAnyway.value = new java.util.ArrayList<>();
+        settings.allowInventory.value = false;
+        BaritoneBreakPlacePolicy.installPlanningRules();
+
         // -- No world cache: a bot only ever plans over chunks that are loaded right now, and the cached-chunk machinery
         // (a packer thread and 512x512 region files per dimension) would give it knowledge of terrain it cannot currently observe.
         settings.chunkCaching.value = false;

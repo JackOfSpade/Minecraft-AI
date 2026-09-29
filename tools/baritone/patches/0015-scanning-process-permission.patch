@@ -1,0 +1,94 @@
+IPlayerContext.allowScanningProcess(name): the processes that choose their targets by scanning every loaded chunk (mine, get-to-block, farm, explore, build) ask the player context before they start and do nothing when refused. A host whose players may only act on what they can observe refuses them; the default allows all, as upstream does.
+
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+index b39c7a1..b537b07 100644
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -121,6 +121,17 @@ public interface IPlayerContext {
+         return BaritoneAPI.getSettings().allowPlace.value;
+     }
+ 
++    /**
++     * Whether the process named {@code process} ({@code "mine"}, {@code "get_to_block"}, {@code "farm"}, {@code "explore"},
++     * {@code "build"}) may be started for this player. Those processes pick their targets by scanning every loaded chunk for
++     * blocks, i.e. they know where things are without the player having seen them; a host whose players must only act on what
++     * they can observe refuses them here, and the process does nothing (a refused start leaves the process inactive). The
++     * default allows everything, which is what upstream does.
++     */
++    default boolean allowScanningProcess(String process) {
++        return true;
++    }
++
+     default Rotation playerRotations() {
+         return new Rotation(player().getYRot(), player().getXRot());
+     }
+diff --git a/src/main/java/baritone/process/BuilderProcess.java b/src/main/java/baritone/process/BuilderProcess.java
+index 29a0c7d..3679fbf 100644
+--- a/src/main/java/baritone/process/BuilderProcess.java
++++ b/src/main/java/baritone/process/BuilderProcess.java
+@@ -98,6 +98,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
+ 
+     @Override
+     public void build(String name, ISchematic schematic, Vec3i origin) {
++        if (!ctx.allowScanningProcess("build")) {
++            return;
++        }
+         this.name = name;
+         this.schematic = schematic;
+         this.realSchematic = null;
+diff --git a/src/main/java/baritone/process/ExploreProcess.java b/src/main/java/baritone/process/ExploreProcess.java
+index 514a110..8232cf1 100644
+--- a/src/main/java/baritone/process/ExploreProcess.java
++++ b/src/main/java/baritone/process/ExploreProcess.java
+@@ -59,6 +59,9 @@ public final class ExploreProcess extends BaritoneProcessHelper implements IExpl
+ 
+     @Override
+     public void explore(int centerX, int centerZ) {
++        if (!ctx.allowScanningProcess("explore")) {
++            return;
++        }
+         explorationOrigin = new BlockPos(centerX, 0, centerZ);
+         distanceCompleted = 0;
+     }
+diff --git a/src/main/java/baritone/process/FarmProcess.java b/src/main/java/baritone/process/FarmProcess.java
+index 4669e46..ed5ca3b 100644
+--- a/src/main/java/baritone/process/FarmProcess.java
++++ b/src/main/java/baritone/process/FarmProcess.java
+@@ -112,6 +112,9 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
+ 
+     @Override
+     public void farm(int range, BlockPos pos) {
++        if (!ctx.allowScanningProcess("farm")) {
++            return;
++        }
+         if (pos == null) {
+             center = baritone.getPlayerContext().playerFeet();
+         } else {
+diff --git a/src/main/java/baritone/process/GetToBlockProcess.java b/src/main/java/baritone/process/GetToBlockProcess.java
+index 1352232..0feeae7 100644
+--- a/src/main/java/baritone/process/GetToBlockProcess.java
++++ b/src/main/java/baritone/process/GetToBlockProcess.java
+@@ -54,6 +54,9 @@ public final class GetToBlockProcess extends BaritoneProcessHelper implements IG
+ 
+     @Override
+     public void getToBlock(BlockOptionalMeta block) {
++        if (!ctx.allowScanningProcess("get_to_block")) {
++            return;
++        }
+         onLostControl();
+         gettingTo = block;
+         start = ctx.playerFeet();
+diff --git a/src/main/java/baritone/process/MineProcess.java b/src/main/java/baritone/process/MineProcess.java
+index dad6cc7..69d9d17 100644
+--- a/src/main/java/baritone/process/MineProcess.java
++++ b/src/main/java/baritone/process/MineProcess.java
+@@ -503,6 +503,9 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
+ 
+     @Override
+     public void mine(int quantity, BlockOptionalMetaLookup filter) {
++        if (!ctx.allowScanningProcess("mine")) {
++            return;
++        }
+         this.filter = filter;
+         if (this.filterFilter() == null) {
+             this.filter = null;
