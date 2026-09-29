@@ -134,15 +134,18 @@ final class TpsDegradationLatchTest {
     }
 
     @Test
-    void justAboveTheExitThresholdNeverRecovers() {
+    void justAboveTheExitThresholdDoesNotRecoverWithinTheRelearnDwell() {
+        // The exit level itself is not reached; only the long steady dwell below the enter level (the
+        // re-learn, tested separately) may change that, so for the whole dwell the latch stays degraded.
         TpsDegradationLatch latch = new TpsDegradationLatch();
         feed(latch, DEGRADED, 200);
-        assertEquals(0, feed(latch, TpsDegradationLatch.EXIT_FLOOR_MS + 0.01D, 100_000));
+        assertEquals(0, feed(latch, TpsDegradationLatch.EXIT_FLOOR_MS + 0.01D, TpsDegradationLatch.RELEARN_SAMPLES - 1));
         assertTrue(latch.degraded());
+        assertEquals(0, latch.relearnCount());
     }
 
     @Test
-    void deadBandBetweenTheThresholdsNeverChangesEitherState() {
+    void deadBandBetweenTheThresholdsChangesNeitherStateWithinTheRelearnDwell() {
         double inBand = (TpsDegradationLatch.ENTER_FLOOR_MS + TpsDegradationLatch.EXIT_FLOOR_MS) / 2.0D; // 61.5
         TpsDegradationLatch normal = new TpsDegradationLatch();
         assertEquals(0, feed(normal, inBand, 10_000));
@@ -151,8 +154,8 @@ final class TpsDegradationLatchTest {
         TpsDegradationLatch degraded = new TpsDegradationLatch();
         feed(degraded, DEGRADED, 200);
         assertTrue(degraded.degraded());
-        assertEquals(0, feed(degraded, inBand, 10_000));
-        assertTrue(degraded.degraded(), "in the band a degraded latch stays degraded");
+        assertEquals(0, feed(degraded, inBand, TpsDegradationLatch.RELEARN_SAMPLES - 1));
+        assertTrue(degraded.degraded(), "in the band a degraded latch stays degraded until the re-learn dwell ends");
     }
 
     @Test
@@ -200,44 +203,57 @@ final class TpsDegradationLatchTest {
     }
 
     @Test
-    void fastOscillationAroundTheExitThresholdNeverRecovers() {
+    void fastOscillationAroundTheExitThresholdDoesNotRecoverThroughTheExitDebounce() {
         TpsDegradationLatch latch = new TpsDegradationLatch();
         feed(latch, DEGRADED, 200);
         assertTrue(latch.degraded());
-        // 57 / 59 alternating straddles 58 every sample: the 40-sample low streak never builds.
+        // 57 / 59 alternating straddles 58 every sample: the 40-sample low streak never builds, so the
+        // exit debounce alone cannot recover it. (Only the re-learn, after RELEARN_SAMPLES steady samples,
+        // may: that is tested separately, so stop one sample short of it.)
         int transitions = 0;
-        for (int i = 0; i < 100_000; i++) {
+        for (int i = 0; i < TpsDegradationLatch.RELEARN_SAMPLES - 1; i++) {
             if (latch.update(i % 2 == 0 ? 57.0D : 59.0D)) {
                 transitions++;
             }
         }
         assertEquals(0, transitions);
         assertTrue(latch.degraded());
+        assertEquals(0, latch.relearnCount());
     }
 
     @Test
-    void slowSwingAcrossBothThresholdsFlipsAtMostOncePerHalfCycleAndRespectsTheDwells() {
-        // Slow sine 50..90 crossing both thresholds; ~630-sample period. Each cycle: one enter, one exit.
+    void slowSwingAcrossBothThresholdsEntersAndExitsExactlyOncePerCycle() {
+        // Slow wave 50..90 (starting in its trough) crossing both thresholds; ~630-sample period. Whole periods, then
+        // a healthy settle tail: every cycle contributes exactly one enter and one exit, so 2 * cycles transitions.
         TpsDegradationLatch latch = new TpsDegradationLatch();
         int cycles = 40;
         int period = 630;
         int transitions = 0;
+        StringBuilder log = new StringBuilder();
         int lastTransition = -1;
         int minGap = Integer.MAX_VALUE;
-        for (int i = 0; i < cycles * period; i++) {
-            double avg = 70.0D + 20.0D * Math.sin(2.0D * Math.PI * i / period);
+        int i = 0;
+        for (; i < cycles * period; i++) {
+            double avg = 70.0D - 20.0D * Math.cos(2.0D * Math.PI * i / period);
             if (latch.update(avg)) {
                 transitions++;
+                log.append(i).append(latch.degraded() ? "E " : "X ");
                 if (lastTransition >= 0) {
                     minGap = Math.min(minGap, i - lastTransition);
                 }
                 lastTransition = i;
             }
         }
-        assertTrue(transitions >= cycles, "a real overload swing must be tracked (" + transitions + ")");
-        // The enter level sits below the sine midpoint, so the enter for the next hump fires just before the last
-        // period ends: at most one extra transition, never a flap within a hump.
-        assertTrue(transitions <= 2 * cycles + 1, "flapped " + transitions + " times over " + cycles + " cycles");
+        for (int tail = 0; tail < 300; tail++, i++) {
+            if (latch.update(HEALTHY)) {
+                transitions++;
+                log.append(i).append(latch.degraded() ? "E " : "X ");
+                minGap = Math.min(minGap, i - lastTransition);
+                lastTransition = i;
+            }
+        }
+        assertFalse(latch.degraded(), "the settle tail must leave the latch normal");
+        assertEquals(2 * cycles, transitions, "one enter and one exit per cycle, no flapping within a hump: " + log);
         assertTrue(minGap >= TpsDegradationLatch.MIN_NORMAL_SAMPLES, "gap " + minGap);
     }
 
@@ -379,5 +395,99 @@ final class TpsDegradationLatchTest {
         assertEquals(0, latch.samplesInState());
         assertTrue(Double.isNaN(latch.baselineMs()), "a new world forgets the baseline");
         assertEquals(TpsDegradationLatch.ENTER_FLOOR_MS, latch.enterLevel(), 0.0D);
+    }
+
+    @Test
+    void aBaselineLearnedOnAnIdleServerIsRelearnedWhenItSettlesAtItsBusyNormalAfterASpike() {
+        // The residual case: baseline 50 (idle server before the bots load) -> exit level only 58 ms. The
+        // server spikes above the enter level, then settles at a steady 59 ms (this pack's normal): without
+        // a re-learn it would never satisfy the 58 ms exit and stay degraded for good.
+        TpsDegradationLatch latch = new TpsDegradationLatch();
+        feed(latch, 50.0D, 6000);
+        assertEquals(50.0D, latch.baselineMs(), 1e-9);
+        assertEquals(58.0D, latch.exitLevel(), 1e-9);
+        assertEquals(65.0D, latch.enterLevel(), 1e-9);
+        assertEquals(1, feed(latch, 80.0D, 200));
+        assertTrue(latch.degraded());
+
+        // Just short of the long dwell: still degraded, baseline untouched.
+        assertEquals(0, feed(latch, 59.0D, TpsDegradationLatch.RELEARN_SAMPLES - 1));
+        assertTrue(latch.degraded());
+        assertEquals(0, latch.relearnCount());
+        assertEquals(50.0D, latch.baselineMs(), 1e-9);
+
+        // The dwell completes: the mean of the steady samples becomes the baseline and the exit follows.
+        assertEquals(0, feed(latch, 59.0D, TpsDegradationLatch.EXIT_SAMPLES - 1));
+        assertEquals(1, latch.relearnCount());
+        assertEquals(59.0D, latch.baselineMs(), 1e-9);
+        assertEquals(59.0D * 1.10D, latch.exitLevel(), 1e-9);
+        assertEquals(59.0D * 1.25D, latch.enterLevel(), 1e-9);
+        assertTrue(latch.degraded(), "one sample short of the exit debounce");
+        assertTrue(latch.update(59.0D));
+        assertFalse(latch.degraded());
+        // ...and it stays normal at that level.
+        assertEquals(0, feed(latch, 59.0D, 10_000));
+    }
+
+    @Test
+    void theRelearnedBaselineIsCappedLikeEveryOtherBaselineSample() {
+        TpsDegradationLatch latch = new TpsDegradationLatch();
+        feed(latch, 50.0D, 6000);
+        feed(latch, 90.0D, 200);
+        assertTrue(latch.degraded());
+        // Steady 64.9 ms is below the enter level (65) but above the baseline cap.
+        feed(latch, 64.9D, TpsDegradationLatch.RELEARN_SAMPLES);
+        assertEquals(1, latch.relearnCount());
+        assertEquals(TpsDegradationLatch.BASELINE_MAX_MS, latch.baselineMs(), 1e-9);
+        assertEquals(75.0D, latch.enterLevel(), 1e-9);
+        assertEquals(66.0D, latch.exitLevel(), 1e-9);
+    }
+
+    @Test
+    void aGenuinelySlowServerSteadyAboveTheEnterLevelStaysDegradedForever() {
+        TpsDegradationLatch latch = new TpsDegradationLatch();
+        feed(latch, 50.0D, 6000);
+        assertEquals(1, feed(latch, 66.0D, 200));
+        assertEquals(0, feed(latch, 66.0D, 200_000));
+        assertTrue(latch.degraded());
+        assertEquals(0, latch.relearnCount());
+        assertEquals(50.0D, latch.baselineMs(), 1e-9);
+    }
+
+    @Test
+    void aSlowServerWithOnlyShortLullsNeverBuildsTheRelearnStreak() {
+        TpsDegradationLatch latch = new TpsDegradationLatch();
+        feed(latch, 50.0D, 6000);
+        feed(latch, 80.0D, 200);
+        assertTrue(latch.degraded());
+        // Lulls of 59 ms, each ending one sample short of the dwell, interrupted by an overloaded sample.
+        for (int i = 0; i < 20; i++) {
+            feed(latch, 59.0D, TpsDegradationLatch.RELEARN_SAMPLES - 1);
+            latch.update(80.0D);
+        }
+        assertEquals(0, latch.relearnCount());
+        assertEquals(50.0D, latch.baselineMs(), 1e-9);
+    }
+
+    @Test
+    void aNonFiniteSampleRestartsTheRelearnStreak() {
+        TpsDegradationLatch latch = new TpsDegradationLatch();
+        feed(latch, 50.0D, 6000);
+        feed(latch, 80.0D, 200);
+        feed(latch, 59.0D, TpsDegradationLatch.RELEARN_SAMPLES - 1);
+        latch.update(Double.NaN);
+        feed(latch, 59.0D, 1);
+        assertEquals(0, latch.relearnCount());
+    }
+
+    @Test
+    void resetForgetsTheRelearnState() {
+        TpsDegradationLatch latch = new TpsDegradationLatch();
+        feed(latch, 50.0D, 6000);
+        feed(latch, 80.0D, 200);
+        feed(latch, 59.0D, TpsDegradationLatch.RELEARN_SAMPLES);
+        assertEquals(1, latch.relearnCount());
+        latch.reset();
+        assertEquals(0, latch.relearnCount());
     }
 }

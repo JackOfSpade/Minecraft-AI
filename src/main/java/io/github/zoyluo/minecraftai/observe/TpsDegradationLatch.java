@@ -33,6 +33,14 @@ package io.github.zoyluo.minecraftai.observe;
  *       closer than {@link #MIN_HYSTERESIS_MS} to the enter level and always above the 50 ms floor, so it is
  *       reachable from a server that is steady at its own baseline.</li>
  * </ul>
+ * <p><b>Re-learning while degraded.</b> The baseline is learned only while not degraded, so one learned on an idle
+ * server (about 50 ms, before the bots load) gives exit level 58 ms; a server that then spikes past the enter level
+ * and settles at its real busy 59 ms would never satisfy the exit and stay degraded for good. So while degraded,
+ * when the samples stay at or below the enter level for {@link #RELEARN_SAMPLES} in a row (about 60 s), their mean
+ * (each sample capped at {@link #BASELINE_MAX_MS}, like every baseline sample) becomes the new baseline and the exit
+ * level rises above the new normal. A genuinely slow server, steady at or above the enter level, never builds such a
+ * streak and stays degraded.</p>
+ *
  * (An earlier draft used exit 48 ms, which is below the 50 ms floor: the latch could never have left the
  * degraded state and the mining-assist gate would have stayed denied for good.)
  */
@@ -55,12 +63,18 @@ public final class TpsDegradationLatch {
     public static final int EXIT_SAMPLES = 40;
     public static final int MIN_DEGRADED_SAMPLES = 100;
     public static final int MIN_NORMAL_SAMPLES = 40;
+    /** While degraded, this many consecutive samples at or below the enter level (about 60 s) re-learn the baseline. */
+    public static final int RELEARN_SAMPLES = 1200;
 
     private boolean degraded;
     private int samplesInState;
     private int beyondStreak;
     private double baseline = Double.NaN;
     private int baselineSamples;
+    // Degraded-state re-learn: the current run of samples at or below the enter level, and their capped sum.
+    private int calmStreak;
+    private double calmSum;
+    private int relearnCount;
 
     /**
      * Feeds one smoothed average tick time in milliseconds.
@@ -73,9 +87,12 @@ public final class TpsDegradationLatch {
         }
         if (!Double.isFinite(averageTickMs)) {
             beyondStreak = 0;
+            calmStreak = 0;
+            calmSum = 0.0D;
             return false;
         }
         if (degraded) {
+            relearnWhileDegraded(averageTickMs);
             beyondStreak = averageTickMs <= exitLevel() ? beyondStreak + 1 : 0;
             if (beyondStreak >= EXIT_SAMPLES && samplesInState >= MIN_DEGRADED_SAMPLES) {
                 flip(false);
@@ -117,6 +134,11 @@ public final class TpsDegradationLatch {
         return degraded;
     }
 
+    /** How many times the baseline was re-adopted while degraded (the caller logs when this grows). */
+    public int relearnCount() {
+        return relearnCount;
+    }
+
     /** Samples spent in the current state (saturating), for the transition log line. */
     public int samplesInState() {
         return samplesInState;
@@ -128,6 +150,32 @@ public final class TpsDegradationLatch {
         beyondStreak = 0;
         baseline = Double.NaN;
         baselineSamples = 0;
+        calmStreak = 0;
+        calmSum = 0.0D;
+        relearnCount = 0;
+    }
+
+    /**
+     * Tracks the run of samples that stay at or below the enter level while degraded. A long enough run means
+     * the server settled at a level that is normal for it (just not what the baseline, learned earlier while it
+     * was idle, expected): its capped mean becomes the baseline so the exit level rises above that level. A single
+     * sample above the enter level restarts the run, so a server that really is slow never gets here.
+     */
+    private void relearnWhileDegraded(double averageTickMs) {
+        if (averageTickMs > enterLevel()) {
+            calmStreak = 0;
+            calmSum = 0.0D;
+            return;
+        }
+        calmStreak++;
+        calmSum += Math.min(averageTickMs, BASELINE_MAX_MS);
+        if (calmStreak >= RELEARN_SAMPLES) {
+            baseline = calmSum / calmStreak;
+            baselineSamples = calmStreak;
+            calmStreak = 0;
+            calmSum = 0.0D;
+            relearnCount++;
+        }
     }
 
     /**
@@ -152,5 +200,7 @@ public final class TpsDegradationLatch {
         degraded = nowDegraded;
         samplesInState = 0;
         beyondStreak = 0;
+        calmStreak = 0;
+        calmSum = 0.0D;
     }
 }

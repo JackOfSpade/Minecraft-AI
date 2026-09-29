@@ -40,7 +40,17 @@ public final class TpsGuard {
             return;
         }
         int dwell = latch.samplesInState();
-        if (latch.update(averageTickMs)) {
+        int relearnsBefore = latch.relearnCount();
+        boolean flipped = latch.update(averageTickMs);
+        if (latch.relearnCount() != relearnsBefore) {
+            // Rare (at most once per RELEARN_SAMPLES): the degraded server settled at a steady level below
+            // the enter level, so that level became the new baseline (see TpsDegradationLatch).
+            BotLog.profile(null, "tps_guard_baseline_relearned",
+                    "baseline_ms", String.format(java.util.Locale.ROOT, "%.2f", latch.baselineMs()),
+                    "enter_level_ms", String.format(java.util.Locale.ROOT, "%.2f", latch.enterLevel()),
+                    "exit_level_ms", String.format(java.util.Locale.ROOT, "%.2f", latch.exitLevel()));
+        }
+        if (flipped) {
             // Only real transitions are logged: the latch's dead band and minimum dwell keep this from
             // flapping around the threshold (it used to flip several times per second).
             lastDegraded = latch.degraded();
