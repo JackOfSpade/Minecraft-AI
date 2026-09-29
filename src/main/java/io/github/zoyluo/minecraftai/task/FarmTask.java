@@ -199,8 +199,10 @@ public final class FarmTask extends AbstractTask {
         darkCells = 0;
         ServerLevel world = bot.level();
         boolean hasSeeds = !harvestOnly && InventoryAction.countItem(bot, seed) > 0;
-        // A crop has an outline but no collider and interior farmland is 15/16 high, so the collider-ray face test of
-        // canObserveBlock can never see an existing field: farm cells are judged by their real outline instead.
+        // canObserveBlock proves that a face centre of one block is struck, which is the wrong question for a field:
+        // a crop is outline-only, interior farmland is 15/16 high and a seed goes into a cell that may be empty air.
+        // The farm-cell query samples the top of the cell's real shape with outline rays (and accepts the empty cell
+        // above a field), so farm cells are judged by what a player looking down at the field sees.
         BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
                 .map(BlockPos::immutable)
                 .filter(pos -> !isFailed(pos))

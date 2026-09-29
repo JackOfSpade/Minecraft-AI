@@ -57,8 +57,11 @@ final class SurvivalFarmReviewContractTest {
                 "the per-tick positional counter is gone");
         int place = irrigate.indexOf("private void place(");
         String body = irrigate.substring(place);
-        assertTrue(body.indexOf("isPathExecutorIdle()") < body.indexOf("++placeRepositions"),
+        assertTrue(body.indexOf("isPathExecutorIdle()") < body.indexOf("placeRepositions++"),
                 "a walk in progress returns before anything is counted");
+        assertTrue(body.indexOf("startPathTo(stand).isFailed()") > 0
+                        && body.indexOf("startPathTo(stand).isFailed()") < body.indexOf("placeRepositions++"),
+                "a reposition is counted only once the path executor actually started a walk");
     }
 
     @Test

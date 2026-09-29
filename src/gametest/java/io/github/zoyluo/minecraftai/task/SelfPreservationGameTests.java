@@ -320,6 +320,95 @@ public final class SelfPreservationGameTests {
         });
     }
 
+    /**
+     * A running fire rescue is preempted by a critical fight, not the other way round: at the retreat health
+     * an observed hostile in range makes DangerWatcher assign a CombatTask, the FireExtinguishTask is PAUSED
+     * beneath it (the fire is still there), and once the hostile is gone and the bot has healed the rescue
+     * resumes or the fire is out. Before this the preemption was only pinned by a source-contract test.
+     */
+    @GameTest(environment = "minecraftai-gametest:self_preservation_game_tests_critical_fight_pauses_a_running_fire_rescue_and_it_completes_after", maxTicks = 700)
+    public void criticalFightPausesARunningFireRescueAndItCompletesAfter(GameTestHelper context) {
+        AIPlayerEntity bot = spawnOnPlatform(context, "FireFighterGT", 20, 5, 210, 12);
+        ServerLevel world = context.getLevel();
+        BlockPos feet = bot.blockPosition();
+        // Water eight blocks off keeps the walking rescue running for a while (no bucket to shortcut it).
+        for (int dx = 6; dx <= 8; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                world.setBlock(feet.offset(dx, -2, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.offset(dx, -1, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD, 1));
+        bot.setRemainingFireTicks(600);
+        int retreatHp = io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp();
+        FireExtinguishTask[] rescue = {null};
+        CombatTask[] combat = {null};
+        net.minecraft.world.entity.monster.zombie.Husk[] husk = {null};
+        int[] stage = {0};
+        int[] outAt = {-1};
+        context.failIfEver(() -> {
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            require(context, bot.isAlive() && bot.getHealth() > 0.0F, "the burning bot died, stage=" + stage[0]);
+            switch (stage[0]) {
+                case 0 -> {
+                    if (active instanceof FireExtinguishTask fire) {
+                        rescue[0] = fire;
+                        BlockPos huskFeet = bot.blockPosition().west(3);
+                        var h = net.minecraft.world.entity.EntityType.HUSK.create(world,
+                                net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+                        require(context, h != null, "could not create the husk fixture");
+                        h.setPersistenceRequired();
+                        h.setNoAi(true);
+                        h.snapTo(huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D, 90.0F, 0.0F);
+                        world.addFreshEntity(h);
+                        husk[0] = h;
+                        bot.setHealth(retreatHp);
+                        stage[0] = 1;
+                    }
+                }
+                case 1 -> {
+                    if (active instanceof CombatTask fight) {
+                        combat[0] = fight;
+                        require(context, rescue[0].state() == TaskState.PAUSED
+                                        && TaskManager.INSTANCE.peekPaused(bot).orElse(null) == rescue[0],
+                                "the fight took over but the fire rescue was not paused beneath it: "
+                                        + rescue[0].state());
+                        // The hostile is gone and the bot has healed: the rescue may go on.
+                        husk[0].discard();
+                        bot.setHealth(bot.getMaxHealth());
+                        bot.hurtTime = 0;
+                        stage[0] = 2;
+                    } else {
+                        require(context, context.getTick() < 200,
+                                "a critical fight never took over from the fire rescue: active="
+                                        + (active == null ? "none" : active.name()));
+                    }
+                }
+                default -> {
+                    if (!bot.isOnFire()) {
+                        if (outAt[0] < 0) {
+                            outAt[0] = (int) context.getTick();
+                        }
+                        // A fresh rescue may have put the fire out first; the older frame resumes (and ends
+                        // at once, nothing is burning) on a following scan: it must not stay paused for good.
+                        if (rescue[0].state() != TaskState.PAUSED) {
+                            cleanUp(bot);
+                            context.succeed();
+                        } else {
+                            require(context, context.getTick() < outAt[0] + 100,
+                                    "the fire is out but the rescue frame was left paused");
+                        }
+                    } else {
+                        require(context, context.getTick() < 650,
+                                "the fire was never put out after the fight: active="
+                                        + (active == null ? "none" : active.name())
+                                        + " rescue=" + rescue[0].state());
+                    }
+                }
+            }
+        });
+    }
+
     // ---- fixtures ----
 
     private static void buildFloor(ServerLevel world, BlockPos feet, int radius) {

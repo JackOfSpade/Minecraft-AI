@@ -211,11 +211,19 @@ public final class IrrigateTask extends AbstractTask {
         // better to go. (Counting every tick of a walk let a long approach exhaust the budget mid-route.)
         BlockPos stand = adjacentStand(bot, cell);
         if (stand != null && !bot.blockPosition().equals(stand)) {
-            if (++placeRepositions > MAX_REPOSITIONS) {
+            if (placeRepositions >= MAX_REPOSITIONS) {
                 fail("place_water_failed:" + reason);
                 return;
             }
-            bot.getActionPack().startPathTo(stand);
+            if (bot.getActionPack().startPathTo(stand).isFailed()) {
+                // No walk started (no route right now): that is not a reposition. It backs off like a refusal
+                // while standing still, so a route that fails every tick cannot burn the walk budget in six ticks.
+                if (++placeAttempts > PLACE_RETRIES) {
+                    fail("place_water_failed:" + reason);
+                }
+                return;
+            }
+            placeRepositions++;
         } else if (++placeAttempts > PLACE_RETRIES) {
             fail("place_water_failed:" + reason);
         }

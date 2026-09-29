@@ -54,5 +54,8 @@ final class HarvestCoreCorridorTest {
         assertTrue(check.contains("getFluidState().isEmpty()"), "water and lava cells fail the corridor");
         assertTrue(check.contains("noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL"),
                 "a cliff (no floor within a harmless fall) fails the corridor");
+        assertTrue(check.contains("int floorLimit = belowY - (int) Math.ceil(CORRIDOR_MAX_FALL) - 1;")
+                        && check.indexOf("for (int y = belowY; y >= floorLimit; y--)") > check.indexOf("noCollision(bot, box.expandTowards"),
+                "the fall column down to the floor is scanned for lava, fire and fluid, not only the cell under the feet");
     }
 }

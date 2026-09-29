@@ -72,11 +72,12 @@ public final class HarvestCore {
     }
 
     /**
-     * Finds a reachable target while optionally accepting a visible cell when the target has no
-     * collision shape.  Short grass, ferns, flowers, and similar thin blocks cannot be hit by a
-     * COLLIDER raycast, so {@code canObserveBlock} alone makes every visible plant look hidden.
-     * The cell fallback remains line-of-sight bounded and is opt-in for callers that can target
-     * such blocks.
+     * Finds a reachable target while optionally accepting a visible cell as a fallback. {@code canObserveBlock}
+     * is shape-aware (a block with no collision shape is aimed at through its selection outline), so a plainly
+     * visible plant normally passes it; the cell fallback ({@code canObserveCell}, an unobstructed view into the
+     * cell) only catches the remainder, such as a thin plant whose outline rays are all blocked by a neighbour
+     * although the cell itself is in view. It remains line-of-sight bounded and is opt-in for callers that can
+     * target such blocks.
      */
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Set<Block> targetBlocks,
                                                      int horizontalRadius, int down, int up,
@@ -407,8 +408,9 @@ public final class HarvestCore {
     /**
      * Cheap safety check for a straight, unplanned walk from the bot to {@code to}: at every sample along
      * the segment the bot's box must be free of collision, must not overlap fire/lava/other hazards or any
-     * fluid (feet, head or the cell under the feet), and must have a floor within a harmless fall. A
-     * cliff edge, a lava pool or a pond between the bot and the drop fails the corridor.
+     * fluid (feet, head or the cell under the feet), and must have a floor within a harmless fall whose fall
+     * column (every cell down to that floor) is free of fire, lava, other hazards and fluid too. A cliff edge,
+     * a lava pool, a pit with lava at its bottom or a pond between the bot and the drop fails the corridor.
      */
     public static boolean isSafeWalkCorridor(AIPlayerEntity bot, Vec3 to) {
         var world = bot.level();
@@ -439,6 +441,26 @@ public final class HarvestCore {
             }
             if (world.noCollision(bot, box.expandTowards(0.0D, -CORRIDOR_MAX_FALL - 0.01D, 0.0D))) {
                 return false; // no floor within a harmless fall
+            }
+            // The fall column: a gap the bot would drop into is only as safe as everything it drops through down
+            // to the floor it lands on (lava or water in a pit is not a floor, a cactus or magma block is not one
+            // either). The scan stops at the first layer that has a collision shape, the floor the bot stands on
+            // or lands on, so a lava pool under a bridge it walks on does not matter.
+            int floorLimit = belowY - (int) Math.ceil(CORRIDOR_MAX_FALL) - 1;
+            for (int y = belowY; y >= floorLimit; y--) {
+                boolean floor = false;
+                for (BlockPos cell : BlockPos.betweenClosed(minX, y, minZ, maxX, y, maxZ)) {
+                    var state = world.getBlockState(cell);
+                    if (Standability.isDangerous(state) || !state.getFluidState().isEmpty()) {
+                        return false;
+                    }
+                    if (!state.getCollisionShape(world, cell).isEmpty()) {
+                        floor = true;
+                    }
+                }
+                if (floor) {
+                    break;
+                }
             }
         }
         return true;
@@ -819,8 +841,9 @@ public final class HarvestCore {
         if (ObservableWorldQuery.canObserveBlock(bot, pos)) {
             return true;
         }
-        // A non-colliding plant has no block hit for canObserveBlock's collider ray.  Reading the
-        // block state is still safe only after this separate ordinary line-of-sight cell check.
+        // canObserveBlock aims at the block's own shape (its outline for a plant). What it can still miss, a thin
+        // plant whose outline rays a neighbour blocks although the cell is in view, is accepted only after this
+        // separate ordinary line-of-sight cell check, before the block state is read.
         return allowObservableCellFallback && ObservableWorldQuery.canObserveCell(bot, pos);
     }
 

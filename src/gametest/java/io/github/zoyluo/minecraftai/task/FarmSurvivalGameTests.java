@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.FarmAction;
+import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MilkCowAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -22,6 +23,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.cow.Cow;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
@@ -638,6 +640,64 @@ public final class FarmSurvivalGameTests {
                             && InventoryAction.countItem(bot, Items.MILK_BUCKET) == 0,
                     "the bucket changed although nothing was milked");
             context.succeed();
+        });
+    }
+
+    /**
+     * A drop lying across a lava-bottomed pit is never walked at: the straight walk-over has no route planning, and
+     * the cell under the bot's feet at the pit's edge is plain air, so only a scan of the whole fall column (down to
+     * the floor it would land on) sees the lava. The same drop on the bot's own side is still a safe corridor.
+     */
+    @GameTest(environment = "minecraftai-gametest:farm_survival_game_tests_walk_over_drop_across_a_lava_pit_is_skipped", maxTicks = 200)
+    public void walkOverDropAcrossALavaPitIsSkipped(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(14, 4, 14));
+        forceChunks(context, feet, 12);
+        prepareGround(world, feet, 12);
+        // A two-wide pit east of the bot, lava at its bottom (one layer under the surface), stone below that.
+        for (int dz = -12; dz <= 12; dz++) {
+            for (int dx = 2; dx <= 3; dx++) {
+                world.setBlock(feet.offset(dx, -3, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.offset(dx, -2, dz), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.offset(dx, -1, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            }
+        }
+        AIPlayerEntity bot = spawnBot(context, "FarmLavaGapGT", feet);
+        requireStrict(context, bot);
+        BlockPos farSide = feet.offset(6, 0, 0);
+        BlockPos nearSide = feet.offset(-3, 0, 0);
+        ItemEntity across = new ItemEntity(world, farSide.getX() + 0.5D, farSide.getY() + 0.1D, farSide.getZ() + 0.5D,
+                new ItemStack(Items.WHEAT, 3));
+        across.setDeltaMovement(Vec3.ZERO);
+        world.addFreshEntity(across);
+        GameTestCleanup.whenFinished(context, across::discard);
+        ItemEntity near = new ItemEntity(world, nearSide.getX() + 0.5D, nearSide.getY() + 0.1D, nearSide.getZ() + 0.5D,
+                new ItemStack(Items.WHEAT, 3));
+        near.setDeltaMovement(Vec3.ZERO);
+        world.addFreshEntity(near);
+        GameTestCleanup.whenFinished(context, near::discard);
+
+        double startX = bot.getX();
+        context.failIfEver(() -> {
+            if (context.getTick() < 10) {
+                return;
+            }
+            if (context.getTick() == 10) {
+                require(context, HarvestCore.isSafeWalkCorridor(bot, near.position()),
+                        "the drop on the bot's own side of the pit was not a safe corridor");
+                require(context, !HarvestCore.isSafeWalkCorridor(bot, across.position()),
+                        "the drop across the lava pit was accepted as a safe corridor");
+                near.discard(); // only the far drop is left for the walk-over below
+            }
+            HarvestCore.walkOverDrops(bot, Set.of(Items.WHEAT), 12.0D);
+            require(context, bot.isAlive() && !bot.isInLava() && bot.getX() < startX + 1.5D,
+                    "the bot walked toward the drop across the lava pit: x=" + bot.getX() + " start=" + startX
+                            + " inLava=" + bot.isInLava());
+            require(context, bot.getActionPack().isWalkToIdle(),
+                    "a walk toward the drop across the lava pit was started");
+            if (context.getTick() >= 120) {
+                context.succeed();
+            }
         });
     }
 
