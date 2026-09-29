@@ -34,6 +34,20 @@ import java.util.Map;
 public final class PerceptionCollector {
     // 12-26ms is a normal snapshot cost (see the call site below); only flag a real regression.
     private static final long SNAPSHOT_SLOW_WARN_MS = 50L;
+    /** At or below this a snapshot is not worth any line at all. */
+    private static final long SNAPSHOT_SLOW_DEBUG_MS = 10L;
+
+    /**
+     * Level of the {@code snapshot_slow} line for a snapshot that took {@code elapsedMs}, or null for none:
+     * WARN only for a genuine regression (above 50 ms, a full server tick), DEBUG for 11-50 ms (ordinary
+     * cost on a busy server; a real session showed 76 WARNs at 11-32 ms, all noise), nothing otherwise.
+     */
+    static Level slowSnapshotLevel(long elapsedMs) {
+        if (elapsedMs > SNAPSHOT_SLOW_WARN_MS) {
+            return Level.WARN;
+        }
+        return elapsedMs > SNAPSHOT_SLOW_DEBUG_MS ? Level.DEBUG : null;
+    }
 
     private PerceptionCollector() {
     }
@@ -64,9 +78,10 @@ public final class PerceptionCollector {
                 "entities_n", entities.size(),
                 "items_n", items.size(),
                 "light", world.getLightLevel(center));
-        if (elapsed > SNAPSHOT_SLOW_WARN_MS) {
+        Level slowLevel = slowSnapshotLevel(elapsed);
+        if (slowLevel == Level.WARN) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.PERCEPTION, bot, "snapshot_slow", "elapsed_ms", elapsed);
-        } else if (elapsed > 10L) {
+        } else if (slowLevel == Level.DEBUG) {
             // Same event name, quieter level: 12-26ms is ordinary snapshot cost, not worth a WARN.
             BotLog.raw(io.github.zoyluo.minecraftai.log.LogCategory.PERCEPTION, Level.DEBUG, bot,
                     "snapshot_slow", null, "elapsed_ms", elapsed);

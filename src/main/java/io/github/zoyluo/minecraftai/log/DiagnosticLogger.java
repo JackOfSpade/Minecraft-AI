@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Detailed diagnostic logging for test playback/replay. Does not modify any existing entity/task classes:
- * - Every SNAPSHOT_INTERVAL ticks, emits one rich snapshot per bot (position/health/hunger/mode/on-ground/fall/air/task+phase+progress/held item/inventory/path and mining state).
+ * - Every SNAPSHOT_INTERVAL ticks, considers one rich snapshot per bot, written only when {@link DiagnosticSnapshotGate} sees a change or a heartbeat is due (position/health/hunger/mode/on-ground/fall/air/task+phase+progress/held item/inventory/path and mining state).
  * - Every tick, compares against the previous tick and catches key events: health loss, sudden fall-distance spikes, disappearing from the world/death (this is exactly what's needed to investigate "Bob suddenly vanished").
  * All calls happen on the main thread within the server tick (G2 thread-safe).
  */
@@ -37,16 +37,19 @@ public final class DiagnosticLogger {
     private boolean enabled = true;
 
     private final Map<UUID, Sample> last = new ConcurrentHashMap<>();
+    private final DiagnosticSnapshotGate snapshotGate = new DiagnosticSnapshotGate();
 
     private DiagnosticLogger() {
     }
 
     public void clear(AIPlayerEntity bot) {
         last.remove(bot.getUuid());
+        snapshotGate.clear(bot.getUuid());
     }
 
     public void clearAll() {
         last.clear();
+        snapshotGate.clearAll();
     }
 
     public void tick(MinecraftServer server) {
@@ -71,7 +74,7 @@ public final class DiagnosticLogger {
             detectEvents(bot, prev, now);
 
             if (tick % SNAPSHOT_INTERVAL == 0) {
-                snapshot(bot, now);
+                snapshot(bot, now, tick);
             }
         }
 
@@ -153,8 +156,17 @@ public final class DiagnosticLogger {
         }
     }
 
-    private void snapshot(AIPlayerEntity bot, Sample s) {
+    private void snapshot(AIPlayerEntity bot, Sample s, int tick) {
+        String goal = GoalExecutor.INSTANCE.describeActiveGoal(bot);
+        String step = GoalExecutor.INSTANCE.describeActiveStep(bot);
+        DiagnosticSnapshotGate.Decision decision = snapshotGate.decide(bot.getUuid(), readingOf(s, goal, step), tick);
+        if (!decision.emit()) {
+            return;
+        }
         BotLog.action(bot, "diag_snapshot",
+                // why this line was written and how many were skipped since the previous one (see DiagnosticSnapshotGate)
+                "reason", decision.reason(),
+                "skipped", decision.suppressedSinceLast(),
                 // —— status ——
                 "pos", s.x + "," + s.y + "," + s.z,
                 "hp", fmt(s.health) + "/" + fmt(s.maxHealth),
@@ -167,8 +179,8 @@ public final class DiagnosticLogger {
                 "fall", fmt(s.fallDistance),
                 "light", s.light,
                 // —— goal ——
-                "goal", GoalExecutor.INSTANCE.describeActiveGoal(bot),
-                "step", GoalExecutor.INSTANCE.describeActiveStep(bot),
+                "goal", goal,
+                "step", step,
                 // —— task ——
                 "task", s.taskName,
                 "task_state", s.taskState,
@@ -181,6 +193,13 @@ public final class DiagnosticLogger {
                 // —— inventory ——
                 "held", s.held,
                 "inv", s.inventory);
+    }
+
+    private static DiagnosticSnapshotGate.Reading readingOf(Sample s, String goal, String step) {
+        String state = s.taskName + "|" + s.taskState + "|" + s.taskPhase + "|" + goal + "|" + step
+                + "|" + s.air + "|" + s.mode + "|" + s.inLava + "|" + s.submerged;
+        String loadout = fmt(s.health) + "|" + s.food + "|" + s.held + "|" + s.inventory;
+        return new DiagnosticSnapshotGate.Reading(s.x, s.y, s.z, state, loadout);
     }
 
     // Living entities within 24 blocks (key for hunting/combat diagnostics): animal count (+ nearest type@distance) / hostile count (+ nearest type@distance).

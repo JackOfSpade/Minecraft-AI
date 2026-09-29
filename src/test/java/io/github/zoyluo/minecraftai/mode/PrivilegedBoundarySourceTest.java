@@ -112,8 +112,8 @@ class PrivilegedBoundarySourceTest {
         }
 
         String prospector = read("mining/OreProspector.java");
-        assertTrue(prospector.contains("nearestObservable"));
-        assertTrue(prospector.contains("private static BlockPos nearestRaw"));
+        assertTrue(prospector.contains("private void stepObservable"));
+        assertTrue(prospector.contains("private void stepRaw"));
         assertTrue(prospector.indexOf("ObservableWorldQuery.canObserveBlock(bot, pos)")
                 < prospector.indexOf("BlockState state = world.getBlockState(pos)"));
 

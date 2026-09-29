@@ -39,6 +39,7 @@
       "io.github.zoyluo.minecraftai.task.OreDigPickupGameTests",
       "io.github.zoyluo.minecraftai.task.GatherPickupGameTests",
       "io.github.zoyluo.minecraftai.persist.BotPersistenceRestoreGameTests",
+      "io.github.zoyluo.minecraftai.task.ProspectScanBudgetGameTests",
       "io.github.zoyluo.minecraftai.task.GatherToolPolicyGameTests",
       "io.github.zoyluo.minecraftai.task.MinePickupGameTests",
       "io.github.zoyluo.minecraftai.task.MineValuablesGameTests",

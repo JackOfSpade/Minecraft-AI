@@ -178,3 +178,24 @@ filtered to the request's scope — see "Design Goals" above) in this order:
    same window should line up with what `gather_unit` reported gained, and `viewer` tells you
    whether a player had the inventory screen open at the time (relevant if items appeared that
    `gather_unit` didn't explain).
+
+## Log Volume Control (2026-09-29)
+
+Analysis of a real two-hour session (4.6 MB `all.log`) found three recurring events making up most of
+the file. They are now throttled by pure, unit-tested policies; nothing is silent: every suppressed
+line is either counted on the next line that is written or summarized.
+
+| Event | Before | Now |
+|---|---|---|
+| `diag_snapshot` (57% of the log) | Every bot, every 2 s, unconditionally | Decided every 2 s by `log/DiagnosticSnapshotGate`: written when the bot's **state** changed (task, task state/phase, goal/step, air, game mode, lava/submerged; at most once per 2 s), or when it **moved** >= 3 blocks or its **loadout** changed (health, food, held item, inventory; at most once per 5 s), otherwise a **heartbeat** every 30 s. New fields `reason` (`first`, `state`, `moved`, `loadout`, combinations, `heartbeat`) and `skipped` (snapshots not written since the previous line). The nearby-entity scan (and its capability decision) only runs when a line is actually written. |
+| `capability_decision` (18%) | One INFO line per (capability, context) every 5 s, forever | `mode/CapabilityAuditThrottle`: the **first occurrence** of each (bot, capability, allowed, reason, context) is always logged in full, so a denial (or an allowed decision, which the strict-survival canary GameTests grep for) is never lost. Repeats are counted per (bot, capability, allowed, reason) and reported as one `capability_decision_summary` per 60 s (`repeats`, `window_ticks`, `contexts`), plus a final flush when the bot is removed. `MANUAL_TELEPORT` and allowed `EMERGENCY_TELEPORT` are still logged every time. |
+| `tps_guard_state` (278 events) | Flipped `degraded` true/false several times per second around a single 55 ms threshold, also toggling the mining-assist gate (`assist_gate deny=tps_degraded`) | `observe/TpsDegradationLatch`: enter above 55 ms only after 10 consecutive samples, exit at or below 48 ms only after 40 consecutive samples, and each state lasts at least 100 (degraded) / 40 (normal) ticks. Only real transitions are logged (new field `previous_state_ticks`). |
+
+`snapshot_slow` (`perception/PerceptionCollector`) is WARN only above 50 ms (a full tick), DEBUG for
+11-50 ms and absent below (`slowSnapshotLevel`, unit-tested); the 76 WARNs seen in the session were all
+11-32 ms.
+
+Gather's treeless-area prospect scan (`gather_prospect_empty` / `gather_prospected`) is a resumable
+`mining/OreProspector.Scan` advanced at most ~2 ms per server tick instead of one 200-600 ms tick; those
+two events gained `scan_steps`, `scan_max_step_us` (and `scan_total_ms` when empty). The visibility rules
+are unchanged: every candidate is still ray-checked before its block state is read.

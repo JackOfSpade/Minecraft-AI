@@ -6,7 +6,7 @@ import net.minecraft.server.MinecraftServer;
 public final class TpsGuard {
     public static final TpsGuard INSTANCE = new TpsGuard();
 
-    private static final double DEGRADED_TICK_MS = 55.0D;
+    private static final int WARMUP_SAMPLES = 40;
     private static final int NORMAL_CONTINUATION_SECONDS = 3;
     private static final int DEGRADED_CONTINUATION_SECONDS = 8;
     private static final int NORMAL_SCAN_INTERVAL = 1;
@@ -16,6 +16,7 @@ public final class TpsGuard {
 
     private long lastSampleNanos;
     private double averageTickMs = 20.0D;
+    private final TpsDegradationLatch latch = new TpsDegradationLatch();
     private boolean lastDegraded;
     private int sampleCount;
 
@@ -35,18 +36,24 @@ public final class TpsGuard {
         }
         sampleCount++;
         averageTickMs = averageTickMs * 0.95D + elapsedMs * 0.05D;
-        boolean degraded = degraded(server);
-        if (degraded != lastDegraded) {
-            lastDegraded = degraded;
+        if (sampleCount < WARMUP_SAMPLES) {
+            return;
+        }
+        int dwell = latch.samplesInState();
+        if (latch.update(averageTickMs)) {
+            // Only real transitions are logged: the latch's dead band and minimum dwell keep this from
+            // flapping around the threshold (it used to flip several times per second).
+            lastDegraded = latch.degraded();
             BotLog.profile(null, "tps_guard_state",
-                    "degraded", degraded,
+                    "degraded", lastDegraded,
                     "avg_tick_ms", String.format(java.util.Locale.ROOT, "%.2f", averageTickMs),
-                    "estimated_tps", String.format(java.util.Locale.ROOT, "%.2f", estimatedTps()));
+                    "estimated_tps", String.format(java.util.Locale.ROOT, "%.2f", estimatedTps()),
+                    "previous_state_ticks", dwell);
         }
     }
 
     public synchronized boolean degraded(MinecraftServer server) {
-        return sampleCount >= 40 && averageTickMs > DEGRADED_TICK_MS;
+        return lastDegraded;
     }
 
     public synchronized int continuationDelaySeconds() {
@@ -73,6 +80,7 @@ public final class TpsGuard {
         lastSampleNanos = 0L;
         averageTickMs = 20.0D;
         lastDegraded = false;
+        latch.reset();
         sampleCount = 0;
     }
 

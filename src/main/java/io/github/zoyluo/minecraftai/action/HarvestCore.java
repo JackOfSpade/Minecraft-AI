@@ -47,6 +47,7 @@ public final class HarvestCore {
         BlockPos origin = bot.getBlockPos();
         return firstWalkReachable(bot, origin,
                 BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
+                        .filter(pos -> scanDecision.allowed() || withinObservationReach(bot, pos))
                         .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                         .filter(pos -> bot.getEntityWorld().getBlockState(pos).isOf(targetBlock))
                         .map(BlockPos::toImmutable)
@@ -86,6 +87,7 @@ public final class HarvestCore {
         BlockPos origin = bot.getBlockPos();
         return firstWalkReachable(bot, origin,
                 BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
+                        .filter(pos -> scanDecision.allowed() || withinObservationReach(bot, pos))
                         .filter(pos -> canObserveHarvestTarget(
                                 bot, pos, allowObservableCellFallback))
                         .filter(pos -> targetBlocks.contains(bot.getEntityWorld().getBlockState(pos).getBlock()))
@@ -533,6 +535,18 @@ public final class HarvestCore {
         // Allows mining the block underfoot/below (as long as it's within reach) -- the core of
         // digging straight down through stone from the surface.
         return canReach(bot, target);
+    }
+
+    /**
+     * Cheap exact pre-filter for the strict (capability denied) scans: a block whose centre is farther from the eye
+     * than the perception radius plus the block's half diagonal (0.87) has no face endpoint within the radius, so
+     * neither the face-ray nor the cell check can ever accept it. Skipping it avoids one capability decision and up
+     * to seven raycast setups per position (a radius-48 scan visits about 170,000 positions and cost 100-150 ms).
+     * Never applied when the hidden-scan capability is allowed, where every position is observable by definition.
+     */
+    private static boolean withinObservationReach(AIPlayerEntity bot, BlockPos pos) {
+        double reach = Math.max(1, io.github.zoyluo.minecraftai.MinecraftAiConfig.get().perception().radius()) + 0.87D;
+        return bot.getEyePos().squaredDistanceTo(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) <= reach * reach;
     }
 
     private static boolean canObserveHarvestTarget(AIPlayerEntity bot,

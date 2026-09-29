@@ -54,6 +54,13 @@ public final class GatherQuotaTask extends AbstractTask {
     // prospect can lock directly onto a tree at the foot of the mountain or farther away.
     private static final int PROSPECT_RANGE = 96;
     private static final int PROSPECT_INTERVAL = 40; // Throttle wide-range scans (once per 2s) to protect TPS
+    // Wide scans are spread across ticks: the strict-survival prospect used to run as one 180-420 ms server tick
+    // (real session, 01:43-01:44). Each tick now advances the scan for at most this long (observability rules
+    // unchanged: OreProspector.Scan still rays each candidate before reading its state).
+    private static final long SCAN_STEP_BUDGET_NANOS = 2_000_000L;
+    private static final int SCAN_STALE_TICKS = 300;     // a scan older than this (task paused, phase left) is dropped, not resumed
+    private static final double SCAN_STALE_DISTANCE_SQ = 64.0D; // ... and so is one begun more than 8 blocks from where the bot is now
+    private static final double EXPLORE_SCAN_STALE_DISTANCE_SQ = 400.0D; // the en-route scan legitimately trails a walking bot
     // EXPLORE (head out in a direction to search): roam's small 28-block steps ping-pong across 8
     // directions on real terrain with near-zero net displacement, so survey keeps circling the same
     // patch forever (real_wood seed=20260610 observed: looped in place to the 6001t timeout when no
@@ -131,6 +138,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private int searchRadius = SEARCH_RADIUS;
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
+    private OreProspector.Scan prospectScan;  // in-flight budgeted prospect scan (null when none)
+    private OreProspector.Scan exploreScan;   // in-flight budgeted en-route explore scan (null when none)
     // Elevation-difference tolerance: previous prospect target + a blacklist of unreachable
     // targets. Re-entering prospect means the previous target wasn't harvested (if it had been,
     // nearby SURVEY would have taken over and prospect wouldn't run again) → blacklist it and move
@@ -260,6 +269,8 @@ public final class GatherQuotaTask extends AbstractTask {
         countSoFar = countBrokenBlocks || countNewItems ? 0 : acceptedInventoryAtStart;
         searchRadius = defaultSearchRadius();
         phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
+        prospectScan = null;
+        exploreScan = null;
         stockpileTask = null;
         pickupOrigin = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
@@ -279,6 +290,8 @@ public final class GatherQuotaTask extends AbstractTask {
 
     @Override
     protected void onResume(AIPlayerEntity bot) {
+        prospectScan = null; // a scan begun before the pause reflects a stale position
+        exploreScan = null;
         if (!countBrokenBlocks) {
             refreshCountSoFar(bot);
         }
@@ -418,31 +431,43 @@ public final class GatherQuotaTask extends AbstractTask {
     // in range), deferring to roam's blind patch-switching fallback (which can walk beyond the scan range).
     private boolean prospectAndApproach(AIPlayerEntity bot) {
         int now = bot.getEntityWorld().getServer().getTicks();
-        if (now - lastProspectTick < PROSPECT_INTERVAL) {
-            return false;
-        }
-        lastProspectTick = now;
-        // Reaching prospect again means the previous prospect target wasn't harvested (if it had
-        // been, nearby SURVEY would already have taken over) → blacklist it and move to the next
-        // one, ruling out a "repeatedly scanning the same unreachable target" infinite loop.
-        // Anti-bloat: the blacklist clears and starts over once it exceeds 32 entries (a resource
-        // may become reachable later).
         java.util.UUID botId = bot.getUuid();
-        if (lastProspectFound != null) {
-            EpisodeMemory.INSTANCE.exclude(botId, lastProspectFound, now, EpisodeMemory.TTL_UNREACHABLE);
-            lastProspectFound = null;
+        if (prospectScan == null) {
+            if (now - lastProspectTick < PROSPECT_INTERVAL) {
+                return false;
+            }
+            lastProspectTick = now;
+            // Reaching prospect again means the previous prospect target wasn't harvested (if it had
+            // been, nearby SURVEY would already have taken over) → blacklist it and move to the next
+            // one, ruling out a "repeatedly scanning the same unreachable target" infinite loop.
+            // Anti-bloat: the blacklist clears and starts over once it exceeds 32 entries (a resource
+            // may become reachable later).
+            if (lastProspectFound != null) {
+                EpisodeMemory.INSTANCE.exclude(botId, lastProspectFound, now, EpisodeMemory.TTL_UNREACHABLE);
+                lastProspectFound = null;
+            }
+            var scanServer = bot.getEntityWorld().getServer();
+            prospectScan = OreProspector.begin(bot, PROSPECT_RANGE,
+                    state -> harvestBlocks.contains(state.getBlock()),
+                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, scanServer.getTicks()));
         }
+        if (!prospectScan.step(SCAN_STEP_BUDGET_NANOS)) {
+            return true; // still scanning: hold position, survey() resumes this scan first on the next tick
+        }
+        OreProspector.Scan scan = prospectScan;
+        prospectScan = null;
         var world = bot.getEntityWorld();
-        BlockPos found = OreProspector.nearest(bot, PROSPECT_RANGE,
-                state -> harvestBlocks.contains(state.getBlock()),
-                pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, now));
+        BlockPos found = scan.result();
         if (found == null) {
             // Observability: silently returning false can't distinguish "genuinely no such
             // resource within 96 blocks" from "a scanning/blacklist bug" (observed: died in 21
             // ticks with no way to diagnose).
             BotLog.action(bot, "gather_prospect_empty",
                     "item", targetItem, "range", PROSPECT_RANGE,
-                    "blacklisted", EpisodeMemory.INSTANCE.excludedCount(botId));
+                    "blacklisted", EpisodeMemory.INSTANCE.excludedCount(botId),
+                    "scan_steps", scan.steps(),
+                    "scan_max_step_us", scan.maxStepNanos() / 1000L,
+                    "scan_total_ms", scan.totalNanos() / 1_000_000L);
             return false; // Does not clear the exclusion (a TTL-backed "genuinely can't get there"); defers to roam's blind patch-switching fallback
         }
         // Anchor the landing point to the target's actual position: the target may be in a
@@ -500,7 +525,9 @@ public final class GatherQuotaTask extends AbstractTask {
                 "found", found.getX() + "," + found.getY() + "," + found.getZ(),
                 "to", ground.getX() + "," + ground.getY() + "," + ground.getZ(),
                 "item", Registries.ITEM.getId(targetItem).toString(),
-                "dist", (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(found)));
+                "dist", (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(found)),
+                "scan_steps", scan.steps(),
+                "scan_max_step_us", scan.maxStepNanos() / 1000L);
         return true;
     }
 
@@ -783,10 +810,16 @@ public final class GatherQuotaTask extends AbstractTask {
         // (2) Light en-route scan (every EXPLORE_SCAN_INTERVAL ticks, 16 blocks): stop as soon as
         // a target block is spotted and hand back to SURVEY for precise gathering.
         int now = bot.getEntityWorld().getServer().getTicks();
-        if (now - lastExploreScanTick >= EXPLORE_SCAN_INTERVAL) {
+        if (exploreScan != null && scanIsStale(bot, exploreScan, EXPLORE_SCAN_STALE_DISTANCE_SQ)) {
+            exploreScan = null;
+        }
+        if (exploreScan == null && now - lastExploreScanTick >= EXPLORE_SCAN_INTERVAL) {
             lastExploreScanTick = now;
-            BlockPos seen = OreProspector.nearest(bot, 16,
-                    state -> harvestBlocks.contains(state.getBlock()));
+            exploreScan = OreProspector.begin(bot, 16, state -> harvestBlocks.contains(state.getBlock()), null);
+        }
+        if (exploreScan != null && exploreScan.step(SCAN_STEP_BUDGET_NANOS)) {
+            BlockPos seen = exploreScan.result();
+            exploreScan = null;
             if (seen != null) {
                 bot.getActionPack().stopAll();
                 exploreTarget = null;
@@ -837,6 +870,18 @@ public final class GatherQuotaTask extends AbstractTask {
         if (harvestBlocks.isEmpty()) {
             fail("unsupported_resource_type");
             return;
+        }
+        // A prospect scan spread over several ticks resumes before anything else scans: survey's own
+        // throttled radius scans below are a full 120-150 ms each and must not run while one is in flight.
+        if (prospectScan != null) {
+            if (scanIsStale(bot, prospectScan, SCAN_STALE_DISTANCE_SQ)) {
+                prospectScan = null;
+            } else {
+                if (!prospectAndApproach(bot)) {
+                    escapeBarrenAreaOrFail(bot); // scan finished with nothing usable: the same tail the synchronous flow ran
+                }
+                return;
+            }
         }
         if (!countBrokenBlocks && HarvestCore.isInventoryFull(bot) && countSoFar < targetCount) {
             phase = Phase.DEPOSIT;
@@ -901,13 +946,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // budget running out too early, and everything burning down to gather_timeout"
             // (observed in log 160048: gather_roam×16 ping-ponging between 4 points while
             // explore only got 4 hops — not a prospect-throttling issue).
-            if (escapeBarrenArea(bot)) {
-                surfaceTried = false; // New area — allow the "surface fallback" again
-                return;
-            }
-            // The explore budget is also exhausted (4 hops, ~190 blocks, found nothing) → use a
-            // dedicated reason so the brain/player knows it "already went out and searched".
-            fail(exploreHops >= EXPLORE_MAX_HOPS ? "no_resource_after_explore" : "no_resource_nearby");
+            escapeBarrenAreaOrFail(bot);
             return;
         }
         targetPos = choice.pos();
@@ -930,6 +969,28 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         phase = Phase.GOTO;
         bot.getActionPack().startPathTo(choice.stand());
+    }
+
+    private void escapeBarrenAreaOrFail(AIPlayerEntity bot) {
+        if (escapeBarrenArea(bot)) {
+            surfaceTried = false; // New area — allow the "surface fallback" again
+            return;
+        }
+        // The explore budget is also exhausted (4 hops, ~190 blocks, found nothing) → use a
+        // dedicated reason so the brain/player knows it "already went out and searched".
+        fail(exploreHops >= EXPLORE_MAX_HOPS ? "no_resource_after_explore" : "no_resource_nearby");
+    }
+
+    /** Test hook: true while a budgeted prospect scan is in flight (ProspectScanBudgetGameTests). */
+    boolean prospectScanActive() {
+        return prospectScan != null;
+    }
+
+    /** A budgeted scan is only meaningful while the bot stays where it began; otherwise it is dropped and redone. */
+    private static boolean scanIsStale(AIPlayerEntity bot, OreProspector.Scan scan, double maxDistanceSq) {
+        int now = bot.getEntityWorld().getServer().getTicks();
+        return now - scan.startTick() > SCAN_STALE_TICKS
+                || bot.getBlockPos().getSquaredDistance(scan.origin()) > maxDistanceSq;
     }
 
     // Dig-approach: when a cliff-face/elevation-difference tree is GOAL_UNREACHABLE by plain

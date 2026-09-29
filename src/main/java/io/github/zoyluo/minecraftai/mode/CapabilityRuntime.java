@@ -6,14 +6,11 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
 
 import java.util.Objects;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /** Minecraft adapter for the pure capability policy. Every privileged execution is decided first. */
 public final class CapabilityRuntime {
-    private static final int REPEATED_DECISION_LOG_INTERVAL = 100;
-    private static final ConcurrentHashMap<AuditKey, Integer> NEXT_LOG_TICK = new ConcurrentHashMap<>();
+    private static final CapabilityAuditThrottle AUDIT = new CapabilityAuditThrottle();
 
     private CapabilityRuntime() {
     }
@@ -27,18 +24,20 @@ public final class CapabilityRuntime {
         MiningEvidenceAudit.recordCapabilityDecision(bot, decision.allowed());
         String normalizedContext = context == null ? "" : context;
         int now = bot.getEntityWorld().getServer().getTicks();
-        AuditKey key = new AuditKey(bot.getUuid(), capability, normalizedContext, decision.allowed());
-        Integer next = NEXT_LOG_TICK.get(key);
         boolean alwaysAudit = capability == PrivilegedCapability.MANUAL_TELEPORT
                 || (capability == PrivilegedCapability.EMERGENCY_TELEPORT && decision.allowed());
-        if (alwaysAudit || next == null || now >= next) {
-            NEXT_LOG_TICK.put(key, now + REPEATED_DECISION_LOG_INTERVAL);
+        CapabilityAuditThrottle.Outcome outcome = AUDIT.observe(bot.getUuid(), capability, decision.allowed(),
+                decision.reason(), normalizedContext, now, alwaysAudit);
+        if (outcome.logDecision()) {
             BotLog.action(bot, "capability_decision",
                     "profile", decision.profile().configValue(),
                     "capability", decision.capability(),
                     "allowed", decision.allowed(),
                     "reason", decision.reason(),
                     "context", normalizedContext);
+        }
+        if (outcome.summary() != null) {
+            logSummary(bot, outcome.summary(), decision.profile().configValue());
         }
         return decision;
     }
@@ -67,16 +66,29 @@ public final class CapabilityRuntime {
     }
 
     public static void clear(AIPlayerEntity bot) {
-        NEXT_LOG_TICK.keySet().removeIf(key -> key.botId().equals(bot.getUuid()));
+        // Flush counted-but-unreported repeats first so the last window of a bot's life is not lost.
+        int now = bot.getEntityWorld().getServer() == null ? 0 : bot.getEntityWorld().getServer().getTicks();
+        for (CapabilityAuditThrottle.Summary summary : AUDIT.drain(bot.getUuid(), now)) {
+            logSummary(bot, summary, MinecraftAiConfig.get().profile().configValue());
+        }
+        AUDIT.clear(bot.getUuid());
     }
 
     public static void clearAll() {
-        NEXT_LOG_TICK.clear();
+        AUDIT.clearAll();
+    }
+
+    private static void logSummary(AIPlayerEntity bot, CapabilityAuditThrottle.Summary summary, String profile) {
+        BotLog.action(bot, "capability_decision_summary",
+                "profile", profile,
+                "capability", summary.key().capability(),
+                "allowed", summary.key().allowed(),
+                "reason", summary.key().reason(),
+                "repeats", summary.count(),
+                "window_ticks", summary.windowTicks(),
+                "contexts", String.join(",", summary.contexts()) + (summary.otherContexts() > 0 ? ",+" + summary.otherContexts() + "_more" : ""));
     }
 
     public record Result<T>(CapabilityDecision decision, boolean executed, T value) {
-    }
-
-    private record AuditKey(UUID botId, PrivilegedCapability capability, String context, boolean allowed) {
     }
 }
