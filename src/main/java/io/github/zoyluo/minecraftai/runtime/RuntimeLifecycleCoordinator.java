@@ -18,6 +18,7 @@ import io.github.zoyluo.minecraftai.log.BotLogWriter;
 import io.github.zoyluo.minecraftai.log.CapabilityTally;
 import io.github.zoyluo.minecraftai.log.DiagnosticLogger;
 import io.github.zoyluo.minecraftai.log.InventoryAudit;
+import io.github.zoyluo.minecraftai.loot.RuntimeDropIndex;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.memory.EpisodeLog;
@@ -56,6 +57,7 @@ public final class RuntimeLifecycleCoordinator {
         PoiAdvisor.INSTANCE.configure(config);
         BotPersistence.INSTANCE.resumeWrites();
         RuntimeRecipeIndex.rebuild(server);
+        RuntimeDropIndex.rebuild(server);
         KnowledgeBase.INSTANCE.attachServer(server);
         BotEdits.loadFromDisk(BotEdits.defaultSidecarPath());
         int restored = BotPersistence.INSTANCE.loadAndRespawn(server);
@@ -76,6 +78,7 @@ public final class RuntimeLifecycleCoordinator {
         clearWorldRuntime();
         KnowledgeBase.INSTANCE.detachServer();
         RuntimeRecipeIndex.clear();
+        RuntimeDropIndex.clear();
         BotLog.lifecycle("server_runtime_stopped", "persisted_bots", persisted);
         BotLogWriter.INSTANCE.shutdown(3000);
     }

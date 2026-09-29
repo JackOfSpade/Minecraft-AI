@@ -27,6 +27,10 @@ public final class GatherPickupGameTests {
     public void vanillaPickupStatSurvivesConcurrentLogConsumption(TestContext context) {
         Fixture fixture = fixture(context, "GatherPickupStatGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
+        // logs); these fixtures are about the pickup/pause/resume state machine, not tool
+        // selection, so give the bot an axe up front to keep exercising that machinery.
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos first = fixture.start().east(3);
         bot.getEntityWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG));
@@ -62,6 +66,10 @@ public final class GatherPickupGameTests {
     public void realMissRetriesNearbyResourceBeforeRegionalRoam(TestContext context) {
         Fixture fixture = fixture(context, "GatherMissRetryGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
+        // logs); these fixtures are about the pickup/pause/resume state machine, not tool
+        // selection, so give the bot an axe up front to keep exercising that machinery.
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos first = fixture.start().east(2);
         BlockPos second = fixture.start().east(5);
         bot.getEntityWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
@@ -115,6 +123,10 @@ public final class GatherPickupGameTests {
     public void reachableHarvestRestartsImmediatelyAfterSafetyPause(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeHarvestGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
+        // logs); these fixtures are about the pickup/pause/resume state machine, not tool
+        // selection, so give the bot an axe up front to keep exercising that machinery.
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
         bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
@@ -158,6 +170,10 @@ public final class GatherPickupGameTests {
     public void safetyDisplacementReselectsInsteadOfMiningRemoteTarget(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeReselectGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
+        // logs); these fixtures are about the pickup/pause/resume state machine, not tool
+        // selection, so give the bot an axe up front to keep exercising that machinery.
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
         bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
@@ -193,6 +209,10 @@ public final class GatherPickupGameTests {
     public void outOfReachRetryCannotRenewHarvestDeadline(TestContext context) {
         Fixture fixture = fixture(context, "GatherHarvestLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
+        // logs); these fixtures are about the pickup/pause/resume state machine, not tool
+        // selection, so give the bot an axe up front to keep exercising that machinery.
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
         bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 
@@ -235,6 +255,10 @@ public final class GatherPickupGameTests {
     public void repeatedSafetyResumeCannotRenewHarvestDeadline(TestContext context) {
         Fixture fixture = fixture(context, "GatherResumeLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
+        // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
+        // logs); these fixtures are about the pickup/pause/resume state machine, not tool
+        // selection, so give the bot an axe up front to keep exercising that machinery.
+        InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
         bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
 

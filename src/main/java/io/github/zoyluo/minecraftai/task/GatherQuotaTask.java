@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
@@ -78,6 +79,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private enum Phase {
         SURVEY,
         GOTO,
+        ENSURE_TOOL,
         HARVEST,
         PICKUP,
         DEPOSIT,
@@ -114,6 +116,14 @@ public final class GatherQuotaTask extends AbstractTask {
     private int pickupMisses; // Count of consecutive "broke it but didn't pick up the drop" events; only ruled pickup_timeout past this limit (avoids failing the whole gather over one missed pickup)
     private boolean pickupSweepAttempted;
     private StockpileTask stockpileTask;
+    // Optimal-tool-category gate (ENSURE_TOOL phase): the category still missing from inventory,
+    // which craft candidate (wood, then stone) is being attempted, the nested CraftTask itself, and
+    // the last attempt's failure reason (surfaced in the final missing_tool failure so the player
+    // learns what to bring, e.g. "missing_tool:shovel need: oak_planks x2").
+    private GatherToolPolicy.Category pendingToolCategory;
+    private int toolCraftCandidateIndex;
+    private Task toolCraftTask;
+    private String lastToolCraftFailure;
     private int searchRadius = SEARCH_RADIUS;
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
@@ -356,6 +366,7 @@ public final class GatherQuotaTask extends AbstractTask {
         switch (phase) {
             case SURVEY -> survey(bot);
             case GOTO -> goToTarget(bot);
+            case ENSURE_TOOL -> ensureTool(bot);
             case HARVEST -> harvest(bot);
             case PICKUP -> pickup(bot);
             case DEPOSIT -> deposit(bot);
@@ -1329,7 +1340,30 @@ public final class GatherQuotaTask extends AbstractTask {
         }
     }
 
+    // Optimal-tool policy (player-requested gather/harvest/break -- mining missions keep their own
+    // pickaxe-tier channel policy and are not routed through this class): never break the target
+    // with the bare hand or a wrong-category tool when an effective category actually exists. If
+    // the bot doesn't already carry one, detour through ENSURE_TOOL to craft the cheapest adequate
+    // tier before mining; if it can't be crafted either, the whole task stops instead of falling
+    // back to a sub-optimal tool.
     private void startHarvest(AIPlayerEntity bot) {
+        GatherToolPolicy.Category category = GatherToolPolicy.categoryFor(bot.getEntityWorld().getBlockState(targetPos));
+        if (category != GatherToolPolicy.Category.NONE && !GatherToolPolicy.hasTool(bot, category)) {
+            bot.getActionPack().stopAll();
+            pendingToolCategory = category;
+            toolCraftCandidateIndex = 0;
+            toolCraftTask = null;
+            lastToolCraftFailure = null;
+            BotLog.action(bot, "gather_tool_missing",
+                    "category", GatherToolPolicy.token(category),
+                    "pos", targetPos.toShortString());
+            phase = Phase.ENSURE_TOOL;
+            return;
+        }
+        doStartHarvest(bot);
+    }
+
+    private void doStartHarvest(AIPlayerEntity bot) {
         countBeforeHarvest = countAccepted(bot);
         pickupSweepAttempted = false;
         harvestStartedTick = elapsed;
@@ -1338,6 +1372,52 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupOriginApproachLogged = false;
         HarvestCore.startMining(bot, targetPos);
         phase = Phase.HARVEST;
+    }
+
+    /**
+     * Crafts the cheapest adequate tool of {@link #pendingToolCategory} (wood tier, then stone)
+     * from the bot's own inventory, reusing CraftTask's existing crafting-table/sticks/planks
+     * chain rather than reimplementing it. Re-checks inventory at the top of every tick so a tool
+     * picked up mid-craft (or produced by the craft itself) is noticed immediately. Re-surveys
+     * afterward instead of resuming GOTO/HARVEST directly: crafting may have walked the bot to a
+     * table, so targetPos/position are no longer assumed valid.
+     */
+    private void ensureTool(AIPlayerEntity bot) {
+        if (GatherToolPolicy.hasTool(bot, pendingToolCategory)) {
+            pendingToolCategory = null;
+            toolCraftTask = null;
+            lastToolCraftFailure = null;
+            searchRadius = defaultSearchRadius();
+            resetSurveyWatchdog();
+            phase = Phase.SURVEY;
+            return;
+        }
+        Item[] candidates = GatherToolPolicy.craftCandidates(pendingToolCategory);
+        if (toolCraftTask == null) {
+            if (toolCraftCandidateIndex >= candidates.length) {
+                String category = GatherToolPolicy.token(pendingToolCategory);
+                String reason = "missing_tool:" + category
+                        + (lastToolCraftFailure == null || lastToolCraftFailure.isBlank() ? "" : " " + lastToolCraftFailure);
+                pendingToolCategory = null;
+                fail(reason);
+                return;
+            }
+            Item candidate = candidates[toolCraftCandidateIndex];
+            toolCraftTask = new CraftTask(candidate, 1);
+            toolCraftTask.start(bot);
+            BotLog.action(bot, "gather_tool_craft_attempt",
+                    "category", GatherToolPolicy.token(pendingToolCategory),
+                    "item", Registries.ITEM.getId(candidate).toString());
+        }
+        toolCraftTask.tick(bot);
+        if (toolCraftTask.state() == TaskState.FAILED) {
+            lastToolCraftFailure = toolCraftTask.failureReason();
+            toolCraftTask = null;
+            toolCraftCandidateIndex++;
+        } else if (toolCraftTask.state() == TaskState.COMPLETED) {
+            toolCraftTask = null;
+            // Re-checked at the top of the next tick; hasTool() is now expected to be true.
+        }
     }
 
     private int countAccepted(AIPlayerEntity bot) {
@@ -1409,20 +1489,44 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         LinkedHashSet<Block> blocks = new LinkedHashSet<>();
         for (Item item : items) {
-            Block block = harvestBlockFor(item);
-            if (block != null) {
-                blocks.add(block);
-            }
+            blocks.addAll(harvestBlocksForItem(item));
         }
         return Set.copyOf(blocks);
     }
 
-    private static Block harvestBlockFor(Item item) {
-        if (item == Items.COBBLESTONE) {
-            return Blocks.STONE;
+    /**
+     * "Gather X" means break a block that DROPS X -- X need not be the full name of the block at
+     * rest in natural generation (dirt is dropped by dirt, grass_block, podzol and mycelium alike;
+     * see RuntimeDropIndex). The runtime drop index (built from the game's own loot tables, same
+     * lifecycle as RuntimeRecipeIndex) is the primary source of truth once the server has started;
+     * it deliberately excludes player-infrastructure blocks (farmland/dirt_path) even though they
+     * too drop dirt. Before the index is ready (unit tests / very early startup) this falls back to
+     * a minimal legacy special case, then to the item's own block (its BlockItem), then finally to
+     * a probabilistic drop source (e.g. gravel -> flint) so there is still somewhere to look.
+     */
+    private static Set<Block> harvestBlocksForItem(Item item) {
+        var deterministic = io.github.zoyluo.minecraftai.loot.RuntimeDropIndex.deterministicSourcesFor(item);
+        if (deterministic.isPresent()) {
+            if (!deterministic.get().isEmpty()) {
+                return deterministic.get();
+            }
+        } else {
+            Block legacy = legacyHarvestBlockFor(item);
+            if (legacy != null) {
+                return Set.of(legacy);
+            }
         }
         if (item instanceof BlockItem blockItem) {
-            return blockItem.getBlock();
+            return Set.of(blockItem.getBlock());
+        }
+        var probabilistic = io.github.zoyluo.minecraftai.loot.RuntimeDropIndex.probabilisticSourcesFor(item);
+        return probabilistic.orElseGet(Set::of);
+    }
+
+    /** Pre-index-ready fallback only (see {@link #harvestBlocksForItem}); the real index covers this identically once built. */
+    private static Block legacyHarvestBlockFor(Item item) {
+        if (item == Items.COBBLESTONE) {
+            return Blocks.STONE;
         }
         return null;
     }

@@ -38,6 +38,7 @@
       "io.github.zoyluo.minecraftai.task.MiningServiceResourceGameTests",
       "io.github.zoyluo.minecraftai.task.OreDigPickupGameTests",
       "io.github.zoyluo.minecraftai.task.GatherPickupGameTests",
+      "io.github.zoyluo.minecraftai.task.GatherToolPolicyGameTests",
       "io.github.zoyluo.minecraftai.task.MinePickupGameTests",
       "io.github.zoyluo.minecraftai.task.MineValuablesGameTests",
       "io.github.zoyluo.minecraftai.mining.assist.MiningAssistSenseGameTests",

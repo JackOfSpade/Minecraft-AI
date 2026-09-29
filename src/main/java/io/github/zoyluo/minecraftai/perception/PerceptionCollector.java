@@ -23,6 +23,7 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import org.slf4j.event.Level;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,6 +32,9 @@ import java.util.List;
 import java.util.Map;
 
 public final class PerceptionCollector {
+    // 12-26ms is a normal snapshot cost (see the call site below); only flag a real regression.
+    private static final long SNAPSHOT_SLOW_WARN_MS = 50L;
+
     private PerceptionCollector() {
     }
 
@@ -60,8 +64,12 @@ public final class PerceptionCollector {
                 "entities_n", entities.size(),
                 "items_n", items.size(),
                 "light", world.getLightLevel(center));
-        if (elapsed > 10L) {
+        if (elapsed > SNAPSHOT_SLOW_WARN_MS) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.PERCEPTION, bot, "snapshot_slow", "elapsed_ms", elapsed);
+        } else if (elapsed > 10L) {
+            // Same event name, quieter level: 12-26ms is ordinary snapshot cost, not worth a WARN.
+            BotLog.raw(io.github.zoyluo.minecraftai.log.LogCategory.PERCEPTION, Level.DEBUG, bot,
+                    "snapshot_slow", null, "elapsed_ms", elapsed);
         }
         return new PerceptionSnapshot(
                 self,
