@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * GameTest scenarios run heavily concurrently, sharing one persistent test-server world.
- * {@code ServerWorld.setTimeOfDay} is world-global, so any scenario that depends on a stable
+ * {@code ServerLevel.setDayTime} is world-global, so any scenario that depends on a stable
  * day/night value for its whole duration must not run at the same time as another such
  * scenario, or they overwrite each other's clock every tick. There is no per-test world
  * instance and no batch-level exclusivity to rely on for this, so scenarios that need a
@@ -12,13 +12,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * scenario runs its real body at a time, while every other (non-time-sensitive) scenario is
  * unaffected and keeps running fully concurrently.
  *
- * <p>Registering a fresh {@code TestContext#runAtEveryTick} callback from inside one that is
+ * <p>Registering a fresh {@code GameTestHelper#failIfEver} callback from inside one that is
  * already executing corrupts vanilla's internal per-test tracking (a live bug in 1.21.5's
- * GameTest rewrite: {@code GameTestState#tickTests} iterates its own tracking map while
+ * GameTest rewrite: {@code GameTestInfo#tickInternal} iterates its own tracking map while
  * invoking each test's tick callbacks, and mutating that state admits a new one mid-iteration
  * crashes the whole test server). So a lock user must poll {@link #tryAcquire()} and run its
  * one-time setup plus its real per-tick body from inside the SAME, single, top-level
- * {@code runAtEveryTick} callback it already registers -- never register a second one once
+ * {@code failIfEver} callback it already registers -- never register a second one once
  * the lock is held.</p>
  */
 public final class GameTestTimeLock {

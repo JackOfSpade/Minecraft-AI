@@ -110,7 +110,7 @@ class AcquireWaterSurvivalBoundaryTest {
         int inspect = task.indexOf(
                 "private static CarvedRelocationCandidate inspectCarvedAscentRelocation");
         int orderedCells = task.indexOf(
-                "new BlockPos[]{target.up(), target}", inspect);
+                "new BlockPos[]{target.above(), target}", inspect);
         int cellGate = task.indexOf("observableCellOrBlock(bot, cell)", orderedCells);
         int stateRead = task.indexOf("world.getBlockState(cell)", cellGate);
         int fluidGuard = task.indexOf("hasObservableAdjacentFluid(bot, world, cell)", stateRead);
@@ -143,12 +143,12 @@ class AcquireWaterSurvivalBoundaryTest {
 
         int sameLevel = body.indexOf("BlockPos sameLevel");
         int sameLevelGate = body.indexOf("observableStandCell(bot, sameLevel)", sameLevel);
-        int sameLevelSkyRead = body.indexOf("world.isSkyVisible(sameLevel)", sameLevelGate);
+        int sameLevelSkyRead = body.indexOf("world.canSeeSky(sameLevel)", sameLevelGate);
         int sameLevelStateRead = body.indexOf(
                 "Standability.isStandable(world, sameLevel)", sameLevelGate);
         int uphill = body.indexOf("BlockPos uphill", sameLevelStateRead);
         int uphillGate = body.indexOf("observableStandCell(bot, uphill)", uphill);
-        int uphillSkyRead = body.indexOf("world.isSkyVisible(uphill)", uphillGate);
+        int uphillSkyRead = body.indexOf("world.canSeeSky(uphill)", uphillGate);
         int uphillStateRead = body.indexOf(
                 "Standability.isStandable(world, uphill)", uphillGate);
         int supportStateRead = body.indexOf("world.getBlockState(sameLevel)", uphillStateRead);

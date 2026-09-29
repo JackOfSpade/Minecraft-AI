@@ -56,7 +56,7 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(mixins.contains("\"SleepManagerHumansOnlyMixin\""));
         String mixin = read(MAIN.resolve("mixin/SleepManagerHumansOnlyMixin.java"));
         assertTrue(mixin.contains("PlayerKind.humansOnly(players)"));
-        assertTrue(mixin.contains("method = \"update\"") && mixin.contains("method = \"canResetTime\""));
+        assertTrue(mixin.contains("method = \"update\"") && mixin.contains("method = \"areEnoughDeepSleeping\""));
     }
 
     @Test

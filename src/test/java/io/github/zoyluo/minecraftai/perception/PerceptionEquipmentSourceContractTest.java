@@ -15,11 +15,11 @@ final class PerceptionEquipmentSourceContractTest {
         String source = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/perception/PerceptionCollector.java"));
 
         assertTrue(source.contains("equipment(bot)"));
-        assertTrue(source.contains("bot.getMainHandStack()"));
-        assertTrue(source.contains("bot.getOffHandStack()"));
-        assertTrue(source.contains("bot.getEquippedStack(EquipmentSlot.HEAD)"));
-        assertTrue(source.contains("bot.getEquippedStack(EquipmentSlot.CHEST)"));
-        assertTrue(source.contains("bot.getEquippedStack(EquipmentSlot.LEGS)"));
-        assertTrue(source.contains("bot.getEquippedStack(EquipmentSlot.FEET)"));
+        assertTrue(source.contains("bot.getMainHandItem()"));
+        assertTrue(source.contains("bot.getOffhandItem()"));
+        assertTrue(source.contains("bot.getItemBySlot(EquipmentSlot.HEAD)"));
+        assertTrue(source.contains("bot.getItemBySlot(EquipmentSlot.CHEST)"));
+        assertTrue(source.contains("bot.getItemBySlot(EquipmentSlot.LEGS)"));
+        assertTrue(source.contains("bot.getItemBySlot(EquipmentSlot.FEET)"));
     }
 }

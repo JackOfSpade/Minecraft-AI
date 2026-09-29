@@ -87,8 +87,8 @@ class MiningAssistCoordinatorSourceContractTest {
                 "getBiome(", "getBlockEntity(", "CapabilityRuntime", "PrivilegedCapability", "raycast(")) {
             assertFalse(source.contains(token), "the sensor adapters own every world read, found " + token);
         }
-        assertEquals(1, count(source, "isSkyVisible("), "the one own-cell read is the underground test (design 2.3 3e)");
-        assertTrue(source.contains("!bot.getEntityWorld().isSkyVisible(bot.getBlockPos())"));
+        assertEquals(1, count(source, "canSeeSky("), "the one own-cell read is the underground test (design 2.3 3e)");
+        assertTrue(source.contains("!bot.level().canSeeSky(bot.blockPosition())"));
     }
 
     // ---- the exception fence ------------------------------------------------------------------------
@@ -103,7 +103,7 @@ class MiningAssistCoordinatorSourceContractTest {
         int catchBlock = body.indexOf("catch (RuntimeException exception) {");
         int fail = body.indexOf("fail(bot, tick, exception);");
         assertTrue(switchCheck > 0, "mode off must cost one static read");
-        assertTrue(body.indexOf("server.getTicks()") > switchCheck, "nothing is read from the server before the switch");
+        assertTrue(body.indexOf("server.getTickCount()") > switchCheck, "nothing is read from the server before the switch");
         assertTrue(tryBlock > switchCheck && run > tryBlock && catchBlock > run && fail > catchBlock,
                 "the whole pass runs inside the try and a failure goes to the fence");
         assertTrue(body.contains("return;"), "the off path returns immediately");
@@ -116,7 +116,7 @@ class MiningAssistCoordinatorSourceContractTest {
         String source = source();
         String fail = method(source, "private static void fail(AIPlayerEntity bot, int tick, RuntimeException exception) {");
         int clear = fail.indexOf("MiningAssistRegistry.clear(bot);");
-        int gate = fail.indexOf("MiningAssistRuntime.failures().recordFailure(bot.getUuid(), tick)");
+        int gate = fail.indexOf("MiningAssistRuntime.failures().recordFailure(bot.getUUID(), tick)");
         int log = fail.indexOf("BotLog.error(bot, \"assist_tick_failed\", exception,");
         assertTrue(clear >= 0 && gate > clear && log > gate, "throttle decides, then the log line is written");
         assertFalse(fail.contains("MiningAssistRuntime.clearBot("),
@@ -155,7 +155,7 @@ class MiningAssistCoordinatorSourceContractTest {
         int decide = run.indexOf("SensePlan.decide(handled,");
         int task = run.indexOf("isSensedTask(TaskManager.INSTANCE.getActive(bot).orElse(null))");
         int gate = run.indexOf("MiningAssistRuntime.enabledFor(bot, tick)");
-        int sky = run.indexOf("!bot.getEntityWorld().isSkyVisible(bot.getBlockPos())");
+        int sky = run.indexOf("!bot.level().canSeeSky(bot.blockPosition())");
         assertTrue(decide > 0 && task > decide && gate > task && sky > gate,
                 "handled, then the task class, then the gate, then the sky read");
         assertTrue(run.contains("if (verdict.senses()) {"));
@@ -207,7 +207,7 @@ class MiningAssistCoordinatorSourceContractTest {
     void theRecoveryOfAFailedPassIsNotLoggedAsANewSession() throws IOException {
         String sense = method(source(), "private static void sense(AIPlayerEntity bot, int tick) {");
         int status = sense.indexOf("state.status().sensed(tick) == SenseStatus.Change.ENABLED");
-        int suppress = sense.indexOf("!MiningAssistRuntime.failures().takeReenableSuppression(bot.getUuid())");
+        int suppress = sense.indexOf("!MiningAssistRuntime.failures().takeReenableSuppression(bot.getUUID())");
         int log = sense.indexOf("MiningAssistLog.senseEnabled(");
         assertTrue(status > 0 && suppress > status && log > suppress,
                 "the enabled line is withheld once after a failure, not once per cooldown");

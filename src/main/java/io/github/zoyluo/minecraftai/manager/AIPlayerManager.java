@@ -59,7 +59,7 @@ public final class AIPlayerManager {
     /**
      * SAFE-DEAD: after a bot dies (hp<=0) it sits in place indefinitely receiving evade requests
      * and never respawns on its own (a fake player has no client to send the vanilla respawn
-     * packet, and the ServerPlayerEntity isn't removed after death either). This revives it to
+     * packet, and the ServerPlayer isn't removed after death either). This revives it to
      * full health and teleports it to a safe surface point, clearing any leftover death state.
      * Returns true if it was revived.
      */

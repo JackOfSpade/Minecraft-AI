@@ -65,13 +65,13 @@ class AssistObservationSourceContractTest {
 
     static {
         // the dimension id: the placed-cells ledger key and poi.cavernDimensions
-        WORLD_CALLS.put("getRegistryKey", new Allowed("BotEdits.java", 1));
+        WORLD_CALLS.put("dimension", new Allowed("BotEdits.java", 1));
         // the one own-cell read of the POI pass: the biome id at the bot's feet
         WORLD_CALLS.put("getBiome", new Allowed("PoiDetector.java", 1));
         // one entity query per POI evaluation, every result still goes through canObserveEntity
         WORLD_CALLS.put("getEntitiesByClass", new Allowed("PoiDetector.java", 1));
         // the other own-cell read: the underground test at the bot's feet (design 2.3 3e)
-        WORLD_CALLS.put("isSkyVisible", new Allowed("MiningAssistCoordinator.java", 1));
+        WORLD_CALLS.put("canSeeSky", new Allowed("MiningAssistCoordinator.java", 1));
     }
 
     private static final Pattern WORLD_MEMBER = Pattern.compile(
@@ -157,14 +157,14 @@ class AssistObservationSourceContractTest {
                 "range is min(range, max(1, radius))");
         assertFalse(body.contains("CapabilityRuntime.decide"), "no privileged read exists here");
         assertFalse(body.contains("CapabilityRuntime"), "not even a mention");
-        assertTrue(body.contains("bot.getEyePos()"), "the ray starts at the bot's own eye");
-        assertTrue(body.contains("RaycastContext.FluidHandling.ANY"));
+        assertTrue(body.contains("bot.getEyePosition()"), "the ray starts at the bot's own eye");
+        assertTrue(body.contains("ClipContext.Fluid.ANY"));
 
         int typeCheck = body.indexOf("HitResult.Type.BLOCK");
         int stateRead = body.indexOf("getBlockState(");
         assertTrue(typeCheck > 0 && stateRead > typeCheck, "the state may only be read after the BLOCK type check");
         assertEquals(1, count(body, "getBlockState("), "exactly one read: the first-hit cell");
-        assertTrue(body.indexOf("isChunkLoaded(") > 0 && body.indexOf("isChunkLoaded(") < body.indexOf("raycast("),
+        assertTrue(body.indexOf("hasChunk(") > 0 && body.indexOf("hasChunk(") < body.indexOf("raycast("),
                 "an end chunk that is not loaded skips the ray before it is cast");
         assertTrue(body.contains("ViewHit.unknown()"));
         assertFalse(body.contains("FACE_SAMPLE_OFFSETS"));
@@ -280,7 +280,7 @@ class AssistObservationSourceContractTest {
             String source = code(file);
             String name = file.getFileName().toString();
             int foundBiome = count(source, ".getBiome(");
-            int foundSky = count(source, "isSkyVisible(");
+            int foundSky = count(source, "canSeeSky(");
             if (foundBiome > 0) {
                 assertEquals("PoiDetector.java", name);
             }
@@ -294,8 +294,8 @@ class AssistObservationSourceContractTest {
         assertEquals(1, sky, "one sky read per sensing decision, at the bot's own feet");
         String detector = code(ASSIST.resolve("PoiDetector.java"));
         assertTrue(detector.contains("world.getBiome(feet)"));
-        assertTrue(detector.contains("BlockPos feet = bot.getBlockPos();"));
-        assertTrue(code(COORDINATOR).contains("!bot.getEntityWorld().isSkyVisible(bot.getBlockPos())"));
+        assertTrue(detector.contains("BlockPos feet = bot.blockPosition();"));
+        assertTrue(code(COORDINATOR).contains("!bot.level().canSeeSky(bot.blockPosition())"));
     }
 
     @Test
@@ -303,7 +303,7 @@ class AssistObservationSourceContractTest {
         String detector = code(ASSIST.resolve("PoiDetector.java"));
         assertTrue(detector.contains("ObservableWorldQuery.canObserveEntity(bot, entity)"));
         assertTrue(detector.contains("!entity.isInvisible()"));
-        assertEquals(1, count(detector, "getEntitiesByClass("), "one entity query per evaluation");
+        assertEquals(1, count(detector, "getEntitiesOfClass("), "one entity query per evaluation");
         assertEquals(1, count(detector, "ObservableWorldQuery.canObserveEntity("));
         Matcher gate = Pattern.compile(
                 "if\\s*\\(\\s*!\\s*ObservableWorldQuery\\.canObserveEntity\\(bot,\\s*entity\\)\\s*\\)\\s*\\{\\s*continue;\\s*\\}")
@@ -325,7 +325,7 @@ class AssistObservationSourceContractTest {
         assertTrue(sort > 0 && loop > sort && observe > loop && accept > observe,
                 "sorted, then visited in that order, then counted only when observed");
         assertTrue(scan.contains("isWardenType(entity)"), "wardens are visited first");
-        assertTrue(scan.contains("bot.squaredDistanceTo(entity)"), "then the nearest first");
+        assertTrue(scan.contains("bot.distanceToSqr(entity)"), "then the nearest first");
         assertTrue(scan.contains("examined >= ENTITY_EXAMINE_CAP || accepted >= ENTITY_CANDIDATE_CAP"));
         assertFalse(scan.contains("examined++ >= ENTITY_CANDIDATE_CAP"),
                 "an unobservable entity must not use up the evidence cap");
@@ -352,8 +352,8 @@ class AssistObservationSourceContractTest {
             assertFalse(source.contains("TaskManager.INSTANCE.assign"), name);
             assertFalse(source.contains("IntentController"), name);
             assertFalse(source.contains("getActionPack"), name + " must not drive the bot");
-            assertFalse(source.contains("sendMessage("), name + " must not chat (P0 is shadow only)");
-            assertFalse(source.contains("interactionManager"), name);
+            assertFalse(source.contains("displayClientMessage("), name + " must not chat (P0 is shadow only)");
+            assertFalse(source.contains("gameMode"), name);
             assertFalse(Pattern.compile("\\.(pauseFor|abort|resumeFromPause|resumeUserIntent|pauseUserIntent)\\(")
                     .matcher(source).find(), name + " must not pause, abort or resume a task");
         }
@@ -468,7 +468,7 @@ class AssistObservationSourceContractTest {
         assertTrue(body.contains("catch (RuntimeException"));
 
         String edits = read(ASSIST.resolve("BotEdits.java"));
-        int placed = edits.indexOf("public static void notePlaced(ServerWorld world, BlockPos pos)");
+        int placed = edits.indexOf("public static void notePlaced(ServerLevel world, BlockPos pos)");
         assertTrue(placed > 0);
         String placedBody = edits.substring(placed, edits.indexOf("public static void noteDug(", placed));
         assertTrue(placedBody.indexOf("senseConfigured()") > 0 && placedBody.contains("catch (RuntimeException"));

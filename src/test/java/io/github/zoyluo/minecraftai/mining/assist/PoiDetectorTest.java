@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The pure parts of the PoiDetector adapter: scheduling, labels and log fields. {@link #refreshBiome} and
- * {@link #evaluate} themselves need a real {@code AIPlayerEntity}/{@code ServerWorld}, which the pure JUnit lane
+ * {@link #evaluate} themselves need a real {@code AIPlayerEntity}/{@code ServerLevel}, which the pure JUnit lane
  * cannot construct (review round, P1 contract G.5): those two methods are pinned here as source-contract checks
  * on the comment-stripped production text instead of exercised live. The live behaviour (a real biome read,
  * {@code deepDark}/{@code poiStructureScore} filled) is covered by the GameTest lane and by
@@ -59,9 +59,9 @@ class PoiDetectorTest {
     void refreshBiomeReadsTheFeetBiomeAndNotesWhenItWasReadSourceContract() throws IOException {
         String detector = code(ASSIST.resolve("PoiDetector.java"));
         String refreshBiome = method(detector,
-                "public static void refreshBiome(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {");
+                "public static void refreshBiome(AIPlayerEntity bot, MiningAssistState state, ServerLevel world, int serverTick) {");
         assertTrue(refreshBiome.contains("world.getBiome(feet)"), "the own-cell biome read moved here, unchanged");
-        assertTrue(refreshBiome.contains("BlockPos feet = bot.getBlockPos();"));
+        assertTrue(refreshBiome.contains("BlockPos feet = bot.blockPosition();"));
         assertTrue(refreshBiome.contains("state.noteBiomeRead(serverTick);"),
                 "so DetourSafetyGate item 8 can tell whether the fact is fresh");
     }
@@ -70,7 +70,7 @@ class PoiDetectorTest {
     void evaluateCallsRefreshBiomeAndRecordsThePoiScoreSourceContract() throws IOException {
         String detector = code(ASSIST.resolve("PoiDetector.java"));
         String evaluate = method(detector,
-                "public static Result evaluate(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {");
+                "public static Result evaluate(AIPlayerEntity bot, MiningAssistState state, ServerLevel world, int serverTick) {");
         assertTrue(evaluate.contains("refreshBiome(bot, state, world, serverTick);"),
                 "evaluate no longer reads the biome itself");
         assertTrue(evaluate.contains("state.notePoiScore(serverTick, score.s());"),

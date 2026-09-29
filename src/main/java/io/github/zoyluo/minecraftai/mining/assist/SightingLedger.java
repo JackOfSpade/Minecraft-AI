@@ -55,7 +55,7 @@ public final class SightingLedger {
 
     /** BlockPos order: y, then z, then x (same as {@code Vec3i.compareTo}, without overflow). */
     private static final Comparator<BlockPos> POS_ORDER = Comparator
-            .comparingInt(BlockPos::getY)
+            .<BlockPos>comparingInt(BlockPos::getY)
             .thenComparingInt(BlockPos::getZ)
             .thenComparingInt(BlockPos::getX);
 

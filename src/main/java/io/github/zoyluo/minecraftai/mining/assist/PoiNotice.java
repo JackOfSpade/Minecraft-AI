@@ -5,7 +5,7 @@ import net.minecraft.core.BlockPos;
 
 /**
  * Pure text rendering of the design 6.1/6.8/6.9 POI notice templates. {@code BlockPos}/{@code String}/
- * primitives in, {@code String} out: no {@code ServerWorld}, no player, no chat send and no task or
+ * primitives in, {@code String} out: no {@code ServerLevel}, no player, no chat send and no task or
  * intent access. Sending the rendered text lives entirely in {@code coordination.PoiCoordinator}, which
  * is unconstrained by the {@code assist} package's source-contract test; this class must stay that way so
  * it never trips it.

@@ -188,9 +188,9 @@ public final class BoatFollowGameTests {
     /**
      * Guard for AIPlayerControlledBoatLogicalSideMixin: it may only make the server authoritative
      * for a boat controlled by our own AIPlayerEntity.  Vanilla answers false on the server for a
-     * boat whose controlling passenger is any PlayerEntity (the real client simulates it and reports
+     * boat whose controlling passenger is any Player (the real client simulates it and reports
      * back) and true for an empty boat or one carrying a non-player entity, so only a PLAYER
-     * passenger can show whether the mixin leaks: a human (a real non-AI ServerPlayerEntity over a
+     * passenger can show whether the mixin leaks: a human (a real non-AI ServerPlayer over a
      * LocalChannel, the stand-in the sleep-vote test uses) must keep its boat client-authoritative
      * (false) while an AIPlayerEntity in an identical boat makes it server-authoritative (true).
      */

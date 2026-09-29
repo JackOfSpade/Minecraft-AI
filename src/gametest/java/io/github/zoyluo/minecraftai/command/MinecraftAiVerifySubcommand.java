@@ -1498,7 +1498,7 @@ public final class MinecraftAiVerifySubcommand {
         bot.getActionPack().stopAll();
     }
 
-    // Reads the bot's cumulative death statistic (ServerStatHandler accumulates across respawns and is never reset by one). Used as the baseline for real_*'s zero-death assertions:
+    // Reads the bot's cumulative death statistic (ServerStatsCounter accumulates across respawns and is never reset by one). Used as the baseline for real_*'s zero-death assertions:
     // in real play, dying and respawning is a major incident — dropped gear/lost position/wasted progress — that can't be waved off even if the goal is completed after respawn.
     // Checking isAlive() alone can't catch "died and came back"; the death count must be compared instead.
     private static int deathCount(AIPlayerEntity bot) {
@@ -2967,14 +2967,14 @@ public final class MinecraftAiVerifySubcommand {
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_INGOT, 5));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        // One-hit kill: goes through the vanilla death flow (drops are spawned); setHealth(0) doesn't trigger onDeath drops, damage must be applied instead.
+        // One-hit kill: goes through the vanilla death flow (drops are spawned); setHealth(0) doesn't trigger die drops, damage must be applied instead.
         bot.hurtServer(world, world.damageSources().generic(), 1000.0F);
         return Result.running("geo_recover", 2400,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.IRON_INGOT) >= 5);
     }
 
     // Runtime recipe index end to end: OAK_TRAPDOOR is not in the hand-written table (confirmed by grep), so it can only be crafted by backward-planning
-    // through a recipe (6 planks) learned by RuntimeRecipeIndex from RecipeManager — mod items go through the same path, and a vanilla item outside the table is used here as a stand-in proof.
+    // through a recipe (6 planks) learned by RuntimeRecipeIndex from RecipeAccess — mod items go through the same path, and a vanilla item outside the table is used here as a stand-in proof.
     private static Result assignCraftRuntime(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);

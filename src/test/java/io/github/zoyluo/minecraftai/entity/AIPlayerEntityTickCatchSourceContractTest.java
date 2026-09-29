@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Source contract of {@code entity/AIPlayerEntity.java}. {@code tick()} overrides
- * {@code ServerPlayerEntity#tick()} and cannot be exercised without a full Minecraft server
+ * {@code ServerPlayer#tick()} and cannot be exercised without a full Minecraft server
  * bootstrap, so this reads the production source as text instead, like the other source-contract
  * tests in this repo.
  */
@@ -40,7 +40,7 @@ class AIPlayerEntityTickCatchSourceContractTest {
         String body = method(source(), "public void tick() {");
 
         // Was catch (NullPointerException exception); widened so any other RuntimeException from the
-        // same call graph (super.tick()/playerTick()/actionPack.onUpdate()) gets the same graceful
+        // same call graph (super.tick()/doTick()/actionPack.onUpdate()) gets the same graceful
         // per-tick handling instead of crashing the server as a "Ticking player" failure.
         assertTrue(body.contains("} catch (RuntimeException exception) {"));
         assertFalse(body.contains("catch (NullPointerException exception)"),

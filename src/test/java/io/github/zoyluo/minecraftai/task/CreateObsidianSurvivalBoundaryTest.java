@@ -36,7 +36,7 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("obsidianStandHint"));
         assertTrue(task.contains("create_obsidian_return_to_view_failed"),
                 "a known formed block must be re-approached before temporary occlusion rejects it");
-        assertTrue(task.contains("bot.getBlockPos().getY() == target.getY()"),
+        assertTrue(task.contains("bot.blockPosition().getY() == target.getY()"),
                 "the horizontal walk controller must not claim a vertical final step");
         assertTrue(task.contains("elevatedPourStand"),
                 "a dry observation ledge above the pool is a valid close work pose");
@@ -66,7 +66,7 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("isSafePickupCollisionCell"),
                 "exact pickup microsteps must validate their final collision cell");
         assertTrue(task.contains("create_obsidian_pickup_no_progress_endpoint"));
-        assertTrue(task.contains("!Standability.isStandable(bot.getEntityWorld(), target)"),
+        assertTrue(task.contains("!Standability.isStandable(bot.level(), target)"),
                 "pickup pathing must reject a raw non-standable endpoint before A* can snap it");
         assertTrue(task.contains("resolved.equals(current)"),
                 "pickup pathing must reject a resolved no-op endpoint");
@@ -85,7 +85,7 @@ class CreateObsidianSurvivalBoundaryTest {
                 "protection water must receive scheduled fluid ticks before source recovery");
         assertTrue(task.contains("protectionPrepared = true"),
                 "the exact washed target must remain eligible for dry mining after drainage");
-        assertTrue(task.contains("obsidianStandHint = standPos.toImmutable()"),
+        assertTrue(task.contains("obsidianStandHint = standPos.immutable()"),
                 "source recovery must retain the stand selected for the actual pour geometry");
         assertTrue(task.contains("create_obsidian_recover_before_reset"),
                 "a target reset must first discharge the live water-source obligation");
@@ -190,10 +190,10 @@ class CreateObsidianSurvivalBoundaryTest {
         int noCandidate = body.indexOf("if (bestSlot < 0 && bestOffhandSlot < 0) {");
         assertTrue(noCandidate >= 0);
         int toolRequiredReturnFalse = body.indexOf(
-                "if (state.isToolRequired()) {\n                return false;\n            }", noCandidate);
+                "if (state.requiresCorrectToolForDrops()) {\n                return false;\n            }", noCandidate);
         assertTrue(toolRequiredReturnFalse > noCandidate,
                 "only the tool-required branch may still return false here");
-        assertTrue(body.indexOf("PlayerInventory.isValidHotbarIndex(slot)", toolRequiredReturnFalse)
+        assertTrue(body.indexOf("Inventory.isHotbarSlot(slot)", toolRequiredReturnFalse)
                         > toolRequiredReturnFalse,
                 "the tool-not-required branch must select an empty hotbar slot as a bare hand, "
                 + "mirroring ToolSelector.equipBestTool's own fallback, instead of failing the mission");
@@ -204,7 +204,7 @@ class CreateObsidianSurvivalBoundaryTest {
         int fallbackClose = body.indexOf("            return true;\n        }", toolRequiredReturnFalse);
         assertTrue(fallbackClose > toolRequiredReturnFalse);
         assertEquals(-1, body.substring(
-                toolRequiredReturnFalse + "if (state.isToolRequired()) {\n                return false;\n            }"
+                toolRequiredReturnFalse + "if (state.requiresCorrectToolForDrops()) {\n                return false;\n            }"
                         .length(),
                 fallbackClose).indexOf("return false"));
     }
@@ -217,7 +217,7 @@ class CreateObsidianSurvivalBoundaryTest {
         assertFalse(action.contains("InventoryAction.removeItems"));
         assertFalse(action.contains("InventoryAction.giveItem"));
         assertTrue(action.contains("InteractAction.useItemInAir"));
-        assertTrue(action.contains("RaycastContext.FluidHandling.SOURCE_ONLY"));
+        assertTrue(action.contains("ClipContext.Fluid.SOURCE_ONLY"));
         assertTrue(action.contains("raycastWaterSource(bot)"));
         assertTrue(action.contains("ObservableWorldQuery.canObserveCell"));
         assertTrue(action.contains("source-only bucket ray is the perception boundary"));

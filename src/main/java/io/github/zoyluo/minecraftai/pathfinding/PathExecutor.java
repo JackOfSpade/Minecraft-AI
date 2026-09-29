@@ -418,7 +418,7 @@ public final class PathExecutor {
         }
         pack.setJumping(false);
 
-        // ServerPlayerEntity normally receives its jump displacement from client movement packets.
+        // ServerPlayer normally receives its jump displacement from client movement packets.
         // Our fake player has no client, so setJumping alone can (rarely) leave it bouncing at the
         // same block forever (the obsidian pool pickup path is a deterministic two-block-deep
         // reproduction). Model exactly one adjacent jump cell through the reviewed fake-client

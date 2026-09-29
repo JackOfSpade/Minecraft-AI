@@ -400,7 +400,7 @@ public final class FarmTask extends AbstractTask {
         }
         completedActions++;
         // The harvested produce/seed drops as an on-ground ItemEntity (FarmAction.harvest breaks the block
-        // with dropStacks=true, which does not go straight into the inventory). The bot harvests from reach
+        // with dropResources=true, which does not go straight into the inventory). The bot harvests from reach
         // distance (<= 4.5 blocks), so drops more than 1 block from its feet are out of vanilla's automatic
         // pickup range -- forced pickup is required, otherwise countItem(produce) never increases and the
         // harvest/farm goal never completes (farm_wheat_from_scratch testing timed out with 0 wheat in the

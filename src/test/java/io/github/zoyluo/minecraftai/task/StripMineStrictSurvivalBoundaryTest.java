@@ -28,7 +28,7 @@ class StripMineStrictSurvivalBoundaryTest {
         String source = read("task/StripMineTask.java");
         int onStart = source.indexOf("protected void onStart");
         int profileGate = source.indexOf("profileRejectionReason(MinecraftAiConfig.get().profile())", onStart);
-        int originRead = source.indexOf("origin = bot.getBlockPos()", onStart);
+        int originRead = source.indexOf("origin = bot.blockPosition()", onStart);
 
         assertTrue(onStart >= 0 && profileGate > onStart && originRead > profileGate,
                 "strict profile gate must run before StripMine initializes from the world");

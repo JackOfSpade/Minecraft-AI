@@ -19,7 +19,7 @@ public final class BoatFollowTask extends AbstractTask {
     private static final double BOAT_STOP_DISTANCE = 5.0D;
     private static final double TURN_ONLY_ANGLE = 82.0D;
     // Watchdog for a mounted boat that is being steered but not actually going anywhere (beached,
-    // wedged against a bank or wall, hung on a rock).  steerToward()/setInputs() only issue paddle
+    // wedged against a bank or wall, hung on a rock).  steerToward()/setInput() only issue paddle
     // input and never confirm it moved anything, so without this the bot would sit in a dead boat
     // forever.  Progress is judged over a whole window, not tick to tick, so a legitimate in-place
     // U-turn (yaw changes, position barely does) or a slow start from rest is never mistaken for
@@ -267,7 +267,7 @@ public final class BoatFollowTask extends AbstractTask {
     /**
      * @return true once a whole {@link #STUCK_WINDOW_TICKS} window of active steering produced
      *     neither real displacement nor a real turn (grounded, wedged against a bank or wall, or
-     *     otherwise physically stuck -- steerToward/setInputs alone cannot detect this, they only
+     *     otherwise physically stuck -- steerToward/setInput alone cannot detect this, they only
      *     issue paddle input, never confirm it moved anything).
      */
     private boolean isStuck(AbstractBoat mounted) {

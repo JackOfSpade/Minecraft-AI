@@ -184,7 +184,7 @@ public final class OffhandExecutionGameTests {
         // A crafting table has no required tool, so this bot breaks it bare-handed in
         // RECLAIMING_TABLE via the real BlockMiner/ActionPack mining loop, which only advances on
         // genuine per-tick AIPlayerEntity.tick() calls -- so this must poll across real GameTest
-        // ticks (runAtEveryTick), not a single synchronous burst of task.tick(bot) calls.
+        // ticks (failIfEver), not a single synchronous burst of task.tick(bot) calls.
         context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(bot);
@@ -325,7 +325,7 @@ public final class OffhandExecutionGameTests {
         // independently-assigned one -- which otherwise duplicates the crafted pickaxe once the
         // capacity-recovery retry below makes this task take long enough for that scan to fire.
         // TaskManager.tickAll() (invoked automatically once per real server tick) then drives
-        // task.tick(bot) itself; this must poll across real GameTest ticks (runAtEveryTick), not a
+        // task.tick(bot) itself; this must poll across real GameTest ticks (failIfEver), not a
         // single synchronous burst of manual tick() calls, since the table-reclaim mining this
         // retry can reach only advances on genuine per-tick AIPlayerEntity.tick() calls.
         TaskManager.INSTANCE.assign(bot, task,

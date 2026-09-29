@@ -14,7 +14,7 @@ import net.minecraft.core.BlockPos;
 /**
  * Per-bot, static, TTL-pruned dedupe registry of point-of-interest sites (mining-assist design 6.4), plus the
  * {@code BotMemory} ring-slot counter and the "open case" bookkeeping {@code PoiCoordinator} needs for resume
- * detection. Never touches {@code ServerWorld}, {@code TaskManager} or chat: pure bookkeeping keyed by
+ * detection. Never touches {@code ServerLevel}, {@code TaskManager} or chat: pure bookkeeping keyed by
  * {@link UUID}, mirroring the {@code OreClaims}/{@code MissionAssistLedger} idiom (plain {@code HashMap}, server
  * thread only, no synchronization).
  *

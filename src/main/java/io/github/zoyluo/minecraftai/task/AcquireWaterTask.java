@@ -400,7 +400,7 @@ public final class AcquireWaterTask extends AbstractTask implements Checkpointab
         // A cave opening can change after a support/shelter placement and flood the current cell
         // on the next vanilla fluid tick. Stop the ascent immediately and let the global physical
         // water rescue own movement until a dry landing is proved; continuing to inspect/place
-        // supports from inside water makes every FluidHandling.ANY perception ray self-occlude.
+        // supports from inside water makes every Fluid.ANY perception ray self-occlude.
         BlockPos wetFeet = bot.blockPosition();
         boolean touchingWater = bot.isInWater()
                 || bot.level().getFluidState(wetFeet).is(FluidTags.WATER)

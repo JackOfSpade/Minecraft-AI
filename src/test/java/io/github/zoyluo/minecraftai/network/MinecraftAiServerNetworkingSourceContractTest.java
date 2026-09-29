@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Source contract of {@code network/MinecraftAiServerNetworking.java}. Both handlers here run on
  * the server thread (queued from a network receiver via {@code context.server().execute(...)}) and
- * take real {@code ServerPlayerEntity}/{@code AIPlayerEntity} arguments, so they cannot be
+ * take real {@code ServerPlayer}/{@code AIPlayerEntity} arguments, so they cannot be
  * exercised without a full Minecraft bootstrap; this reads the production source as text instead,
  * like the other source-contract tests in this repo.
  */
@@ -38,7 +38,7 @@ class MinecraftAiServerNetworkingSourceContractTest {
 
     @Test
     void handleSetOptionCatchesRuntimeExceptionsLikeHandleCommandDoes() throws IOException {
-        String body = method(source(), "private void handleSetOption(ServerPlayerEntity player, SetOptionC2S payload) {");
+        String body = method(source(), "private void handleSetOption(ServerPlayer player, SetOptionC2S payload) {");
 
         assertTrue(body.contains("try {"), "the unknown_option throw must be covered by a try block");
         assertTrue(body.contains("} catch (RuntimeException exception) {"),

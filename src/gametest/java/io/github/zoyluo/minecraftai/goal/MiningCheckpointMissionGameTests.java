@@ -2922,7 +2922,7 @@ public final class MiningCheckpointMissionGameTests {
                             "commit-window restore did not replay the delivered rare batch: "
                                     + (oreTask == null
                                     ? "none" : oreTask.getClass().getSimpleName()));
-                    // Drive the commit synchronously (a nested runAtEveryTick would break the
+                    // Drive the commit synchronously (a nested failIfEver would break the
                     // GameTest scheduler's iterator): a fully delivered batch reaches
                     // COMPLETED within a few ticks via the finishAlreadyDeliveredBatch fast
                     // path; abort is a no-op on a COMPLETED task, it just clears the

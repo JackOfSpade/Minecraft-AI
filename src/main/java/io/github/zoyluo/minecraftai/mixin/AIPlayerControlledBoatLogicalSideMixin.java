@@ -9,18 +9,18 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Vanilla's {@code Entity.isLogicalSideForUpdatingMovement()} treats any boat with a real
- * {@code PlayerEntity} passenger as client-authoritative: on the server it always returns false
- * (confirmed with javap -- the server branch is exactly {@code !isControlledByPlayer()}, and
- * {@code isControlledByPlayer()} is true whenever the controlling passenger is a
- * {@code PlayerEntity}). A real client then simulates the boat locally and reports the result back
- * with a {@code VehicleMoveC2SPacket} every tick; our fake {@link AIPlayerEntity} has no client to
+ * Vanilla's {@code Entity.isLocalInstanceAuthoritative()} treats any boat with a real
+ * {@code Player} passenger as client-authoritative: on the server it always returns false
+ * (confirmed with javap -- the server branch is exactly {@code !isClientAuthoritative()}, and
+ * {@code isClientAuthoritative()} is true whenever the controlling passenger is a
+ * {@code Player}). A real client then simulates the boat locally and reports the result back
+ * with a {@code ServerboundMoveVehiclePacket} every tick; our fake {@link AIPlayerEntity} has no client to
  * send that packet, so a boat it rides never moves on the server -- confirmed live (boat position
- * unchanged for ~140 ticks while {@code steerToward} was actively calling {@code setInputs}).
+ * unchanged for ~140 ticks while {@code steerToward} was actively calling {@code setInput}).
  *
  * <p>This makes the server the logical (authoritative) side for a boat's movement specifically
  * when its controlling passenger is our own {@link AIPlayerEntity}, so
- * {@code AbstractBoatEntity.tick()} runs its normal physics (updateVelocity/move/collisions)
+ * {@code AbstractBoat.tick()} runs its normal physics (updateVelocity/move/collisions)
  * server-side exactly as it would for a client, instead of zeroing the boat's velocity and
  * waiting forever. A boat driven by a real player, or any other vehicle (horse, minecart, pig,
  * etc.), is completely unaffected: both continue through the untouched vanilla path.</p>

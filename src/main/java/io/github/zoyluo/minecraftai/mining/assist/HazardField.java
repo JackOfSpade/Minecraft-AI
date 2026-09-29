@@ -62,7 +62,7 @@ public final class HazardField {
 
     /** BlockPos order: y, then z, then x (same as {@code Vec3i.compareTo}, without overflow). */
     private static final Comparator<BlockPos> POS_ORDER = Comparator
-            .comparingInt(BlockPos::getY)
+            .<BlockPos>comparingInt(BlockPos::getY)
             .thenComparingInt(BlockPos::getZ)
             .thenComparingInt(BlockPos::getX);
 
@@ -552,7 +552,7 @@ public final class HazardField {
     /**
      * Decodes a bucket-local index back to the world position it was packed from by {@link
      * #localIndex}, as {@link BlockPos#asLong()}; callers unpack with {@link BlockPos#getX}/
-     * {@code unpackLongY}/{@code unpackLongZ}. The exact inverse of {@link #localIndex}.
+     * {@code getY}/{@code getZ}. The exact inverse of {@link #localIndex}.
      */
     private static long decodeWorld(Bucket bucket, int local) {
         int x = (bucket.bx << SHIFT) + (local & LOCAL_MASK);

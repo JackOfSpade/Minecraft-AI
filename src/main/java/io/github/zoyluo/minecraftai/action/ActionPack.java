@@ -472,7 +472,7 @@ public final class ActionPack {
 
     /**
      * Actively sinks the bot down one cell into the given (already-air) block.
-     * Key point: the bot is a ServerPlayerEntity, and the server side **does not run travel()**
+     * Key point: the bot is a ServerPlayer, and the server side **does not run travel()**
      * (a real player's movement/gravity is driven by the client, and a fake player has no
      * client), so there is **no passive gravity** -- digging out the floor beneath it will not
      * make it fall automatically. Shaft-digging-down tasks (DigDownTask /

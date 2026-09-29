@@ -20,7 +20,7 @@ import net.minecraft.world.item.Items;
  * bottom half = player inventory (click to give an item to the AI).
  * Left-click = whole stack; Shift+left-click = single item. Slots are addressed by "real main index",
  * mapping directly onto the slot field of {@link BotItemMoveC2S}.
- * Never touches ScreenHandler/Screen container logic anywhere in this flow -- only sends C2S packets,
+ * Never touches AbstractContainerMenu/Screen container logic anywhere in this flow -- only sends C2S packets,
  * with the Inventory modified directly server-side (per iron rule G3).
  */
 public final class InventoryView implements PanelComponent {

@@ -151,7 +151,7 @@ public final class BotInventoryScreenHandler extends AbstractContainerMenu {
     }
 
     private void addBotSlots() {
-        // PlayerInventory main slots 9..35 are the normal three-row backpack.
+        // Inventory main slots 9..35 are the normal three-row backpack.
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < HOTBAR_SIZE; column++) {
                 int slot = row * HOTBAR_SIZE + column;
@@ -161,7 +161,7 @@ public final class BotInventoryScreenHandler extends AbstractContainerMenu {
             }
         }
 
-        // PlayerInventory slots 0..8 are the bot's normal hotbar, including its selected main hand.
+        // Inventory slots 0..8 are the bot's normal hotbar, including its selected main hand.
         for (int column = 0; column < HOTBAR_SIZE; column++) {
             addSlot(new BotInventorySlot(botInventory, BOT_HOTBAR_START + column,
                     SLOT_X + column * SLOT_SPACING, BOT_HOTBAR_Y, serverInventory));
@@ -296,7 +296,7 @@ public final class BotInventoryScreenHandler extends AbstractContainerMenu {
     }
 
     /**
-     * Maps the 41 visible bot cells directly to a ServerPlayerEntity's normal PlayerInventory,
+     * Maps the 41 visible bot cells directly to a ServerPlayer's normal Inventory,
      * armor, and offhand. Nothing in this inventory is padding or a copied stack.
      */
     private static final class BotBackedInventory implements Container {

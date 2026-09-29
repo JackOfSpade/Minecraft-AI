@@ -48,10 +48,10 @@ class ObservableWorldQueryInsetFaceTest {
         String insetBody = source.substring(inset, facePolicy);
         assertTrue(insetBody.contains("Math.min("));
         assertTrue(insetBody.contains("MinecraftAiConfig.get().perception().radius()"));
-        assertTrue(insetBody.contains("bot.getBlockInteractionRange()"));
-        assertTrue(insetBody.contains("RaycastContext.FluidHandling.ANY"));
+        assertTrue(insetBody.contains("bot.blockInteractionRange()"));
+        assertTrue(insetBody.contains("ClipContext.Fluid.ANY"));
         assertTrue(insetBody.contains("hit.getBlockPos().equals(pos)"));
-        assertTrue(insetBody.contains("hit.getSide() == direction"));
+        assertTrue(insetBody.contains("hit.getDirection() == direction"));
         assertTrue(insetBody.contains("FACE_SAMPLE_OFFSETS"));
     }
 }

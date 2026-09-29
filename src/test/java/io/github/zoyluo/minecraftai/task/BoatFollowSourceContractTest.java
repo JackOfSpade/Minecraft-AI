@@ -21,9 +21,9 @@ final class BoatFollowSourceContractTest {
 
         assertTrue(recipes.contains("boat(Items.OAK_BOAT, Items.OAK_PLANKS)"));
         assertTrue(recipes.contains("boat(Items.CHERRY_BOAT, Items.CHERRY_PLANKS)"));
-        assertTrue(action.contains("InteractAction.useItemInAir(player, Hand.MAIN_HAND)"),
+        assertTrue(action.contains("InteractAction.useItemInAir(player, InteractionHand.MAIN_HAND)"),
                 "a boat must be placed through the ordinary held-item use path");
-        assertTrue(action.contains("InteractAction.useItemOnEntity(player, boat, Hand.MAIN_HAND)"),
+        assertTrue(action.contains("InteractAction.useItemOnEntity(player, boat, InteractionHand.MAIN_HAND)"),
                 "boarding must use vanilla entity interaction");
         assertFalse(action.contains("spawnEntity("), "the task must not fabricate a boat entity");
         assertFalse(action.contains("startRiding("), "the task must not bypass vanilla boarding");
@@ -57,7 +57,7 @@ final class BoatFollowSourceContractTest {
         assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 6"));
         assertTrue(safety.contains("void renewFollowSwim(AIPlayerEntity bot)"));
         assertTrue(safety.contains("void clearFollowSwim(AIPlayerEntity bot)"));
-        assertTrue(safety.contains("bot.getAir() <= AIR_SURFACE_THRESHOLD"),
+        assertTrue(safety.contains("bot.getAirSupply() <= AIR_SURFACE_THRESHOLD"),
                 "the narrow swim allowance must expire before drowning safety is weakened");
     }
 
@@ -74,7 +74,7 @@ final class BoatFollowSourceContractTest {
         String config = Files.readString(Path.of("src/main/resources/minecraftai.mixins.json"));
 
         assertTrue(logical.contains("isLogicalSideForUpdatingMovement"));
-        assertTrue(logical.contains("boat.getEntityWorld().isClient()"),
+        assertTrue(logical.contains("boat.level().isClientSide()"),
                 "the client side must keep vanilla behaviour");
         assertTrue(logical.contains("getControllingPassenger() instanceof AIPlayerEntity"),
                 "only a boat controlled by our own AI player may become server-authoritative");

@@ -26,9 +26,9 @@ class MiningServiceDisposalSourceContractTest {
         assertTrue(body.indexOf("ensureCenteredAtWorkFace(bot)")
                         < body.indexOf("enterPocketPhase(Phase.OPEN_DISPOSAL_POCKET)"),
                 "disposal must own a stationary centered face before OPEN becomes durable debt");
-        assertTrue(service.contains("bot.getVelocity().lengthSquared() <= 1.0E-8D"),
+        assertTrue(service.contains("bot.getDeltaMovement().lengthSqr() <= 1.0E-8D"),
                 "an exact center with residual walk velocity must still run the center return");
-        assertTrue(motion.contains("bot.setVelocity(Vec3d.ZERO);"));
+        assertTrue(motion.contains("bot.setDeltaMovement(Vec3.ZERO);"));
         assertTrue(motion.contains("bot.setOnGround(true);"));
     }
 
@@ -38,7 +38,7 @@ class MiningServiceDisposalSourceContractTest {
         String inventory = read("action/InventoryAction.java");
 
         assertTrue(service.contains("InventoryAction.dropSlotEntity"));
-        assertTrue(inventory.contains("player.dropItem(removed, false, true)"));
+        assertTrue(inventory.contains("player.drop(removed, false, true)"));
         assertFalse(service.contains("setPickupDelay"));
         assertFalse(service.contains("setPickupDelayInfinite"));
         assertFalse(service.contains(".setOwner("));
@@ -103,7 +103,7 @@ class MiningServiceDisposalSourceContractTest {
                         "return hasObservedPlacementSupport(bot, pocketEntry);"),
                 "an open pocket must attest the persistent floor support used by its first seal");
         assertTrue(sealBody.contains("BlockPos target = !lowerSealed ? pocketEntry\n"
-                        + "                    : !upperSealed ? pocketEntry.up() : null;"),
+                        + "                    : !upperSealed ? pocketEntry.above() : null;"),
                 "the atomic seal must place feet against the floor before head against feet");
         assertFalse(sealBody.contains("BlockPos target = !upperSealed ? pocketEntry.up()"),
                 "head-first sealing reintroduces no_adjacent_block in natural ore cavities");
@@ -232,7 +232,7 @@ class MiningServiceDisposalSourceContractTest {
         String body = service.substring(selector, next);
 
         assertFalse(body.contains("isDisposableJunk"));
-        assertTrue(body.contains("!pocketEntityIds.contains(entity.getUuid())"));
+        assertTrue(body.contains("!pocketEntityIds.contains(entity.getUUID())"));
         assertTrue(body.contains(
                 "sink == null || !fullyContains(sink, entity.getBoundingBox())"));
     }
@@ -246,18 +246,18 @@ class MiningServiceDisposalSourceContractTest {
                 "private Optional<ItemEntity> nearestUntrackedOpeningSpoil", observable);
         String observableBody = service.substring(observable, opening);
 
-        assertTrue(observableBody.contains("Box sink = pocketSinkBox();"));
-        assertTrue(observableBody.contains("Box query = sink.expand(0.01D);"));
+        assertTrue(observableBody.contains("AABB sink = pocketSinkBox();"));
+        assertTrue(observableBody.contains("AABB query = sink.inflate(0.01D);"));
         assertTrue(observableBody.contains("ItemEntity.class, query,"));
         assertTrue(observableBody.contains(
                 "fullyContains(sink, entity.getBoundingBox())"));
         assertFalse(observableBody.contains(
                 "fullyContains(query, entity.getBoundingBox())"));
 
-        int sinkBox = service.indexOf("private Box pocketSinkBox()");
+        int sinkBox = service.indexOf("private AABB pocketSinkBox()");
         int containment = service.indexOf("private static boolean fullyContains", sinkBox);
         String sinkBoxBody = service.substring(sinkBox, containment);
-        assertFalse(sinkBoxBody.contains(".expand("),
+        assertFalse(sinkBoxBody.contains(".inflate("),
                 "the physical sink boundary must remain the exact two-cell block volume");
     }
 
@@ -283,7 +283,7 @@ class MiningServiceDisposalSourceContractTest {
                 + " || !pocketLedgerVerified"));
         assertTrue(body.contains("observableOpeningSpoil(bot).stream()"));
         assertTrue(body.contains(
-                ".noneMatch(entity -> pocketEntityIds.contains(entity.getUuid()))"));
+                ".noneMatch(entity -> pocketEntityIds.contains(entity.getUUID()))"));
         assertTrue(body.contains(
                 "String reason = \"mining_service_disposal_tracked_entity_escaped\";"));
         assertTrue(body.contains("pocketTerminalFailure = reason;"));

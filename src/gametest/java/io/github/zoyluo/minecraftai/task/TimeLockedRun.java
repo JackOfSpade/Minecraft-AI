@@ -9,10 +9,10 @@ import net.minecraft.network.chat.Component;
  * Runs a GameTest body that needs the world clock to itself ({@link GameTestTimeLock}) and releases the lock
  * (and runs the cleanup) exactly when the body finishes or fails.
  *
- * <p>{@code TestContext.addFinalTask} is NOT an "after the test" hook: it schedules its task at tick 0 and then
- * completes the test, dropping every later {@code runAtEveryTick} tick. A body that must run for many ticks and
+ * <p>{@code GameTestHelper.succeedIf} is NOT an "after the test" hook: it schedules its task at tick 0 and then
+ * completes the test, dropping every later {@code failIfEver} tick. A body that must run for many ticks and
  * still clean up therefore does its own bookkeeping here instead. Like {@link
- * ShelterGameTestFixtures#runLocked} this registers the test's one and only {@code runAtEveryTick}.
+ * ShelterGameTestFixtures#runLocked} this registers the test's one and only {@code failIfEver}.
  */
 final class TimeLockedRun {
     private TimeLockedRun() {

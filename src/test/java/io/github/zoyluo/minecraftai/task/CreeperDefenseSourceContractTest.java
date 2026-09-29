@@ -24,8 +24,8 @@ class CreeperDefenseSourceContractTest {
                 + " observableCreeperSnapshots");
         int observable = source.indexOf(
                 "entity -> ObservableWorldQuery.canObserveEntity(bot, entity)", scan);
-        int fuse = source.indexOf("entity.getLerpedFuseTime(1.0F)", observable);
-        int charged = source.indexOf("entity.isCharged()", fuse);
+        int fuse = source.indexOf("entity.getSwelling(1.0F)", observable);
+        int charged = source.indexOf("entity.isPowered()", fuse);
         assertTrue(scan >= 0 && observable > scan && fuse > observable && charged > fuse,
                 "fuse/charged facts must be read only after exact entity observation");
         assertFalse(source.contains("getOtherEntities"),
@@ -38,9 +38,9 @@ class CreeperDefenseSourceContractTest {
         int fastStep = source.indexOf("private boolean tryFastStepAway");
         int feet = source.indexOf("ObservableWorldQuery.canObserveCell(bot, target)", fastStep);
         int head = source.indexOf(
-                "ObservableWorldQuery.canObserveCell(bot, target.up())", feet);
+                "ObservableWorldQuery.canObserveCell(bot, target.above())", feet);
         int support = source.indexOf(
-                "ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target.down())", head);
+                "ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target.below())", head);
         int physicalStep = source.indexOf("FakePlayerMotion.stepToStandable", support);
         assertTrue(fastStep >= 0 && feet > fastStep && head > feet
                         && support > head && physicalStep > support,

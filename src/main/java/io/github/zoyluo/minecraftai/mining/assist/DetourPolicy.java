@@ -10,7 +10,7 @@ import net.minecraft.world.phys.Vec3;
 /**
  * Pure admission and ranking policy of the opportunistic valuables detour (mining-assist design 4.2), plus the
  * small pure rules the pose search and the engine share (lease, pose limits, announce text). No Minecraft
- * registry, no clock: BlockPos, Vec3d, ints and doubles only, so every number of the design is a unit test.
+ * registry, no clock: BlockPos, Vec3, ints and doubles only, so every number of the design is a unit test.
  *
  * <p>Raw values come from {@link ValueTable} (built by P0, unchanged); the sighting ledger supplies the
  * nominations ({@link SightingLedger.Sighting}). A sighting is only a nomination (I1): admission says the

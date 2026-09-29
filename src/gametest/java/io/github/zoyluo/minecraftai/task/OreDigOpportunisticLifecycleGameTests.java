@@ -140,7 +140,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             if (!fatigued[0] && phase != DetourPhase.IDLE) {
                 // A deliberately slow mine: mining fatigue does not touch movement, so APPROACH/RETURN keep their
                 // ordinary pace while every swing is stretched out, exercising the MINE_BEAT_TICKS heartbeat.
-                // Amplifier 0 (Fatigue I, calcBlockBreakingDelta's own ~0.3x speed multiplier), not 2 (Fatigue
+                // Amplifier 0 (Fatigue I, getDestroyProgress's own ~0.3x speed multiplier), not 2 (Fatigue
                 // III, ~0.027x): III stretches a single iron-pick diamond_ore swing to roughly 800+ ticks, past
                 // even MINE_SWING_TICKS(160), so the engine's own cap always skips the member (mine_timeout)
                 // before ever proving a real break under a live heartbeat, and -- far more importantly -- the

@@ -39,10 +39,10 @@ final class FollowSwimSourceContractTest {
     @Test
     void oxygenDecisionUsesTheMeasuredLossAndEffectsRatherThanHardCodedPotions() throws IOException {
         String swim = read("task/FollowSwimming.java");
-        assertTrue(swim.contains("loss.observe(bot.getAir(), bot.isSubmergedInWater()"));
+        assertTrue(swim.contains("loss.observe(bot.getAirSupply(), bot.isUnderWater()"));
         assertTrue(swim.contains("FollowOxygen.shouldSurface(air, rate, blocksToAir)"));
         assertTrue(swim.contains("FollowOxygen.mayResumeDive("));
-        assertTrue(swim.contains("StatusEffects.WATER_BREATHING") && swim.contains("StatusEffects.CONDUIT_POWER"));
+        assertTrue(swim.contains("MobEffects.WATER_BREATHING") && swim.contains("MobEffects.CONDUIT_POWER"));
     }
 
     @Test
@@ -83,7 +83,7 @@ final class FollowSwimSourceContractTest {
         assertTrue(dig.contains("ObservableWorldQuery.canObserveBlock(bot, cell)"),
                 "only currently observable blocks may be broken");
         assertTrue(dig.contains("DigNav.adjacentHazardFluid("), "never through or beside an observed fluid");
-        assertTrue(dig.contains("isSolidFloor(world, stand.down())"),
+        assertTrue(dig.contains("isSolidFloor(world, stand.below())"),
                 "never dig into a cell that would leave the bot over an unknown drop");
         assertTrue(dig.contains("instanceof FallingBlock"), "never under a suspended sand/gravel column");
         assertTrue(dig.contains("hasSuitableTool"), "only with a tool that can actually break the block");
@@ -99,7 +99,7 @@ final class FollowSwimSourceContractTest {
         String body = swim.substring(exit, end);
         assertTrue(body.contains("needsWaterExit(bot, target, standoff)"),
                 "wading through shallows must stay with land follow, not run the swim exit");
-        assertFalse(body.contains("if (!isSwimCell(world, bot.getBlockPos()))"),
+        assertFalse(body.contains("if (!isSwimCell(world, bot.blockPosition()))"),
                 "merely having wet feet is not swimming");
         int gate = body.indexOf("needsWaterExit(");
         int search = body.indexOf("searchRoute(");
@@ -108,7 +108,7 @@ final class FollowSwimSourceContractTest {
                         && body.contains("ascendWhileSubmerged("),
                 "a submerged bot heading for land must still surface for air early");
         assertTrue(swim.contains("static boolean isSwimming(AIPlayerEntity bot)")
-                        && swim.contains("bot.isSubmergedInWater()"),
+                        && swim.contains("bot.isUnderWater()"),
                 "swimming = head under water or afloat with nothing solid underfoot");
     }
 
@@ -137,7 +137,7 @@ final class FollowSwimSourceContractTest {
         String dig = read("task/FollowDigOut.java");
         assertTrue(dig.contains("isBuildingBlock(state)") && dig.contains("BotEdits.wasPlaced(world, cell)"),
                 "building blocks and the bots' own placements are never dug");
-        assertTrue(dig.contains("state.isOf(Blocks.COBBLESTONE)") && dig.contains("BlockTags.PLANKS")
+        assertTrue(dig.contains("state.is(Blocks.COBBLESTONE)") && dig.contains("BlockTags.PLANKS")
                 && dig.contains("BlockTags.DOORS"));
         assertFalse(dig.contains("never doors, chests, beds, glass, planks or any other block entity / built block"),
                 "the header must not claim it can tell built blocks from natural ones");
@@ -160,8 +160,8 @@ final class FollowSwimSourceContractTest {
     @Test
     void followRechecksAHeldOwnCellGoalAsSoonAsThePlayerMoves() throws IOException {
         String follow = read("task/FollowTask.java");
-        assertTrue(follow.contains("holdTargetPos = target.getBlockPos().toImmutable();"));
-        assertTrue(follow.contains("!holdTargetPos.equals(target.getBlockPos())")
+        assertTrue(follow.contains("holdTargetPos = target.blockPosition().immutable();"));
+        assertTrue(follow.contains("!holdTargetPos.equals(target.blockPosition())")
                 && follow.contains("nextRepathTick = elapsed;"));
     }
 

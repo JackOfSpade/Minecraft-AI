@@ -142,7 +142,7 @@ public final class SweepEngine {
     /**
      * Lowest surface any fluid cell can have, in blocks above the cell floor. A flowing fluid of level 1
      * is one ninth of a block tall (a source is eight ninths, falling fluid a full block), and the ray
-     * (FluidHandling.ANY) tests that partial-height shape, not the whole cell.
+     * (Fluid.ANY) tests that partial-height shape, not the whole cell.
      */
     public static final double MIN_FLUID_HEIGHT = 1.0D / 9.0D;
     /** Proof height: strictly below {@link #MIN_FLUID_HEIGHT}, so rounding cannot turn a near miss into a proof. */

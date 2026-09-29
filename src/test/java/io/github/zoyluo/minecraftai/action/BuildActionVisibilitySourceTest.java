@@ -24,13 +24,13 @@ class BuildActionVisibilitySourceTest {
         assertTrue(place >= 0 && placeAt > place);
         String body = source.substring(place, placeAt);
 
-        assertTrue(body.contains("player.canInteractWithBlockAt(against, 0.0D)"));
+        assertTrue(body.contains("player.isWithinBlockInteractionRange(against, 0.0D)"));
         assertTrue(body.contains("exactPlacementSampleRange("));
         assertFalse(body.contains("squaredDistanceTo(against.toCenterPos())"),
                 "vanilla block-box reach must not be narrowed to support-center reach");
         assertTrue(body.contains("visibleSupportFaceHit(player, against, face, sampleRange)"));
         assertTrue(body.indexOf("visibleSupportFaceHit")
-                        < body.indexOf("player.canInteractWithBlockAt"),
+                        < body.indexOf("player.isWithinBlockInteractionRange"),
                 "external support interaction checks require exact perception proof first");
         assertTrue(body.indexOf("visibleSupportFaceHit") < body.indexOf("getBlockState(destination)"),
                 "destination reads require an exact visible support-face proof first");
@@ -49,11 +49,11 @@ class BuildActionVisibilitySourceTest {
                 "six face-center rays must not prevent the exact edge sampler from running");
         assertFalse(body.contains("getBlockState("),
                 "placeBlockAt must not inspect an unproven adjacent support");
-        assertTrue(body.contains("placeBlock(player, against, direction, Hand.MAIN_HAND)"));
+        assertTrue(body.contains("placeBlock(player, against, direction, InteractionHand.MAIN_HAND)"));
 
         int strict = body.indexOf("OperatingProfile.STRICT_SURVIVAL");
         int failedReturn = body.indexOf("return lastFailure;", strict);
-        int fallback = body.indexOf("directPlaceFallback(player, pos, Hand.MAIN_HAND)");
+        int fallback = body.indexOf("directPlaceFallback(player, pos, InteractionHand.MAIN_HAND)");
         assertTrue(strict >= 0 && failedReturn > strict && fallback > failedReturn,
                 "strict mode must return before the direct world-mutation fallback");
     }
@@ -107,9 +107,9 @@ class BuildActionVisibilitySourceTest {
                 "the pure probe ray must never write yaw directly either");
         assertFalse(body.contains(".setPitch"),
                 "the pure probe ray must never write pitch directly either");
-        assertFalse(body.contains("player.raycast("),
+        assertFalse(body.contains("player.pick("),
                 "the pure probe ray must build its own RaycastContext, not vanilla's look-direction raycast");
-        assertTrue(body.contains("new RaycastContext("),
+        assertTrue(body.contains("new ClipContext("),
                 "the probe must cast its own eye-to-target ray");
     }
 
@@ -123,7 +123,7 @@ class BuildActionVisibilitySourceTest {
 
         assertTrue(body.contains("LookAction.lookAt(player, target)"),
                 "the real placement's own ray must keep turning the head exactly as before");
-        assertTrue(body.contains("player.raycast(sampleRange, 1.0F, false)"),
+        assertTrue(body.contains("player.pick(sampleRange, 1.0F, false)"),
                 "the real placement's own ray must keep using vanilla's look-direction raycast");
     }
 }

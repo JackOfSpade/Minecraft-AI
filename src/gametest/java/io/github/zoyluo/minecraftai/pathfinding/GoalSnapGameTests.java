@@ -18,7 +18,7 @@ import java.util.Optional;
  * each followed by two TIMEOUT A* searches at the node budget once the goal was underground/
  * underwater). {@link Standability#findNearestStandableForGoal} is the fix: a small nearby window
  * is tried first, and only a bounded, fluid-refusing deep fallback runs if that finds nothing.
- * These tests exercise that method directly (a real {@code ServerWorld} is required, so this
+ * These tests exercise that method directly (a real {@code ServerLevel} is required, so this
  * cannot be a plain unit test) rather than going through full A* connectivity, which the water
  * case does not have (crossing open water is not a legal walk move, by design).
  */

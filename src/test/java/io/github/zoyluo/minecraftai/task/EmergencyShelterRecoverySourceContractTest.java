@@ -40,7 +40,7 @@ final class EmergencyShelterRecoverySourceContractTest {
                         + "not merely on health/food crossing an arbitrary threshold");
         assertTrue(shelter.contains("beginRecoveredExit(bot)"));
         assertTrue(shelter.contains("registerOwnedCleanupDebt(bot)"));
-        assertTrue(shelter.contains("expected.equals(bot.getEntityWorld().getBlockState(position))"),
+        assertTrue(shelter.contains("expected.equals(bot.level().getBlockState(position))"),
                 "cleanup proof must use exact placed block state, not a material/shape guess");
         assertTrue(watcher.contains("shouldStartLastResortShelter(bot, threat)"));
         assertTrue(watcher.contains("isTwoHitLethalHealth"));
@@ -52,7 +52,7 @@ final class EmergencyShelterRecoverySourceContractTest {
                 "DangerWatcher must not auto-dispatch bots to travel back and clean up shelters");
         assertTrue(cleanup.contains("DangerWatcher.hasObservableHostilePressure(bot)"));
         assertTrue(cleanup.contains("EmergencyShelterTask.ownsCleanupBlock(bot, debt, target)"));
-        assertTrue(cleanup.contains("bot.getHungerManager().getFoodLevel() < 20"));
+        assertTrue(cleanup.contains("bot.getFoodData().getFoodLevel() < 20"));
         assertTrue(repayer.contains("EmergencyShelterTask.promoteExitDebtForCleanup(bot, shelterExitDebt);"));
     }
 

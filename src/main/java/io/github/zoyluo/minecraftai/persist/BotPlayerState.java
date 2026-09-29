@@ -24,7 +24,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * compound stored in {@link BotRecord#playerStateNbt()}.
  *
  * <p>Since 1.21.5 the armor slots and the offhand live in the entity's {@code EntityEquipment}, not in
- * the 36-slot main list, so {@code PlayerInventory.writeData} silently drops them: before this class
+ * the 36-slot main list, so {@code Inventory.writeData} silently drops them: before this class
  * existed every restart stripped the armor and offhand item from every bot.
  *
  * <p>Decision table (vanilla player data vs. what a bot persists):
@@ -33,13 +33,13 @@ import net.minecraft.world.level.storage.ValueOutput;
  * -------------------------------------  ---------  --------------------------------------------------
  * Inventory (36 main slots)              persisted  BotRecord.inventoryNbt (unchanged, old saves load)
  * equipment: head/chest/legs/feet        persisted  "Equipment" (per-slot ItemStack codec, all components)
- * equipment: offhand, body, saddle       persisted  "Equipment" (every non-main-hand PlayerInventory slot)
+ * equipment: offhand, body, saddle       persisted  "Equipment" (every non-main-hand Inventory slot)
  * SelectedItemSlot (hotbar)              persisted  "SelectedSlot"
- * EnderItems                             persisted  "EnderItems" (vanilla StackWithSlot list)
+ * EnderItems                             persisted  "EnderItems" (vanilla ItemStackWithSlot list)
  * XpLevel / XpP / XpTotal                persisted  "XpLevel" / "XpProgress" / "XpTotal"
- * foodLevel/foodSaturationLevel/         persisted  "Hunger" (vanilla HungerManager.writeData; the food
- *   foodExhaustionLevel/foodTickTimer                 level is also kept in BotRecord.hunger)
- * active_effects (status effects)        persisted  "ActiveEffects" (vanilla StatusEffectInstance codec)
+ * foodLevel/foodSaturationLevel/         persisted  "Hunger" (vanilla FoodData.writeData; the food
+ *   foodExhaustionLevel/tickTimer                 level is also kept in BotRecord.hunger)
+ * active_effects (status effects)        persisted  "ActiveEffects" (vanilla MobEffectInstance codec)
  * Air, Fire                              persisted  "Air", "Fire" (cheap; fire only when burning)
  * AbsorptionAmount                       persisted  "Absorption"
  * Health                                 persisted  BotRecord.health (clamped to at least 1 on restore)
@@ -153,7 +153,7 @@ public final class BotPlayerState {
                             "field", EQUIPMENT + "." + slot.getSerializedName(), "reason", "undecodable_stack");
                     continue;
                 }
-                // PlayerInventory.setStack replaces the slot: applying twice can never duplicate an item.
+                // Inventory.setStack replaces the slot: applying twice can never duplicate an item.
                 inventory.setItem(entry.getIntKey(), stack);
             }
         });

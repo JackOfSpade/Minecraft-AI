@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * facts), not permanently freeze on the first ones ever recorded.
  *
  * <p>Inserts places directly into the private {@code places} map via reflection rather than
- * through {@link BotMemory#markPlace}, since that method requires a live {@code ServerWorld}
+ * through {@link BotMemory#markPlace}, since that method requires a live {@code ServerLevel}
  * unavailable to this unit test; {@link BotMemory.Place} itself is a plain record with no
  * Minecraft bootstrap dependency.
  */

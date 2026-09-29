@@ -27,7 +27,7 @@ public final class PoiAssembler {
      * @param entities        entity evidence of the latest scan, may be null for none
      * @param openness        ring openness at the live perception radius, may be null for unavailable
      * @param perceptionRadius the LIVE perception radius the rays were clamped to
-     * @param dimensionId     {@code world.getRegistryKey().getValue().toString()}
+     * @param dimensionId     {@code world.dimension().getValue().toString()}
      * @param cavernDimensions {@code poi.cavernDimensions}
      */
     public static PoiSignals assemble(PoiEvidenceWindow window,

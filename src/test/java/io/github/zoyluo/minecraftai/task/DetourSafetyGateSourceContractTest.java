@@ -86,8 +86,8 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("stage.isStart()"));
         // Item 3: bot vitals and the two MinecraftAiConfig sections.
         for (String token : List.of("bot.getHealth()", "combat.retreatHp()", "cfg.detour().startHpMargin()",
-                "bot.hurtTime", "bot.isOnFire()", "bot.isInLava()", "bot.isSubmergedInWater()",
-                "bot.isTouchingWater()", "bot.getHungerManager().getFoodLevel()", "survival.hungerCriticalThreshold()")) {
+                "bot.hurtTime", "bot.isOnFire()", "bot.isInLava()", "bot.isUnderWater()",
+                "bot.isInWater()", "bot.getFoodData().getFoodLevel()", "survival.hungerCriticalThreshold()")) {
             assertTrue(body.contains(token), "item 3 must read " + token);
         }
         // Item 4.
@@ -119,7 +119,7 @@ class DetourSafetyGateSourceContractTest {
         assertTrue(body.contains("SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,"));
         assertTrue(body.contains("CAVERN_BLOCKS_DETOUR"));
         // P2: the no-detour zone now reads the real mandatory-repeat latch instead of a hard-coded false.
-        assertTrue(body.contains(".inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.getBlockPos()))"),
+        assertTrue(body.contains(".inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.blockPosition()))"),
                 "the no-detour zone reads MandatoryLatch.inNoDetourZone");
         // Item 10.
         assertTrue(body.contains("state.hazards().anyTrapWithin("));

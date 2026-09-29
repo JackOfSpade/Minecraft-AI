@@ -70,7 +70,7 @@ final class GatherScanLifecycleSourceContractTest {
         assertTrue(methodBody(runtime, "public static void clear(").contains("AUDIT.drain("),
                 "removing a bot must flush its pending repeat counts");
         assertTrue(runtime.contains("AUDIT.drainDue("), "a periodic sweep must report lone repeats");
-        assertTrue(read("MinecraftAiMod.java").contains("CapabilityRuntime.flushDue(server.getTicks())"),
+        assertTrue(read("MinecraftAiMod.java").contains("CapabilityRuntime.flushDue(server.getTickCount())"),
                 "the sweep must be driven from the server tick");
         String lifecycle = read("runtime/RuntimeLifecycleCoordinator.java");
         assertTrue(methodBody2(lifecycle, "public void onServerStarted(").contains("clearWorldRuntime();")

@@ -58,10 +58,10 @@ class MiningAssistWiringSourceContractTest {
         int end = mod.indexOf("ServerTickEvents.END_SERVER_TICK.register(server -> {");
         assertTrue(start > 0 && end > start, "START is registered before END");
         String lambda = between(mod, "ServerTickEvents.END_SERVER_TICK.register(server -> {", "\n        });");
-        String endCall = "MiningAssistRuntime.endTick(server.getTicks());";
+        String endCall = "MiningAssistRuntime.endTick(server.getTickCount());";
         int tps = lambda.indexOf("TpsGuard.INSTANCE.tick(server);");
         int diagnostics = lambda.indexOf("DiagnosticLogger.INSTANCE.tick(server);");
-        int snapshot = lambda.indexOf("BotEdits.snapshotIfDue(server.getTicks(), assistSidecar);");
+        int snapshot = lambda.indexOf("BotEdits.snapshotIfDue(server.getTickCount(), assistSidecar);");
         int last = lambda.lastIndexOf(endCall);
         assertTrue(tps > 0 && diagnostics > tps, "the existing END statements keep their order");
         assertTrue(snapshot > diagnostics && last > snapshot, "sidecar snapshot, then the headroom end");
@@ -99,7 +99,7 @@ class MiningAssistWiringSourceContractTest {
         // POI hold) must not touch -- see MiningAssistRuntime.clearBotUnload's javadoc.
         assertTrue(transientBody.contains("MiningAssistRuntime.clearBotUnload(bot);"));
         String forget = between(lifecycle, "private static void forgetBot(", "private static void clearWorldRuntime()");
-        assertTrue(forget.contains("MiningAssistRuntime.clearForced(bot.getUuid());"),
+        assertTrue(forget.contains("MiningAssistRuntime.clearForced(bot.getUUID());"),
                 "a bot that is gone for good must not keep the harness opt-in alive");
         String world = lifecycle.substring(lifecycle.indexOf("private static void clearWorldRuntime()"));
         assertTrue(world.contains("MiningAssistRuntime.clearWorldRuntime();"));
@@ -124,8 +124,8 @@ class MiningAssistWiringSourceContractTest {
                 "public static void clearBotUnload(AIPlayerEntity bot) {",
                 "public static SenseFailureGate failures() {");
         assertTrue(clearBotUnload.contains("clearBot(bot);"), "clearBotUnload still does everything clearBot does");
-        assertTrue(clearBotUnload.contains("PoiRegistry.clear(bot.getUuid());"));
-        assertTrue(clearBotUnload.contains("MandatoryLatch.clear(bot.getUuid());"));
+        assertTrue(clearBotUnload.contains("PoiRegistry.clear(bot.getUUID());"));
+        assertTrue(clearBotUnload.contains("MandatoryLatch.clear(bot.getUUID());"));
     }
 
     @Test

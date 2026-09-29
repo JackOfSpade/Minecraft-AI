@@ -567,7 +567,7 @@ public final class CraftTask extends AbstractTask {
             }
         }
         // origin.up() is the bot's own head cell -- always intersects its own hitbox, so vanilla
-        // placement there is never actually admissible (World/CollisionView#canPlace rejects any
+        // placement there is never actually admissible (World/CollisionGetter#canPlace rejects any
         // destination whose collision shape intersects a live entity, the placer included, with
         // no self-exemption). The one block above that is genuinely external, open headroom.
         BlockPos above = origin.above().above();

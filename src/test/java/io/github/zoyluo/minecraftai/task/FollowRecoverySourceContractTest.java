@@ -18,7 +18,7 @@ final class FollowRecoverySourceContractTest {
         String follow = read("task/FollowTask.java");
 
         assertTrue(follow.contains(
-                "BlockPos standNear = standOffsetFrom(target.getBlockPos(), bot.getBlockPos(), STOP_DISTANCE)"),
+                "BlockPos standNear = standOffsetFrom(target.blockPosition(), bot.blockPosition(), STOP_DISTANCE)"),
                 "the walk/path destination must stand off from the player, not target their own block");
         assertTrue(follow.contains("startPathTo(standNear)"));
         assertTrue(follow.contains("boolean walkIdle = pack.isWalkToIdle()"));
@@ -35,7 +35,7 @@ final class FollowRecoverySourceContractTest {
         String pack = read("action/ActionPack.java");
 
         // Yaw belongs to the steering controller: only pitch follows the player while navigating.
-        assertTrue(follow.contains("LookAction.lookPitchAt(bot, target.getEntityPos()"),
+        assertTrue(follow.contains("LookAction.lookPitchAt(bot, target.position()"),
                 "while a path/walk is steering, only the pitch may follow the player");
         int steeringBranch = follow.indexOf("if (steering)");
         int fullLook = follow.indexOf("CombatCore.lookAt(bot, target)");
@@ -53,7 +53,7 @@ final class FollowRecoverySourceContractTest {
         // A throttled request is "keep the current plan", never a failed route.
         assertTrue(follow.contains("ActionPack.PATHFINDING_THROTTLED.equals(path.reason())"));
         // The straight-line fallback is verified along its whole length and logged.
-        int direct = follow.indexOf("pack.startWalkTo(standNear.toCenterPos())");
+        int direct = follow.indexOf("pack.startWalkTo(standNear.getCenter())");
         int verify = follow.indexOf("FollowDirectWalk.verify(");
         assertTrue(verify >= 0 && direct > verify && follow.contains("\"follow_direct_walk\""),
                 "startWalkTo may only follow a verified segment");
@@ -93,9 +93,9 @@ final class FollowRecoverySourceContractTest {
         int stop = shelter.indexOf("bot.getActionPack().stopAll();", preserve);
         assertTrue(onAbort >= 0 && preserve > onAbort && stop > preserve,
                 "cancellation must snapshot the owned exit before its action state is discarded");
-        assertTrue(shelter.contains("currentOwned.containsKey(candidate) && currentOwned.containsKey(candidate.up())"));
+        assertTrue(shelter.contains("currentOwned.containsKey(candidate) && currentOwned.containsKey(candidate.above())"));
         assertTrue(shelter.contains("boolean matchesDimension(AIPlayerEntity bot)"));
-        assertTrue(shelter.contains("owned.equals(bot.getEntityWorld().getBlockState(position))"));
+        assertTrue(shelter.contains("owned.equals(bot.level().getBlockState(position))"));
         // FollowTask delegates its shelter-exit-debt mini state machine to a dedicated
         // collaborator (a mechanical extraction, same behaviour); the invariants below now live
         // in that collaborator rather than in FollowTask itself.

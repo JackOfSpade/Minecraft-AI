@@ -26,7 +26,7 @@ import net.minecraft.world.item.alchemy.PotionContents;
 
 public final class EquipAction {
     private static final int MIN_MELEE_RAW_DURABILITY = 2;
-    // Vanilla ArrowEntity starts at two base damage for normal, spectral, and tipped arrows.
+    // Vanilla Arrow starts at two base damage for normal, spectral, and tipped arrows.
     // Potion damage is added as a selection score only; vanilla remains the authority on impact.
     private static final int VANILLA_ARROW_DAMAGE_SCORE = 2;
     private static final int MAX_EFFECT_AMPLIFIER_FOR_SCORE = 8;
@@ -152,7 +152,7 @@ public final class EquipAction {
     }
 
     /**
-     * Equips a bow and places the deterministic best arrow in offhand.  RangedWeaponItem resolves
+     * Equips a bow and places the deterministic best arrow in offhand.  ProjectileWeaponItem resolves
      * a held projectile before inventory ammunition, so this makes the score observable by the
      * actual shot instead of relying on inventory iteration order.  The previous offhand stack is
      * atomically swapped into the arrow's source slot and can later be restored by the returned

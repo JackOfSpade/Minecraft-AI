@@ -122,7 +122,7 @@ public final class BuildAction {
     /**
      * Whether {@link #placeBlockAt} would find an acceptable support at {@code pos} -- the SAME
      * reach and obstruction test placeBlockAt itself uses ({@link #probeSupportFaceHit} +
-     * {@code canInteractWithBlockAt}), without any world mutation, requiring an item in hand, or
+     * {@code isWithinBlockInteractionRange}), without any world mutation, requiring an item in hand, or
      * turning the bot's head (a candidate probe must not have that side effect; see
      * {@link #probeSupportFaceHit}). Lets a caller (e.g. CraftTask's placement-candidate search)
      * filter candidate cells down to ones BuildAction would actually accept, instead of only

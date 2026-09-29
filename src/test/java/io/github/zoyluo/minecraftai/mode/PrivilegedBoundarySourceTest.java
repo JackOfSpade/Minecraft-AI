@@ -130,11 +130,11 @@ class PrivilegedBoundarySourceTest {
         assertFalse(build.contains("ObservableWorldQuery.canObserveBlock"),
                 "face-center observation must not pre-empt the exact inset click sampler");
         assertTrue(build.contains("ObservableWorldQuery.canObserveCell"));
-        assertTrue(build.contains("canPlace(placementState, pos, ShapeContext.of(player))"),
+        assertTrue(build.contains("isUnobstructed(placementState, pos, CollisionContext.of(player))"),
                 "direct placement fallback must respect entity/world collision");
-        assertTrue(build.contains("player.raycast(sampleRange, 1.0F, false)"),
+        assertTrue(build.contains("player.pick(sampleRange, 1.0F, false)"),
                 "exact placement rays must use the perception-and-interaction bounded range");
-        assertTrue(build.contains("hit.getSide() != face"));
+        assertTrue(build.contains("hit.getDirection() != face"));
         assertTrue(build.contains("OperatingProfile.STRICT_SURVIVAL"),
                 "strict mode must not use direct setBlockState placement fallback");
 
@@ -153,7 +153,7 @@ class PrivilegedBoundarySourceTest {
                 "invalid blueprint IDs must fail closed before touching world state");
 
         String container = read("task/ContainerTask.java");
-        assertTrue(container.contains("squaredDistanceTo(containerPos.toCenterPos()) > REACH_SQUARED"));
+        assertTrue(container.contains("distanceToSqr(containerPos.getCenter()) > REACH_SQUARED"));
         assertTrue(container.contains("ObservableWorldQuery.canObserveBlock(bot, containerPos)"));
 
         assertTrue(matchingSources(Pattern.compile("setTimeOfDay\\s*\\(")).isEmpty(),
@@ -192,7 +192,7 @@ class PrivilegedBoundarySourceTest {
         int interactionGuard = service.indexOf("private static boolean canInteractWithDepot");
         assertTrue(interactionGuard >= 0);
         String guard = service.substring(interactionGuard);
-        assertTrue(guard.contains("squaredDistanceTo(pos.toCenterPos()) <= REACH_SQUARED"));
+        assertTrue(guard.contains("distanceToSqr(pos.getCenter()) <= REACH_SQUARED"));
         assertTrue(guard.contains("ObservableWorldQuery.canObserveCell(bot, pos)"));
     }
 

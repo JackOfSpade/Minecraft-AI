@@ -31,8 +31,8 @@ final class WorkshopPreferenceSourceContractTest {
         assertTrue(locator.contains("Blocks.BLAST_FURNACE"));
         assertTrue(locator.contains("SmeltChain.RAW_FOODS.contains(input)"));
         assertTrue(locator.contains("BLAST_FURNACE_INPUTS.contains(input)"));
-        assertTrue(locator.contains("!queuedInput.isEmpty() && !queuedInput.isOf(input)"));
-        assertTrue(locator.contains("queuedOutput.isEmpty() || queuedOutput.isOf(output)"));
+        assertTrue(locator.contains("!queuedInput.isEmpty() && !queuedInput.is(input)"));
+        assertTrue(locator.contains("queuedOutput.isEmpty() || queuedOutput.is(output)"));
         assertTrue(smelt.contains("WorkshopLocator.nearestCompatibleFurnace(bot, input, output, requestedItems, excluded)"));
     }
 

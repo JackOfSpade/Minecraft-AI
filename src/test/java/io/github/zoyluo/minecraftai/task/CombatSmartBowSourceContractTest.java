@@ -22,7 +22,7 @@ final class CombatSmartBowSourceContractTest {
         assertTrue(combat.contains("EquipAction.bestRangedSlot(bot, target).isPresent()"));
         assertTrue(combat.contains("finishRangedLoadout(bot);\n        CombatCore.ensureMeleeWeapon(bot);"),
                 "crossing back inside the range boundary must restore the offhand and equip melee");
-        assertTrue(combat.contains("bot.clearActiveItem();"),
+        assertTrue(combat.contains("bot.stopUsingItem();"),
                 "leaving ranged mode must cancel, rather than release, an in-progress bow shot");
         assertTrue(combat.contains("protected void onAbort(AIPlayerEntity bot)"));
         assertTrue(combat.contains("protected void onPause(AIPlayerEntity bot)"));
@@ -35,15 +35,15 @@ final class CombatSmartBowSourceContractTest {
 
         assertTrue(equip.contains("stack.getItem() instanceof ArrowItem"),
                 "ArrowItem is the shared base for normal, spectral, and tipped vanilla arrows");
-        assertTrue(equip.contains("DataComponentTypes.POTION_CONTENTS"));
-        assertTrue(equip.contains("PotionContentsComponent.DEFAULT"));
-        assertTrue(equip.contains("StatusEffects.INSTANT_DAMAGE"));
-        assertTrue(equip.contains("target.getType().isIn(EntityTypeTags.UNDEAD)"));
-        assertTrue(equip.contains("StatusEffects.INSTANT_HEALTH"));
+        assertTrue(equip.contains("DataComponents.POTION_CONTENTS"));
+        assertTrue(equip.contains("PotionContents.EMPTY"));
+        assertTrue(equip.contains("MobEffects.INSTANT_DAMAGE"));
+        assertTrue(equip.contains("target.getType().is(EntityTypeTags.UNDEAD)"));
+        assertTrue(equip.contains("MobEffects.INSTANT_HEALTH"));
         assertTrue(equip.indexOf("candidate.damageScore()")
                         < equip.indexOf("candidate.enemyEffectScore()"),
                 "direct damage must be the first arrow ranking key, before harmful effects");
-        assertTrue(equip.contains("bot.equipStack(EquipmentSlot.OFFHAND, ammunition.copy())"),
+        assertTrue(equip.contains("bot.setItemSlot(EquipmentSlot.OFFHAND, ammunition.copy())"),
                 "the selected arrow must be held because vanilla resolves held projectiles first");
         assertTrue(equip.contains("does not let an Infinity bow invent ammunition"));
     }
@@ -52,9 +52,9 @@ final class CombatSmartBowSourceContractTest {
     void rangedOffhandSwapNeverDropsOrOverwritesAnUnverifiedStack() throws IOException {
         String equip = read("action/EquipAction.java");
 
-        assertTrue(equip.contains("inventory.getMainStacks().set(choice.mainSlot(), displacedOffhand)"));
-        assertTrue(equip.contains("ItemStack.areEqual(inventory.getMainStacks().get(restoreSlot), storedOffhand)"));
-        assertTrue(equip.contains("ItemStack.areItemsAndComponentsEqual(currentOffhand, ammunition)"));
+        assertTrue(equip.contains("inventory.getNonEquipmentItems().set(choice.mainSlot(), displacedOffhand)"));
+        assertTrue(equip.contains("ItemStack.matches(inventory.getNonEquipmentItems().get(restoreSlot), storedOffhand)"));
+        assertTrue(equip.contains("ItemStack.isSameItemSameComponents(currentOffhand, ammunition)"));
         assertFalse(equip.contains("dropItem"),
                 "ranged preparation/restoration must be an inventory swap, never a drop");
     }

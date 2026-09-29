@@ -8,7 +8,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class OfflineProfileFactory {
     /**
-     * Vanilla's client-side {@code DefaultSkinHelper} renders any profile with no signed skin
+     * Vanilla's client-side {@code DefaultPlayerSkin} renders any profile with no signed skin
      * texture using one of 18 built-in default skins (9 named characters x slim/wide arm model),
      * chosen deterministically via {@code Math.floorMod(profile.id().hashCode(), 18)}. That is the
      * only public hook into that fixed skin set -- there is no "textures" property or other API to

@@ -21,7 +21,7 @@ public abstract class PlayerManagerFakePlayerMixin {
     private MinecraftServer server;
 
     /**
-     * Was a {@code @Redirect} on the {@code new ServerPlayNetworkHandler(...)} call itself, which
+     * Was a {@code @Redirect} on the {@code new ServerGamePacketListenerImpl(...)} call itself, which
      * exclusively claims that one call site. That is incompatible with any other mod hooking the same
      * vanilla constructor for its own fake players (confirmed: PvP BOT's HeroBot does exactly this, and
      * its own mixin does not tolerate losing the resulting Mixin conflict -- the whole server refused to

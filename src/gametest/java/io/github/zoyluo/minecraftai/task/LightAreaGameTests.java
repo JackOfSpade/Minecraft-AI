@@ -104,7 +104,7 @@ public final class LightAreaGameTests {
             }
             settleTicks[0]++;
             if (settleTicks[0] < 80) {
-                return; // give calculateAmbientDarkness() and DangerWatcher's own scan cadence room to run repeatedly
+                return; // give updateSkyBrightness() and DangerWatcher's own scan cadence room to run repeatedly
             }
             require(context, !world.canSeeSky(feet), "fixture leaf canopy did not block direct sky visibility");
             int combined = world.getMaxLocalRawBrightness(feet, world.getSkyDarken());

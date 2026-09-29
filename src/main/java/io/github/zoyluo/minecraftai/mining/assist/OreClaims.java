@@ -149,7 +149,7 @@ public final class OreClaims {
     /**
      * Hook 2 of {@code OreDigTask.scanBonusOre}: whether another bot holds a claim on {@code pos} in this bot's
      * dimension, at the bot's server tick. Equivalent to
-     * {@code heldByOther(BotEdits.dimensionKey(bot.getEntityWorld()), bot.getUuid(), pos.asLong(),
+     * {@code heldByOther(BotEdits.dimensionKey(bot.level()), bot.getUuid(), pos.asLong(),
      * MiningAssistRuntime.serverTick(bot))}. Must be cheap and never throw: it answers false at once, before it reads
      * the dimension or the tick, when no claim exists anywhere ({@link #size()} is 0: assist off or nobody claims,
      * the design's "one static check" cost claim for hook 2 on every ore cell of the bonus scan); any failure to resolve the

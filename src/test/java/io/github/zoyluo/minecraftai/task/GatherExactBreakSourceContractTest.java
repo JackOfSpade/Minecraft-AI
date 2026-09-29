@@ -16,7 +16,7 @@ final class GatherExactBreakSourceContractTest {
                 "src/main/java/io/github/zoyluo/minecraftai/task/GatherQuotaTask.java"));
 
         assertTrue(source.contains("public static GatherQuotaTask breakBlocks(Block block, int targetCount)"));
-        assertTrue(source.contains("\"break_blocks\", Registries.BLOCK.getId(block).toString()"));
+        assertTrue(source.contains("\"break_blocks\", BuiltInRegistries.BLOCK.getKey(block).toString()"));
         assertTrue(source.contains("countBrokenBlocks ? 0 : countAccepted(bot)"));
         assertTrue(source.contains("countSoFar++"));
         assertTrue(source.contains("if (countBrokenBlocks) {\n                // An exact break request"));

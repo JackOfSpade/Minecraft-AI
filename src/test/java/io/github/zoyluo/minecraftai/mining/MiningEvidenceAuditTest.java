@@ -161,7 +161,7 @@ final class MiningEvidenceAuditTest {
 
         assertTrue(capability.contains(
                 "MiningEvidenceAudit.recordCapabilityDecision(bot, decision.allowed())"));
-        assertTrue(audit.contains("Stats.CUSTOM.getOrCreateStat(Stats.DEATHS)"));
+        assertTrue(audit.contains("Stats.CUSTOM.get(Stats.DEATHS)"));
         assertTrue(oreDig.contains("MiningEvidenceAudit.observeDiamondOreBeforeBreak("));
         assertTrue(oreDig.contains("MiningEvidenceAudit.recordDiamondOreBreak(bot, pos)"));
         assertTrue(oreDig.contains("MiningEvidenceAudit.recordDiamondNativePickup("));

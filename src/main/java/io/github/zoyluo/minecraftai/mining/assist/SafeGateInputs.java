@@ -22,7 +22,7 @@ package io.github.zoyluo.minecraftai.mining.assist;
  * @param onFire              item 3
  * @param inLava              item 3
  * @param submerged           item 3: {@code bot.isSubmergedInWater()}
- * @param touchingWater       item 3: {@code bot.isTouchingWater()}
+ * @param touchingWater       item 3: {@code bot.isInWater()}
  * @param foodLevel           item 3: the hunger manager's food level
  * @param hungerCritical      item 3: {@code MinecraftAiConfig.survival().hungerCriticalThreshold()}
  * @param waterRescueActive   item 4: {@code NavSafetyNet.isWaterRescueActive(bot)}

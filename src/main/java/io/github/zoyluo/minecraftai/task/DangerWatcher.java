@@ -1206,7 +1206,7 @@ public final class DangerWatcher {
         }
         if (entity instanceof EnderMan enderman) {
             // isAngry() is only a broad tracked flag: an Enderman targeting another player or mob
-            // also sets it. shouldAngerAt() binds persistent/universal anger to this exact bot and
+            // also sets it. isAngryAt() binds persistent/universal anger to this exact bot and
             // remains factual if teleportation temporarily clears the live target reference.
             return enderman.getTarget() == bot
                     || enderman.isAngryAt(bot, bot.level());

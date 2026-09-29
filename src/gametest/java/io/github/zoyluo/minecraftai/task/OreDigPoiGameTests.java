@@ -84,7 +84,7 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.botLog;
  *
  * <h2>A real, documented harness limitation: no player-message capture</h2>
  * <p>{@code PoiCoordinator.sendNotice} sends through {@code BrainCoordinator.sendPanelChat} (a no-op unless a
- * real client has subscribed over the mod's own networking channel) and {@code ServerPlayerEntity.sendMessage}
+ * real client has subscribed over the mod's own networking channel) and {@code ServerPlayer.sendMessage}
  * (routed through each bot's {@code FakeClientConnection}, whose {@code send(Packet)} is an intentional no-op --
  * verified by reading {@code network/FakeClientConnection.java} and {@code network/DeliveredPackets.java} before
  * writing this file). Neither path leaves anything this harness can read back, and grepping the whole
@@ -188,8 +188,8 @@ public final class OreDigPoiGameTests {
     }
 
     /**
-     * A real, visible {@code WardenEntity} (AI disabled so it cannot itself hurt the bot mid-test, matching this
-     * package's own {@code setAiDisabled(true)} convention for fixture hostiles) reaches
+     * A real, visible {@code Warden} (AI disabled so it cannot itself hurt the bot mid-test, matching this
+     * package's own {@code setNoAi(true)} convention for fixture hostiles) reaches
      * {@code PoiScorer.Band.MANDATORY} and stops the bot regardless of two things placed to try to prevent it:
      * a full mineshaft-certain palette in the very same evidence window (proving MANDATORY is decided before,
      * and independent of, the certain/habitation path in {@code PoiScorer.evaluate}), and a pre-seeded

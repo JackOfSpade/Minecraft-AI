@@ -16,7 +16,7 @@ import java.util.Optional;
 
 /**
  * Runtime recipe index (knowledge-layer, data-driven): after the server starts, scans all crafting
- * recipes from RecipeManager to build an index, letting the planner reverse-derive **items not
+ * recipes from RecipeAccess to build an index, letting the planner reverse-derive **items not
  * covered by the hand-written table** — including any mod items (e.g. Twilight Forest recipes work automatically).
  *
  * Two-tier strategy (see RecipeRegistry.find): the hand-written table takes priority (pins down
@@ -121,9 +121,9 @@ public final class RuntimeRecipeIndex {
 
     // Ingredient (multiple candidates per slot) -> our anyOf structure; multiple slots of the same
     // material merge their count.
-    // 1.21.3: ingredients are uniformly read from getIngredientPlacement().getIngredients() (same
-    // API for shaped/shapeless); items are read via getMatchingItems() (a list of RegistryEntry);
-    // hasNoPlacement = a dynamic special recipe, skipped by the caller.
+    // 1.21.3: ingredients are uniformly read from placementInfo().getIngredients() (same
+    // API for shaped/shapeless); items are read via items() (a list of Holder);
+    // isImpossibleToPlace = a dynamic special recipe, skipped by the caller.
     private static List<RecipeRegistry.Ingredient> convertIngredients(CraftingRecipe crafting) {
         if (crafting.placementInfo().isImpossibleToPlace()) {
             return List.of();

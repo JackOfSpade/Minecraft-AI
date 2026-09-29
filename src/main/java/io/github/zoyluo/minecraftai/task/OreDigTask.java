@@ -3170,7 +3170,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // has a factual coordinate to chase. This closes the old 64-broken/32-collected failure
         // mode without reading hidden entities or accepting a privileged inventory mutation.
         io.github.zoyluo.minecraftai.pathfinding.Standability.clearCache();
-        // ServerPlayerEntity's onGround bit normally comes from client movement packets and is
+        // ServerPlayer's onGround bit normally comes from client movement packets and is
         // therefore not durable for a clientless fake player. The collision-checked support/head
         // envelope is the authoritative settled-pose invariant here: it rejects the transient
         // upper cell from an elevated pickup while accepting a physically supported shaft floor.

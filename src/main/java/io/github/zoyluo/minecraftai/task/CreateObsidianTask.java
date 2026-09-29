@@ -1033,7 +1033,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * preferred when one is on hand, but {@link BlockState#requiresCorrectToolForDrops()} being false means bare
      * hands are always a legal fallback -- see the no-candidate branch below, which never hard-fails
      * for such a block (mirrors {@code BlockMiner}/{@code ToolSelector.equipMiningChannelTool}'s own
-     * {@code isToolRequired()}-gated policy).
+     * {@code requiresCorrectToolForDrops()}-gated policy).
      */
     private static boolean equipOrdinaryMiningTool(AIPlayerEntity bot, BlockState state) {
         int required = state.requiresCorrectToolForDrops()
@@ -1473,7 +1473,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         if (waterSource != null && atKnownProtectedMinePose(bot, standPos, obsidian)) {
             // This exact target and work pose were observed when vanilla fluid formed the block.
-            // The retained source now sits between the eye ray and obsidian, so a FluidHandling.ANY
+            // The retained source now sits between the eye ray and obsidian, so a Fluid.ANY
             // visibility check would reject the very protection a player deliberately keeps.
             // Interaction reach + unchanged safe pose bound this exception to that remembered cell.
             bot.getActionPack().stopAll();

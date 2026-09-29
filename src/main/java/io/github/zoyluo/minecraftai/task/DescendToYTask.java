@@ -1757,7 +1757,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return Map.of();
         }
         ArrayList<Map.Entry<BlockPos, Block>> sorted = new ArrayList<>(ownedWaterSeals.entrySet());
-        sorted.sort(Map.Entry.comparingByKey(java.util.Comparator.comparingInt(BlockPos::getX)
+        sorted.sort(Map.Entry.comparingByKey(java.util.Comparator.<BlockPos>comparingInt(BlockPos::getX)
                 .thenComparingInt(BlockPos::getY)
                 .thenComparingInt(BlockPos::getZ)));
         StringBuilder encoded = new StringBuilder();

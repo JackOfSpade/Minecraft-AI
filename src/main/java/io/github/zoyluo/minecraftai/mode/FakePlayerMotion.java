@@ -95,7 +95,7 @@ public final class FakePlayerMotion {
         if (!stepTo(bot, target, reason)) {
             return false;
         }
-        // ServerPlayerEntity normally learns this from the client's movement packet. A fake
+        // ServerPlayer normally learns this from the client's movement packet. A fake
         // player has no client, so a collision-validated landing must publish the same grounded
         // state explicitly; otherwise pickup/checkpoint code can remain suspended forever even
         // though there is a solid support directly below its feet.
@@ -302,7 +302,7 @@ public final class FakePlayerMotion {
         int dy = target.getY() - from.getY();
         int dz = Math.abs(target.getZ() - from.getZ());
         boolean sameColumn = dx == 0 && dz == 0;
-        // ServerPlayerEntity normally refreshes onGround from client movement packets. A
+        // ServerPlayer normally refreshes onGround from client movement packets. A
         // clientless fake player can therefore report false on the tick after a verified landing.
         // Accept that stale bit only when the current pose is dry/standable and Minecraft's own
         // one-microblock support probe finds the exact block below. A genuinely airborne entity,

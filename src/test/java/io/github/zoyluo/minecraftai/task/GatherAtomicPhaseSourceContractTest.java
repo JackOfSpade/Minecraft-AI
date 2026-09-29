@@ -26,7 +26,7 @@ final class GatherAtomicPhaseSourceContractTest {
                 "gather must retain the factual break coordinate until pickup resolves");
         assertTrue(source.contains("HarvestCore.approachKnownPickupCell(bot, pickupOrigin)"),
                 "an occluded drop must fall back to the remembered break coordinate");
-        assertTrue(source.contains("Stats.PICKED_UP"),
+        assertTrue(source.contains("Stats.ITEM_PICKED_UP"),
                 "vanilla pickup stats must distinguish collection from concurrent inventory consumption");
         int miss = source.indexOf("gather_pickup_miss");
         int watchdogReset = source.indexOf("resetSurveyWatchdog()", miss);

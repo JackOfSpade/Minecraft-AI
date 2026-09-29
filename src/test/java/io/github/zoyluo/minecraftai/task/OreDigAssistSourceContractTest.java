@@ -167,7 +167,7 @@ class OreDigAssistSourceContractTest {
         int abort = source.indexOf("protected void onAbort");
         assertTrue(resume >= 0 && abort > resume);
         String body = source.substring(resume, abort);
-        int restoringFaceAssign = body.indexOf("restoringFace = !bot.getBlockPos().equals(lastFace);");
+        int restoringFaceAssign = body.indexOf("restoringFace = !bot.blockPosition().equals(lastFace);");
         int restoreFaceStarted = body.indexOf("restoreFaceStarted = elapsed;", restoringFaceAssign);
         int detourResumedCall = body.indexOf("detourResumed(restoringFace);", restoreFaceStarted);
         assertTrue(restoringFaceAssign >= 0 && restoreFaceStarted > restoringFaceAssign
@@ -195,7 +195,7 @@ class OreDigAssistSourceContractTest {
     void oreExcludedBodyIsByteIdentical() throws IOException {
         String source = read(SOURCE);
         String expected = "private boolean oreExcluded(AIPlayerEntity bot, BlockPos pos) {\n"
-                + "        return EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), pos, bot.getEntityWorld().getServer().getTicks());\n"
+                + "        return EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), pos, bot.level().getServer().getTickCount());\n"
                 + "    }";
         assertTrue(source.contains(expected), "oreExcluded's body text must not change");
     }
@@ -205,7 +205,7 @@ class OreDigAssistSourceContractTest {
     @Test
     void hookTwoIsASeparateStatementInsideScanBonusOreOnly() throws IOException {
         String source = read(SOURCE);
-        int scanBonusOre = source.indexOf("private BlockPos scanBonusOre(AIPlayerEntity bot, ServerWorld world) {");
+        int scanBonusOre = source.indexOf("private BlockPos scanBonusOre(AIPlayerEntity bot, ServerLevel world) {");
         int scanBonusOreEnd = source.indexOf("private OreDigTask.DetourHostImpl detourHost;", scanBonusOre);
         assertTrue(scanBonusOre >= 0 && scanBonusOreEnd > scanBonusOre);
         String body = source.substring(scanBonusOre, scanBonusOreEnd);
@@ -272,7 +272,7 @@ class OreDigAssistSourceContractTest {
         String source = read(SOURCE);
         assertTrue(source.contains("OreDigTask.isCurrentSupport(bot, ore)"));
         assertTrue(source.contains("OreDigTask.this.detourRebaseTargetMonitors();"));
-        assertTrue(source.contains("OreDigTask.this.detourRebaseCursor(bot.getBlockPos());"));
+        assertTrue(source.contains("OreDigTask.this.detourRebaseCursor(bot.blockPosition());"));
         assertTrue(source.contains("OreDigTask.this.noteProgress();"));
     }
 

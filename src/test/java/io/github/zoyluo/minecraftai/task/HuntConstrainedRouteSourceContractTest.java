@@ -57,9 +57,9 @@ class HuntConstrainedRouteSourceContractTest {
                 "// Keep scanning for prey while roaming");
 
         assertTrue(approach.contains(
-                        "BlockPos returnAnchor = bot.getBlockPos().toImmutable();"));
+                        "BlockPos returnAnchor = bot.blockPosition().immutable();"));
         assertTrue(approach.contains(
-                        "digBreakthroughFloor(bot.getBlockPos(), attackPose, surfaceFloorY(bot))"),
+                        "digBreakthroughFloor(bot.blockPosition(), attackPose, surfaceFloorY(bot))"),
                 "approach execution must bind the near-level dig floor to its own segment");
         assertTrue(approach.contains("returnAnchor, true);"),
                 "moving-prey replans must own the start of each new approach segment");

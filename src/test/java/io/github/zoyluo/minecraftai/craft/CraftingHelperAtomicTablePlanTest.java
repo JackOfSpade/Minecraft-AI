@@ -21,9 +21,9 @@ final class CraftingHelperAtomicTablePlanTest {
         assertTrue(helper.contains("planFromCounts("));
         assertTrue(helper.contains("boolean craftingTableAvailable"));
         assertTrue(helper.contains("boolean targetRecipeNeedsTable"));
-        assertTrue(helper.contains("combinedPlanner.ensureItem(net.minecraft.item.Items.CRAFTING_TABLE, 1"));
+        assertTrue(helper.contains("combinedPlanner.ensureItem(net.minecraft.world.item.Items.CRAFTING_TABLE, 1"));
         assertTrue(helper.contains("combinedPlanner.ensureItem(target, requiredCount"));
-        assertTrue(helper.indexOf("combinedPlanner.ensureItem(net.minecraft.item.Items.CRAFTING_TABLE, 1")
+        assertTrue(helper.indexOf("combinedPlanner.ensureItem(net.minecraft.world.item.Items.CRAFTING_TABLE, 1")
                         < helper.indexOf("combinedPlanner.ensureItem(target, requiredCount"),
                 "table materials must be committed before planning the requested 3x3 recipe");
     }

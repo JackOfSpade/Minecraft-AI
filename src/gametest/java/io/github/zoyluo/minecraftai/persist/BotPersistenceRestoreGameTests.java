@@ -34,7 +34,7 @@ import java.util.Set;
  * what the save path does), a JSON round trip through {@link RuntimeSnapshotCodec} (exactly what
  * runtime.json goes through), despawn, then {@link AIPlayerManager#respawnFromRecord} (the per-bot call
  * of the server-start restore). Regression: armor and offhand were silently dropped on every restart
- * because PlayerInventory.writeData only serializes the 36 main slots since 1.21.5.
+ * because Inventory.writeData only serializes the 36 main slots since 1.21.5.
  */
 public final class BotPersistenceRestoreGameTests {
     private static final String ENV = "minecraftai-gametest:bot_persistence_restore_game_tests_";

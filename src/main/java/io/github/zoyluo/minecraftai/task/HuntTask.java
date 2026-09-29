@@ -31,7 +31,7 @@ import net.minecraft.world.phys.Vec3;
  * HUNT (tier-2 food self-sufficiency): actively hunts nearby edible animals and picks up raw
  * meat until the target amount of meat is reached.
  *
- * Background: CombatCore/CombatTask originally only fought **hostile mobs** (HostileEntity); a
+ * Background: CombatCore/CombatTask originally only fought **hostile mobs** (Monster); a
  * hungry bot had no ability to "actively go get meat" (EatTask only eats existing food and gives
  * up if there's no meat). This task fills that gap: find the nearest cow/pig/sheep/chicken/rabbit
  * -> approach -> kill -> pick up meat -> repeat until the quota is met.
@@ -1466,7 +1466,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 == SurfacePathStart.STARTED;
     }
 
-    // Only hunts adult vanilla animals known to drop raw meat. The old "any AnimalEntity"
+    // Only hunts adult vanilla animals known to drop raw meat. The old "any Animal"
     // compatibility would treat bees, frogs, and other non-food creatures as prey, wasting the 200t
     // pickup budget and possibly starting unwanted fights; modded meat sources should be added via
     // explicit config.

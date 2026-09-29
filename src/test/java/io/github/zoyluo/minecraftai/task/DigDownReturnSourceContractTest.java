@@ -44,7 +44,7 @@ class DigDownReturnSourceContractTest {
                 "adjacent horizontal traversal must not restart a long-path controller every tick");
         assertTrue(task.contains("descentTrail.contains(side)"),
                 "horizontal traversal must not reinterpret the exact-return trail as fresh work");
-        assertTrue(task.contains("rememberDescentStep(bot.getBlockPos())"),
+        assertTrue(task.contains("rememberDescentStep(bot.blockPosition())"),
                 "a horizontal physical step must be checkpointed in the same task tick");
         assertTrue(task.contains("returnOutcome = restored.returnOutcome()"),
                 "a restart during failure recovery must retain its terminal outcome");

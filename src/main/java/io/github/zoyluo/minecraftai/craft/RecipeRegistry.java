@@ -73,7 +73,7 @@ public final class RecipeRegistry {
     }
 
     // Two-tier lookup: the handwritten table takes priority (pins down vanilla's critical chains, zero
-    // regression in determinism); on a miss, fall back to the runtime index (full RecipeManager coverage,
+    // regression in determinism); on a miss, fall back to the runtime index (full RecipeAccess coverage,
     // a fallback for mod/long-tail items -- e.g. Twilight Forest mod recipes can be auto-derived).
     public static Optional<Recipe> find(Item output) {
         Recipe handwritten = BY_OUTPUT.get(output);

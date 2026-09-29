@@ -89,12 +89,12 @@ final class ShelterGameTestFixtures {
     }
 
     /**
-     * Registers {@code perTick} as the test's single top-level {@code runAtEveryTick} callback,
+     * Registers {@code perTick} as the test's single top-level {@code failIfEver} callback,
      * gated on {@link GameTestTimeLock}: the callback polls {@link GameTestTimeLock#tryAcquire()}
      * every tick until it holds the lock, then runs {@code perTick} from that same callback on
-     * every subsequent tick, and releases the lock in {@code context.addFinalTask} if it was ever
+     * every subsequent tick, and releases the lock in {@code context.succeedIf} if it was ever
      * acquired. See {@link GameTestTimeLock}'s class docs for why this must stay the test's only
-     * {@code runAtEveryTick} registration.
+     * {@code failIfEver} registration.
      */
     static void runLocked(GameTestHelper context, Runnable perTick) {
         boolean[] timeLockAcquired = {false};

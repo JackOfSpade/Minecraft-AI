@@ -24,7 +24,7 @@ import net.minecraft.world.phys.Vec3;
  * nothing: the caller logs the returned {@link Result} and no task, chat line or model call follows from it.
  *
  * <p>It reads only observed data. Evidence cells come from the state's POI window, which the sweep and the
- * break peek filled from first hits. The entity scan is one {@code getEntitiesByClass} per evaluation, and an
+ * break peek filled from first hits. The entity scan is one {@code getEntitiesOfClass} per evaluation, and an
  * entity is kept only if {@code ObservableWorldQuery.canObserveEntity} allows it and it is not invisible.
  * The only other world read is the biome id at the bot's own feet (the F3 equivalent), which goes into the
  * state for the deep-dark veto, the lush-caves classification flag and the logs; it is not a scoring term.</p>
@@ -209,7 +209,7 @@ public final class PoiDetector {
     }
 
     /**
-     * One {@code getEntitiesByClass} over the perception box. Only entities that could contribute (a score,
+     * One {@code getEntitiesOfClass} over the perception box. Only entities that could contribute (a score,
      * a habitation marker or a warden) are candidates, examined wardens first and then nearest first (at most
      * {@value #ENTITY_EXAMINE_CAP} examined, {@value #ENTITY_CANDIDATE_CAP} accepted); each must be
      * visible (not invisible, not a marker armor stand) and pass {@code ObservableWorldQuery.canObserveEntity}.

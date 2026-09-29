@@ -36,7 +36,7 @@ class OreDigObservationSourceContractTest {
 
         int adjacent = source.indexOf(
                 "public static Observation adjacentHazard(AIPlayerEntity bot");
-        int observedCandidate = source.indexOf("observeDangerFluid(bot, pos.offset(direction))", adjacent);
+        int observedCandidate = source.indexOf("observeDangerFluid(bot, pos.relative(direction))", adjacent);
         int unknownAggregate = source.indexOf(
                 "unknown ? Observation.UNKNOWN : Observation.OBSERVED_GONE", observedCandidate);
         assertTrue(adjacent > stateRead && observedCandidate > adjacent
@@ -48,7 +48,7 @@ class OreDigObservationSourceContractTest {
     void hiddenFluidAndHiddenStoneTakeTheSameSealedChannelAction() throws IOException {
         String source = Files.readString(ORE_DIG);
         int tunnel = source.indexOf("private void digTowardStep(");
-        int head = source.indexOf("BlockPos head = step.up()", tunnel);
+        int head = source.indexOf("BlockPos head = step.above()", tunnel);
         int activeSettlement = source.indexOf(
                 "settleOwnedTunnelMine(bot, goal, intent, activeChannel)", head);
         int headObservation = source.indexOf("!canObserveWorldState(bot, head)", activeSettlement);
@@ -80,7 +80,7 @@ class OreDigObservationSourceContractTest {
         String lateralBody = source.substring(lateral, seal);
         assertTrue(insetAware > lateral && seal > insetAware,
                 "lateral fluid sealing must use the dedicated observable candidate API");
-        assertFalse(lateralBody.contains("squaredDistanceTo"),
+        assertFalse(lateralBody.contains("distanceToSqr"),
                 "edge-visible fluids must not be rejected by a center-distance prefilter");
         assertFalse(lateralBody.contains("world.getFluidState(candidate)"),
                 "unknown lateral candidates must never be read to distinguish fluid from stone");
@@ -135,7 +135,7 @@ class OreDigObservationSourceContractTest {
         int continueHelper = source.indexOf("private void continueUnknownOwnerApproach");
         int nextStep = source.indexOf("BlockPos next = stepToward", continueHelper);
         int exactOwnerGuard = source.indexOf(
-                "next.equals(owner) || next.up().equals(owner)", nextStep);
+                "next.equals(owner) || next.above().equals(owner)", nextStep);
         int inactiveMiner = source.indexOf("if (miner.target() != null)", exactOwnerGuard);
         int tunnelOnly = source.indexOf("digTowardStep(bot, world, owner, intent)", inactiveMiner);
         assertTrue(continueHelper > veinGone && nextStep > continueHelper
@@ -160,9 +160,9 @@ class OreDigObservationSourceContractTest {
         int footObserve = source.indexOf(
                 "!ObservableWorldQuery.canObserveCell(bot, candidate)", highPose);
         int headObserve = source.indexOf(
-                "!ObservableWorldQuery.canObserveCell(bot, candidate.up())", footObserve);
+                "!ObservableWorldQuery.canObserveCell(bot, candidate.above())", footObserve);
         int floorObserve = source.indexOf(
-                "!ObservableWorldQuery.canObserveBlock(bot, candidate.down())", headObserve);
+                "!ObservableWorldQuery.canObserveBlock(bot, candidate.below())", headObserve);
         int standable = source.indexOf("Standability.isStandable(world, candidate)", floorObserve);
         assertTrue(highPose >= 0 && footObserve > highPose && headObserve > footObserve
                         && floorObserve > headObserve && standable > floorObserve,

@@ -30,7 +30,7 @@ class OreDigCheckpointSourceContractTest {
                 "OreDig restore must reject another ore family or rare mission identity");
 
         int restoreFlag = source.indexOf(
-                "restoringFace = !bot.getBlockPos().equals(cursor.face())", constructor);
+                "restoringFace = !bot.blockPosition().equals(cursor.face())", constructor);
         int tick = source.indexOf("protected void onTick", restoreFlag);
         int returnGate = source.indexOf("if (restoringFace)", tick);
         int scanWork = source.indexOf("lastFace = factualFace", returnGate);
@@ -38,9 +38,9 @@ class OreDigCheckpointSourceContractTest {
                 "OreDig must return to the exact cursor.face before scanning or extending the saved branch");
 
         int restoreMethod = source.indexOf("private void returnToSavedFace", scanWork);
-        int exactGate = source.indexOf("bot.getBlockPos().equals(lastFace)", restoreMethod);
+        int exactGate = source.indexOf("bot.blockPosition().equals(lastFace)", restoreMethod);
         int faceOverwrite = source.indexOf(
-                "lastFace = bot.getBlockPos().toImmutable()", exactGate);
+                "lastFace = bot.blockPosition().immutable()", exactGate);
         assertTrue(restoreMethod > scanWork && exactGate > restoreMethod && faceOverwrite > exactGate,
                 "OreDig may replace the durable face only after reaching its exact coordinate");
     }
@@ -169,7 +169,7 @@ class OreDigCheckpointSourceContractTest {
         int veinMine = source.indexOf("beginTargetMine(bot, v)", veinBranch);
         int observedCell = source.indexOf(
                 "ObservableWorldQuery.canObserveCell(bot, candidate)", veinMine);
-        int observedSupport = source.indexOf("ObservableWorldQuery.canObserveBlock(bot, candidate.down())",
+        int observedSupport = source.indexOf("ObservableWorldQuery.canObserveBlock(bot, candidate.below())",
                 observedCell);
         int standability = source.indexOf("Standability.isStandable", observedSupport);
 
@@ -222,8 +222,8 @@ class OreDigCheckpointSourceContractTest {
         int helper = source.indexOf(
                 "private BranchFluidSealResult sealOneObservableLateralBranchFluid");
         int bodyLevels = source.indexOf(
-                "new BlockPos[]{branchCell, branchCell.up()}", helper);
-        int lateralOnly = source.indexOf("Direction.Type.HORIZONTAL", bodyLevels);
+                "new BlockPos[]{branchCell, branchCell.above()}", helper);
+        int lateralOnly = source.indexOf("Direction.Plane.HORIZONTAL", bodyLevels);
         int visibleGate = source.indexOf(
                 "OreScan.observeDangerFluid(bot, candidate)", lateralOnly);
         int singleSeal = source.indexOf("return BranchFluidSealResult.SEALED", visibleGate);
@@ -319,7 +319,7 @@ class OreDigCheckpointSourceContractTest {
                         && capture > targetState,
                 "all visible scan targets must publish a high side pose before nearest selection");
         int finishBreak = source.indexOf("private void finishTargetBreak");
-        int newlyExposedScan = source.indexOf("nearestOre(bot, bot.getEntityWorld())", finishBreak);
+        int newlyExposedScan = source.indexOf("nearestOre(bot, bot.level())", finishBreak);
         int stabilize = source.indexOf("stabilizeBrokenTargetDrop(bot, pos)", newlyExposedScan);
         assertTrue(finishBreak >= 0 && newlyExposedScan > finishBreak
                         && stabilize > newlyExposedScan,
@@ -405,16 +405,16 @@ class OreDigCheckpointSourceContractTest {
         assertTrue(oreDig.contains("publishCompletedStripSuccessor")
                         && oreDig.contains("boolean factualCorner = completedDirection != null")
                         && oreDig.contains("&& factualRear != null")
-                        && oreDig.contains("bot.getBlockPos().offset(completedDirection.getOpposite())")
+                        && oreDig.contains("bot.blockPosition().relative(completedDirection.getOpposite())")
                         && oreDig.contains("boundaryRerouteOrigin = stripProgressPos")
                         && oreDig.contains("controlledStripRear = factualRear"),
                 "every exact final physical step may publish its origin and factual rear");
         assertTrue(oreDig.contains("ownsFactualCornerRear(here, forward)")
-                        && oreDig.contains("rear = forward.rotateYClockwise()")
+                        && oreDig.contains("rear = forward.getClockWise()")
                         && oreDig.contains("Direction gateFacing = rear.getOpposite()")
                         && oreDig.contains(
                         "isAheadOfDirection(here, hostilePos, gateFacing)")
-                        && oreDig.contains("candidateGate = candidateRetreat.offset(gateFacing)")
+                        && oreDig.contains("candidateGate = candidateRetreat.relative(gateFacing)")
                         && oreDig.contains("isObservableRearCorridor")
                         && oreDig.contains("isObservableNarrowMiningGate"),
                 "hostile recovery at a factual corner must retreat through the crossed old leg");
@@ -425,7 +425,7 @@ class OreDigCheckpointSourceContractTest {
                         && oreDig.contains("ore_dig_branch_boundary_backtrack")
                         && oreDig.contains("stripStepsLeft = 1"),
                 "a zero-movement fluid cascade must retain one bounded observed rear step");
-        assertTrue(oreDig.contains("boundaryRerouteOrigin = origin.toImmutable()")
+        assertTrue(oreDig.contains("boundaryRerouteOrigin = origin.immutable()")
                         && checkpointSource.contains("values.put(\"boundary_reroute_origin\"")
                         && oreDig.contains("restoredCheckpoint.boundaryRerouteOrigin()"),
                 "the zero-movement reverse exception must survive an exact checkpoint restart");
@@ -477,7 +477,7 @@ class OreDigCheckpointSourceContractTest {
         assertTrue(checkpointSource.contains("values.put(\"pending_pickup_inventory\""));
         assertTrue(source.contains("restoredPendingPickupPos"));
         assertTrue(source.contains("restoredPendingPickupLastSeenPos"));
-        assertTrue(source.contains("pendingPickupLastSeenPos = drop.getBlockPos().toImmutable()"),
+        assertTrue(source.contains("pendingPickupLastSeenPos = drop.blockPosition().immutable()"),
                 "a visible moving target drop must advance the durable recovery coordinate");
         assertTrue(source.contains("ore_dig_drop_unrecovered:"),
                 "drop loss must fail closed instead of silently consuming the finite ore field");

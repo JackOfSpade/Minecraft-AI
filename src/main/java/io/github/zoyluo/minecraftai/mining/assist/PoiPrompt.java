@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 /**
  * Pure text/JSON for the R4 LLM confirmation protocol (mining-assist design 6.6): the fixed system prompt,
  * the {@code confirm_point_of_interest} tool schema, the user payload builder, and response validation. No
- * network, no {@code ServerWorld}, no task or chat access -- {@code brain/PoiAdvisor} is the only caller that
+ * network, no {@code ServerLevel}, no task or chat access -- {@code brain/PoiAdvisor} is the only caller that
  * touches the wire.
  *
  * <p><b>One documented adaptation.</b> Design 6.6's payload example shows literal block registry ids

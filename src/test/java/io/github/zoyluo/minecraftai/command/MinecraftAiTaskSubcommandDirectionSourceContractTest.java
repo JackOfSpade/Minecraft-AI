@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Source contract of {@code command/MinecraftAiTaskSubcommand.java}'s {@code direction(...)}
- * parser. It takes a Brigadier {@code CommandContext<ServerCommandSource>}, which cannot be
+ * parser. It takes a Brigadier {@code CommandContext<CommandSourceStack>}, which cannot be
  * constructed without a full Minecraft bootstrap, so this reads the production source as text
  * instead, like the other source-contract tests in this repo.
  */
@@ -38,7 +38,7 @@ class MinecraftAiTaskSubcommandDirectionSourceContractTest {
 
     @Test
     void upAndUResolveToDirectionUpNotDown() throws IOException {
-        String body = method(source(), "private static Direction direction(CommandContext<ServerCommandSource> context) {");
+        String body = method(source(), "private static Direction direction(CommandContext<CommandSourceStack> context) {");
 
         assertTrue(body.contains("case \"up\", \"u\" -> Direction.UP;"),
                 "\"up\"/\"u\" must resolve to Direction.UP, not the previously-inverted Direction.DOWN");

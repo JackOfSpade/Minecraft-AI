@@ -2,7 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 /**
  * Pure timing/decision state machine behind {@link FollowStuckRecovery}, extracted so its tick
- * counting and branching can be unit-tested without a {@code ServerWorld}, bot, or player: it
+ * counting and branching can be unit-tested without a {@code ServerLevel}, bot, or player: it
  * knows nothing about pathfinding, block positions, or entities, only tick numbers and a single
  * boolean input ("did the caller observe real progress this tick?").
  *

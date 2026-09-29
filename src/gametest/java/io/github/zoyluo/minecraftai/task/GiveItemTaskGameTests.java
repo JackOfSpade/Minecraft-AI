@@ -24,7 +24,7 @@ import java.util.Set;
  * item to a player (deposit/withdraw only move items in/out of containers, trade only works with
  * villagers), so the model stalled on repeated say(purpose=plan) calls until
  * model_call_budget_exhausted. The recipient here is another bot (a real, strict-survival
- * PlayerEntity target), per the fix's own suggestion for exercising this without a human tester.
+ * Player target), per the fix's own suggestion for exercising this without a human tester.
  */
 public final class GiveItemTaskGameTests {
     @GameTest(maxTicks = 300)

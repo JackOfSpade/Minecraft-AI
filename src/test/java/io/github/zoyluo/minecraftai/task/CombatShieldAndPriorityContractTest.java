@@ -40,11 +40,11 @@ class CombatShieldAndPriorityContractTest {
         String combat = read(COMBAT_TASK);
         int handler = combat.indexOf("private boolean handleReactiveShield");
         int lookAt = combat.indexOf("LookAction.lookAt(bot, faceTowards)", handler);
-        int raise = combat.indexOf("InteractAction.useItemInAir(bot, Hand.OFF_HAND)", handler);
+        int raise = combat.indexOf("InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND)", handler);
         assertTrue(handler >= 0 && lookAt > handler && raise > lookAt,
                 "the bot must turn to face the incoming projectile/creeper before raising the shield");
         assertTrue(combat.contains("ProjectileThreat.mostImminent(bot)"));
-        assertTrue(combat.contains("creeper.getLerpedFuseTime(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD"));
+        assertTrue(combat.contains("creeper.getSwelling(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD"));
     }
 
     @Test
