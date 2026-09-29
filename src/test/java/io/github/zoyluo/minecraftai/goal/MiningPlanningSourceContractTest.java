@@ -183,6 +183,7 @@ class MiningPlanningSourceContractTest {
         String hunt = read("task/HuntTask.java");
         String smelt = read("task/SmeltTask.java");
         String service = read("task/MiningServiceTask.java");
+        String servicePolicy = read("task/ServicePolicy.java");
         assertTrue(hunt.contains("collected > 0 && !requireFullQuota"));
         assertTrue(smelt.contains("collected >= targetCount || (collected > 0 && !requireCookedQuota)"));
         assertTrue(service.contains("values.put(\"channel_tools\""),
@@ -193,7 +194,7 @@ class MiningPlanningSourceContractTest {
                 "underground mining service must never start a surface food acquisition task");
         assertFalse(service.contains("FOOD_SERVICE_LEVEL"),
                 "full hunger cannot replace a carried safe-food reserve");
-        assertTrue(service.contains("MiningFoodReserve.MIN_DEEP_MINE_UNITS"));
+        assertTrue(servicePolicy.contains("MiningFoodReserve.MIN_DEEP_MINE_UNITS"));
         assertTrue(planner.contains("deep_mining_food_reserve_depleted"));
         assertTrue(planner.contains("underground_surface_resource_unavailable"));
     }

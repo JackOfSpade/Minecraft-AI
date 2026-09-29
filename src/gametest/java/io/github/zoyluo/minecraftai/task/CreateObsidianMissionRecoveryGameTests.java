@@ -164,7 +164,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
         MiningServiceTask committed = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                ServicePolicy.obsidian8(32, 8), 8,
                 fixture.missionId().toString(), 32);
         committed.start(fixture.bot());
         for (int tick = 0; tick < 20 && committed.state() == TaskState.RUNNING; tick++) {
@@ -206,7 +206,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
         MiningServiceTask committed = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                ServicePolicy.obsidian8(32, 8), 8,
                 fixture.missionId().toString(), 32);
         committed.start(fixture.bot());
         for (int tick = 0; tick < 20 && committed.state() == TaskState.RUNNING; tick++) {
@@ -242,7 +242,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         Fixture fixture = spawnPreparedBot(context, "ObsidianWrongBoundaryGT", 16, true);
         MiningServiceTask staleBoundary = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                ServicePolicy.obsidian8(32, 8), 8,
                 fixture.missionId().toString(), 32);
         staleBoundary.start(fixture.bot());
         for (int tick = 0; tick < 20 && staleBoundary.state() == TaskState.RUNNING; tick++) {
@@ -292,7 +292,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 fixture.start(), 8, 0, 8);
         MiningServiceTask stale = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                ServicePolicy.obsidian8(32, 8), 8,
                 fixture.missionId().toString(), 32);
         stale.start(fixture.bot());
         require(context, stale.state() == TaskState.RUNNING,
@@ -380,7 +380,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
         MiningServiceTask interrupted = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                ServicePolicy.obsidian8(32, 8), 8,
                 fixture.missionId().toString(), 32,
                 MiningCursor.initial(fixture.start(), 48));
         interrupted.start(fixture.bot());
@@ -449,7 +449,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                     fixture.start(), 8, 0, 8);
             MiningServiceTask interrupted = new MiningServiceTask(
                     Set.of(Blocks.OBSIDIAN), Map.of(),
-                    MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                    ServicePolicy.obsidian8(32, 8), 8,
                     fixture.missionId().toString(), 32);
             interrupted.start(fixture.bot());
 
@@ -476,7 +476,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
         MiningServiceTask interrupted = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                ServicePolicy.obsidian8(32, 8), 8,
                 fixture.missionId().toString(), 32);
         interrupted.start(fixture.bot());
 
@@ -498,7 +498,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
         MiningServiceTask interrupted = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32), 0,
+                ServicePolicy.obsidianPreflight(32), 0,
                 fixture.missionId().toString(), 32);
         interrupted.start(fixture.bot());
         require(context, interrupted.state() == TaskState.RUNNING,
@@ -542,7 +542,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
         MiningServiceTask interrupted = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32), 0,
+                ServicePolicy.obsidianPreflight(32), 0,
                 fixture.missionId().toString(), 32);
         interrupted.start(fixture.bot());
         Map<String, String> checkpoint = interrupted.checkpoint();
@@ -583,7 +583,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightDoneUnknownGT", 0, true);
         MiningServiceTask committed = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32), 0,
+                ServicePolicy.obsidianPreflight(32), 0,
                 fixture.missionId().toString(), 32);
         committed.start(fixture.bot());
         for (int tick = 0; tick < 20 && committed.state() == TaskState.RUNNING; tick++) {
@@ -633,7 +633,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 "stale-target fixture unexpectedly proved a fresh identity: " + fresh.steps());
         MiningServiceTask stale = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(16), 0,
+                ServicePolicy.obsidianPreflight(16), 0,
                 fixture.missionId().toString(), 16);
         stale.start(fixture.bot());
 
@@ -669,7 +669,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                     pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
             MiningServiceTask interrupted = new MiningServiceTask(
                     Set.of(Blocks.OBSIDIAN), Map.of(),
-                    MiningServiceTask.ServicePolicy.obsidianPreflight(24), 0,
+                    ServicePolicy.obsidianPreflight(24), 0,
                     fixture.missionId().toString(), 24);
             interrupted.start(fixture.bot());
 
@@ -708,7 +708,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                     fixture.start(), 8, 0, 8);
             MiningServiceTask interrupted = new MiningServiceTask(
                     Set.of(Blocks.OBSIDIAN), Map.of(),
-                    MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8,
+                    ServicePolicy.obsidian8(32, 8), 8,
                     fixture.missionId().toString(), 32);
             interrupted.start(fixture.bot());
             require(context, interrupted.state() == TaskState.RUNNING,
@@ -736,7 +736,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightWrongTargetGT", 0, true);
         MiningServiceTask stale = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(16), 0,
+                ServicePolicy.obsidianPreflight(16), 0,
                 fixture.missionId().toString(), 16);
         stale.start(fixture.bot());
 
@@ -769,7 +769,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                         + fresh.steps() + " unresolved=" + fresh.unresolved());
         MiningServiceTask stale = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(16), 0,
+                ServicePolicy.obsidianPreflight(16), 0,
                 fixture.missionId().toString(), 16);
         stale.start(fixture.bot());
         for (int tick = 0; tick < 20 && stale.state() == TaskState.RUNNING; tick++) {
@@ -801,7 +801,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
         MiningServiceTask interrupted = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(24), 0,
+                ServicePolicy.obsidianPreflight(24), 0,
                 fixture.missionId().toString(), 24);
         interrupted.start(fixture.bot());
 
@@ -824,7 +824,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightDoneGT", 0, true);
         MiningServiceTask committed = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32), 0,
+                ServicePolicy.obsidianPreflight(32), 0,
                 fixture.missionId().toString(), 32);
         committed.start(fixture.bot());
         for (int tick = 0; tick < 20 && committed.state() == TaskState.RUNNING; tick++) {

@@ -66,7 +66,7 @@ public final class DangerWatcherLowHealthGameTests {
 
         MiningServiceTask service = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32));
+                ServicePolicy.obsidianPreflight(32));
         TaskManager.INSTANCE.assign(bot, service,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_obsidian_service_tool_budget"));
         DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);

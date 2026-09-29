@@ -11,12 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MiningServicePolicyTest {
     @Test
     void defaultOrePoliciesPreserveTheLegacyChannelSwitch() {
-        MiningServiceTask.ServicePolicy ordinary =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
-        MiningServiceTask.ServicePolicy branch =
-                MiningServiceTask.ServicePolicy.defaultOre(true);
+        ServicePolicy ordinary =
+                ServicePolicy.defaultOre(false);
+        ServicePolicy branch =
+                ServicePolicy.defaultOre(true);
 
-        assertEquals(MiningServiceTask.ServiceProfile.ORE_BATCH, ordinary.profile());
+        assertEquals(ServiceProfile.ORE_BATCH, ordinary.profile());
         assertEquals(1, ordinary.targetToolUsableDurability());
         assertEquals(0, ordinary.channelToolUsableDurability());
         assertFalse(ordinary.maintainsTunnelingTools());
@@ -26,22 +26,22 @@ class MiningServicePolicyTest {
 
     @Test
     void capacityHandoffPreservesTheParentsPhysicalStoneHorizon() {
-        MiningServiceTask.ServicePolicy handoff =
-                MiningServiceTask.ServicePolicy.capacityHandoff(61);
+        ServicePolicy handoff =
+                ServicePolicy.capacityHandoff(61);
 
-        assertEquals(MiningServiceTask.ServiceProfile.ORE_BATCH, handoff.profile());
+        assertEquals(ServiceProfile.ORE_BATCH, handoff.profile());
         assertFalse(handoff.maintainsTunnelingTools());
         assertEquals(61, handoff.emergencyBlocksReserved());
         assertEquals(4, handoff.freeSlotsMin());
-        assertEquals(MiningServiceTask.ServicePolicy.defaultOre(false).foodMinUnits(),
+        assertEquals(ServicePolicy.defaultOre(false).foodMinUnits(),
                 handoff.foodMinUnits());
     }
 
     @Test
     void obsidianThirtyTwoPoliciesPinEveryRemainingServiceHorizon() {
-        MiningServiceTask.ServicePolicy preflight =
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32);
-        assertEquals(MiningServiceTask.ServiceProfile.OBSIDIAN_PREFLIGHT,
+        ServicePolicy preflight =
+                ServicePolicy.obsidianPreflight(32);
+        assertEquals(ServiceProfile.OBSIDIAN_PREFLIGHT,
                 preflight.profile());
         assertEquals(32, preflight.targetToolUsableDurability());
         assertEquals(520, preflight.channelToolUsableDurability());
@@ -49,12 +49,12 @@ class MiningServicePolicyTest {
         assertEquals(52, preflight.emergencyBlocksReserved());
         assertTrue(preflight.craftingTableRequired());
 
-        MiningServiceTask.ServicePolicy boundary8 =
-                MiningServiceTask.ServicePolicy.obsidian8(32, 8);
-        MiningServiceTask.ServicePolicy boundary16 =
-                MiningServiceTask.ServicePolicy.obsidian8(32, 16);
-        MiningServiceTask.ServicePolicy boundary24 =
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24);
+        ServicePolicy boundary8 =
+                ServicePolicy.obsidian8(32, 8);
+        ServicePolicy boundary16 =
+                ServicePolicy.obsidian8(32, 16);
+        ServicePolicy boundary24 =
+                ServicePolicy.obsidian8(32, 24);
         assertEquals(24, boundary8.targetToolUsableDurability());
         assertEquals(16, boundary8.futureStickReserve());
         assertEquals(40, boundary8.emergencyBlocksReserved());
@@ -64,26 +64,26 @@ class MiningServicePolicyTest {
         assertEquals(8, boundary24.targetToolUsableDurability());
         assertEquals(0, boundary24.futureStickReserve());
         assertEquals(16, boundary24.emergencyBlocksReserved());
-        assertEquals(32, MiningServiceTask.ServicePolicy.bootstrapStickTarget(32));
-        assertEquals(64, MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(32));
+        assertEquals(32, ServicePolicy.bootstrapStickTarget(32));
+        assertEquals(64, ServicePolicy.bootstrapStoneLikeTarget(32));
     }
 
     @Test
     void namedProfilesCannotBeConstructedWithDowngradedThresholds() {
-        assertThrows(IllegalArgumentException.class, () -> new MiningServiceTask.ServicePolicy(
-                MiningServiceTask.ServiceProfile.OBSIDIAN_8,
+        assertThrows(IllegalArgumentException.class, () -> new ServicePolicy(
+                ServiceProfile.OBSIDIAN_8,
                 24, 520, 2, 0, 4, 28, 8, true));
-        assertThrows(IllegalArgumentException.class, () -> new MiningServiceTask.ServicePolicy(
-                MiningServiceTask.ServiceProfile.OBSIDIAN_PREFLIGHT,
+        assertThrows(IllegalArgumentException.class, () -> new ServicePolicy(
+                ServiceProfile.OBSIDIAN_PREFLIGHT,
                 32, 519, 2, 0, 4, 52, 24, true));
-        assertThrows(IllegalArgumentException.class, () -> new MiningServiceTask.ServicePolicy(
-                MiningServiceTask.ServiceProfile.ORE_BATCH,
+        assertThrows(IllegalArgumentException.class, () -> new ServicePolicy(
+                ServiceProfile.ORE_BATCH,
                 1, 519, 2, 0, 4, 16, 0, false));
-        assertThrows(IllegalArgumentException.class, () -> new MiningServiceTask.ServicePolicy(
-                MiningServiceTask.ServiceProfile.OBSIDIAN_8,
+        assertThrows(IllegalArgumentException.class, () -> new ServicePolicy(
+                ServiceProfile.OBSIDIAN_8,
                 8, 520, 2, 0, 4, 16, 0, false));
-        assertThrows(IllegalArgumentException.class, () -> new MiningServiceTask.ServicePolicy(
-                MiningServiceTask.ServiceProfile.RARE_ORE_BATCH,
+        assertThrows(IllegalArgumentException.class, () -> new ServicePolicy(
+                ServiceProfile.RARE_ORE_BATCH,
                 1, 520, 14, 83, 4, 16, 48, true));
     }
 
@@ -93,9 +93,9 @@ class MiningServicePolicyTest {
         int[] torches = {560, 480, 400, 320, 240, 160, 80};
         int[] futureSticks = {182, 154, 126, 98, 70, 42, 14};
         for (int index = 0; index < boundaries.length; index++) {
-            MiningServiceTask.ServicePolicy policy =
-                    MiningServiceTask.ServicePolicy.rareOreBatch(64, boundaries[index]);
-            assertEquals(MiningServiceTask.ServiceProfile.RARE_ORE_BATCH, policy.profile());
+            ServicePolicy policy =
+                    ServicePolicy.rareOreBatch(64, boundaries[index]);
+            assertEquals(ServiceProfile.RARE_ORE_BATCH, policy.profile());
             assertEquals(8, policy.targetToolUsableDurability());
             assertEquals(910, policy.channelToolUsableDurability());
             assertEquals(torches[index], policy.torchMinCount());
@@ -105,12 +105,12 @@ class MiningServicePolicyTest {
             assertTrue(policy.craftingTableRequired());
         }
 
-        MiningServiceTask.ServicePolicy boundary0 =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 0);
-        MiningServiceTask.ServicePolicy boundary55 =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 55);
-        MiningServiceTask.ServicePolicy boundary63 =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 63);
+        ServicePolicy boundary0 =
+                ServicePolicy.rareOreBatch(64, 0);
+        ServicePolicy boundary55 =
+                ServicePolicy.rareOreBatch(64, 55);
+        ServicePolicy boundary63 =
+                ServicePolicy.rareOreBatch(64, 63);
         assertEquals(8, boundary0.targetToolUsableDurability());
         assertEquals(640, boundary0.torchMinCount());
         assertEquals(210, boundary0.futureStickReserve());
@@ -126,10 +126,10 @@ class MiningServicePolicyTest {
 
     @Test
     void rareRetryReleasesOnlyItsSealedChannelStonePool() {
-        MiningServiceTask.ServicePolicy sealed =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 0, 0);
-        MiningServiceTask.ServicePolicy released =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 0, 1);
+        ServicePolicy sealed =
+                ServicePolicy.rareOreBatch(64, 0, 0);
+        ServicePolicy released =
+                ServicePolicy.rareOreBatch(64, 0, 1);
 
         assertEquals(MiningBudget.RARE_SERVICE_PROTECTED_STONE_LIKE,
                 sealed.emergencyBlocksReserved());
@@ -148,13 +148,13 @@ class MiningServicePolicyTest {
         assertEquals(60, MiningBudget.RARE_BOOTSTRAP_STONE_LIKE);
         // Mission-margin epochs reuse the released epoch-one shape; only the mission-derived
         // capacity (2 regular + 2 capped margin for 64 targets) bounds the epoch argument.
-        assertEquals(released, MiningServiceTask.ServicePolicy.rareOreBatch(64, 0, 2));
-        assertEquals(released, MiningServiceTask.ServicePolicy.rareOreBatch(64, 0, 3));
+        assertEquals(released, ServicePolicy.rareOreBatch(64, 0, 2));
+        assertEquals(released, ServicePolicy.rareOreBatch(64, 0, 3));
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.rareOreBatch(64, 0, 4));
+                () -> ServicePolicy.rareOreBatch(64, 0, 4));
         // A one-batch mission owns no margin: epoch two stays impossible there.
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.rareOreBatch(8, 0, 2));
+                () -> ServicePolicy.rareOreBatch(8, 0, 2));
     }
 
     @Test
@@ -171,8 +171,8 @@ class MiningServicePolicyTest {
 
     @Test
     void diamondStackDescentKitPinsTheFullMissionReserve() {
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareDescentKit(64);
+        ServicePolicy policy =
+                ServicePolicy.rareDescentKit(64);
 
         assertEquals(650, policy.channelToolUsableDurability());
         assertEquals(80, policy.foodMinUnits());
@@ -185,15 +185,15 @@ class MiningServicePolicyTest {
     @Test
     void obsidianFactoriesRejectImpossibleTransactionIdentities() {
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.obsidianPreflight(0));
+                () -> ServicePolicy.obsidianPreflight(0));
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.obsidian8(32, 0));
+                () -> ServicePolicy.obsidian8(32, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.obsidian8(32, 7));
+                () -> ServicePolicy.obsidian8(32, 7));
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.obsidian8(8, 8));
+                () -> ServicePolicy.obsidian8(8, 8));
         assertThrows(IllegalArgumentException.class,
-                () -> MiningServiceTask.ServicePolicy.obsidian8(8, 16));
+                () -> ServicePolicy.obsidian8(8, 16));
     }
 
     @Test
@@ -203,10 +203,10 @@ class MiningServicePolicyTest {
         int[] expectedBootstrapStone = {28, 28, 40, 40, 52, 64, 64, 76};
         for (int index = 0; index < targets.length; index++) {
             assertEquals(expectedBootstrapSticks[index],
-                    MiningServiceTask.ServicePolicy.bootstrapStickTarget(targets[index]),
+                    ServicePolicy.bootstrapStickTarget(targets[index]),
                     "sticks target=" + targets[index]);
             assertEquals(expectedBootstrapStone[index],
-                    MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(targets[index]),
+                    ServicePolicy.bootstrapStoneLikeTarget(targets[index]),
                     "stone target=" + targets[index]);
         }
     }

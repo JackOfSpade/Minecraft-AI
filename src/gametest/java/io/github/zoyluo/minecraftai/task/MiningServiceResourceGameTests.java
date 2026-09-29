@@ -50,7 +50,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "admission-velocity", 0, cursor);
 
         // Reproduce the sealed evidence pose: OreDig has reached the correct BlockPos but its
@@ -150,7 +150,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.capacityHandoff(64),
+                ServicePolicy.capacityHandoff(64),
                 0, "natural-pocket-seal", 0, miningCursor(face, 0, 1));
         task.start(bot);
         context.runAtEveryTick(() -> {
@@ -230,7 +230,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.capacityHandoff(64),
+                ServicePolicy.capacityHandoff(64),
                 0, "unsafe-geometry-reroute", 0, miningCursor(face, 0, 1));
         task.start(bot);
         context.runAtEveryTick(() -> {
@@ -302,7 +302,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.capacityHandoff(64),
+                ServicePolicy.capacityHandoff(64),
                 0, "double-unsafe-geometry", 0, miningCursor(face, 0, 1));
         task.start(bot);
         context.runAtEveryTick(() -> {
@@ -348,8 +348,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.east();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "lower-only-restart", 0, cursor)};
@@ -463,8 +463,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "pocket-count-bound", 0, cursor);
@@ -620,8 +620,8 @@ public final class MiningServiceResourceGameTests {
         prepareDisposalPocket(fixture, Direction.EAST);
         prepareDisposalPocket(fixture, Direction.WEST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "open-retry-budget", 0, cursor);
@@ -677,8 +677,8 @@ public final class MiningServiceResourceGameTests {
         prepareDisposalPocket(fixture, Direction.EAST);
         prepareDisposalPocket(fixture, Direction.WEST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "seal-retry-budget", 0, cursor);
@@ -733,8 +733,8 @@ public final class MiningServiceResourceGameTests {
         prepareDisposalPocket(fixture, Direction.EAST);
         prepareDisposalPocket(fixture, Direction.WEST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "reroute-atomic", 0, cursor);
@@ -800,8 +800,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "open-mutation-budget", 0, cursor);
@@ -854,8 +854,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "capture-mutation-budget", 0, cursor);
@@ -1045,7 +1045,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(true),
+                ServicePolicy.defaultOre(true),
                 0, "sealed-pocket-test", 0, cursor);
         task.start(bot);
         int[] serviceTicks = {0};
@@ -1181,8 +1181,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "pocket-restore", 0, cursor);
@@ -1290,7 +1290,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "debt-return", 0, cursor);
         task.start(bot);
         MiningServiceTask[] active = {task};
@@ -1323,7 +1323,7 @@ public final class MiningServiceResourceGameTests {
                 active[0].abort(bot);
                 active[0] = new MiningServiceTask(
                         Set.of(Blocks.DIAMOND_ORE), live,
-                        MiningServiceTask.ServicePolicy.defaultOre(false),
+                        ServicePolicy.defaultOre(false),
                         0, "debt-return", 0, cursor);
                 active[0].start(bot);
                 require(context, live.get("budget_used").equals(
@@ -1364,8 +1364,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos entry = face.east();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "unsealed-return", 0, cursor)};
@@ -1462,8 +1462,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "prebaseline-return", 0, cursor)};
@@ -1545,8 +1545,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "prebaseline-terminal", 0, cursor)};
@@ -1625,8 +1625,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "open-move-debt", 0, cursor);
@@ -1714,8 +1714,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "capture-move-debt", 0, cursor);
@@ -1812,8 +1812,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask bootstrap = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "raw-sink-containment", 0, cursor);
@@ -1936,8 +1936,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos sink = face.east(2);
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "settle-tracked-escape", 0, cursor)};
@@ -2064,8 +2064,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos sink = face.east(2);
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "tracked-escape", 0, cursor);
@@ -2190,7 +2190,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "debt-timeout", 0, cursor)};
         active[0].start(bot);
         AtomicBoolean restoredWithMissingIdentity = new AtomicBoolean();
@@ -2219,7 +2219,7 @@ public final class MiningServiceResourceGameTests {
                 task.abort(bot);
                 active[0] = new MiningServiceTask(
                         Set.of(Blocks.DIAMOND_ORE), live,
-                        MiningServiceTask.ServicePolicy.defaultOre(false),
+                        ServicePolicy.defaultOre(false),
                         0, "debt-timeout", 0, cursor);
                 active[0].start(bot);
                 restoredWithMissingIdentity.set(true);
@@ -2264,8 +2264,8 @@ public final class MiningServiceResourceGameTests {
         BlockPos sink = face.east(2);
         prepareDisposalPocket(fixture, Direction.EAST);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         MiningServiceTask[] active = {new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(), policy,
                 0, "pocket-reuse", 0, cursor)};
@@ -2343,7 +2343,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "full-pocket-reuse", 0, cursor);
         task.start(bot);
         int[] completedAt = {-1};
@@ -2456,7 +2456,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "non-junk-opening-spoil", 0, cursor);
         task.start(bot);
         AtomicReference<ItemEntity> claySpoil = new AtomicReference<>();
@@ -2517,8 +2517,8 @@ public final class MiningServiceResourceGameTests {
         bot.getEntityWorld().setBlockState(
                 face.east(2), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         AtomicReference<MiningServiceTask> active = new AtomicReference<>(new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
                 policy, 0, "pocket-ore", 0, cursor));
@@ -2623,7 +2623,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "both-pocket-ore", 0, cursor);
         task.start(bot);
 
@@ -2694,7 +2694,7 @@ public final class MiningServiceResourceGameTests {
                     "mine_face", bot.getEntityWorld(), rememberedFaceBeforeRestore);
             MiningServiceTask restored = new MiningServiceTask(
                     Set.of(Blocks.DIAMOND_ORE), terminal,
-                    MiningServiceTask.ServicePolicy.defaultOre(false),
+                    ServicePolicy.defaultOre(false),
                     0, "both-pocket-ore", 0, cursor);
             restored.start(bot);
             Map<String, String> replayed = restored.checkpoint();
@@ -2765,8 +2765,8 @@ public final class MiningServiceResourceGameTests {
                 Block.NOTIFY_ALL);
 
         MiningCursor cursor = miningCursor(face, 0, 1);
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         String mission = upperOre ? "upper-mouth-ore" : "entry-mouth-ore";
         AtomicReference<MiningServiceTask> active = new AtomicReference<>(
                 new MiningServiceTask(Set.of(Blocks.DIAMOND_ORE), Map.of(),
@@ -2863,7 +2863,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "closed-ore-entity-debt", 0, cursor);
         task.start(bot);
         AtomicReference<ItemEntity> residual = new AtomicReference<>();
@@ -2943,7 +2943,7 @@ public final class MiningServiceResourceGameTests {
         MiningCursor cursor = miningCursor(face, 0, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.defaultOre(false),
+                ServicePolicy.defaultOre(false),
                 0, "pocket-seal-loss", 0, cursor);
         task.start(bot);
         AtomicBoolean sealInventoryRemoved = new AtomicBoolean();
@@ -3034,7 +3034,7 @@ public final class MiningServiceResourceGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 24));
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32));
+                ServicePolicy.obsidianPreflight(32));
         task.start(bot);
 
         context.runAtEveryTick(() -> {
@@ -3069,7 +3069,7 @@ public final class MiningServiceResourceGameTests {
         InventoryAction.removeItems(bot, Items.WATER_BUCKET, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32));
+                ServicePolicy.obsidianPreflight(32));
         task.start(bot);
 
         context.runAtEveryTick(() -> {
@@ -3109,19 +3109,19 @@ public final class MiningServiceResourceGameTests {
         java.util.List<Stage> stages = java.util.List.of(
                 new Stage(() -> new MiningServiceTask(
                         Set.of(Blocks.OBSIDIAN), Map.of(),
-                        MiningServiceTask.ServicePolicy.obsidianPreflight(32)),
+                        ServicePolicy.obsidianPreflight(32)),
                         52, 24, "preflight"),
                 new Stage(() -> new MiningServiceTask(
                         Set.of(Blocks.OBSIDIAN), Map.of(),
-                        MiningServiceTask.ServicePolicy.obsidian8(32, 8), 8),
+                        ServicePolicy.obsidian8(32, 8), 8),
                         40, 16, "boundary_8"),
                 new Stage(() -> new MiningServiceTask(
                         Set.of(Blocks.OBSIDIAN), Map.of(),
-                        MiningServiceTask.ServicePolicy.obsidian8(32, 16), 16),
+                        ServicePolicy.obsidian8(32, 16), 16),
                         28, 8, "boundary_16"),
                 new Stage(() -> new MiningServiceTask(
                         Set.of(Blocks.OBSIDIAN), Map.of(),
-                        MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24),
+                        ServicePolicy.obsidian8(32, 24), 24),
                         16, 0, "boundary_24"));
         int[] stageIndex = {0};
         MiningServiceTask[] current = {null};
@@ -3165,7 +3165,7 @@ public final class MiningServiceResourceGameTests {
         InventoryAction.removeItems(bot, Items.CRAFTING_TABLE, 1);
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidianPreflight(32));
+                ServicePolicy.obsidianPreflight(32));
         task.start(bot);
 
         context.runAtEveryTick(() -> {
@@ -3194,7 +3194,7 @@ public final class MiningServiceResourceGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STICK, 2));
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         for (int tick = 0; tick < 400 && task.state() == TaskState.RUNNING; tick++) {
             task.tick(bot);
@@ -3216,7 +3216,7 @@ public final class MiningServiceResourceGameTests {
         giveObsidianServiceKit(bot, 9, 4, 16);
         MiningServiceTask task = new MiningServiceTask(
                     Set.of(Blocks.OBSIDIAN), Map.of(),
-                    MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                    ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         for (int tick = 0; tick < 400 && task.state() == TaskState.RUNNING; tick++) {
             task.tick(bot);
@@ -3239,7 +3239,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.RUNNING) {
@@ -3270,7 +3270,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.RUNNING) {
@@ -3299,7 +3299,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask original = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         original.start(bot);
         Map<String, String> checkpoint = original.checkpoint();
         MiningServiceTask.RestoreMetadata metadata =
@@ -3315,7 +3315,7 @@ public final class MiningServiceResourceGameTests {
                         && "0".equals(checkpoint.get("future_stick_reserve"))
                         && "true".equals(checkpoint.get("crafting_table_required"))
                         && metadata.policy().equals(
-                        MiningServiceTask.ServicePolicy.obsidian8(32, 24))
+                        ServicePolicy.obsidian8(32, 24))
                         && metadata.serviceBoundary() == 24,
                 "schema-8 checkpoint lost its identity or policy: " + checkpoint);
 
@@ -3343,7 +3343,7 @@ public final class MiningServiceResourceGameTests {
         unidentified.remove("torch_min_count");
         MiningServiceTask legacyObsidian = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.copyOf(unidentified),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         legacyObsidian.start(bot);
         require(context, legacyObsidian.state() == TaskState.FAILED
                         && "mining_service_invalid_checkpoint"
@@ -3352,7 +3352,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask restored = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), checkpoint,
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         restored.start(bot);
         context.runAtEveryTick(() -> {
             if (restored.state() == TaskState.RUNNING) {
@@ -3384,7 +3384,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.RUNNING) {
@@ -3426,7 +3426,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.RUNNING) {
@@ -3457,7 +3457,7 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask task = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
-                MiningServiceTask.ServicePolicy.obsidian8(32, 24), 24);
+                ServicePolicy.obsidian8(32, 24), 24);
         task.start(bot);
         context.runAtEveryTick(() -> {
             if (task.state() == TaskState.RUNNING) {
@@ -3482,8 +3482,8 @@ public final class MiningServiceResourceGameTests {
     public void rareBoundary8AcceptsExactResourceHorizonAndRepairsChannel(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonExactGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 8);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 8);
         int preRepairSticks = rarePreRepairSticks(policy, false);
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
                 policy.foodMinUnits(), preRepairSticks, false);
@@ -3519,8 +3519,8 @@ public final class MiningServiceResourceGameTests {
     public void rareBoundary8RejectsOneTorchBelowHorizonBeforeRepair(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonTorchFailGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 8);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 8);
         int preRepairSticks = rarePreRepairSticks(policy, false);
         int haveTorches = policy.torchMinCount() - 1;
         giveRareBoundaryKit(bot, policy, haveTorches,
@@ -3544,8 +3544,8 @@ public final class MiningServiceResourceGameTests {
     public void rareBoundary8RejectsOneFoodBelowHorizonBeforeRepair(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonFoodFailGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 8);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 8);
         int preRepairSticks = rarePreRepairSticks(policy, false);
         int haveFood = policy.foodMinUnits() - 1;
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
@@ -3569,8 +3569,8 @@ public final class MiningServiceResourceGameTests {
     public void rareBoundary8RejectsOneStickBelowRepairHorizon(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonStickFailGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 8);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 8);
         int requiredSticks = rarePreRepairSticks(policy, false);
         int haveSticks = requiredSticks - 1;
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
@@ -3594,8 +3594,8 @@ public final class MiningServiceResourceGameTests {
     public void rareBoundary8PhysicallyWithdrawsMissionHorizonFromDepot(TestContext context) {
         Fixture fixture = spawn(context, "RareHorizonDepotGT", true);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 8);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 8);
         giveRareBoundaryKit(bot, policy, 0, 0, 0, true);
         Inventory depot = ContainerAction.resolve(bot, fixture.depot()).orElseThrow();
         int depotSlot = putStackedInventory(
@@ -3633,8 +3633,8 @@ public final class MiningServiceResourceGameTests {
     public void rareBoundary8CrowdedDepotReservesTheWholeRefillPeak(TestContext context) {
         Fixture fixture = spawn(context, "RareCrowdedDepotGT", true);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 8);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 8);
         giveRareBoundaryKit(bot, policy, 0, 0, 0, false);
         Inventory depot = ContainerAction.resolve(bot, fixture.depot()).orElseThrow();
         int depotSlot = putStackedInventory(
@@ -3703,8 +3703,8 @@ public final class MiningServiceResourceGameTests {
         memory.markPlace("mining_depot", bot.getEntityWorld(), remoteDepot);
         memory.remember("mining_depot_owner", mission);
 
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 63);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 63);
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
                 policy.foodMinUnits(), rareProtectedSticks(policy), true);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 5));
@@ -3784,8 +3784,8 @@ public final class MiningServiceResourceGameTests {
     public void boundaryZeroWorstCaseRepairLeavesRetryCushionUsable(TestContext context) {
         Fixture fixture = spawn(context, "RareBoundaryZeroRetryGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy retryPolicy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 0, 1);
+        ServicePolicy retryPolicy =
+                ServicePolicy.rareOreBatch(64, 0, 1);
         // Epoch zero already spent one seven-pick pool. Epoch one receives the sealed retry heads,
         // while the sixteen emergency blocks remain untouchable.
         int retryPreRepairSticks = rarePreRepairSticks(retryPolicy, false);
@@ -3832,8 +3832,8 @@ public final class MiningServiceResourceGameTests {
     public void boundary63AcceptsExactlyOneUsableTargetBreak(TestContext context) {
         Fixture fixture = spawn(context, "RareBoundary63ToolGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 63);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 63);
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
                 policy.foodMinUnits(), rareProtectedSticks(policy), true);
         int ironSlot = InventoryAction.findItem(bot, Items.IRON_PICKAXE).orElseThrow();
@@ -3884,8 +3884,8 @@ public final class MiningServiceResourceGameTests {
     public void rareServiceSchema6PinsMissionTargetAndBoundary(TestContext context) {
         Fixture fixture = spawn(context, "RareIdentityGT", false);
         AIPlayerEntity bot = fixture.bot();
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 55);
+        ServicePolicy policy =
+                ServicePolicy.rareOreBatch(64, 55);
         giveRareBoundaryKit(bot, policy, policy.torchMinCount(),
                 policy.foodMinUnits(), rarePreRepairSticks(policy, false), false);
         MiningCursor cursor = miningCursor(bot.getBlockPos().toImmutable(), 0, 7);
@@ -3917,17 +3917,17 @@ public final class MiningServiceResourceGameTests {
 
         MiningServiceTask wrongMission = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), checkpoint,
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 55),
+                ServicePolicy.rareOreBatch(64, 55),
                 55, "forged-mission", 64, cursor);
         wrongMission.start(bot);
         MiningServiceTask wrongTarget = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), checkpoint,
-                MiningServiceTask.ServicePolicy.rareOreBatch(72, 55),
+                ServicePolicy.rareOreBatch(72, 55),
                 55, "rare-mission", 72, cursor);
         wrongTarget.start(bot);
         MiningServiceTask wrongOres = new MiningServiceTask(
                 Set.of(Blocks.EMERALD_ORE), checkpoint,
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 55),
+                ServicePolicy.rareOreBatch(64, 55),
                 55, "rare-mission", 64, cursor);
         wrongOres.start(bot);
         require(context, wrongMission.state() == TaskState.FAILED
@@ -3939,7 +3939,7 @@ public final class MiningServiceResourceGameTests {
         Map<String, String> cursorless = Map.copyOf(cursorlessSchema6);
         MiningServiceTask cursorlessRestore = new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), cursorless,
-                MiningServiceTask.ServicePolicy.rareOreBatch(64, 55),
+                ServicePolicy.rareOreBatch(64, 55),
                 55, "rare-mission", 64);
         cursorlessRestore.start(bot);
         require(context, MiningServiceTask.inspectCheckpoint(cursorless).isEmpty()
@@ -4238,7 +4238,7 @@ public final class MiningServiceResourceGameTests {
             Map<String, String> checkpoint) {
         return new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), checkpoint,
-                MiningServiceTask.ServicePolicy.rareDescentKit(64),
+                ServicePolicy.rareDescentKit(64),
                 0, mission, 64, cursor);
     }
 
@@ -4366,13 +4366,13 @@ public final class MiningServiceResourceGameTests {
         BlockPos face = bot.getBlockPos().toImmutable();
         return new MiningServiceTask(
                 Set.of(Blocks.DIAMOND_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.rareOreBatch(target, boundary),
+                ServicePolicy.rareOreBatch(target, boundary),
                 boundary, "rare-horizon-" + target, target,
                 miningCursor(face, 0, boundary / 8));
     }
 
     private static void giveRareBoundaryKit(AIPlayerEntity bot,
-                                            MiningServiceTask.ServicePolicy policy,
+                                            ServicePolicy policy,
                                             int torches,
                                             int food,
                                             int sticks,
@@ -4396,12 +4396,12 @@ public final class MiningServiceResourceGameTests {
         giveStackedItem(bot, Items.STICK, sticks);
     }
 
-    private static int rareProtectedSticks(MiningServiceTask.ServicePolicy policy) {
+    private static int rareProtectedSticks(ServicePolicy policy) {
         return policy.futureStickReserve() + MiningBudget.DIAMOND_STACK_TARGET_TOOL_STICKS;
     }
 
     private static int rarePreRepairSticks(
-            MiningServiceTask.ServicePolicy policy, boolean freshChannelPicks) {
+            ServicePolicy policy, boolean freshChannelPicks) {
         int currentEpoch = freshChannelPicks ? 0
                 : MiningBudget.RARE_TUNNELING_SERVICE_TARGET
                 * MiningBudget.STONE_PICKAXE_STICK_COST;
@@ -4560,8 +4560,8 @@ public final class MiningServiceResourceGameTests {
 
     private static Map<String, String> validCheckpoint(
             AIPlayerEntity bot, String budget, String lastProgress) {
-        MiningServiceTask.ServicePolicy policy =
-                MiningServiceTask.ServicePolicy.defaultOre(false);
+        ServicePolicy policy =
+                ServicePolicy.defaultOre(false);
         Map<String, String> values = new LinkedHashMap<>();
         values.put("schema", "8");
         values.put("work_face", bot.getBlockPos().getX() + ","

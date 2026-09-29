@@ -466,7 +466,7 @@ public final class OreDigPickupGameTests {
         BlockPos start = fixture.start();
         BlockPos ore = start.north();
         var world = context.getWorld();
-        int protectedStone = MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(32)
+        int protectedStone = ServicePolicy.bootstrapStoneLikeTarget(32)
                 + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
 
         world.setBlockState(ore, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
@@ -531,7 +531,7 @@ public final class OreDigPickupGameTests {
         BlockPos start = fixture.start();
         BlockPos ore = start.north();
         var world = context.getWorld();
-        int protectedStone = MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(32)
+        int protectedStone = ServicePolicy.bootstrapStoneLikeTarget(32)
                 + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
 
         world.setBlockState(
@@ -5480,7 +5480,7 @@ public final class OreDigPickupGameTests {
         BlockPos forward = start.north();
         BlockPos fluid = forward.east();
         var world = context.getWorld();
-        int protectedStone = MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(32)
+        int protectedStone = ServicePolicy.bootstrapStoneLikeTarget(32)
                 + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
 
         // The forward body is a sealed mining wall. Its exposed side lava is reachable from the
@@ -5578,7 +5578,7 @@ public final class OreDigPickupGameTests {
         BlockPos headWater = forwardHead.east();
         BlockPos headLava = forwardHead.west();
         var world = context.getWorld();
-        int protectedStone = MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(32)
+        int protectedStone = ServicePolicy.bootstrapStoneLikeTarget(32)
                 + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
 
         world.setBlockState(forward, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
@@ -5643,7 +5643,7 @@ public final class OreDigPickupGameTests {
         BlockPos forwardHead = forward.up();
         BlockPos headLava = forwardHead.east();
         var world = context.getWorld();
-        int protectedStone = MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(32)
+        int protectedStone = ServicePolicy.bootstrapStoneLikeTarget(32)
                 + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
 
         world.setBlockState(forward, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);

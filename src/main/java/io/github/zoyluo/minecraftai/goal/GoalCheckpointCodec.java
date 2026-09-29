@@ -15,6 +15,8 @@ import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.task.HuntSearchCursor;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
+import io.github.zoyluo.minecraftai.task.ServicePolicy;
+import io.github.zoyluo.minecraftai.task.ServiceProfile;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
@@ -640,7 +642,7 @@ final class GoalCheckpointCodec {
 
     record SettledServiceDescriptor(
             String oreFingerprint,
-            MiningServiceTask.ServicePolicy policy,
+            ServicePolicy policy,
             String missionId,
             int target,
             int boundary) {
@@ -693,9 +695,9 @@ final class GoalCheckpointCodec {
                         || !"true".equals(parts[12]) && !"false".equals(parts[12])) {
                     return Optional.empty();
                 }
-                MiningServiceTask.ServicePolicy policy =
-                        new MiningServiceTask.ServicePolicy(
-                                MiningServiceTask.ServiceProfile.valueOf(parts[1]),
+                ServicePolicy policy =
+                        new ServicePolicy(
+                                ServiceProfile.valueOf(parts[1]),
                                 Integer.parseInt(parts[5]),
                                 Integer.parseInt(parts[6]),
                                 Integer.parseInt(parts[7]),

@@ -20,6 +20,7 @@ import io.github.zoyluo.minecraftai.task.BlueprintSchema;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
 import io.github.zoyluo.minecraftai.task.HuntTask;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
+import io.github.zoyluo.minecraftai.task.ServicePolicy;
 import io.github.zoyluo.minecraftai.task.WorkshopLocator;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -1833,10 +1834,10 @@ public final class GoalPlanner {
             }
             // Keep the tool-upgrade boundary explicit: four stone picks are cheap tunnel tools;
             // diamond/iron durability remains reserved for target blocks and later replacement.
-            int stoneLikeTarget = MiningServiceTask.ServicePolicy
+            int stoneLikeTarget = ServicePolicy
                     .bootstrapStoneLikeTarget(targetCount)
                     + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
-            int serviceStickTarget = MiningServiceTask.ServicePolicy
+            int serviceStickTarget = ServicePolicy
                     .bootstrapStickTarget(targetCount)
                     + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STICKS;
             boolean needsStoneSword = counts.getOrDefault(Items.STONE_SWORD, 0) <= 0;

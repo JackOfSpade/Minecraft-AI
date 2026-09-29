@@ -48,6 +48,8 @@ import io.github.zoyluo.minecraftai.task.MineTask;
 import io.github.zoyluo.minecraftai.task.MoveTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.PlaceStationsTask;
+import io.github.zoyluo.minecraftai.task.ServicePolicy;
+import io.github.zoyluo.minecraftai.task.ServiceProfile;
 import io.github.zoyluo.minecraftai.task.SmeltTask;
 import io.github.zoyluo.minecraftai.task.StockpileTask;
 import io.github.zoyluo.minecraftai.task.Task;
@@ -477,9 +479,9 @@ public final class GoalExecutor {
                 inspectOreDigCheckpointForGoal(goal, restoredMiningCheckpoint);
         boolean ignoredBootstrapMiningNamespace = restoredService
                 .filter(metadata -> metadata.policy().profile()
-                        == MiningServiceTask.ServiceProfile.RARE_ORE_BATCH
+                        == ServiceProfile.RARE_ORE_BATCH
                         || metadata.policy().profile()
-                        == MiningServiceTask.ServiceProfile.RARE_DESCENT_KIT)
+                        == ServiceProfile.RARE_DESCENT_KIT)
                 .filter(metadata -> metadata.serviceBoundary() == 0)
                 .flatMap(metadata -> decodedMining.filter(mining ->
                         mining.rareMissionTarget() == 0
@@ -522,8 +524,8 @@ public final class GoalExecutor {
         boolean unmarkedClosedAuxiliaryService = restoredCapacityParent == null
                 && restoredAuxiliaryMining.filter(metadata -> !metadata.batchOpen()).isPresent()
                 && restoredService.map(MiningServiceTask.RestoreMetadata::policy)
-                .map(MiningServiceTask.ServicePolicy::profile)
-                .filter(profile -> profile == MiningServiceTask.ServiceProfile.ORE_BATCH)
+                .map(ServicePolicy::profile)
+                .filter(profile -> profile == ServiceProfile.ORE_BATCH)
                 .isPresent();
         String restoredAuxiliaryFingerprint = restoredAuxiliaryMining
                 .map(metadata -> OreDigTask.oreFingerprint(metadata.ores()))
@@ -723,21 +725,21 @@ public final class GoalExecutor {
                 .orElse(0);
         if (restoredService.isPresent()) {
             MiningServiceTask.RestoreMetadata serviceMetadata = restoredService.orElseThrow();
-            MiningServiceTask.ServiceProfile profile = serviceMetadata.policy().profile();
+            ServiceProfile profile = serviceMetadata.policy().profile();
             boolean obsidianOres = serviceMetadata.ores().equals(
                     OreScan.expandOreFamilies(Set.of(net.minecraft.block.Blocks.OBSIDIAN)));
             boolean missionMatches = missionId.toString().equals(
                     serviceMetadata.serviceMissionId());
             boolean incompatibleServiceIdentity;
             if (restoredCapacityParent != null
-                    && profile != MiningServiceTask.ServiceProfile.ORE_BATCH) {
+                    && profile != ServiceProfile.ORE_BATCH) {
                 incompatibleServiceIdentity = true;
-            } else if (profile == MiningServiceTask.ServiceProfile.OBSIDIAN_8) {
+            } else if (profile == ServiceProfile.OBSIDIAN_8) {
                 CreateObsidianTask.RestoreMetadata obsidianMetadata = restoredObsidian.orElse(null);
                 boolean policyMatches = obsidianMetadata != null
                         && serviceMetadata.serviceTargetCount() == obsidianMetadata.targetCount()
                         && serviceMetadata.policy().equals(
-                        MiningServiceTask.ServicePolicy.obsidian8(
+                        ServicePolicy.obsidian8(
                                 obsidianMetadata.targetCount(),
                                 serviceMetadata.serviceBoundary()));
                 boolean pendingIdentity = obsidianMetadata != null
@@ -751,15 +753,15 @@ public final class GoalExecutor {
                 incompatibleServiceIdentity = !obsidianOres || !missionMatches
                         || !policyMatches
                         || (!pendingIdentity && !alreadyAcknowledgedIdentity);
-            } else if (profile == MiningServiceTask.ServiceProfile.OBSIDIAN_PREFLIGHT) {
+            } else if (profile == ServiceProfile.OBSIDIAN_PREFLIGHT) {
                 incompatibleServiceIdentity = !obsidianOres || !missionMatches
                         || serviceMetadata.serviceBoundary() != 0
                         || restoredPendingBoundary > 0
                         || unsettledObsidian
                         || !serviceMetadata.policy().equals(
-                        MiningServiceTask.ServicePolicy.obsidianPreflight(
+                        ServicePolicy.obsidianPreflight(
                                 serviceMetadata.serviceTargetCount()));
-            } else if (profile == MiningServiceTask.ServiceProfile.RARE_DESCENT_KIT) {
+            } else if (profile == ServiceProfile.RARE_DESCENT_KIT) {
                 BlockPos serviceFace = decodePos(restoredServiceCheckpoint.get("work_face"))
                         .orElse(null);
                 BlockPos embeddedCursorFace = decodePos(
@@ -778,8 +780,8 @@ public final class GoalExecutor {
                         || restoredMining.isPresent()
                         || !miningStepFeedsGoal(goal, serviceMetadata.ores())
                         || !serviceMetadata.policy().equals(
-                        MiningServiceTask.ServicePolicy.rareDescentKit(64));
-            } else if (profile == MiningServiceTask.ServiceProfile.RARE_ORE_BATCH) {
+                        ServicePolicy.rareDescentKit(64));
+            } else if (profile == ServiceProfile.RARE_ORE_BATCH) {
                 BlockPos serviceFace = decodePos(restoredServiceCheckpoint.get("work_face"))
                         .orElse(null);
                 boolean retryBoundaryZero = serviceMetadata.serviceBoundary() == 0
@@ -808,7 +810,7 @@ public final class GoalExecutor {
                         || !retryEpochMatches
                         || !miningStepFeedsGoal(goal, serviceMetadata.ores())
                         || !serviceMetadata.policy().equals(
-                        MiningServiceTask.ServicePolicy.rareOreBatch(
+                        ServicePolicy.rareOreBatch(
                                 serviceMetadata.serviceTargetCount(),
                                 serviceMetadata.serviceBoundary(),
                                 restoredRareResourceEpoch));
@@ -827,14 +829,14 @@ public final class GoalExecutor {
                     miningNamespaceMatches = ordinaryServiceMiningNamespaceMatches(
                             goal, serviceMetadata.ores(), serviceFace, restoredMining);
                 }
-                MiningServiceTask.ServicePolicy expectedOrdinaryPolicy =
+                ServicePolicy expectedOrdinaryPolicy =
                         !serviceMetadata.policy().maintainsTunnelingTools()
                                 && serviceMetadata.policy().emergencyBlocksReserved()
-                                > MiningServiceTask.ServicePolicy.defaultOre(false)
+                                > ServicePolicy.defaultOre(false)
                                 .emergencyBlocksReserved()
-                                ? MiningServiceTask.ServicePolicy.capacityHandoff(
+                                ? ServicePolicy.capacityHandoff(
                                 serviceMetadata.policy().emergencyBlocksReserved())
-                                : MiningServiceTask.ServicePolicy.defaultOre(
+                                : ServicePolicy.defaultOre(
                                 serviceMetadata.policy().maintainsTunnelingTools());
                 incompatibleServiceIdentity = !missionMatches
                         || restoredPendingBoundary > 0
@@ -933,9 +935,9 @@ public final class GoalExecutor {
         }
         boolean committedRareDescentKit = committedService && restoredService
                 .map(MiningServiceTask.RestoreMetadata::policy)
-                .map(MiningServiceTask.ServicePolicy::profile)
+                .map(ServicePolicy::profile)
                 .filter(profile -> profile
-                        == MiningServiceTask.ServiceProfile.RARE_DESCENT_KIT)
+                        == ServiceProfile.RARE_DESCENT_KIT)
                 .isPresent();
         boolean committedRareDescentKitReady = committedRareDescentKit
                 && MiningServiceTask.rareDescentKitReady(bot)
@@ -981,8 +983,8 @@ public final class GoalExecutor {
         Optional<MiningServiceTask.RestoreMetadata> stableRestoredService = restoredService;
         boolean ordinaryService = stableRestoredService
                 .map(MiningServiceTask.RestoreMetadata::policy)
-                .map(MiningServiceTask.ServicePolicy::profile)
-                .filter(profile -> profile == MiningServiceTask.ServiceProfile.ORE_BATCH)
+                .map(ServicePolicy::profile)
+                .filter(profile -> profile == ServiceProfile.ORE_BATCH)
                 .isPresent();
         boolean freshOrdinaryServiceSuccessor = ordinaryService && plan.success()
                 && hasFreshMiningSuccessor(plan.steps(),
@@ -1126,9 +1128,9 @@ public final class GoalExecutor {
         }
         boolean restoredPreflight = restoredService
                 .map(MiningServiceTask.RestoreMetadata::policy)
-                .map(MiningServiceTask.ServicePolicy::profile)
+                .map(ServicePolicy::profile)
                 .filter(profile -> profile
-                        == MiningServiceTask.ServiceProfile.OBSIDIAN_PREFLIGHT)
+                        == ServiceProfile.OBSIDIAN_PREFLIGHT)
                 .isPresent();
         int plannedPreflightTarget = plannedObsidianPreflightTarget(plan.steps());
         boolean freshObsidianIdentityPresent = plan.steps().stream().anyMatch(
@@ -1166,8 +1168,8 @@ public final class GoalExecutor {
                 : Set.of();
         boolean restoredObsidianBoundary = restoredService
                 .map(MiningServiceTask.RestoreMetadata::policy)
-                .map(MiningServiceTask.ServicePolicy::profile)
-                .filter(profile -> profile == MiningServiceTask.ServiceProfile.OBSIDIAN_8)
+                .map(ServicePolicy::profile)
+                .filter(profile -> profile == ServiceProfile.OBSIDIAN_8)
                 .isPresent();
         int restoredObsidianCollected = restoredObsidian.isPresent()
                 ? nonNegativeInt(restoredObsidianCheckpoint.get("collected")) : -1;
@@ -1276,12 +1278,12 @@ public final class GoalExecutor {
             // batch from the wrong position; its checkpoint returns to the exact saved work face.
             // If planning currently fails because the tool/food is at that depot, run service alone;
             // assignNext's postcondition repair replans after the inventory has been replenished.
-            MiningServiceTask.ServicePolicy restoredPolicy = restoredService.orElseThrow().policy();
+            ServicePolicy restoredPolicy = restoredService.orElseThrow().policy();
             int pendingBoundary = restoredObsidian
                     .map(CreateObsidianTask.RestoreMetadata::pendingServiceBoundary)
                     .orElse(0);
             GoalStep serviceStep;
-            if (restoredPolicy.profile() == MiningServiceTask.ServiceProfile.OBSIDIAN_8) {
+            if (restoredPolicy.profile() == ServiceProfile.OBSIDIAN_8) {
                 if (pendingBoundary <= 0) {
                     recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                             GoalResult.Status.FAILED,
@@ -1295,7 +1297,7 @@ public final class GoalExecutor {
                         restoredObsidian.orElseThrow().targetCount());
                 rebuiltObsidianAcquisition = true;
             } else if (restoredPolicy.profile()
-                    == MiningServiceTask.ServiceProfile.OBSIDIAN_PREFLIGHT) {
+                    == ServiceProfile.OBSIDIAN_PREFLIGHT) {
                 serviceStep = GoalStep.obsidianPreflight(
                         restoredService.orElseThrow().serviceTargetCount());
                 int continuationTarget = restoredObsidian
@@ -1305,7 +1307,7 @@ public final class GoalExecutor {
                         continuationTarget);
                 rebuiltObsidianAcquisition = true;
             } else if (restoredPolicy.profile()
-                    == MiningServiceTask.ServiceProfile.RARE_DESCENT_KIT) {
+                    == ServiceProfile.RARE_DESCENT_KIT) {
                 serviceStep = GoalStep.rareDescentKitService(
                         interruptedServiceOres,
                         restoredService.orElseThrow().serviceTargetCount());
@@ -1321,7 +1323,7 @@ public final class GoalExecutor {
                 restoredSteps.add(0, serviceStep);
                 restoredSteps.addAll(descentTail);
             } else if (restoredPolicy.profile()
-                    == MiningServiceTask.ServiceProfile.RARE_ORE_BATCH) {
+                    == ServiceProfile.RARE_ORE_BATCH) {
                 serviceStep = GoalStep.rareOreService(
                         interruptedServiceOres,
                         restoredService.orElseThrow().serviceBoundary(),
@@ -1330,7 +1332,7 @@ public final class GoalExecutor {
             } else {
                 boolean explicitCapacityPolicy = !restoredPolicy.maintainsTunnelingTools()
                         && restoredPolicy.emergencyBlocksReserved()
-                        > MiningServiceTask.ServicePolicy.defaultOre(false)
+                        > ServicePolicy.defaultOre(false)
                         .emergencyBlocksReserved();
                 if ((explicitCapacityPolicy || capacityOrdinaryServiceRestore)
                         && ordinaryServiceParent.isEmpty()) {
@@ -1703,14 +1705,14 @@ public final class GoalExecutor {
                 boolean identityMatches = metadata.isPresent() && serviceMetadata.isPresent()
                         && serviceMetadata.orElseThrow().done()
                         && serviceMetadata.orElseThrow().policy().profile()
-                        == MiningServiceTask.ServiceProfile.OBSIDIAN_8
+                        == ServiceProfile.OBSIDIAN_8
                         && plan.missionId.toString().equals(
                         serviceMetadata.orElseThrow().serviceMissionId())
                         && serviceMetadata.orElseThrow().serviceTargetCount()
                         == metadata.orElseThrow().targetCount()
                         && serviceMetadata.orElseThrow().serviceBoundary() == expectedBoundary
                         && serviceMetadata.orElseThrow().policy().equals(
-                        MiningServiceTask.ServicePolicy.obsidian8(
+                        ServicePolicy.obsidian8(
                                 metadata.orElseThrow().targetCount(), expectedBoundary));
                 Optional<Map<String, String>> acknowledged = identityMatches
                         && expectedBoundary == plan.current.count()
@@ -3211,7 +3213,7 @@ public final class GoalExecutor {
                 OreDigTask.inspectCheckpoint(parentCheckpoint, 0);
         if (service.isEmpty() || parent.isEmpty()
                 || service.orElseThrow().policy().profile()
-                != MiningServiceTask.ServiceProfile.ORE_BATCH
+                != ServiceProfile.ORE_BATCH
                 || service.orElseThrow().serviceTargetCount() != 0
                 || service.orElseThrow().serviceBoundary() != 0
                 || parent.orElseThrow().rareMissionTarget() != 0
@@ -3833,30 +3835,30 @@ public final class GoalExecutor {
         if (step.isObsidianService()) {
             int target = step.obsidianTransactionTarget();
             return new MiningServiceInvocation(
-                    MiningServiceTask.ServicePolicy.obsidian8(target, step.count()),
+                    ServicePolicy.obsidian8(target, step.count()),
                     target, step.count());
         }
         if (step.isObsidianPreflight()) {
             int target = step.obsidianTransactionTarget();
             return new MiningServiceInvocation(
-                    MiningServiceTask.ServicePolicy.obsidianPreflight(target), target, 0);
+                    ServicePolicy.obsidianPreflight(target), target, 0);
         }
         if (step.isRareOreService()) {
             int target = step.rareOreMissionTarget();
             return new MiningServiceInvocation(
-                    MiningServiceTask.ServicePolicy.rareOreBatch(
+                    ServicePolicy.rareOreBatch(
                             target, step.count(), plan.rareResourceRetriesUsed),
                     target, step.count());
         }
         if (step.isRareDescentKitService()) {
             int target = step.rareDescentKitMissionTarget();
             return new MiningServiceInvocation(
-                    MiningServiceTask.ServicePolicy.rareDescentKit(target), target, 0);
+                    ServicePolicy.rareDescentKit(target), target, 0);
         }
-        MiningServiceTask.ServicePolicy policy = step.isMiningHandoffService()
-                ? MiningServiceTask.ServicePolicy.capacityHandoff(
+        ServicePolicy policy = step.isMiningHandoffService()
+                ? ServicePolicy.capacityHandoff(
                 step.miningHandoffStoneLikeReserve())
-                : MiningServiceTask.ServicePolicy.defaultOre(
+                : ServicePolicy.defaultOre(
                 step.maintainsTunnelingTools());
         return new MiningServiceInvocation(policy, 0, 0);
     }
@@ -4105,7 +4107,7 @@ public final class GoalExecutor {
 
     static int capacityHandoffStoneLikeReserveForObsidianTarget(int obsidianTarget) {
         if (obsidianTarget > 0) {
-            return MiningServiceTask.ServicePolicy.bootstrapStoneLikeTarget(obsidianTarget)
+            return ServicePolicy.bootstrapStoneLikeTarget(obsidianTarget)
                     + MiningBudget.OBSIDIAN_BOOTSTRAP_CHANNEL_RETRY_STONE_LIKE;
         }
         return MiningBudget.EMERGENCY_STONE_LIKE;
@@ -4860,7 +4862,7 @@ public final class GoalExecutor {
         }
     }
 
-    private record MiningServiceInvocation(MiningServiceTask.ServicePolicy policy,
+    private record MiningServiceInvocation(ServicePolicy policy,
                                            int target,
                                            int boundary) {
     }

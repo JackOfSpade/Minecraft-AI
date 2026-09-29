@@ -23,6 +23,7 @@ import io.github.zoyluo.minecraftai.task.HoldTask;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.ResupplyTask;
+import io.github.zoyluo.minecraftai.task.ServicePolicy;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
@@ -1312,7 +1313,7 @@ public final class MiningCheckpointMissionGameTests {
                             "failed-primary fixture did not bind its exact closed parent");
                     Map<String, String> terminalFailedService = withServicePolicy(
                             failedService,
-                            MiningServiceTask.ServicePolicy.defaultOre(false));
+                            ServicePolicy.defaultOre(false));
                     String settledFailure =
                             "mining_service_disposal_ore_preserved:minecraft:diamond_ore";
                     terminalFailedService = new LinkedHashMap<>(terminalFailedService);
@@ -1632,7 +1633,7 @@ public final class MiningCheckpointMissionGameTests {
 
             MiningServiceTask foreign = new MiningServiceTask(
                     Set.of(Blocks.COAL_ORE), Map.of(),
-                    MiningServiceTask.ServicePolicy.defaultOre(false),
+                    ServicePolicy.defaultOre(false),
                     0, "foreign-service-geometry", 0, original,
                     java.util.List.of(guard));
             foreign.start(bot);
@@ -1646,7 +1647,7 @@ public final class MiningCheckpointMissionGameTests {
 
             MiningServiceTask rotatedService = new MiningServiceTask(
                     Set.of(Blocks.COAL_ORE), Map.of(),
-                    MiningServiceTask.ServicePolicy.defaultOre(false),
+                    ServicePolicy.defaultOre(false),
                     0, "rotated-service-geometry", 0, rotated,
                     java.util.List.of(guard));
             rotatedService.start(bot);
@@ -2376,7 +2377,7 @@ public final class MiningCheckpointMissionGameTests {
                 .orElseThrow();
         MiningServiceTask serviceTask = new MiningServiceTask(
                 Set.of(Blocks.COAL_ORE), Map.of(),
-                MiningServiceTask.ServicePolicy.capacityHandoff(
+                ServicePolicy.capacityHandoff(
                         MiningBudget.EMERGENCY_STONE_LIKE),
                 0, "capacity-parent-gametest", 0, cursor);
         serviceTask.start(bot);
@@ -2627,7 +2628,7 @@ public final class MiningCheckpointMissionGameTests {
                             "failed-aux fixture did not produce an exact non-pocket service");
                     Map<String, String> terminalFailedService = withServicePolicy(
                             failedService,
-                            MiningServiceTask.ServicePolicy.defaultOre(false));
+                            ServicePolicy.defaultOre(false));
                     require(context,
                             MiningServiceTask.inspectCheckpoint(terminalFailedService).isPresent()
                                     && GoalExecutor.failedClosedAuxiliaryServiceMatches(
@@ -2987,7 +2988,7 @@ public final class MiningCheckpointMissionGameTests {
                             MiningMissionBudget.SERVICE_HARD_WINDOW_TICKS));
                     failedService.put("last_progress_budget", "0");
                     failedService = withServicePolicy(failedService,
-                            MiningServiceTask.ServicePolicy.defaultOre(true));
+                            ServicePolicy.defaultOre(true));
                     require(context, GoalExecutor.failedClosedAuxiliaryServiceMatches(
                                     failedService, closedAux),
                             "continuation fixture service does not bind its closed cursor");
@@ -3115,7 +3116,7 @@ public final class MiningCheckpointMissionGameTests {
                     serviceCheckpoint.put("budget_used", "0");
                     serviceCheckpoint.put("last_progress_budget", "0");
                     serviceCheckpoint = withServicePolicy(serviceCheckpoint,
-                            MiningServiceTask.ServicePolicy.defaultOre(true));
+                            ServicePolicy.defaultOre(true));
                     require(context, GoalExecutor.failedClosedAuxiliaryServiceMatches(
                                     serviceCheckpoint, closedAux),
                             "completed service does not bind its closed iron cursor");
@@ -3534,8 +3535,8 @@ public final class MiningCheckpointMissionGameTests {
 
             // Forge a checkpoint that is internally valid for target 72. Restore must still reject
             // it because the top-level mission target is 8; service self-consistency is insufficient.
-            MiningServiceTask.ServicePolicy wrongPolicy =
-                    MiningServiceTask.ServicePolicy.rareOreBatch(72, 0, 0);
+            ServicePolicy wrongPolicy =
+                    ServicePolicy.rareOreBatch(72, 0, 0);
             checkpoint.put("task.service_target_count", "72");
             checkpoint.put("task.target_tool_usable", String.valueOf(
                     wrongPolicy.targetToolUsableDurability()));
@@ -5421,8 +5422,8 @@ public final class MiningCheckpointMissionGameTests {
                     // protected pool plus a 17-block excess. The partial excess is deliberately
                     // earlier than the full tuff stack but cannot release its occupied slot, so
                     // the capacity transaction must leave it untouched and choose all 64 tuff.
-                    MiningServiceTask.ServicePolicy boundaryPolicy =
-                            MiningServiceTask.ServicePolicy.rareOreBatch(16, 8, 0);
+                    ServicePolicy boundaryPolicy =
+                            ServicePolicy.rareOreBatch(16, 8, 0);
                     int cobblestone = InventoryAction.countItem(bot, Items.COBBLESTONE);
                     int protectedStone = boundaryPolicy.emergencyBlocksReserved();
                     int cobblestoneBaseline = protectedStone + 17;
@@ -5478,8 +5479,8 @@ public final class MiningCheckpointMissionGameTests {
                                     && checkpoint.containsKey("mining.face"),
                             "service checkpoint lost face/cursor: "
                                     + checkpointSummary(checkpoint));
-                    MiningServiceTask.ServicePolicy expected =
-                            MiningServiceTask.ServicePolicy.rareOreBatch(16, 8, 0);
+                    ServicePolicy expected =
+                            ServicePolicy.rareOreBatch(16, 8, 0);
                     require(context, "true".equals(checkpoint.get("task.channel_tools"))
                                     && "RARE_ORE_BATCH".equals(checkpoint.get("task.service_profile"))
                                     && "16".equals(checkpoint.get("task.service_target_count"))
@@ -6240,7 +6241,7 @@ public final class MiningCheckpointMissionGameTests {
 
     private static Map<String, String> withServicePolicy(
             Map<String, String> checkpoint,
-            MiningServiceTask.ServicePolicy policy) {
+            ServicePolicy policy) {
         Map<String, String> rewritten = new LinkedHashMap<>(checkpoint);
         rewritten.put("channel_tools", String.valueOf(policy.maintainsTunnelingTools()));
         rewritten.put("service_profile", policy.profile().name());

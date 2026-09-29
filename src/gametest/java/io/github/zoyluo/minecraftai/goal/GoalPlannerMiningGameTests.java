@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
+import io.github.zoyluo.minecraftai.task.ServicePolicy;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
@@ -1299,7 +1300,7 @@ public final class GoalPlannerMiningGameTests {
                 Items.COOKED_BEEF, MiningBudget.RARE_BOOTSTRAP_FOOD,
                 Items.CRAFTING_TABLE, 1);
         int occupiedSlots = occupiedInventorySlots(prepared);
-        int serviceFreeSlots = MiningServiceTask.ServicePolicy
+        int serviceFreeSlots = ServicePolicy
                 .rareOreBatch(64, 0).freeSlotsMin();
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
                 new Goal.HaveItem(Items.DIAMOND, 64), prepared, 64, -59,
