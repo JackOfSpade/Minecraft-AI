@@ -62,6 +62,38 @@ final class InstructionRoundEvaluator {
         return new RoundOutcome(started, missing, missing || round.planBlockedAction(), withhold, keepGoing);
     }
 
+    /**
+     * The say-withholding flag for the NEXT call. A failure-report call is a say-only side job about a
+     * task that already ran: it must leave the flag exactly as it was, so a plan-only loop interrupted by a
+     * failure wake keeps withholding say afterwards. Every other call replaces the flag with the round's
+     * own verdict.
+     */
+    static boolean nextWithholdSay(boolean currentFlag, boolean failureReportCall, boolean roundVerdict) {
+        return failureReportCall ? currentFlag : roundVerdict;
+    }
+
+    /**
+     * Whether the current model-call chain belongs to a player instruction. Set when the player gives one,
+     * cleared when an autonomous wake (goal continuation, task-finished, failure) starts a chain of its
+     * own: the last instruction text is never cleared, so its mere presence must not make a later
+     * autonomous wake claim that the OLD instruction could not be started.
+     */
+    static final class InstructionChain {
+        private boolean playerInstruction;
+
+        void beginPlayerInstruction() {
+            playerInstruction = true;
+        }
+
+        void beginAutonomousWake() {
+            playerInstruction = false;
+        }
+
+        boolean playerInstruction() {
+            return playerInstruction;
+        }
+    }
+
     /** What a response with no tool call at all means for the request. */
     record TextOnlyOutcome(boolean requestOutstanding, boolean withholdSayNextCall) {
     }

@@ -188,6 +188,7 @@ public final class BrainCoordinator {
         conversation.lastToolRoundPlanBlockedAction = false;
         conversation.withholdSayNextCall = false;
         conversation.lastInstruction = text;
+        conversation.instructionChain.beginPlayerInstruction();
         conversation.geminiInteractionId = null;
         conversation.pendingGeminiFunctionResults = List.of();
         io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clearUserGoal(bot); // B: a new message from the user clears the stored original goal; the first goal triggered by this message becomes the new "user's original goal"
@@ -202,12 +203,16 @@ public final class BrainCoordinator {
             return;
         }
 
-        // The withheld-say flag only ever describes the call that was just answered; the round
-        // evaluation below decides whether the NEXT call needs it.
-        conversation.withholdSayNextCall = false;
         // A failure-report call is a per-call marker (set by submit), never an instruction-level flag:
         // it must neither start the player's request nor be held against it.
         boolean failureReportCall = conversation.failureReportCall;
+        // The withheld-say flag describes the call that was just answered; the round evaluation below
+        // decides whether the NEXT call needs it. A failure-report call is a side job that leaves it
+        // untouched (see InstructionRoundEvaluator.nextWithholdSay), so a plan-only loop interrupted by
+        // a failure wake still withholds say afterwards.
+        if (!failureReportCall) {
+            conversation.withholdSayNextCall = false;
+        }
         boolean planAlreadyAnnounced = !failureReportCall
                 && conversation.initialPlanSpoken && !conversation.requestStarted;
         recordResponseAndDeliverReply(bot, conversation, response);
@@ -350,7 +355,8 @@ public final class BrainCoordinator {
         conversation.lastToolRoundFailureCount = failedToolCalls;
         conversation.lastToolRoundMissingRequiredAction = outcome.lastRoundMissingRequiredAction();
         conversation.lastToolRoundPlanBlockedAction = initialActionGate.blockedActionCalls();
-        conversation.withholdSayNextCall = outcome.withholdSayNextCall();
+        conversation.withholdSayNextCall = InstructionRoundEvaluator.nextWithholdSay(
+                conversation.withholdSayNextCall, failureReportCall, outcome.withholdSayNextCall());
         BotLog.comm(bot, "tool_round_evaluated",
                 "model_call", conversation.callBudget.callsUsed(),
                 "model_calls_remaining", conversation.callBudget.callsRemaining(),
@@ -850,6 +856,9 @@ public final class BrainCoordinator {
             conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), "")));
         }
         conversation.withholdSayNextCall = false;
+        // An autonomous wake starts a chain of its own: the last player instruction (never cleared) must
+        // not be mistaken for the request of this chain if its budget ends.
+        conversation.instructionChain.beginAutonomousWake();
         conversation.continuationTaskPolls = 0;
         // A task failure is reported with its own guaranteed model call, so it is checked before the
         // per-instruction planner budget: an exhausted planner budget must never swallow the report.
@@ -1224,7 +1233,7 @@ public final class BrainCoordinator {
                 conversation.budgetExhaustionReported,
                 workActive,
                 conversation.requestStarted,
-                !conversation.lastInstruction.isBlank(),
+                conversation.instructionChain.playerInstruction() && !conversation.lastInstruction.isBlank(),
                 "automatic_wake".equals(trigger));
         if (report == InstructionRoundEvaluator.BudgetReport.SILENT) {
             return;
@@ -1498,6 +1507,8 @@ public final class BrainCoordinator {
         // The say tool is removed from the next call after a say(plan)-only round (see shouldWithholdSay).
         private boolean withholdSayNextCall;
         private String lastInstruction = "";
+        private final InstructionRoundEvaluator.InstructionChain instructionChain =
+                new InstructionRoundEvaluator.InstructionChain();
         private String lastFailureName;
         private String lastFailureReason;
 

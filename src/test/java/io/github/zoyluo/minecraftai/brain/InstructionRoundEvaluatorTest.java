@@ -251,6 +251,41 @@ final class InstructionRoundEvaluatorTest {
         // instead of falling through to the exhausted-budget apology.
         FailureWake wake = InstructionRoundEvaluator.failureWake(true, budget.canAcquireFailureReportCall());
         assertEquals(FailureWake.REPORT_DIRECTLY, wake);
-        assertTrue(wake != FailureWake.NONE && wake != FailureWake.INJECT);
+    }
+
+    @Test
+    void aFailureReportCallLeavesTheSayWithholdingFlagAsItWas() {
+        // A plan-only loop interrupted by a failure wake: the flag was true before the failure call ...
+        RoundOutcome failureRound = InstructionRoundEvaluator.evaluateToolRound(
+                round(false, true, true, false, false, false, false, 0, false));
+        assertFalse(failureRound.withholdSayNextCall(), "the failure round itself has no opinion (it reports false)");
+        // ... and must still be true for the next planner call.
+        assertTrue(InstructionRoundEvaluator.nextWithholdSay(true, true, failureRound.withholdSayNextCall()));
+        assertFalse(InstructionRoundEvaluator.nextWithholdSay(false, true, failureRound.withholdSayNextCall()));
+        // An ordinary call replaces the flag with the round's own verdict, whatever it was before.
+        assertTrue(InstructionRoundEvaluator.nextWithholdSay(false, false, true));
+        assertFalse(InstructionRoundEvaluator.nextWithholdSay(true, false, false));
+        // The text-only variant of a failure report likewise reports false and must not clear the flag.
+        TextOnlyOutcome textOnly = InstructionRoundEvaluator.evaluateTextOnlyRound(false, true, true);
+        assertTrue(InstructionRoundEvaluator.nextWithholdSay(true, true, textOnly.withholdSayNextCall()));
+    }
+
+    @Test
+    void anAutonomousWakeDoesNotBlameTheOldPlayerInstruction() {
+        InstructionRoundEvaluator.InstructionChain chain = new InstructionRoundEvaluator.InstructionChain();
+        assertFalse(chain.playerInstruction());
+        chain.beginPlayerInstruction();
+        // An answer-only instruction never started work, and its budget ending is reported as never started.
+        assertEquals(BudgetReport.COULD_NOT_START,
+                InstructionRoundEvaluator.budgetReport(false, false, false, chain.playerInstruction(), false));
+        // A later autonomous wake (goal / task-finished / failure) whose chain ends with a non-automatic
+        // trigger must not tell the player it could not start that OLD instruction.
+        chain.beginAutonomousWake();
+        assertFalse(chain.playerInstruction());
+        assertEquals(BudgetReport.COULD_NOT_WORK_OUT,
+                InstructionRoundEvaluator.budgetReport(false, false, false, chain.playerInstruction(), false));
+        // A new player instruction re-arms it.
+        chain.beginPlayerInstruction();
+        assertTrue(chain.playerInstruction());
     }
 }

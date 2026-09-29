@@ -84,6 +84,22 @@ final class BrainCoordinatorBrainFixesContractTest {
     }
 
     @Test
+    void theInstructionChainAndWithholdSayWiringStaysInPlace() throws IOException {
+        String coordinator = read("brain/BrainCoordinator.java");
+
+        assertTrue(containsIgnoringWhitespace(coordinator, "conversation.instructionChain.beginPlayerInstruction();"),
+                "a player instruction must mark the chain as belonging to the player");
+        assertTrue(containsIgnoringWhitespace(coordinator, "conversation.instructionChain.beginAutonomousWake();"),
+                "an autonomous wake must not inherit the old player instruction");
+        assertTrue(containsIgnoringWhitespace(coordinator,
+                        "conversation.instructionChain.playerInstruction() && !conversation.lastInstruction.isBlank()"),
+                "the budget report may only blame a player instruction of this chain");
+        assertTrue(containsIgnoringWhitespace(coordinator,
+                        "InstructionRoundEvaluator.nextWithholdSay( conversation.withholdSayNextCall, failureReportCall,"),
+                "a failure-report round must leave the withheld-say flag alone");
+    }
+
+    @Test
     void theRequestStartedFlagIsNeverDerivedFromMereRunningWork() throws IOException {
         String coordinator = read("brain/BrainCoordinator.java");
 
