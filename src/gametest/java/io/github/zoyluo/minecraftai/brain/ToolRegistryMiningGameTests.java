@@ -92,6 +92,35 @@ public final class ToolRegistryMiningGameTests {
     }
 
     @GameTest(maxTicks = 20)
+    public void unknownMineOreModeFailsClosedWithoutDisturbingActiveWork(TestContext context) {
+        ActiveFixture fixture = activeFixture(context, "MineOreModeGT");
+        try {
+            ToolDefinition definition = new ToolRegistry().get("mine_ore").orElse(null);
+            require(context, definition != null, "mine_ore was not registered");
+            for (String mode : List.of("veins", "all", "until_vein_exhausted", "count,vein")) {
+                JsonObject args = new JsonObject();
+                args.addProperty("ore", "minecraft:iron_ore");
+                args.addProperty("count", 1);
+                args.addProperty("mode", mode);
+                ToolDefinition.ToolResult result = definition.handler().invoke(fixture.bot(), args);
+                require(context, result != null && !result.ok(),
+                        "mine_ore mode=" + mode + " was accepted instead of rejected");
+                require(context, result.message().contains("invalid_mode")
+                                && result.message().contains("count") && result.message().contains("vein"),
+                        "mine_ore mode=" + mode + " must fail listing the valid modes, got: " + result.message());
+                requireUndisturbed(context, fixture, "mine_ore mode=" + mode);
+            }
+            JsonObject schema = definition.parametersSchema().getAsJsonObject("properties")
+                    .getAsJsonObject("mode");
+            require(context, schema.getAsJsonArray("enum").size() == ToolRegistry.MINE_ORE_MODES.size(),
+                    "the mode schema enum must list exactly the valid modes: " + schema);
+        } finally {
+            cleanupFixture(context, fixture);
+        }
+        context.complete();
+    }
+
+    @GameTest(maxTicks = 20)
     public void strictPlayerCommandsRejectWithoutDisturbingActiveWork(TestContext context) {
         ActiveFixture fixture = activeFixture(context, "StripCmdGT");
         try {

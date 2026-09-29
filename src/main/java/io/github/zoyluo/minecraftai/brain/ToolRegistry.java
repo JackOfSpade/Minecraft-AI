@@ -329,14 +329,18 @@ public final class ToolRegistry {
         register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine the ore. For non-ore inventory items such as minecraft:obsidian, use achieve_goal instead. Do not manually break this into gather/craft/mine steps. Two modes: mode=count (default) mines `count` ore blocks and will strip-mine to find more. mode=vein is for 'mine the whole/entire vein', 'this vein', 'all of this ore', 'until the vein is gone': it mines exactly the connected vein of the nearest ore of that type the bot can see (or of the ore at x/y/z), then STOPS and reports how many were mined -- no branch mining, no digging down, no other veins. count is ignored in vein mode. Vein mode needs a suitable pickaxe already in the inventory and a visible ore.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
                 .property("count", integerSchema("how many ore blocks to mine (mode=count only)"))
-                .property("mode", enumStringSchema("count (default): mine `count` ores, searching further if needed. vein: mine the whole connected vein of one visible ore and stop when it is exhausted", "count", "vein"))
+                .property("mode", enumStringSchema("count (default): mine `count` ores, searching further if needed. vein: mine the whole connected vein of one visible ore and stop when it is exhausted", MINE_ORE_MODES.toArray(new String[0])))
                 .property("x", integerSchema("vein mode only: x of an ore in the vein the player means (optional; default nearest visible ore)"))
                 .property("y", integerSchema("vein mode only: y of an ore in the vein the player means (give x, y and z together)"))
                 .property("z", integerSchema("vein mode only: z of an ore in the vein the player means"))
                 .required("ore")
                 .build(), (bot, args) -> {
-            if ("vein".equalsIgnoreCase(optionalString(args, "mode", "count"))
-                    || optionalBoolean(args, "until_vein_exhausted", false)) {
+            String mineOreMode = optionalString(args, "mode", "count").trim().toLowerCase(java.util.Locale.ROOT);
+            if (!MINE_ORE_MODES.contains(mineOreMode)) {
+                return fail("invalid_mode: mine_ore mode must be one of " + String.join(", ", MINE_ORE_MODES)
+                        + " (got '" + optionalString(args, "mode", "count") + "'); no ore was mined");
+            }
+            if ("vein".equals(mineOreMode)) {
                 Set<Block> veinOres = oreTargetsFrom(requiredString(args, "ore"));
                 if (veinOres.stream().noneMatch(ore -> io.github.zoyluo.minecraftai.mining.ToolTier
                         .canHarvestWithInventory(bot, ore.getDefaultState()))) {
@@ -1180,6 +1184,9 @@ public final class ToolRegistry {
         }
         return args.get(name).getAsBoolean();
     }
+
+    /** The values of mine_ore's {@code mode} parameter (also the schema enum): anything else is rejected, never guessed. */
+    static final List<String> MINE_ORE_MODES = List.of("count", "vein");
 
     private static String optionalString(JsonObject args, String name, String defaultValue) {
         if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
