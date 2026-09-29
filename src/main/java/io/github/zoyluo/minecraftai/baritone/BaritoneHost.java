@@ -7,6 +7,7 @@ import baritone.api.utils.HostEnvironment;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import java.util.function.Supplier;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.player.Player;
 
 /**
@@ -31,7 +32,7 @@ public final class BaritoneHost {
      * entity of this bot" so the instance survives the entity being replaced.
      */
     public static IBaritone create(Supplier<? extends AIPlayerEntity> bot) {
-        configure();
+        configure(bot.get().getServer());
         return BaritoneAPI.getProvider().createBaritone(baritone -> new ServerPlayerContext(baritone, bot));
     }
 
@@ -49,14 +50,21 @@ public final class BaritoneHost {
     }
 
     /**
-     * Idempotent, must run before the first touch of {@code BaritoneAPI} (its static initializer reads
-     * {@code <game dir>/baritone/settings.txt}, which is why the game directory is set first).
+     * Points Baritone at {@code server} and applies the server defaults. Safe to call again (a later call re-points it at
+     * the newer server, which matters when an integrated server is restarted in the same JVM); {@link #create} calls it, and
+     * so should anything that uses Baritone's API without a bot yet (for example {@code BlockOptionalMeta}).
+     *
+     * <p>Must run before the first touch of {@code BaritoneAPI}: its static initializer reads
+     * {@code <game dir>/baritone/settings.txt}, which is why the game directory is set first.</p>
      */
-    private static synchronized void configure() {
+    public static synchronized void configure(MinecraftServer server) {
+        HostEnvironment.setGameDirectory(FabricLoader.getInstance().getGameDir());
+        // Block drops are learned from the server's own loot tables; Baritone's fallback (a private registry-only level) reloads
+        // every data-pack registry and cannot run inside a Fabric server.
+        HostEnvironment.setLootLevel(server::overworld);
         if (configured) {
             return;
         }
-        HostEnvironment.setGameDirectory(FabricLoader.getInstance().getGameDir());
         Settings settings = BaritoneAPI.getSettings();
         // A bot's yaw is its real yaw (ActionPack and vanilla movement read it directly), so Baritone must set it for
         // real instead of the "free look" trick that only changes the direction of the next move.

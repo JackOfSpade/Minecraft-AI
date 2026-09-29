@@ -86,6 +86,7 @@ public final class BaritoneServerGameTests {
 
     @GameTest(maxTicks = 100)
     public void blockDropsAreLearnedFromTheLootTablesAndMatchedByItemHash(GameTestHelper context) {
+        BaritoneHost.configure(context.getLevel().getServer());
         BlockOptionalMeta ironOre = new BlockOptionalMeta(Blocks.IRON_ORE);
         require(context, ironOre.matches(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.RAW_IRON)),
                 "iron ore's drop (raw iron) is not matched: the loot-table stub or the item hash is broken");

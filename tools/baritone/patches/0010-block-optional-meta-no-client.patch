@@ -1,7 +1,10 @@
-BlockOptionalMeta's loot-table stub level no longer keeps a Minecraft client reference; it reports the vanilla feature set.
+BlockOptionalMeta's loot-table stub level no longer keeps a Minecraft client reference (it reports the vanilla feature set).
+Block drops are rolled on a real ServerLevel and the server's own loot registries, supplied by the host through
+HostEnvironment.setLootLevel(). Without one the drops of a block are unknown (logged once, empty): the upstream fallback, a
+private level that reloads all data-pack registries, wedges a running Fabric server, so it is never used.
 
 diff --git a/src/api/java/baritone/api/utils/BlockOptionalMeta.java b/src/api/java/baritone/api/utils/BlockOptionalMeta.java
-index 398695a..aad7a13 100644
+index 398695a..6d8a061 100644
 --- a/src/api/java/baritone/api/utils/BlockOptionalMeta.java
 +++ b/src/api/java/baritone/api/utils/BlockOptionalMeta.java
 @@ -21,7 +21,6 @@ import baritone.api.utils.accessor.IItemStack;
@@ -20,7 +23,30 @@ index 398695a..aad7a13 100644
  import net.minecraft.world.item.Item;
  import net.minecraft.world.item.ItemStack;
  import net.minecraft.world.item.Items;
-@@ -258,7 +258,6 @@ public final class BlockOptionalMeta {
+@@ -230,7 +230,11 @@ public final class BlockOptionalMeta {
+             } else {
+                 List<Item> items = new ArrayList<>();
+                 try {
+-                    ServerLevel lv2 = ServerLevelStub.fastCreate();
++                    ServerLevel lv2 = HostEnvironment.lootLevel();
++                    if (lv2 == null) {
++                        // ServerLevelStub reloads all data-pack registries, which wedges a Fabric server: the host must say where to roll loot
++                        throw new IllegalStateException("HostEnvironment.setLootLevel(...) was not called");
++                    }
+ 
+                     LootParams.Builder lv5 = new LootParams.Builder(lv2)
+                         .withParameter(LootContextParams.ORIGIN, Vec3.ZERO)
+@@ -251,14 +255,14 @@ public final class BlockOptionalMeta {
+             return Collections.emptyList();
+         } else {
+             LootParams lv2 = params.withParameter(LootContextParams.BLOCK_STATE, state.defaultBlockState()).create(LootContextParamSets.BLOCK);
+-            ServerLevelStub lv3 = (ServerLevelStub) lv2.getLevel();
+-            LootTable lv4 = lv3.holder().getLootTable(lv.get());
++            ServerLevel lv3 = lv2.getLevel();
++            ReloadableServerRegistries.Holder registries = lv3 instanceof ServerLevelStub stub ? stub.holder() : lv3.getServer().reloadableRegistries();
++            LootTable lv4 = registries.getLootTable(lv.get());
+             return((ILootTable) lv4).invokeGetRandomItems(new LootContext.Builder(lv2).withOptionalRandomSeed(1).create(null));
+         }
      }
  
      public static class ServerLevelStub extends ServerLevel {
@@ -28,7 +54,7 @@ index 398695a..aad7a13 100644
          private static Unsafe unsafe = getUnsafe();
          private static CompletableFuture<RegistryAccess> registryAccess = load();
  
-@@ -268,8 +267,7 @@ public final class BlockOptionalMeta {
+@@ -268,8 +272,7 @@ public final class BlockOptionalMeta {
  
          @Override
          public FeatureFlagSet enabledFeatures() {

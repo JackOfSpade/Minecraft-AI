@@ -30,7 +30,7 @@ src/main/java/.../minecraftai/mixin/      Baritone*Mixin, ServerChunkCacheBarito
 |---|---|
 | `third_party/baritone/UPSTREAM.md`, `MANIFEST.txt` | version, commit, upstream blob SHA of every vendored file (`apply.sh verify` recomputes them; the generator refuses to run on an edited vendor tree) |
 | `tools/baritone/exclude.txt` | what is vendored but not compiled, with the reason per group. Every entry has to match something, so an upstream move fails the build instead of silently compiling more or less |
-| `tools/baritone/overlay/` | new files added to the generated tree: `HostEnvironment` (hooks) and stubs that stand in for excluded client-only classes (`RenderEvent`, `PathRenderer`, `SelectionRenderer`, `SchematicaHelper`, `LitematicaHelper`). An overlay file that shadows an upstream file must be in `exclude.txt` first |
+| `tools/baritone/overlay/` | new files added to the generated tree: `HostEnvironment` (hooks: game directory, game-thread hop, loot level) and stubs that stand in for excluded client-only classes (`RenderEvent`, `PathRenderer`, `SelectionRenderer`, `SchematicaHelper`, `LitematicaHelper`). An overlay file that shadows an upstream file must be in `exclude.txt` first |
 | `tools/baritone/patches/` | the patch series (`git diff` output, one concern per file, description above the first `diff --git`) |
 | `tools/baritone/BaritoneSource.java` | the generator (single-file Java 21 program, no dependencies besides `git`) |
 | `tools/baritone/apply.sh` | runs the generator without Gradle |
@@ -59,7 +59,7 @@ differ, upstream gets a new hook or a defaulted method that our glue implements 
 | `0007-behaviors-without-client-options` | PathingBehavior, CustomGoalProcess, LookBehavior, MineProcess | no disconnect-on-arrival, no auto-jump toggle, sensitivity from `IPlayerContext`, dropped items via `ctx.entities()` |
 | `0008-world-cache-directory` | WorldProvider | cache directory under `<game dir>/baritone/cache` instead of a client save/server-address layout |
 | `0009-baritone-instance-construction` | Baritone, BaritoneProvider | constructed from a player-context factory; no primary instance, no chat control; `NullElytraProcess`; commands and GUI unsupported |
-| `0010-block-optional-meta-no-client` | BlockOptionalMeta | the loot-table stub level no longer keeps a `Minecraft` reference |
+| `0010-block-optional-meta-no-client` | BlockOptionalMeta | block drops are rolled on a real level supplied through `HostEnvironment.setLootLevel` (upstream's private registry-reloading stub level wedges a Fabric server and is never used) |
 | `0011-world-scanner-chunk-snapshot` | FasterWorldScanner | scans run on worker threads (parallel stream, mine/farm rescans); they read the chunk source's thread-safe view instead of `ServerChunkCache.getChunk`, which waits for the server thread once per chunk |
 
 ## Excluded from the build (see `exclude.txt`)
