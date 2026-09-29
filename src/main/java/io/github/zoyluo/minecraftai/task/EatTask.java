@@ -4,6 +4,7 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.EatAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.log.BotLog;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
@@ -16,6 +17,13 @@ public final class EatTask extends AbstractTask {
 
     /** Per-bite budget: unchanged from the original single-item timeout. */
     private static final int PER_ITEM_TIMEOUT_TICKS = 160;
+    /**
+     * Eating watchdog: a normal bite takes about 32 ticks. A fake player can be left in the using-item state
+     * without the bite ever finishing (a stale use that never ticks down); after this many ticks the bite is
+     * cancelled and retried once, then the pass ends as stuck.
+     */
+    static final int EAT_WATCHDOG_TICKS = 140;
+    private static final int MAX_WATCHDOG_RETRIES = 1;
     // Eat-to-full: keep taking bites until the food bar is 20, not just one item. Bounding the
     // number of bites (rather than only a flat tick count) keeps the task's overall budget scaled
     // to how much work it actually has to do -- one bite for a near-full bar, several for an
@@ -36,6 +44,8 @@ public final class EatTask extends AbstractTask {
     private int itemElapsed;
     /** Bites successfully consumed so far this task instance. */
     private int itemsConsumed;
+    /** Watchdog cancellations so far this task instance. */
+    private int watchdogRetries;
 
     public EatTask() {
         this(false);
@@ -136,6 +146,20 @@ public final class EatTask extends AbstractTask {
 
     private void waitForFinish(AIPlayerEntity bot) {
         waitTicks++;
+        if (isEatWatchdogExpired(waitTicks, bot.isUsingItem())) {
+            if (watchdogRetries < MAX_WATCHDOG_RETRIES) {
+                watchdogRetries++;
+                BotLog.action(bot, "eat_watchdog_retry", "wait_ticks", waitTicks, "food", bot.getFoodData().getFoodLevel());
+                bot.stopUsingItem();
+                bot.getActionPack().stopAll();
+                phase = Phase.STARTING;
+                itemElapsed = 0;
+                return;
+            }
+            bot.stopUsingItem();
+            finishOnTimeoutOrFailure("eat_stuck");
+            return;
+        }
         ItemStack stack = bot.getItemInHand(InteractionHand.MAIN_HAND);
         int currentCount = stack.isEmpty() ? 0 : stack.getCount();
         if (!bot.isUsingItem() && waitTicks > 5) {
@@ -152,6 +176,11 @@ public final class EatTask extends AbstractTask {
                 finishOnTimeoutOrFailure("eat_not_consumed");
             }
         }
+    }
+
+    /** Whether a bite that is still in the using-item state after {@code waitTicks} ticks is stuck. */
+    static boolean isEatWatchdogExpired(int waitTicks, boolean usingItem) {
+        return usingItem && waitTicks > EAT_WATCHDOG_TICKS;
     }
 
     /**

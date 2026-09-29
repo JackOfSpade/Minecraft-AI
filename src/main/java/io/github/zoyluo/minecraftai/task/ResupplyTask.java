@@ -427,7 +427,7 @@ public final class ResupplyTask extends AbstractTask {
     private static Item firstFood(Container inventory) {
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (InventoryAction.isEatableFood(stack)) {
+            if (InventoryAction.isStockableFood(stack)) {
                 return stack.getItem();
             }
         }

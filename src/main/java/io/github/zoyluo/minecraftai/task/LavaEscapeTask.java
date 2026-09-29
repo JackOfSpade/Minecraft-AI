@@ -72,6 +72,8 @@ public final class LavaEscapeTask extends AbstractTask {
         // Escaping lava means success: complete once out of lava and standing stably (if out
         // of lava but not yet grounded, wait one more tick, to avoid stepping wrong at the
         // bank edge and falling back in).
+        // Still burning after the exit is handed to DangerWatcher's FireExtinguishTask on its next scan
+        // (water bucket, observed water, fire block) instead of being left to burn out for ~15 s.
         if (!bot.isInLava()) {
             bot.getActionPack().setJumping(false);
             bot.getActionPack().setForward(0.0F);

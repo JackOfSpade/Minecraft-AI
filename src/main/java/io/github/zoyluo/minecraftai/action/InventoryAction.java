@@ -200,44 +200,71 @@ public final class InventoryAction {
         return false;
     }
 
-    /** Food the bot may ever eat automatically: it has a food value and never inflicts poison/wither. */
+    /**
+     * Food the bot may ever eat automatically: it has a food value, never inflicts poison/wither, and is not
+     * in the never-auto-eat reserve (enchanted golden apple, chorus fruit, suspicious stew, teleport/unknown
+     * consume effects). A golden apple is eatable here but only chosen in a low-health emergency.
+     */
     public static boolean isEatableFood(ItemStack stack) {
-        return !stack.isEmpty() && stack.has(DataComponents.FOOD) && !isPoisonFood(stack);
+        return !stack.isEmpty() && stack.has(DataComponents.FOOD) && !isPoisonFood(stack)
+                && FoodPolicy.reserveTier(stack) != FoodPolicy.Tier.NEVER;
     }
 
+    /** Food worth taking from a chest for routine eating: eatable, and not an emergency-only golden apple. */
+    public static boolean isStockableFood(ItemStack stack) {
+        return isEatableFood(stack) && FoodPolicy.reserveTier(stack) != FoodPolicy.Tier.EMERGENCY_ONLY;
+    }
+
+    /** Sentinel option id for the offhand stack in {@link #chooseFood}. */
+    private static final int OFFHAND_OPTION = -1;
+
+    /**
+     * The slot of the food to eat next, or -1. Picks by {@link FoodPolicy#choose}: cheap food that fits the
+     * hunger gap before valuable food, the golden apple only in a low-health emergency, hunger-only food
+     * (raw chicken, rotten flesh) last. An offhand pick is promoted into the main inventory first.
+     */
     public static int findFoodSlot(AIPlayerEntity player) {
+        return chooseFood(player, false);
+    }
+
+    /** Like {@link #findFoodSlot} but never falls back to harmful food and never to an emergency-only apple. */
+    public static int findSafeFoodSlot(AIPlayerEntity player) {
+        return chooseFood(player, true);
+    }
+
+    private static int chooseFood(AIPlayerEntity player, boolean safeOnly) {
+        java.util.List<FoodPolicy.Option> options = new java.util.ArrayList<>();
         Inventory inventory = player.getInventory();
-        int harmfulSlot = -1;
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
-            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
-            if (!isEatableFood(stack)) {
-                continue;
-            }
-            if (HARMFUL_FOODS.contains(stack.getItem())) {
-                if (harmfulSlot < 0) {
-                    harmfulSlot = slot; // record it as the last-resort fallback
-                }
-                continue;
-            }
-            return slot; // prefer safe food first (cooked meat/bread/raw beef/pork/mutton)
+            addFoodOption(options, slot, inventory.getNonEquipmentItems().get(slot), safeOnly);
         }
-        boolean harmfulOffhand = false;
-        ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
-        if (isEatableFood(offHandStack)) {
-            if (HARMFUL_FOODS.contains(offHandStack.getItem())) {
-                harmfulOffhand = true;
-            } else {
-                return promoteOffhandSlot(player, 0).orElse(-1);
-            }
+        addFoodOption(options, OFFHAND_OPTION, player.getItemBySlot(EquipmentSlot.OFFHAND), safeOnly);
+        boolean emergency = !safeOnly && player.getHealth()
+                <= io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp();
+        FoodPolicy.Option chosen = FoodPolicy.choose(
+                options, FoodPolicy.hungerGap(player.getFoodData().getFoodLevel()), emergency);
+        if (chosen == null) {
+            return -1;
         }
-        if (harmfulSlot >= 0) {
-            return harmfulSlot;
+        return chosen.id() == OFFHAND_OPTION ? promoteOffhandSlot(player, 0).orElse(-1) : chosen.id();
+    }
+
+    private static void addFoodOption(java.util.List<FoodPolicy.Option> options, int id, ItemStack stack,
+                                      boolean safeOnly) {
+        if (!isEatableFood(stack)) {
+            return;
         }
-        return harmfulOffhand ? promoteOffhandSlot(player, 0).orElse(-1) : -1;
+        FoodPolicy.Tier tier = HARMFUL_FOODS.contains(stack.getItem())
+                ? FoodPolicy.Tier.LAST_RESORT : FoodPolicy.reserveTier(stack);
+        if (safeOnly && (tier == FoodPolicy.Tier.LAST_RESORT || tier == FoodPolicy.Tier.EMERGENCY_ONLY)) {
+            return;
+        }
+        var food = stack.get(DataComponents.FOOD);
+        options.add(new FoodPolicy.Option(id, food.nutrition(), food.saturation(), tier));
     }
 
     /**
-     * Whether the bot carries any food that is not on the {@link #HARMFUL_FOODS} list, in the main
+     * Whether the bot carries any ordinary (non-harmful, non-emergency-only, non-reserve) food, in the main
      * inventory or the offhand. Side-effect free: unlike {@link #findFoodSlot} it never promotes
      * the offhand stack and never logs, so it is safe to call from pure predicates every scan.
      */
@@ -250,22 +277,9 @@ public final class InventoryAction {
         return isSafeFood(player.getItemBySlot(EquipmentSlot.OFFHAND));
     }
 
-    /** Like {@link #findFoodSlot} but never falls back to harmful food (returns -1 instead). */
-    public static int findSafeFoodSlot(AIPlayerEntity player) {
-        Inventory inventory = player.getInventory();
-        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
-            if (isSafeFood(inventory.getNonEquipmentItems().get(slot))) {
-                return slot;
-            }
-        }
-        if (isSafeFood(player.getItemBySlot(EquipmentSlot.OFFHAND))) {
-            return promoteOffhandSlot(player, 0).orElse(-1);
-        }
-        return -1;
-    }
-
     private static boolean isSafeFood(ItemStack stack) {
-        return isEatableFood(stack) && !HARMFUL_FOODS.contains(stack.getItem());
+        return isEatableFood(stack) && !HARMFUL_FOODS.contains(stack.getItem())
+                && FoodPolicy.reserveTier(stack) != FoodPolicy.Tier.EMERGENCY_ONLY;
     }
 
     public static Map<String, Integer> summarize(AIPlayerEntity player) {

@@ -61,6 +61,7 @@
       "io.github.zoyluo.minecraftai.task.GiveItemTaskGameTests",
       "io.github.zoyluo.minecraftai.task.HungerEatToFullGameTests",
       "io.github.zoyluo.minecraftai.task.SurvivalReflexGameTests",
+      "io.github.zoyluo.minecraftai.task.SelfPreservationGameTests",
       "io.github.zoyluo.minecraftai.task.FollowTaskGameTests",
       "io.github.zoyluo.minecraftai.pathfinding.GoalSnapGameTests",
       "io.github.zoyluo.minecraftai.pathfinding.StringPullWaterCornerGameTests",

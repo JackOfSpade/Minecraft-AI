@@ -34,6 +34,8 @@ public final class DangerWatcher {
     public static final DangerWatcher INSTANCE = new DangerWatcher();
     private final Map<UUID, Integer> nextThreatAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextEatAttemptTick = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> nextFireAttemptTick = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> nextPowderSnowAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextResupplyAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextNightAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextSurfaceSkipLogTick = new ConcurrentHashMap<>();
@@ -78,6 +80,8 @@ public final class DangerWatcher {
         leashCooldowns.remove(id);
         darkTrapDetections.remove(id);
         nextEatAttemptTick.remove(id);
+        nextFireAttemptTick.remove(id);
+        nextPowderSnowAttemptTick.remove(id);
         nextResupplyAttemptTick.remove(id);
         nextNightAttemptTick.remove(id);
         nextSurfaceSkipLogTick.remove(id);
@@ -94,6 +98,8 @@ public final class DangerWatcher {
         leashCooldowns.clear();
         darkTrapDetections.clear();
         nextEatAttemptTick.clear();
+        nextFireAttemptTick.clear();
+        nextPowderSnowAttemptTick.clear();
         nextResupplyAttemptTick.clear();
         nextNightAttemptTick.clear();
         nextSurfaceSkipLogTick.clear();
@@ -217,6 +223,11 @@ public final class DangerWatcher {
             TaskManager.INSTANCE.assign(bot, new LavaEscapeTask(), TaskOrigin.safety("lava_escape"));
             BotLog.danger(bot, "lava_escape_start", "pos", bot.blockPosition().toShortString(),
                     "hp", (int) bot.getHealth());
+            return true;
+        }
+        // Fire and powder-snow self-rescue, right behind lava: burning costs about a heart a second (the
+        // lava exit alone leaves fifteen seconds of it), and a bot sunk in powder snow cannot walk or path out.
+        if (maybeSelfRescue(server, bot, active)) {
             return true;
         }
         // CreateObsidianTask deliberately works near a pool and independently enforces dry,
@@ -504,6 +515,50 @@ public final class DangerWatcher {
         return threat.isEmpty()
                 && bot.hurtTime == 0
                 && bot.getHealth() > MinecraftAiConfig.get().combat().retreatHp();
+    }
+
+    /**
+     * Fire and powder-snow reflexes. Returns true when one of them owns this scan (already running, or just
+     * assigned). Both are SAFETY tasks; ordinary work is paused and resumed afterwards, a running safety
+     * owner is replaced in place. Deliberately skipped while lava escape or a sealed shelter/barricade runs.
+     */
+    private boolean maybeSelfRescue(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
+        if (active.isPresent() && (active.get() instanceof FireExtinguishTask
+                || active.get() instanceof PowderSnowEscapeTask)) {
+            return true; // the running rescue owns the controls; both are bounded by their own timeouts
+        }
+        if (active.isPresent() && (active.get() instanceof LavaEscapeTask
+                || active.get() instanceof EmergencyShelterTask
+                || active.get() instanceof MiningBarricadeTask)) {
+            return false;
+        }
+        UUID id = bot.getUUID();
+        int now = server.getTickCount();
+        if (FireExtinguishTask.isBurningWithoutImmunity(bot) && now >= nextFireAttemptTick.getOrDefault(id, 0)) {
+            if (FireExtinguishTask.hasMeans(bot)) {
+                startSelfRescue(bot, active, new FireExtinguishTask(), "fire_extinguish");
+                nextFireAttemptTick.put(id, now + 40);
+                BotLog.danger(bot, "fire_extinguish_start", "pos", bot.blockPosition().toShortString(),
+                        "hp", (int) bot.getHealth(), "fire_ticks", bot.getRemainingFireTicks());
+                return true;
+            }
+            nextFireAttemptTick.put(id, now + 20); // no way to help right now: look again shortly
+        }
+        if (PowderSnowEscapeTask.isSunkInPowderSnow(bot) && now >= nextPowderSnowAttemptTick.getOrDefault(id, 0)) {
+            startSelfRescue(bot, active, new PowderSnowEscapeTask(), "powder_snow_escape");
+            nextPowderSnowAttemptTick.put(id, now + 40);
+            BotLog.danger(bot, "powder_snow_escape_start", "pos", bot.blockPosition().toShortString(),
+                    "hp", (int) bot.getHealth());
+            return true;
+        }
+        return false;
+    }
+
+    private static void startSelfRescue(AIPlayerEntity bot, Optional<Task> active, Task rescue, String why) {
+        if (active.isPresent() && shouldPreserveActiveWork(bot)) {
+            TaskManager.INSTANCE.pauseFor(bot, why);
+        }
+        TaskManager.INSTANCE.assign(bot, rescue, TaskOrigin.safety(why));
     }
 
     private boolean maybeRegroup(AIPlayerEntity bot, Optional<Task> active) {

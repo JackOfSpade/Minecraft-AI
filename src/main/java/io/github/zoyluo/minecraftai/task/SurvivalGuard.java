@@ -32,8 +32,10 @@ public final class SurvivalGuard {
                 || task instanceof CombatTask
                 || task instanceof EmergencyShelterTask || task instanceof MiningBarricadeTask
                 || task instanceof EatTask
-                || task instanceof LavaEscapeTask) {
-            return null; // LavaEscapeTask is itself the lava self-rescue action, and must never be interrupted by guard_in_lava in turn
+                || task instanceof LavaEscapeTask
+                || task instanceof FireExtinguishTask
+                || task instanceof PowderSnowEscapeTask) {
+            return null; // the lava/fire/powder-snow self-rescue tasks are themselves the response, and must never be interrupted by guard_in_lava / guard_on_fire in turn
         }
         // Note: RecoverDropsTask is deliberately **not** exempt -- cutting it off when air is critical during an underwater corpse run is correct:
         // exempting it = the task continues = drowning and dropping a whole second set of gear; accepting the item loss to save the bot's life is the only correct call (this was suggested for exemption during review; do not change it).
@@ -47,11 +49,11 @@ public final class SurvivalGuard {
             }
             return "guard_drowning";
         }
-        // (2) Stuck in lava: burning every tick, any work stops immediately, yielding to DangerWatcher's escape/extinguish handling.
+        // (2) Stuck in lava: burning every tick, any work stops immediately, yielding to DangerWatcher, which dispatches LavaEscapeTask (and FireExtinguishTask once out of the lava).
         if (bot.isInLava()) {
             return "guard_in_lava";
         }
-        // (3) On fire and past half health lost: the fire source may be right next to the work target (mining next to lava), so continuing work = staying pinned in the fire.
+        // (3) On fire and past half health lost: the fire source may be right next to the work target (mining next to lava), so continuing work = staying pinned in the fire. DangerWatcher dispatches FireExtinguishTask (punch out the fire block, water bucket at the feet, or observed water/rain) when the bot has any means to put itself out.
         if (bot.isOnFire() && bot.getHealth() < 10.0F) {
             return "guard_on_fire";
         }
