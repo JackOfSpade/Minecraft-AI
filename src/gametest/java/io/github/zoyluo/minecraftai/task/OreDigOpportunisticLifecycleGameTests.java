@@ -483,44 +483,52 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 14. The drop chase is contract-bound (walk-only, <= 2 attempts) and never terminal
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_drop_recovery_contract_bound_and_non_terminal", maxTicks = 3200)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_drop_recovery_contract_bound_and_non_terminal", maxTicks = 1800)
     public void dropRecoveryContractBoundAndNonTerminal(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(34, -3, 12, -3, 3, 4);
-        // Recoverable: floating in the open, already fully-swept interior air -- every neighbour of the break
-        // cell is known, so nothing can ever be excluded from a legal chase. dy=1 + a solid roof (not dy=0):
-        // see the pose comment on the first test in this file (the one buried cell this adds is the ore's
-        // own roof, not a neighbour the drop could ever roll into).
+        // FIXTURE HISTORY / ROOT CAUSE (confirmed against the real GameTest log; see the g2/r7/r8 debugging
+        // sessions' own reports): the original fixture made "hidden" a DIFFERENT block (gold_ore) from the
+        // diamond, so 4.8's vein-follow could never pick it up as a member -- it could only ever become an
+        // ordinary BreakPeek sighting (4.7/4.8) needing its own later detour with a fresh LIVE re-proof. But
+        // the diamond's own detour lasts only ~70-100 ticks and returns the bot to its blind-tunnel anchor
+        // immediately after (design 4.10), and nothing in the mission's own ordinary ladder (target lapis,
+        // never present) ever walks the bot back past the gold's one open face again -- every later
+        // DetourStartSelector re-proof of that candidate answered "unknown" (never present, never gone) for
+        // the whole ~2700-tick budget regardless of how close the gold was moved (dx=13 across the room,
+        // then dz=2 two cells short, then directly adjacent at dz=4 -- all three confirmed wrong the same
+        // way). This was the fixture's own geometry, not a product bug: an ordinary BreakPeek sighting is
+        // *supposed* to need its own later live re-proof, and nothing here ever gave it one.
+        //
+        // THE FIX (task's own suggested option): make both valuables the SAME block (diamond_ore), placed as
+        // immediate same-block neighbours, so the second one is discovered and mined by ordinary P1
+        // vein-follow (4.7 "scan the 26 neighbours of p... add PRESENT cells to pending", 4.8 "members are
+        // visited nearest-first... each member re-runs 4.6 and 4.7") within the SAME live detour as the first
+        // -- no return-to-anchor, no second detour, no stale re-proof anywhere in the path.
+        //
+        // A second attempt this round embedded memberB a shell layer deep (matching the original "hidden"
+        // gold's own trick) with only its south face -- memberA's own cell -- open. That is geometrically
+        // impossible to mine here: the only cardinal stand DetourHostImpl.poseFor can ever offer for it is
+        // memberA's own former cell, and that cell's roof (mandatory for memberA's own breakGeometry overhead
+        // check, see the pose comment below) leaves no headroom for a player to stand there -- confirmed
+        // against the real GameTest log (event=ore_dig_detour_skip reason='geometry' the instant vein-follow
+        // reached it). Embedding is therefore not this fixture's route to "reachable by ordinary P1
+        // behaviour"; two open, individually-roofed same-block cells are.
+        //
+        // Both members: floating in the open, already fully-swept interior air -- every neighbour of each
+        // break cell is known, so nothing can ever be excluded from a legal chase; each one's own break
+        // independently exercises the drop ledger's contract (attempt a walk-only chase, at most 2 attempts,
+        // settle within SETTLE_TOTAL_TICKS=60, and treat a lost drop as non-terminal -- design 4.9). dy=1 +
+        // a solid roof (not dy=0): see the pose comment on the first test in this file (the one buried cell
+        // this adds per member is its own roof, not a neighbour either drop could ever roll into).
+        BlockPos memberA = room.at(5, 1, 3);
         room.set(5, 1, 3, Blocks.DIAMOND_ORE);
         room.set(5, 2, 3, Blocks.STONE);
-        // Unrecoverable: embedded a full shell layer deep, directly beside the diamond itself (not clear
-        // across the room at the original dx=13, room maxDx=12): a cell outside the room's own carved
-        // interior box is left as the shell fill's default STONE on every face automatically, so placing the
-        // gold at z=4 (one past the interior's own maxDz=3, directly north of the diamond at z=3, the last
-        // interior row) needs no explicit sealing loop -- its up, down, east, west and north (z=5)
-        // neighbours are already solid by construction, and only the south face (z=3, the diamond's own
-        // cell) is ever open. The diamond's own break exposes that face (I1/I2, never x-ray beforehand), so
-        // whatever the bot re-proves while it works the diamond, one cell away, decides this sighting --
-        // moved as close as the geometry allows after the first attempt (two cells away, dz=2, one
-        // aisle further back) still read unknown for the whole run (see below).
-        //
-        // The original fixture put this at dx=13 (still one shell layer deep, same technique) but clear
-        // across the room from the diamond at dx=5, trusting OreDig's own far-ranging spiral search to
-        // wander there eventually. Confirmed wrong against the real GameTest log, across three different
-        // "keep busy" fixture attempts (no local ore, a solid local supply, a checkerboarded one): every
-        // later DetourStartSelector re-proof of the old dx=13 candidate answered unknown (never present,
-        // never gone) for the whole ~2700-tick budget regardless, because the corridor's own default
-        // direction (branch_leg dir=north, i.e. -z) never actually walks anywhere near dx=13 in that time --
-        // this was the room geometry itself, not the busy-work fixture around it, so no amount of "keep the
-        // bot nearby" tuning elsewhere could have fixed it. A first reposition (dz=2, two cells short of the
-        // diamond) was still not enough: the diamond's own detour lasts only ~70 ticks (ticks=73 confirmed in
-        // the real GameTest log) and returns the bot to its blind-tunnel anchor immediately after, so a
-        // candidate merely "nearby" only gets the brief, one-shot chance of a stray ray during that visit,
-        // not a proof. Directly adjacent (the very next cell along the same sightline the break itself must
-        // re-prove) is the closest this candidate can get to the diamond while staying genuinely hidden.
-        BlockPos hidden = room.at(5, 1, 4);
-        room.set(5, 1, 4, Blocks.GOLD_ORE);
-        BlockPos guard = room.at(5, 1, 5); // one cell further into the shell: never a legal walk target either
+        BlockPos memberB = room.at(6, 1, 3);
+        room.set(6, 1, 3, Blocks.DIAMOND_ORE);
+        room.set(6, 2, 3, Blocks.STONE);
+        BlockPos guard = room.at(7, 1, 3); // sealed solid just past memberB: never a legal walk target either
+        room.set(7, 1, 3, Blocks.STONE);
         AIPlayerEntity bot = h.spawn("DetourDropGT", room, 0, 0);
         // A stone pick is mandatory for OreDig's own strip/channel through ordinary rock: the channel-tool
         // policy floors every mined block (including the mission's own coal/lapis target) at STONE tier and,
@@ -529,7 +537,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        h.enableDetourMode(256); // a wider sensor budget, belt-and-braces now the gold sits well within reach
+        h.enableDetourMode(256); // a wider sensor budget, belt-and-braces
         h.enableAssist(bot);
         UUID id = bot.getUuid();
         Progress p = new Progress();
@@ -559,24 +567,23 @@ public final class OreDigOpportunisticLifecycleGameTests {
             if (phaseOf(id) != DetourPhase.IDLE) {
                 activeTicks[0]++;
             }
-            boolean bothGone = room.world.getBlockState(room.at(5, 1, 2)).isAir()
-                    && room.world.getBlockState(hidden).isAir();
+            boolean bothGone = room.world.getBlockState(memberA).isAir()
+                    && room.world.getBlockState(memberB).isAir();
             if (!bothGone) {
-                h.require(p.tick - p.assignedAt < 2700, "both valuables were never both broken (recoverable="
-                        + !room.world.getBlockState(room.at(5, 1, 2)).isAir() + " hidden="
-                        + !room.world.getBlockState(hidden).isAir() + ")");
+                h.require(p.tick - p.assignedAt < 900, "both valuables were never both broken (memberA_left="
+                        + !room.world.getBlockState(memberA).isAir() + " memberB_left="
+                        + !room.world.getBlockState(memberB).isAir() + ")");
                 return;
             }
             // Give the settle logic (up to SETTLE_TOTAL_TICKS=60) and the coordinator a moment to finish quietly.
-            if (p.tick - p.assignedAt < 2700 + 100) {
+            if (p.tick - p.assignedAt < 900 + 150) {
                 return;
             }
             h.require(!task[0].failureReason().toLowerCase(java.util.Locale.ROOT).contains("unrecovered"),
                     "an unrecovered-drop failure reason appeared after settling");
             h.require(room.world.getBlockState(guard).isOf(Blocks.STONE), "the chase eventually dug through solid rock");
-            LOG.info("[detour-gametest] drop_recovery active_ticks={} diamond_held={} gold_held={}",
-                    activeTicks[0], InventoryAction.countItem(bot, Items.DIAMOND), InventoryAction.countItem(bot, Items.GOLD_NUGGET)
-                            + InventoryAction.countItem(bot, Items.RAW_GOLD));
+            LOG.info("[detour-gametest] drop_recovery active_ticks={} diamonds_held={}",
+                    activeTicks[0], InventoryAction.countItem(bot, Items.DIAMOND));
             h.pass();
         }));
     }
@@ -656,47 +663,52 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // 16. Inventory below the reserve stops a detour from starting; freeing space allows it
     // ---------------------------------------------------------------------------------------------
 
-    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_inventory_reserve_stops_detour", maxTicks = 2300)
+    @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_inventory_reserve_stops_detour", maxTicks = 1800)
     public void inventoryReserveStopsDetour(TestContext context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(36, -3, 8, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
         //
-        // KNOWN REMAINING ISSUE (not resolved; effort spent this round is recorded here rather than
-        // guessed past, per the debugging brief -- see the g2 debugging session's own report for the full
-        // analysis). ROOT CAUSE, confirmed against the real GameTest log: with no local coal at all,
-        // OreDig's own ordinary ladder (target=coal_ore, none present) has nothing to find near spawn and
-        // commits to a single STRIP_SEGMENT(48)-block leg in its default direction (north, -z). This room's
-        // interior is only 7 cells deep in z (-3..3), so that leg exits the sealed room through the shell
-        // within the first few blocks and then keeps digging straight through 40+ blocks of the platform's
-        // ordinary solid rock beyond it -- a real corridor with solid walls on both sides, not open air --
-        // at ordinary mining speed, going stale (present -> unknown, never present again) within as little
-        // as ~150-200 ticks of active mining once the leg is well underway. The bot is walled away from its
-        // own sightline to the diamond, not merely far from it; freeing inventory space afterward correctly
-        // finds nothing to detour to because there really is nothing observable any more.
+        // FIXTURE HISTORY / ROOT CAUSE (confirmed against the real GameTest log; see the g2/r7/r8 debugging
+        // sessions' own reports for the full trail, two rounds). Round 1 (still true): with no local coal at
+        // all, OreDig's own ordinary ladder (target=coal_ore, none present) has nothing to find near spawn and
+        // commits to a single STRIP_SEGMENT(48)-block leg out of the sealed room, going stale within ~150-200
+        // ticks; a FIXED 900-tick wait for the reserve to free always lost that race.
         //
-        // Three classes of fixture-only fix were tried this round and every one, confirmed against the real
-        // GameTest log, traded this failure for a different one instead of resolving it: (a) a local coal
-        // supply generous enough to outlast a shortened wait pulled the bot away before the diamond was ever
-        // sighted (a checkerboard on the room's far side) or put a solid cell squarely on the spawn-diamond
-        // sightline (a checkerboard/block between the two, confirmed to occlude at (2,1,0)); (b) shortening
-        // the "wait for the reserve to free" step alone (900 -> 300 ticks) was not enough on its own -- the
-        // escape leg goes stale well inside even a 300-tick window; (c) a small, purely-local coal column
-        // right next to spawn (matching slowMineAndDropLostAndLongReturnNeverTripNoProgress's own technique)
-        // combined with a much shorter wait avoided both the occlusion and the escape-leg staleness, but
-        // then failed a different way: "ore_dig_drop_unrecovered", a real drop physics/recovery edge case
-        // of adding a fresh local supply this fixture did not previously exercise, and the P1 contract calls
-        // out an unrecovered drop as expected to be non-terminal (test 14 in this file, itself one of this
-        // round's other open items) rather than something a fixture should route around.
+        // Round 2 (this fix's own finding): reacting to the FIRST live `ore_dig_detour_skip reason='capacity'`
+        // line (freeing space immediately instead of after a fixed wait) is necessary but not sufficient on
+        // its own. Instrumenting DetourStartSelector directly (temporary, removed) showed the real shape of
+        // the problem: that one successful re-proof is a brief, lucky alignment -- the very next selector
+        // passes (every START_CHECK_INTERVAL_TICKS=10) reproved the SAME candidate as `unknown` over and over,
+        // even while the bot stayed only 6-8 blocks away the whole time (confirmed by position/distance
+        // logging). `observeBlockIs`'s occlusion check is a straight-line raycast from the bot's own eye
+        // position, independent of which way it is facing, so this was not a facing/FOV issue: with no local
+        // target, OreDig's own ladder has nothing to hold the bot inside the open interior, and once it drifts
+        // toward the far side of the small room the straight line back to the diamond clips the room's own
+        // solid roof/floor cells at a shallow angle. A momentary re-proof race is not a fixture bug to route
+        // around at the freeing step; it needs the bot actually anchored near the diamond's own open sightline
+        // for the (now much shorter, reactive) wait.
         //
-        // Left unchanged (no local supply, the original position) rather than trading one failure for
-        // another without a clearer fix in hand; a genuine repair likely needs either a product-level look
-        // at how long a below-reserve sighting is trusted before its own re-proof, or a fixture technique
-        // this round did not find that keeps the ladder near the diamond for the whole reserve wait without
-        // ever creating a fresh drop to recover or a cell on the sightline.
+        // THE FIX: give the mission a tiny, purely-local coal supply -- the same proven technique as
+        // slowMineAndDropLostAndLongReturnNeverTripNoProgress's emerald column and
+        // returnFailureRebasesInPlaceAndDisablesDetours's checkerboard (dy=1 + roof, open floor below, so each
+        // one's own ordinary-ladder drop is reliably recoverable) -- placed WEST of spawn (dx=-1,-2) on rows
+        // off the spawn-diamond sightline (dz=+-2, never dz=0, never dx=0 which is spawn's own column), so
+        // mining it can never stand directly on the line to the diamond at dz=0. A high target count (999,
+        // matching returnFailureRebasesInPlaceAndDisablesDetours) keeps the mission perpetually incomplete so
+        // it never finishes and stops ticking before the detour ever gets its chance. This keeps the bot
+        // inside the open interior, near the diamond's own line of sight, for the whole (now short) reactive
+        // wait, instead of trading this failure for the round-1 occlusion/drop_unrecovered ones a long fixed
+        // wait's worth of local ore used to cause.
         BlockPos ore = room.at(5, 1, 0);
         room.set(5, 1, 0, Blocks.DIAMOND_ORE);
         room.set(5, 2, 0, Blocks.STONE);
+        for (int dx = -2; dx <= -1; dx++) {
+            for (int dz = -2; dz <= 2; dz += 4) {
+                room.set(dx, 1, dz, Blocks.COAL_ORE);
+                room.set(dx, 2, dz, Blocks.STONE);
+            }
+        }
         AIPlayerEntity bot = h.spawn("DetourInventoryGT", room, 0, 0);
         setInventory(bot, Items.IRON_PICKAXE, 2); // leaves only 2 empty slots: below the default reserve of 3
         h.enableDetourMode(256); // a wider sensor budget, belt-and-braces
@@ -715,7 +727,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             if (p.assignedAt < 0) {
                 if (h.settle(bot, p)) {
                     h.assertStrict(bot);
-                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 1);
+                    task[0] = new OreDigTask(Set.of(Blocks.COAL_ORE), 999);
                     TaskManager.INSTANCE.assign(bot, task[0], TaskOrigin.of(TaskOrigin.Kind.MISSION, "gametest_detour_inventory"));
                     p.assignedAt = p.tick;
                     stageStart[0] = p.tick;
@@ -733,10 +745,14 @@ public final class OreDigOpportunisticLifecycleGameTests {
                         h.require(p.tick - stageStart[0] < 500, "the nearby diamond was never even sighted");
                         return;
                     }
-                    if (p.tick - stageStart[0] < 900) {
+                    if (!sawSkipReason(bot.getGameProfile().name(), "capacity")) {
+                        h.require(p.tick - stageStart[0] < 700,
+                                "capacityOk never rejected the sighted diamond while inventory was below the reserve");
                         return;
                     }
-                    // Free up space well above the reserve and confirm the same candidate can now be detoured to.
+                    // Free up space well above the reserve immediately after the first live proof that the
+                    // reserve actually blocked this exact candidate -- not a long fixed wait (see the FIXTURE
+                    // HISTORY note above) -- and confirm the same candidate can now be detoured to.
                     setInventory(bot, Items.IRON_PICKAXE, 6);
                     stage[0] = 1;
                     stageStart[0] = p.tick;
@@ -1095,6 +1111,20 @@ public final class OreDigOpportunisticLifecycleGameTests {
             return -1;
         }
         return (int) detourEvents(lines).stream().filter(e -> e.equals("ore_dig_detour_start")).count();
+    }
+
+    /**
+     * True once this bot's own structured log has an {@code ore_dig_detour_skip} line carrying the given
+     * {@code reason} (e.g. {@code capacity}, the DetourStartSelector line {@code capacityOk} itself logs).
+     * Used to trigger a fixture step on live proof of a gate firing, instead of a fixed tick count.
+     */
+    private static boolean sawSkipReason(String botName, String reason) {
+        List<String> lines = botLog(botName);
+        if (lines == null || !hasSpawnLine(lines)) {
+            return false;
+        }
+        String reasonNeedle = "reason='" + reason + "'";
+        return lines.stream().anyMatch(line -> line.contains("event=ore_dig_detour_skip") && line.contains(reasonNeedle));
     }
 
     private static List<String> botLog(String botName) {
