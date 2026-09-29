@@ -1,0 +1,69 @@
+TickEvent and IGameEventListener only imported client classes for javadoc references; WorldEvent carries a Level instead of a ClientLevel
+(a ServerLevel on a server). RenderEvent is replaced by a stub (tools/baritone/overlay).
+
+diff --git a/src/api/java/baritone/api/event/events/TickEvent.java b/src/api/java/baritone/api/event/events/TickEvent.java
+index 405ad3c..0d9e1a9 100644
+--- a/src/api/java/baritone/api/event/events/TickEvent.java
++++ b/src/api/java/baritone/api/event/events/TickEvent.java
+@@ -18,7 +18,6 @@
+ package baritone.api.event.events;
+ 
+ import baritone.api.event.events.type.EventState;
+-import net.minecraft.client.Minecraft;
+ 
+ import java.util.function.BiFunction;
+ 
+diff --git a/src/api/java/baritone/api/event/events/WorldEvent.java b/src/api/java/baritone/api/event/events/WorldEvent.java
+index f40042e..839e960 100644
+--- a/src/api/java/baritone/api/event/events/WorldEvent.java
++++ b/src/api/java/baritone/api/event/events/WorldEvent.java
+@@ -18,7 +18,7 @@
+ package baritone.api.event.events;
+ 
+ import baritone.api.event.events.type.EventState;
+-import net.minecraft.client.multiplayer.ClientLevel;
++import net.minecraft.world.level.Level;
+ 
+ /**
+  * @author Brady
+@@ -29,14 +29,14 @@ public final class WorldEvent {
+     /**
+      * The new world that is being loaded. {@code null} if being unloaded.
+      */
+-    private final ClientLevel world;
++    private final Level world;
+ 
+     /**
+      * The state of the event
+      */
+     private final EventState state;
+ 
+-    public WorldEvent(ClientLevel world, EventState state) {
++    public WorldEvent(Level world, EventState state) {
+         this.world = world;
+         this.state = state;
+     }
+@@ -44,7 +44,7 @@ public final class WorldEvent {
+     /**
+      * @return The new world that is being loaded. {@code null} if being unloaded.
+      */
+-    public final ClientLevel getWorld() {
++    public final Level getWorld() {
+         return this.world;
+     }
+ 
+diff --git a/src/api/java/baritone/api/event/listener/IGameEventListener.java b/src/api/java/baritone/api/event/listener/IGameEventListener.java
+index 6939f8d..8eedce5 100644
+--- a/src/api/java/baritone/api/event/listener/IGameEventListener.java
++++ b/src/api/java/baritone/api/event/listener/IGameEventListener.java
+@@ -18,10 +18,6 @@
+ package baritone.api.event.listener;
+ 
+ import baritone.api.event.events.*;
+-import net.minecraft.client.Minecraft;
+-import net.minecraft.client.gui.screens.DeathScreen;
+-import net.minecraft.client.multiplayer.ClientLevel;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.phys.Vec3;

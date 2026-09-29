@@ -1,0 +1,26 @@
+FasterWorldScanner scans on worker threads (a parallel stream, plus MineProcess/FarmProcess rescans); it asks the chunk source for its thread-safe
+view instead of calling ServerChunkCache.getChunk, which hops onto the server thread and waits for it once per chunk.
+
+diff --git a/src/main/java/baritone/cache/FasterWorldScanner.java b/src/main/java/baritone/cache/FasterWorldScanner.java
+index c5e6a13..dd83eeb 100644
+--- a/src/main/java/baritone/cache/FasterWorldScanner.java
++++ b/src/main/java/baritone/cache/FasterWorldScanner.java
+@@ -23,6 +23,7 @@ import baritone.api.utils.BetterBlockPos;
+ import baritone.api.utils.BlockOptionalMeta;
+ import baritone.api.utils.BlockOptionalMetaLookup;
+ import baritone.api.utils.IPlayerContext;
++import baritone.utils.accessor.IClientChunkProvider;
+ import baritone.utils.accessor.IPalettedContainer;
+ import io.netty.buffer.Unpooled;
+ import net.minecraft.core.BlockPos;
+@@ -140,7 +141,9 @@ public enum FasterWorldScanner implements IWorldScanner {
+     }
+ 
+     private Stream<BlockPos> scanChunkInternal(IPlayerContext ctx, BlockOptionalMetaLookup lookup, ChunkPos pos) {
+-        ChunkSource chunkProvider = ctx.world().getChunkSource();
++        // Scans run on worker threads (parallel stream, MineProcess/FarmProcess rescans): use the chunk source's thread-safe view,
++        // ServerChunkCache.getChunk would hop onto the server thread for every single chunk.
++        ChunkSource chunkProvider = ((IClientChunkProvider) ctx.world().getChunkSource()).createThreadSafeCopy();
+         // if chunk is not loaded, return empty stream
+         if (!chunkProvider.hasChunk(pos.x, pos.z)) {
+             return Stream.empty();

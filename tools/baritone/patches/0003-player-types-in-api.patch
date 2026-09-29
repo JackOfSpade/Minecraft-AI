@@ -1,0 +1,219 @@
+IPlayerContext.player() returns Player (not LocalPlayer), minecraft() the game-thread event loop (Minecraft or MinecraftServer),
+entities() is implemented by the host instead of casting to ClientLevel, and mouseSensitivity() is a new defaulted method
+(replaces a read of the client options). IPlayerController and RotationUtils take Player.
+IBaritoneProvider: getBaritoneForPlayer(Player); createBaritone takes a factory for the player context;
+getBaritoneForMinecraft/getBaritoneForConnection (client only) are dropped.
+
+diff --git a/src/api/java/baritone/api/IBaritoneProvider.java b/src/api/java/baritone/api/IBaritoneProvider.java
+index 1daec2e..4cbcfba 100644
+--- a/src/api/java/baritone/api/IBaritoneProvider.java
++++ b/src/api/java/baritone/api/IBaritoneProvider.java
+@@ -21,12 +21,12 @@ import baritone.api.cache.IWorldScanner;
+ import baritone.api.command.ICommand;
+ import baritone.api.command.ICommandSystem;
+ import baritone.api.schematic.ISchematicSystem;
+-import net.minecraft.client.Minecraft;
+-import net.minecraft.client.multiplayer.ClientPacketListener;
+-import net.minecraft.client.player.LocalPlayer;
++import baritone.api.utils.IPlayerContext;
++import net.minecraft.world.entity.player.Player;
+ 
+ import java.util.List;
+ import java.util.Objects;
++import java.util.function.Function;
+ 
+ /**
+  * Provides the present {@link IBaritone} instances, as well as non-baritone instance related APIs.
+@@ -39,6 +39,7 @@ public interface IBaritoneProvider {
+      * Returns the primary {@link IBaritone} instance. This instance is persistent, and
+      * is represented by the local player that is created by the game itself, not a "bot"
+      * player through Baritone.
++     * A server-side embedding has no such player and no primary instance: this returns {@code null} there.
+      *
+      * @return The primary {@link IBaritone} instance.
+      */
+@@ -49,17 +50,17 @@ public interface IBaritoneProvider {
+      * returned by {@link #getPrimaryBaritone()}.
+      *
+      * @return All active {@link IBaritone} instances.
+-     * @see #getBaritoneForPlayer(LocalPlayer)
++     * @see #getBaritoneForPlayer(Player)
+      */
+     List<IBaritone> getAllBaritones();
+ 
+     /**
+-     * Provides the {@link IBaritone} instance for a given {@link LocalPlayer}.
++     * Provides the {@link IBaritone} instance for a given {@link Player}.
+      *
+      * @param player The player
+      * @return The {@link IBaritone} instance.
+      */
+-    default IBaritone getBaritoneForPlayer(LocalPlayer player) {
++    default IBaritone getBaritoneForPlayer(Player player) {
+         for (IBaritone baritone : this.getAllBaritones()) {
+             if (Objects.equals(player, baritone.getPlayerContext().player())) {
+                 return baritone;
+@@ -69,44 +70,14 @@ public interface IBaritoneProvider {
+     }
+ 
+     /**
+-     * Provides the {@link IBaritone} instance for a given {@link Minecraft}.
++     * Creates and registers a new {@link IBaritone} instance that controls the player described by the
++     * {@link IPlayerContext} the factory returns. The factory receives the new instance (so the context can ask it
++     * for its look behavior or world data) and is called before any behavior is constructed.
+      *
+-     * @param minecraft The minecraft
+-     * @return The {@link IBaritone} instance.
+-     */
+-    default IBaritone getBaritoneForMinecraft(Minecraft minecraft) {
+-        for (IBaritone baritone : this.getAllBaritones()) {
+-            if (Objects.equals(minecraft, baritone.getPlayerContext().minecraft())) {
+-                return baritone;
+-            }
+-        }
+-        return null;
+-    }
+-
+-    /**
+-     * Provides the {@link IBaritone} instance for the player with the specified connection.
+-     *
+-     * @param connection The connection
+-     * @return The {@link IBaritone} instance.
+-     */
+-    default IBaritone getBaritoneForConnection(ClientPacketListener connection) {
+-        for (IBaritone baritone : this.getAllBaritones()) {
+-            final LocalPlayer player = baritone.getPlayerContext().player();
+-            if (player != null && player.connection == connection) {
+-                return baritone;
+-            }
+-        }
+-        return null;
+-    }
+-
+-    /**
+-     * Creates and registers a new {@link IBaritone} instance using the specified {@link Minecraft}. The existing
+-     * instance is returned if already registered.
+-     *
+-     * @param minecraft The minecraft
++     * @param playerContext Creates the player context of the new instance
+      * @return The {@link IBaritone} instance
+      */
+-    IBaritone createBaritone(Minecraft minecraft);
++    IBaritone createBaritone(Function<IBaritone, IPlayerContext> playerContext);
+ 
+     /**
+      * Destroys and removes the specified {@link IBaritone} instance. If the specified instance is the
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+index de6d7cd..27c41a9 100644
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -18,11 +18,10 @@
+ package baritone.api.utils;
+ 
+ import baritone.api.cache.IWorldData;
+-import net.minecraft.client.Minecraft;
+-import net.minecraft.client.multiplayer.ClientLevel;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.BlockPos;
++import net.minecraft.util.thread.BlockableEventLoop;
+ import net.minecraft.world.entity.Entity;
++import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.SlabBlock;
+ import net.minecraft.world.phys.BlockHitResult;
+@@ -39,17 +38,19 @@ import java.util.stream.StreamSupport;
+  */
+ public interface IPlayerContext {
+ 
+-    Minecraft minecraft();
++    /**
++     * The thread-owning game object: Minecraft on a client, MinecraftServer on a server. Baritone only asks it
++     * {@link BlockableEventLoop#isSameThread() which thread is the game thread}.
++     */
++    BlockableEventLoop<?> minecraft();
+ 
+-    LocalPlayer player();
++    Player player();
+ 
+     IPlayerController playerController();
+ 
+     Level world();
+ 
+-    default Iterable<Entity> entities() {
+-        return ((ClientLevel) world()).entitiesForRendering();
+-    }
++    Iterable<Entity> entities();
+ 
+     default Stream<Entity> entitiesStream() {
+         return StreamSupport.stream(entities().spliterator(), false);
+@@ -95,6 +96,14 @@ public interface IPlayerContext {
+ 
+     BetterBlockPos viewerPos();
+ 
++    /**
++     * Vanilla's mouse sensitivity option (0.0 to 1.0). Baritone snaps its rotations to the grid of angles that
++     * a mouse at this sensitivity can produce; a lower value means a finer grid.
++     */
++    default double mouseSensitivity() {
++        return 0.5;
++    }
++
+     default Rotation playerRotations() {
+         return new Rotation(player().getYRot(), player().getXRot());
+     }
+diff --git a/src/api/java/baritone/api/utils/IPlayerController.java b/src/api/java/baritone/api/utils/IPlayerController.java
+index 48142d1..4d9c3fe 100644
+--- a/src/api/java/baritone/api/utils/IPlayerController.java
++++ b/src/api/java/baritone/api/utils/IPlayerController.java
+@@ -18,7 +18,6 @@
+ package baritone.api.utils;
+ 
+ import baritone.api.BaritoneAPI;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.world.InteractionHand;
+@@ -47,9 +46,9 @@ public interface IPlayerController {
+ 
+     GameType getGameType();
+ 
+-    InteractionResult processRightClickBlock(LocalPlayer player, Level world, InteractionHand hand, BlockHitResult result);
++    InteractionResult processRightClickBlock(Player player, Level world, InteractionHand hand, BlockHitResult result);
+ 
+-    InteractionResult processRightClick(LocalPlayer player, Level world, InteractionHand hand);
++    InteractionResult processRightClick(Player player, Level world, InteractionHand hand);
+ 
+     boolean clickBlock(BlockPos loc, Direction face);
+ 
+diff --git a/src/api/java/baritone/api/utils/RotationUtils.java b/src/api/java/baritone/api/utils/RotationUtils.java
+index 5eef8b4..a998ce3 100644
+--- a/src/api/java/baritone/api/utils/RotationUtils.java
++++ b/src/api/java/baritone/api/utils/RotationUtils.java
+@@ -19,11 +19,11 @@ package baritone.api.utils;
+ 
+ import baritone.api.BaritoneAPI;
+ import baritone.api.IBaritone;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.entity.Entity;
++import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.block.BaseFireBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.BlockHitResult;
+@@ -266,12 +266,12 @@ public final class RotationUtils {
+     }
+ 
+     @Deprecated
+-    public static Optional<Rotation> reachable(LocalPlayer entity, BlockPos pos, double blockReachDistance) {
++    public static Optional<Rotation> reachable(Player entity, BlockPos pos, double blockReachDistance) {
+         return reachable(entity, pos, blockReachDistance, false);
+     }
+ 
+     @Deprecated
+-    public static Optional<Rotation> reachable(LocalPlayer entity, BlockPos pos, double blockReachDistance, boolean wouldSneak) {
++    public static Optional<Rotation> reachable(Player entity, BlockPos pos, double blockReachDistance, boolean wouldSneak) {
+         IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForPlayer(entity);
+         IPlayerContext ctx = baritone.getPlayerContext();
+         return reachable(ctx, pos, blockReachDistance, wouldSneak);

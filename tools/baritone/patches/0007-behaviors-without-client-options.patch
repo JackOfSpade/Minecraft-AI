@@ -1,0 +1,119 @@
+PathingBehavior/CustomGoalProcess drop the client-only disconnect-on-arrival, PathingBehavior the vanilla auto-jump toggle
+(a ServerPlayer has neither), LookBehavior reads the mouse sensitivity from IPlayerContext.mouseSensitivity(), MineProcess
+asks ctx.entities() for dropped items instead of casting the world to ClientLevel.
+
+diff --git a/src/main/java/baritone/behavior/LookBehavior.java b/src/main/java/baritone/behavior/LookBehavior.java
+index 98e12ae..11f69a3 100644
+--- a/src/main/java/baritone/behavior/LookBehavior.java
++++ b/src/main/java/baritone/behavior/LookBehavior.java
+@@ -302,7 +302,7 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
+ 
+         private float mouseToAngle(double mouseDelta) {
+             // casting float literals to double gets us the precise values used by mc
+-            final double f = ctx.minecraft().options.sensitivity().get() * (double) 0.6f + (double) 0.2f;
++            final double f = ctx.mouseSensitivity() * (double) 0.6f + (double) 0.2f;
+             return (float) (mouseDelta * f * f * f * 8.0d) * 0.15f; // yes, one double and one float scaling factor
+         }
+     }
+diff --git a/src/main/java/baritone/behavior/PathingBehavior.java b/src/main/java/baritone/behavior/PathingBehavior.java
+index 6ed20d5..d2a0f3e 100644
+--- a/src/main/java/baritone/behavior/PathingBehavior.java
++++ b/src/main/java/baritone/behavior/PathingBehavior.java
+@@ -36,7 +36,6 @@ import baritone.pathing.path.PathExecutor;
+ import baritone.utils.PathRenderer;
+ import baritone.utils.PathingCommandContext;
+ import baritone.utils.pathing.Favoring;
+-import net.minecraft.client.multiplayer.ClientLevel;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.network.chat.Component;
+ 
+@@ -70,8 +69,6 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
+ 
+     private final Object pathPlanLock = new Object();
+ 
+-    private boolean lastAutoJump;
+-
+     private BetterBlockPos expectedSegmentStart;
+ 
+     private final LinkedBlockingQueue<PathEvent> toDispatch = new LinkedBlockingQueue<>();
+@@ -159,11 +156,6 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
+                     logDebug("All done. At " + goal);
+                     queuePathEvent(PathEvent.AT_GOAL);
+                     next = null;
+-                    if (Baritone.settings().disconnectOnArrival.value) {
+-                        if (ctx.world() instanceof ClientLevel clientLevel) {
+-                            clientLevel.disconnect(Component.literal("[Baritone] Arrived at goal!"));
+-                        }
+-                    }
+                     return;
+                 }
+                 if (next != null && !next.getPath().positions().contains(ctx.playerFeet()) && !next.getPath().positions().contains(expectedSegmentStart)) { // can contain either one
+@@ -238,23 +230,6 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
+         }
+     }
+ 
+-    @Override
+-    public void onPlayerUpdate(PlayerUpdateEvent event) {
+-        if (current != null) {
+-            switch (event.getState()) {
+-                case PRE:
+-                    lastAutoJump = ctx.minecraft().options.autoJump().get();
+-                    ctx.minecraft().options.autoJump().set(false);
+-                    break;
+-                case POST:
+-                    ctx.minecraft().options.autoJump().set(lastAutoJump);
+-                    break;
+-                default:
+-                    break;
+-            }
+-        }
+-    }
+-
+     public void secretInternalSetGoal(Goal goal) {
+         this.goal = goal;
+     }
+diff --git a/src/main/java/baritone/process/CustomGoalProcess.java b/src/main/java/baritone/process/CustomGoalProcess.java
+index bb32fb0..8c61fe6 100644
+--- a/src/main/java/baritone/process/CustomGoalProcess.java
++++ b/src/main/java/baritone/process/CustomGoalProcess.java
+@@ -24,7 +24,6 @@ import baritone.api.process.PathingCommand;
+ import baritone.api.process.PathingCommandType;
+ import baritone.utils.BaritoneProcessHelper;
+ import net.minecraft.ChatFormatting;
+-import net.minecraft.client.multiplayer.ClientLevel;
+ import net.minecraft.network.chat.Component;
+ 
+ /**
+@@ -111,11 +110,6 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
+                 }
+                 if (this.goal == null || (this.goal.isInGoal(ctx.playerFeet()) && this.goal.isInGoal(baritone.getPathingBehavior().pathStart()))) {
+                     onLostControl(); // we're there xd
+-                    if (Baritone.settings().disconnectOnArrival.value) {
+-                        if (ctx.world() instanceof ClientLevel clientLevel) {
+-                            clientLevel.disconnect(Component.literal("[Baritone] Arrived at goal!"));
+-                        }
+-                    }
+                     if (Baritone.settings().notificationOnPathComplete.value) {
+                         logNotification("Pathing complete", false);
+                     }
+diff --git a/src/main/java/baritone/process/MineProcess.java b/src/main/java/baritone/process/MineProcess.java
+index 31aa16a..7de06aa 100644
+--- a/src/main/java/baritone/process/MineProcess.java
++++ b/src/main/java/baritone/process/MineProcess.java
+@@ -30,7 +30,6 @@ import baritone.pathing.movement.CalculationContext;
+ import baritone.pathing.movement.MovementHelper;
+ import baritone.utils.BaritoneProcessHelper;
+ import baritone.utils.BlockStateInterface;
+-import net.minecraft.client.multiplayer.ClientLevel;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.item.ItemEntity;
+@@ -344,7 +343,7 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
+             return Collections.emptyList();
+         }
+         List<BlockPos> ret = new ArrayList<>();
+-        for (Entity entity : ((ClientLevel) ctx.world()).entitiesForRendering()) {
++        for (Entity entity : ctx.entities()) {
+             if (entity instanceof ItemEntity) {
+                 ItemEntity ei = (ItemEntity) entity;
+                 if (filter.has(ei.getItem())) {

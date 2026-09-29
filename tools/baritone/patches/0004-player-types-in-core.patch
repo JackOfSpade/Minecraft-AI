@@ -1,0 +1,117 @@
+InventoryBehavior, CalculationContext, MovementDiagonal and ToolSet declared LocalPlayer for what is a plain Player.
+
+diff --git a/src/main/java/baritone/behavior/InventoryBehavior.java b/src/main/java/baritone/behavior/InventoryBehavior.java
+index 15dff73..0f6ec71 100644
+--- a/src/main/java/baritone/behavior/InventoryBehavior.java
++++ b/src/main/java/baritone/behavior/InventoryBehavior.java
+@@ -21,12 +21,12 @@ import baritone.Baritone;
+ import baritone.api.event.events.TickEvent;
+ import baritone.api.utils.Helper;
+ import baritone.utils.ToolSet;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.NonNullList;
+ import net.minecraft.core.component.DataComponents;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.entity.EquipmentSlot;
++import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.inventory.ClickType;
+ import net.minecraft.world.item.BlockItem;
+ import net.minecraft.world.item.Item;
+@@ -189,7 +189,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
+     }
+ 
+     public boolean throwaway(boolean select, Predicate<? super ItemStack> desired, boolean allowInventory) {
+-        LocalPlayer p = ctx.player();
++        Player p = ctx.player();
+         NonNullList<ItemStack> inv = p.getInventory().getNonEquipmentItems();
+         for (int i = 0; i < 9; i++) {
+             ItemStack item = inv.get(i);
+diff --git a/src/main/java/baritone/pathing/movement/CalculationContext.java b/src/main/java/baritone/pathing/movement/CalculationContext.java
+index f616c98..9161289 100644
+--- a/src/main/java/baritone/pathing/movement/CalculationContext.java
++++ b/src/main/java/baritone/pathing/movement/CalculationContext.java
+@@ -25,12 +25,12 @@ import baritone.pathing.precompute.PrecomputedData;
+ import baritone.utils.BlockStateInterface;
+ import baritone.utils.ToolSet;
+ import baritone.utils.pathing.BetterWorldBorder;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Holder;
+ import net.minecraft.world.entity.EquipmentSlot;
+ import net.minecraft.world.entity.ai.attributes.Attributes;
+ import net.minecraft.world.entity.player.Inventory;
++import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
+ import net.minecraft.world.item.enchantment.*;
+@@ -95,7 +95,7 @@ public class CalculationContext {
+         this.precomputedData = new PrecomputedData();
+         this.safeForThreadedUse = forUseOnAnotherThread;
+         this.baritone = baritone;
+-        LocalPlayer player = baritone.getPlayerContext().player();
++        Player player = baritone.getPlayerContext().player();
+         this.world = baritone.getPlayerContext().world();
+         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
+         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java b/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
+index 8be1047..25e3f0c 100644
+--- a/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
+@@ -32,9 +32,9 @@ import com.google.common.collect.ImmutableSet;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Set;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
++import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
+@@ -60,7 +60,7 @@ public class MovementDiagonal extends Movement {
+     protected boolean safeToCancel(MovementState state) {
+         //too simple. backfill does not work after cornering with this
+         //return context.precomputedData.canWalkOn(ctx, ctx.playerFeet().down());
+-        LocalPlayer player = ctx.player();
++        Player player = ctx.player();
+         double offset = 0.25;
+         double x = player.position().x;
+         double y = player.position().y - 1;
+diff --git a/src/main/java/baritone/utils/ToolSet.java b/src/main/java/baritone/utils/ToolSet.java
+index eca79d9..799547b 100644
+--- a/src/main/java/baritone/utils/ToolSet.java
++++ b/src/main/java/baritone/utils/ToolSet.java
+@@ -18,13 +18,13 @@
+ package baritone.utils;
+ 
+ import baritone.Baritone;
+-import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.component.DataComponents;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.world.effect.MobEffects;
+ import net.minecraft.world.entity.ai.attributes.Attributes;
++import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.Item;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.enchantment.Enchantment;
+@@ -58,7 +58,7 @@ public class ToolSet {
+      */
+     private final Function<Block, Double> backendCalculation;
+ 
+-    private final LocalPlayer player;
++    private final Player player;
+ 
+     /**
+      * Used for evaluating the material cost of a tool.
+@@ -74,7 +74,7 @@ public class ToolSet {
+         ItemTags.NETHERITE_TOOL_MATERIALS
+     );
+ 
+-    public ToolSet(LocalPlayer player) {
++    public ToolSet(Player player) {
+         breakStrengthCache = new HashMap<>();
+         this.player = player;
+ 

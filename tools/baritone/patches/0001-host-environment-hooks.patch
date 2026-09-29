@@ -1,0 +1,145 @@
+Helper, Settings, SettingsUtil and IBuilderProcess no longer touch Minecraft.getInstance()/GuiMessageTag/BaritoneToast.
+The game directory and the hop onto the game thread come from the new overlay class HostEnvironment (defaults work
+without configuration); the chat logger defaults to SLF4J and the toaster to a no-op.
+
+diff --git a/src/api/java/baritone/api/Settings.java b/src/api/java/baritone/api/Settings.java
+index b611cad..e94826e 100644
+--- a/src/api/java/baritone/api/Settings.java
++++ b/src/api/java/baritone/api/Settings.java
+@@ -21,9 +21,6 @@ import baritone.api.utils.Helper;
+ import baritone.api.utils.NotificationHelper;
+ import baritone.api.utils.SettingsUtil;
+ import baritone.api.utils.TypeUtils;
+-import baritone.api.utils.gui.BaritoneToast;
+-import net.minecraft.client.GuiMessageTag;
+-import net.minecraft.client.Minecraft;
+ import net.minecraft.core.Vec3i;
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.world.item.Item;
+@@ -1278,14 +1275,7 @@ public final class Settings {
+      * {@link Setting#value};
+      */
+     @JavaOnly
+-    public final Setting<Consumer<Component>> logger = new Setting<>((msg) -> {
+-        try {
+-            final GuiMessageTag tag = useMessageTag.value ? Helper.MESSAGE_TAG : null;
+-            Minecraft.getInstance().gui.getChat().addMessage(msg, null, tag);
+-        } catch (Throwable t) {
+-            LOGGER.warn("Failed to log message to chat: " + msg.getString(), t);
+-        }
+-    });
++    public final Setting<Consumer<Component>> logger = new Setting<>((msg) -> LOGGER.info(msg.getString()));
+ 
+     /**
+      * The function that is called when Baritone will send a desktop notification. This function can be added to
+@@ -1301,7 +1291,7 @@ public final class Settings {
+      * {@link Setting#value};
+      */
+     @JavaOnly
+-    public final Setting<BiConsumer<Component, Component>> toaster = new Setting<>(BaritoneToast::addOrUpdate);
++    public final Setting<BiConsumer<Component, Component>> toaster = new Setting<>((title, message) -> {});
+ 
+     /**
+      * Print out ALL command exceptions as a stack trace to stdout, even simple syntax errors
+diff --git a/src/api/java/baritone/api/process/IBuilderProcess.java b/src/api/java/baritone/api/process/IBuilderProcess.java
+index 67a3ed4..a42b9fe 100644
+--- a/src/api/java/baritone/api/process/IBuilderProcess.java
++++ b/src/api/java/baritone/api/process/IBuilderProcess.java
+@@ -18,7 +18,7 @@
+ package baritone.api.process;
+ 
+ import baritone.api.schematic.ISchematic;
+-import net.minecraft.client.Minecraft;
++import baritone.api.utils.HostEnvironment;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Vec3i;
+ import net.minecraft.world.level.block.state.BlockState;
+@@ -53,7 +53,7 @@ public interface IBuilderProcess extends IBaritoneProcess {
+ 
+     @Deprecated
+     default boolean build(String schematicFile, BlockPos origin) {
+-        File file = new File(new File(Minecraft.getInstance().gameDirectory, "schematics"), schematicFile);
++        File file = new File(new File(HostEnvironment.gameDirectory().toFile(), "schematics"), schematicFile);
+         return build(schematicFile, file, origin);
+     }
+ 
+diff --git a/src/api/java/baritone/api/utils/Helper.java b/src/api/java/baritone/api/utils/Helper.java
+index 507cd85..459075a 100644
+--- a/src/api/java/baritone/api/utils/Helper.java
++++ b/src/api/java/baritone/api/utils/Helper.java
+@@ -20,8 +20,6 @@ package baritone.api.utils;
+ import baritone.api.BaritoneAPI;
+ import baritone.api.Settings;
+ import net.minecraft.ChatFormatting;
+-import net.minecraft.client.GuiMessageTag;
+-import net.minecraft.client.Minecraft;
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.network.chat.MutableComponent;
+ 
+@@ -43,18 +41,6 @@ public interface Helper {
+      */
+     Helper HELPER = new Helper() {};
+ 
+-    /**
+-     * The main game instance returned by {@link Minecraft#getInstance()}.
+-     * Deprecated since {@link IPlayerContext#minecraft()} should be used instead (In the majority of cases).
+-     */
+-    @Deprecated
+-    Minecraft mc = Minecraft.getInstance();
+-
+-    /**
+-     * The tag to assign to chat messages when {@link Settings#useMessageTag} is {@code true}.
+-     */
+-    GuiMessageTag MESSAGE_TAG = new GuiMessageTag(0xFF55FF, null, Component.literal("Baritone message."), "Baritone");
+-
+     static Component getPrefix() {
+         // Inner text component
+         final Calendar now = Calendar.getInstance();
+@@ -79,7 +65,7 @@ public interface Helper {
+      * @param message The message to display in the popup
+      */
+     default void logToast(Component title, Component message) {
+-        Minecraft.getInstance().execute(() -> BaritoneAPI.getSettings().toaster.value.accept(title, message));
++        HostEnvironment.execute(() -> BaritoneAPI.getSettings().toaster.value.accept(title, message));
+     }
+ 
+     /**
+@@ -140,7 +126,7 @@ public interface Helper {
+      * @param error   Whether to log as an error
+      */
+     default void logNotificationDirect(String message, boolean error) {
+-        Minecraft.getInstance().execute(() -> BaritoneAPI.getSettings().notifier.value.accept(message, error));
++        HostEnvironment.execute(() -> BaritoneAPI.getSettings().notifier.value.accept(message, error));
+     }
+ 
+     /**
+@@ -175,7 +161,7 @@ public interface Helper {
+         if (logAsToast) {
+             logToast(getPrefix(), component);
+         } else {
+-            Minecraft.getInstance().execute(() -> BaritoneAPI.getSettings().logger.value.accept(component));
++            HostEnvironment.execute(() -> BaritoneAPI.getSettings().logger.value.accept(component));
+         }
+     }
+ 
+diff --git a/src/api/java/baritone/api/utils/SettingsUtil.java b/src/api/java/baritone/api/utils/SettingsUtil.java
+index 8b9f6a7..c35365c 100644
+--- a/src/api/java/baritone/api/utils/SettingsUtil.java
++++ b/src/api/java/baritone/api/utils/SettingsUtil.java
+@@ -19,7 +19,6 @@ package baritone.api.utils;
+ 
+ import baritone.api.BaritoneAPI;
+ import baritone.api.Settings;
+-import net.minecraft.client.Minecraft;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.Vec3i;
+ import net.minecraft.core.registries.BuiltInRegistries;
+@@ -113,7 +112,7 @@ public class SettingsUtil {
+     }
+ 
+     private static Path settingsByName(String name) {
+-        return Minecraft.getInstance().gameDirectory.toPath().resolve("baritone").resolve(name);
++        return HostEnvironment.gameDirectory().resolve("baritone").resolve(name);
+     }
+ 
+     public static List<Settings.Setting> modifiedSettings(Settings settings) {

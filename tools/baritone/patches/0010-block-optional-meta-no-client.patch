@@ -1,0 +1,40 @@
+BlockOptionalMeta's loot-table stub level no longer keeps a Minecraft client reference; it reports the vanilla feature set.
+
+diff --git a/src/api/java/baritone/api/utils/BlockOptionalMeta.java b/src/api/java/baritone/api/utils/BlockOptionalMeta.java
+index 398695a..aad7a13 100644
+--- a/src/api/java/baritone/api/utils/BlockOptionalMeta.java
++++ b/src/api/java/baritone/api/utils/BlockOptionalMeta.java
+@@ -21,7 +21,6 @@ import baritone.api.utils.accessor.IItemStack;
+ import baritone.api.utils.accessor.ILootTable;
+ import com.google.common.collect.ImmutableMap;
+ import com.google.common.collect.ImmutableSet;
+-import net.minecraft.client.Minecraft;
+ import net.minecraft.core.HolderLookup;
+ import net.minecraft.core.LayeredRegistryAccess;
+ import net.minecraft.core.Registry;
+@@ -40,6 +39,7 @@ import net.minecraft.server.packs.resources.MultiPackResourceManager;
+ import net.minecraft.tags.TagLoader;
+ import net.minecraft.world.RandomSequences;
+ import net.minecraft.world.flag.FeatureFlagSet;
++import net.minecraft.world.flag.FeatureFlags;
+ import net.minecraft.world.item.Item;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
+@@ -258,7 +258,6 @@ public final class BlockOptionalMeta {
+     }
+ 
+     public static class ServerLevelStub extends ServerLevel {
+-        private static Minecraft client = Minecraft.getInstance();
+         private static Unsafe unsafe = getUnsafe();
+         private static CompletableFuture<RegistryAccess> registryAccess = load();
+ 
+@@ -268,8 +267,7 @@ public final class BlockOptionalMeta {
+ 
+         @Override
+         public FeatureFlagSet enabledFeatures() {
+-            assert client.level != null;
+-            return client.level.enabledFeatures();
++            return FeatureFlags.VANILLA_SET;
+         }
+ 
+         public static ServerLevelStub fastCreate() {

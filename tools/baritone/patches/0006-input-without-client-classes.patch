@@ -1,0 +1,70 @@
+InputOverrideHandler no longer swaps the LocalPlayer's KeyboardInput for PlayerMovementInput (there is no client input on a server; the host
+applies isInputForcedDown() itself). BlockBreakHelper drops the client-side destroy-delay reset, BlockPlaceHelper asks
+isPassenger() instead of the LocalPlayer-only isHandsBusy().
+
+diff --git a/src/main/java/baritone/utils/BlockBreakHelper.java b/src/main/java/baritone/utils/BlockBreakHelper.java
+index 0c5cf6f..b62cd45 100644
+--- a/src/main/java/baritone/utils/BlockBreakHelper.java
++++ b/src/main/java/baritone/utils/BlockBreakHelper.java
+@@ -19,7 +19,6 @@ package baritone.utils;
+ 
+ import baritone.api.BaritoneAPI;
+ import baritone.api.utils.IPlayerContext;
+-import baritone.utils.accessor.IPlayerControllerMP;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.HitResult;
+@@ -70,8 +69,6 @@ public final class BlockBreakHelper {
+                 if (ctx.playerController().hasBrokenBlock()) { // block broken this tick
+                     // break delay timer only applies for multi-tick block breaks like vanilla
+                     breakDelayTimer = BaritoneAPI.getSettings().blockBreakSpeed.value - BASE_BREAK_DELAY;
+-                    // must reset controller's destroy delay to prevent the client from delaying itself unnecessarily
+-                    ((IPlayerControllerMP) ctx.minecraft().gameMode).setDestroyDelay(0);
+                 }
+             }
+             // if true, we're breaking a block. if false, we broke the block this tick
+diff --git a/src/main/java/baritone/utils/BlockPlaceHelper.java b/src/main/java/baritone/utils/BlockPlaceHelper.java
+index ca8d505..b36e780 100644
+--- a/src/main/java/baritone/utils/BlockPlaceHelper.java
++++ b/src/main/java/baritone/utils/BlockPlaceHelper.java
+@@ -41,7 +41,7 @@ public class BlockPlaceHelper {
+             return;
+         }
+         HitResult mouseOver = ctx.objectMouseOver();
+-        if (!rightClickRequested || ctx.player().isHandsBusy() || mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
++        if (!rightClickRequested || ctx.player().isPassenger() || mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
+             return;
+         }
+         rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
+diff --git a/src/main/java/baritone/utils/InputOverrideHandler.java b/src/main/java/baritone/utils/InputOverrideHandler.java
+index 38a32f5..0779874 100644
+--- a/src/main/java/baritone/utils/InputOverrideHandler.java
++++ b/src/main/java/baritone/utils/InputOverrideHandler.java
+@@ -23,7 +23,6 @@ import baritone.api.event.events.TickEvent;
+ import baritone.api.utils.IInputOverrideHandler;
+ import baritone.api.utils.input.Input;
+ import baritone.behavior.Behavior;
+-import net.minecraft.client.player.KeyboardInput;
+ 
+ import java.util.HashMap;
+ import java.util.Map;
+@@ -93,17 +92,8 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
+         blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT));
+         blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT));
+ 
+-        if (inControl()) {
+-            if (ctx.player().input.getClass() != PlayerMovementInput.class) {
+-                ctx.player().input = new PlayerMovementInput(this);
+-            }
+-        } else {
+-            if (ctx.player().input.getClass() == PlayerMovementInput.class) { // allow other movement inputs that aren't this one, e.g. for a freecam
+-                ctx.player().input = new KeyboardInput(ctx.minecraft().options);
+-            }
+-        }
+-        // only set it if it was previously incorrect
+-        // gotta do it this way, or else it constantly thinks you're beginning a double tap W sprint lol
++        // There is no client-side input object to swap on a server: the host reads isInputForcedDown(...) after this
++        // tick and applies the movement to the player itself.
+     }
+ 
+     private boolean inControl() {
