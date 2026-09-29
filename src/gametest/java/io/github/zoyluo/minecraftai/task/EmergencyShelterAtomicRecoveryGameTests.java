@@ -469,8 +469,12 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_food_nineteen_waits_for_natural_healing_without_eating", maxTicks = 16000)
-    public void foodNineteenWaitsForNaturalHealingWithoutEating(GameTestHelper context) {
+    // EmergencyShelterTask#shouldStartHoldEating (pinned by EmergencyShelterEatingPolicyTest) tops every recovery
+    // shelter's hunger bar to 20, so a bot at food 19 spends its reserve item while still sealed, and the shelter only
+    // opens once health is full. (This test used to expect "food 19 heals naturally without eating" and an 18 HP exit,
+    // an older policy.)
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_food_nineteen_tops_hunger_to_twenty_from_reserve_while_sealed", maxTicks = 16000)
+    public void foodNineteenTopsHungerToTwentyFromReserveWhileSealed(GameTestHelper context) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
@@ -481,9 +485,9 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         EmergencyShelterTask task = new EmergencyShelterTask();
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
-                        "gametest_shelter_food_nineteen_efficiency"));
+                        "gametest_shelter_food_nineteen_top_up"));
         boolean[] boundaryInjected = {false};
-        boolean[] naturalHealingObserved = {false};
+        boolean[] reserveSpentWhileSealed = {false};
         runLocked(context, () -> {
             context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
@@ -500,24 +504,31 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 return;
             }
             if (boundaryInjected[0]) {
-                require(context, InventoryAction.countItem(bot, Items.COOKED_BEEF) == 1,
-                        "food 19 consumed a reserve item despite active natural regeneration");
-                if (bot.getHealth() > 17.0F) {
-                    naturalHealingObserved[0] = true;
+                if (InventoryAction.countItem(bot, Items.COOKED_BEEF) == 0
+                        && !reserveSpentWhileSealed[0]) {
+                    require(context, sealed,
+                            "shelter opened before its reserve food was physically consumed");
+                    reserveSpentWhileSealed[0] = true;
                 }
-                if (bot.getHealth() < 18.0F) {
+                if (bot.getHealth() < bot.getMaxHealth()) {
+                    // Out of food items but with a full hunger bar the bot still regenerates: it holds sealed
+                    // until it is back at full health (it must not cry for help or give up at half health).
                     require(context, task.state() == TaskState.RUNNING && sealed,
-                            "food-19 shelter opened before natural healing reached 18 HP");
+                            "food-19 shelter opened before healing completed: hp=" + bot.getHealth()
+                                    + " " + task.describe());
+                    require(context, !task.describe().contains("cried_for_help=true"),
+                            "a regenerating bot with a full hunger bar must not cry for help: "
+                                    + task.describe());
                 }
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, boundaryInjected[0] && naturalHealingObserved[0]
-                            && bot.getHealth() >= 18.0F,
-                    "food-19 fixture did not recover through natural regeneration");
-            require(context, InventoryAction.countItem(bot, Items.COOKED_BEEF) == 1,
-                    "food-19 completion spent its untouched reserve");
+            require(context, boundaryInjected[0] && reserveSpentWhileSealed[0]
+                            && bot.getHealth() >= bot.getMaxHealth()
+                            && bot.getFoodData().getFoodLevel() >= 20,
+                    "food-19 fixture did not top hunger up from the reserve and heal fully: hp="
+                            + bot.getHealth() + " food=" + bot.getFoodData().getFoodLevel());
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterFoodNineteenGT");
         });
@@ -613,202 +624,91 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 "ShelterOverhangNightGT", "shallow overhang");
     }
 
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_observed_hostile_at_head_port_is_resealed_before_foot_door_opens", maxTicks = 16000)
-    public void observedHostileAtHeadPortIsResealedBeforeFootDoorOpens(
-            GameTestHelper context) {
+    // The shelter's HOLD ends in beginRecoveredExit, which deliberately FORCES the door: "a fully healed
+    // bot deliberately reopens its own door even if the original hostile is still visible ... resealing
+    // forever would turn recovery into a dirt prison" (EmergencyShelterTask#beginSafeExit). These three
+    // scenarios used to expect the head-port observation reseal / four-door rotation / typed pressure
+    // timeout for a recovered bot, but that machinery only runs for a non-forced exit. They now pin the
+    // documented policy: a recovered bot leaves through its own doorway with a hostile visible at it,
+    // whether or not it holds a spare block, and never publishes a pressure reseal or a timeout.
+
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_recovered_bot_reopens_its_door_despite_a_hostile_at_the_head_port", maxTicks = 16000)
+    public void recoveredBotReopensItsDoorDespiteAHostileAtTheHeadPort(GameTestHelper context) {
+        verifyRecoveredBotLeavesDespiteHostiles(context, "ShelterObservationResealGT",
+                "gametest_shelter_recovered_exit_hostile_at_port", List.of(Direction.NORTH), false);
+    }
+
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_recovered_bot_reopens_its_door_despite_hostiles_on_all_four_sides", maxTicks = 16000)
+    public void recoveredBotReopensItsDoorDespiteHostilesOnAllFourSides(GameTestHelper context) {
+        verifyRecoveredBotLeavesDespiteHostiles(context, "ShelterAllPressureGT",
+                "gametest_shelter_recovered_exit_all_pressure",
+                List.of(Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST), false);
+    }
+
+    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_recovered_bot_needs_no_reseal_block_to_leave_despite_a_hostile", maxTicks = 16000)
+    public void recoveredBotNeedsNoResealBlockToLeaveDespiteAHostile(GameTestHelper context) {
+        verifyRecoveredBotLeavesDespiteHostiles(context, "ShelterResealFailureGT",
+                "gametest_shelter_recovered_exit_no_reseal_block", List.of(Direction.NORTH), true);
+    }
+
+    private static void verifyRecoveredBotLeavesDespiteHostiles(GameTestHelper context,
+                                                                String botName,
+                                                                String reason,
+                                                                List<Direction> hostileSides,
+                                                                boolean noSpareBlock) {
         BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
-        AIPlayerEntity bot = spawn(context, "ShelterObservationResealGT", feet);
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 24));
+        AIPlayerEntity bot = spawn(context, botName, feet);
+        // Ten blocks exactly fund the supported envelope; the no-spare variant then fills every free slot so
+        // a mined wall drop cannot be collected either: the exit must not depend on having a block to reseal.
+        InventoryAction.giveItem(bot, new ItemStack(noSpareBlock ? Items.NETHERRACK : Items.DIRT,
+                noSpareBlock ? 10 : 32));
 
         EmergencyShelterTask task = new EmergencyShelterTask();
-        TaskManager.INSTANCE.assign(bot, task,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY,
-                        "gametest_shelter_observation_reseal"));
-        Husk[] hostile = {null};
-        boolean[] resealObserved = {false};
+        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, reason));
+        List<Husk> hostiles = new ArrayList<>();
 
         runLocked(context, () -> {
             context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.fail(Component.nullToEmpty("observation shelter ended as " + task.state()
+                context.fail(Component.nullToEmpty("recovered-exit shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
-            if (hostile[0] == null && !resealObserved[0]
+            if (hostiles.isEmpty() && task.state() == TaskState.RUNNING
                     && task.describe().contains("phase=HOLD")) {
-                BlockPos hostileFeet = feet.north(2);
-                Husk husk = EntityType.HUSK.create(
-                        context.getLevel(), EntitySpawnReason.COMMAND);
-                if (husk == null) {
-                    context.fail(Component.nullToEmpty(
-                            "failed to create shelter observation hostile"));
-                    return;
+                if (noSpareBlock) {
+                    require(context, InventoryAction.countItem(bot, Items.NETHERRACK) == 0,
+                            "exact-material fixture retained a reseal block");
+                    for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+                        if (bot.getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
+                            bot.getInventory().getNonEquipmentItems().set(slot, new ItemStack(Items.STICK, 64));
+                        }
+                    }
+                    bot.getInventory().setChanged();
                 }
-                husk.setPersistenceRequired();
-                husk.setNoAi(true);
-                husk.snapTo(
-                        hostileFeet.getX() + 0.5D, hostileFeet.getY(),
-                        hostileFeet.getZ() + 0.5D, 0.0F, 0.0F);
-                context.getLevel().addFreshEntity(husk);
-                hostile[0] = husk;
-                return;
-            }
-            if (!resealObserved[0]
-                    && task.describe().contains("phase=HOLD")
-                    && task.describe().contains("observation_reseals=1")) {
-                require(context, isSealed(context, feet.north())
-                                && isSealed(context, feet.north().above()),
-                        "hostile observation opened a passable foot doorway");
-                resealObserved[0] = true;
-                hostile[0].discard();
-                hostile[0] = null;
+                for (Direction side : hostileSides) {
+                    hostiles.add(spawnHusk(context, feet.relative(side, 2)));
+                }
                 return;
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, resealObserved[0],
-                    "shelter completed without physically resealing observed pressure");
-            require(context, !bot.blockPosition().equals(feet.north()),
-                    "shelter reused the pressured north doorway instead of rotating egress");
-            assertPhysicalExit(context, bot, feet);
-            finish(context, bot, "ShelterObservationResealGT");
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_four_sided_pressure_forces_physical_exit_only_after_global_deadline", maxTicks = 16000)
-    public void fourSidedPressureForcesPhysicalExitOnlyAfterGlobalDeadline(
-            GameTestHelper context) {
-        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
-        preparePlatform(context, feet, 4);
-        AIPlayerEntity bot = spawn(context, "ShelterAllPressureGT", feet);
-        InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 32));
-
-        EmergencyShelterTask task = new EmergencyShelterTask();
-        TaskManager.INSTANCE.assign(bot, task,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_all_pressure"));
-        List<Husk> hostiles = new ArrayList<>();
-        boolean[] allDirectionsPressured = {false};
-        boolean[] forcedSupportsRemoved = {false};
-        int[] forcedUnsupportedTicks = {0};
-        int[] forcedAtExitAge = {-1};
-
-        runLocked(context, () -> {
-            context.getLevel().setDayTime(1000L);
-            if (hostiles.isEmpty()
-                    && task.state() == TaskState.RUNNING
-                    && task.describe().contains("phase=HOLD")) {
-                for (Direction direction : Direction.Plane.HORIZONTAL) {
-                    hostiles.add(spawnHusk(context, feet.relative(direction, 2)));
-                }
-                return;
-            }
-            if (describedInt(task, "pressured_egress") == 4) {
-                allDirectionsPressured[0] = true;
-            }
-            if (task.state() == TaskState.RUNNING) {
-                if (task.describe().contains("force_pressure_exit=true")
-                        && !forcedSupportsRemoved[0]) {
-                    forcedAtExitAge[0] = describedInt(task, "exit_age");
-                    for (Direction direction : Direction.Plane.HORIZONTAL) {
-                        context.getLevel().setBlock(feet.relative(direction).below(),
-                                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                    }
-                    forcedSupportsRemoved[0] = true;
-                }
-                if (forcedSupportsRemoved[0] && forcedUnsupportedTicks[0] < 80) {
-                    forcedUnsupportedTicks[0]++;
-                    require(context, task.state() == TaskState.RUNNING,
-                            "forced exit became terminal with every landing unsupported");
-                    if (forcedUnsupportedTicks[0] == 80) {
-                        for (Direction direction : Direction.Plane.HORIZONTAL) {
-                            context.getLevel().setBlock(feet.relative(direction).below(),
-                                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-                        }
-                    }
-                }
-                if (!hostiles.isEmpty()
-                        && !task.describe().contains("phase=STEP_OUT")) {
-                    require(context, bot.blockPosition().equals(feet),
-                            "pressure rotation moved before a physical STEP_OUT: "
-                                    + task.describe());
-                }
-                return;
-            }
-            require(context, task.state() == TaskState.FAILED
-                            && "shelter_exit_pressure_timeout".equals(task.failureReason()),
-                    "four-sided pressure did not end with the typed timeout: "
-                            + task.state() + ":" + task.failureReason());
-            require(context, allDirectionsPressured[0]
-                            && describedInt(task, "observation_reseals") >= 4
-                            && forcedUnsupportedTicks[0] == 80
-                            && forcedAtExitAge[0] >= 500,
-                    "shelter forced an exit before rotating across all four pressured doors: "
+            require(context, !hostiles.isEmpty(), "fixture never reached the HOLD envelope");
+            require(context, hostiles.stream().allMatch(Husk::isAlive),
+                    "the hostiles must still be there: this proves the bot left despite them");
+            require(context, describedInt(task, "observation_reseals") == 0
+                            && describedInt(task, "pressured_egress") == 0
+                            && task.describe().contains("force_pressure_exit=true"),
+                    "a recovered bot must reopen its door (forced exit), not reseal against visible "
+                            + "hostiles: " + task.describe());
+            require(context, describedInt(task, "exit_age") < 500,
+                    "a recovered bot must not spend the pressure deadline in a sealed shelter: "
                             + task.describe());
             assertPhysicalExit(context, bot, feet);
             hostiles.forEach(Husk::discard);
-            finish(context, bot, "ShelterAllPressureGT");
-        });
-    }
-
-    @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_missing_reseal_block_cannot_publish_terminal_inside_shelter", maxTicks = 16000)
-    public void missingResealBlockCannotPublishTerminalInsideShelter(GameTestHelper context) {
-        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
-        preparePlatform(context, feet, 4);
-        AIPlayerEntity bot = spawn(context, "ShelterResealFailureGT", feet);
-        // Ten blocks exactly fund the supported envelope. Once sealed, a full non-block inventory
-        // prevents the mined wall drop from being collected, making reseal factually unavailable.
-        InventoryAction.giveItem(bot, new ItemStack(Items.NETHERRACK, 10));
-
-        EmergencyShelterTask task = new EmergencyShelterTask();
-        TaskManager.INSTANCE.assign(bot, task,
-                TaskOrigin.of(TaskOrigin.Kind.VERIFY,
-                        "gametest_shelter_reseal_failure"));
-        Husk[] hostile = {null};
-        int[] sealedRetryTicks = {0};
-
-        runLocked(context, () -> {
-            context.getLevel().setDayTime(1000L);
-            if (hostile[0] == null
-                    && task.state() == TaskState.RUNNING
-                    && task.describe().contains("phase=HOLD")) {
-                require(context, InventoryAction.countItem(bot, Items.NETHERRACK) == 0,
-                        "exact-material fixture retained a reseal block");
-                for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
-                    if (bot.getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
-                        bot.getInventory().getNonEquipmentItems().set(slot, new ItemStack(Items.STICK, 64));
-                    }
-                }
-                bot.getInventory().setChanged();
-                hostile[0] = spawnHusk(context, feet.north(2));
-                return;
-            }
-            boolean observationOnly = context.getLevel().getBlockState(feet.north().above()).isAir()
-                    && isSealed(context, feet.north());
-            if (hostile[0] != null
-                    && task.state() == TaskState.RUNNING && observationOnly
-                    && !task.describe().contains("force_pressure_exit=true")) {
-                sealedRetryTicks[0]++;
-                require(context, bot.blockPosition().equals(feet)
-                                && !hasPassableEnvelopeSide(context, feet),
-                        "failed reseal published movement or a passable door before deadline");
-                return;
-            }
-            if (task.state() == TaskState.RUNNING) {
-                return;
-            }
-            require(context, task.state() == TaskState.FAILED
-                            && "shelter_exit_pressure_timeout".equals(task.failureReason()),
-                    "failed reseal did not preserve the typed pressure timeout: "
-                            + task.state() + ":" + task.failureReason());
-            require(context, sealedRetryTicks[0] >= 20,
-                    "fixture did not prove bounded head-open/foot-sealed reseal retries");
-            assertPhysicalExit(context, bot, feet);
-            if (hostile[0] != null) {
-                hostile[0].discard();
-            }
-            finish(context, bot, "ShelterResealFailureGT");
+            finish(context, bot, botName);
         });
     }
 
