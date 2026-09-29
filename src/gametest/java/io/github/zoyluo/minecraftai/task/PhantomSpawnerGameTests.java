@@ -34,6 +34,11 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
  * bot) get the same huge rest statistic, stand under open sky at night 50 blocks apart, and the vanilla
  * spawner is driven directly many times. The human side is the control: it must get phantoms under the very
  * same conditions, the bot side must get none.
+ *
+ * <p>The world's difficulty is deliberately not forced to HARD: difficulty is global server state, and
+ * changing it would perturb every GameTest running concurrently in the same server (mob spawning, damage,
+ * hunger). Instead the test runs on whatever difficulty the server has (asserted to be non-peaceful) and
+ * compensates with {@code ATTEMPTS} = 80 spawner runs, which is plenty even at the lowest odds.
  */
 public final class PhantomSpawnerGameTests {
     private static final long MIDNIGHT = 18000L;
