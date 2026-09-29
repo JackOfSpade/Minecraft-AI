@@ -1192,10 +1192,12 @@ public final class BrainCoordinator {
 
     /**
      * Ends only the planner loop. A task that was successfully started is allowed to finish;
-     * repeated no-work failures are reset to a clean idle state and reported in normal chat.
+     * repeated no-work failures are reset to a clean idle state and reported in normal chat. A mission
+     * that a safety task paused counts as work: resetToIdle would destroy its cursor, and
+     * DangerWatcher resumes exactly that paused work once the threat is gone.
      */
     private void finishCallBudget(AIPlayerEntity bot, BotConversation conversation, String trigger) {
-        boolean workActive = hasRuntimeWork(
+        boolean workActive = TaskManager.INSTANCE.hasPaused(bot) || hasRuntimeWork(
                 TaskManager.INSTANCE.getActive(bot).isPresent(),
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot),
                 io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.queuedGoalCount(bot),
