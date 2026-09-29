@@ -75,4 +75,53 @@ class BuildActionVisibilitySourceTest {
         assertSame(vanillaFailure,
                 BuildAction.preferPlacementFailure(invisible, vanillaFailure));
     }
+
+    // ---- canAcceptPlacementAt must be a side-effect-free probe: it may never turn the bot's head ----------
+
+    @Test
+    void canAcceptPlacementAtUsesTheNonRotatingProbeNeverTheHeadTurningRealPlacementHelper()
+            throws IOException {
+        String source = Files.readString(SOURCE);
+        int hasFace = source.indexOf("private static boolean hasAcceptableSupportFace(");
+        int preferFailure = source.indexOf("static ActionResult preferPlacementFailure(", hasFace);
+        assertTrue(hasFace >= 0 && preferFailure > hasFace);
+        String body = source.substring(hasFace, preferFailure);
+
+        assertTrue(body.contains("probeSupportFaceHit(player, against, face, sampleRange)"),
+                "the placement-candidate query must go through the non-rotating probe");
+        assertFalse(body.contains("visibleSupportFaceHit("),
+                "a mere candidate check must never call the real placement's head-turning helper");
+    }
+
+    @Test
+    void theProbeRayNeverTurnsTheBotsHeadOrCallsVanillasLookDirectionRaycast() throws IOException {
+        String source = Files.readString(SOURCE);
+        int rayTo = source.indexOf("private static BlockHitResult rayTo(");
+        int directFallback = source.indexOf("private static ActionResult directPlaceFallback(", rayTo);
+        assertTrue(rayTo >= 0 && directFallback > rayTo);
+        String body = source.substring(rayTo, directFallback);
+
+        assertFalse(body.contains("LookAction.lookAt"),
+                "the pure probe ray must never rotate the player");
+        assertFalse(body.contains(".setYaw") && body.contains(".setPitch"),
+                "the pure probe ray must never write yaw/pitch directly either");
+        assertFalse(body.contains("player.raycast("),
+                "the pure probe ray must build its own RaycastContext, not vanilla's look-direction raycast");
+        assertTrue(body.contains("new RaycastContext("),
+                "the probe must cast its own eye-to-target ray");
+    }
+
+    @Test
+    void theRealPlacementRayStillTurnsTheHeadBeforeRaycasting() throws IOException {
+        String source = Files.readString(SOURCE);
+        int rotateAndRaycast = source.indexOf("private static BlockHitResult rotateAndRaycast(");
+        int rayTo = source.indexOf("private static BlockHitResult rayTo(", rotateAndRaycast);
+        assertTrue(rotateAndRaycast >= 0 && rayTo > rotateAndRaycast);
+        String body = source.substring(rotateAndRaycast, rayTo);
+
+        assertTrue(body.contains("LookAction.lookAt(player, target)"),
+                "the real placement's own ray must keep turning the head exactly as before");
+        assertTrue(body.contains("player.raycast(sampleRange, 1.0F, false)"),
+                "the real placement's own ray must keep using vanilla's look-direction raycast");
+    }
 }

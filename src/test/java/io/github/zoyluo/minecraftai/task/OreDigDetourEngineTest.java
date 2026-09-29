@@ -420,7 +420,7 @@ class OreDigDetourEngineTest {
         // No real pickup: forces the settle logic to consult the (scripted) drop view instead of the auto-pickup.
         host.pickupEnabled = false;
         // The drop's only stand is the mined cell itself, which noStep now protects: never chased into it.
-        host.dropViewFn = cell -> new DetourHost.DropView(true, seed);
+        host.dropViewFn = cell -> new DetourHost.DropView(true, seed, true);
         DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
         OreDigDetourEngine engine = new OreDigDetourEngine();
         engine.start(host, sel);
@@ -448,6 +448,32 @@ class OreDigDetourEngineTest {
         assertEquals(OreDigDetourEngine.MEMBER_CAP, engine.membersStarted());
     }
 
+    @Test
+    void aDifferentBlockSightingRevealedByABreakNeverBecomesAMemberOfTheRunningSameBlockVein() {
+        // Design 3.3/4.7/4.8: a break peek that reveals a DIFFERENT valuable as a neighbour of the break
+        // folds into SightingLedger as an ordinary opportunistic sighting, never into the same-block vein
+        // this detour is following. host.neighbours26Same is contractually keyed by blockId (the real host
+        // only ever returns neighbours OBSERVED_PRESENT as the exact same block, OreDigTask.neighbours26Same),
+        // so a fixture that leaves it empty for a foreign block is the faithful case; this asserts the
+        // engine never schedules, mines or consumes that foreign sighting while following the real vein.
+        FakeDetourHost host = new FakeDetourHost();
+        BlockPos seed = new BlockPos(1, 40, 0);
+        BlockPos differentBlockNeighbour = new BlockPos(2, 40, 0);
+        host.sightings.add(new SightingLedger.Sighting(differentBlockNeighbour, "gold_ore", 45, 0, 0));
+
+        DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.start(host, sel);
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("done", r.reason());
+        assertEquals(1, engine.membersStarted(), "only the seed was mined -- the foreign neighbour never joined the vein");
+        assertFalse(host.calls.contains("mine:2,40,0"), "a different block must never be scheduled as a same-block vein member");
+        assertFalse(host.forgotten.contains(differentBlockNeighbour), "the foreign sighting is untouched by this detour");
+        assertEquals(1, host.sightings().size(),
+                "the foreign sighting still sits in the ledger, unconsumed -- available for its own start check later");
+    }
+
     // ---- drop ledger --------------------------------------------------------------------------------------------
 
     @Test
@@ -467,12 +493,65 @@ class OreDigDetourEngineTest {
     void dropLostUnreachablePitIsImmediate() {
         FakeDetourHost host = new FakeDetourHost();
         host.pickupEnabled = false;
-        host.dropViewFn = cell -> new DetourHost.DropView(true, null);
+        // At rest (it settled into the pit) but no legal stand: a real "no reachable floor", declared
+        // as soon as the settle-min grace period allows, not held back waiting for it to "land" again.
+        host.dropViewFn = cell -> new DetourHost.DropView(true, null, true);
         BlockPos seed = new BlockPos(1, 40, 0);
         DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
         OreDigDetourEngine engine = new OreDigDetourEngine();
         engine.start(host, sel);
         OreDigDetourEngine.Result r = runToFinish(host, engine);
+        assertEquals("done", r.reason());
+        assertEquals(1, engine.dropsLost());
+    }
+
+    @Test
+    void settleDropDoesNotDeclareNoStandWhileTheItemIsStillFalling() {
+        // Regression for the bug the mining-assist design 4.9 fix addresses: at SETTLE_MIN_TICKS the
+        // freshly spawned item has not finished falling out of the break cell, so no stand is computed
+        // yet (stand == null, atRest == false). That must NOT be written off as no_stand -- it means
+        // "not yet known". A real stand appears once it settles, well before the SETTLE_TOTAL_TICKS cap.
+        FakeDetourHost host = new FakeDetourHost();
+        host.pickupEnabled = false;
+        BlockPos seed = new BlockPos(1, 40, 0);
+        java.util.concurrent.atomic.AtomicInteger observeCalls = new java.util.concurrent.atomic.AtomicInteger();
+        host.dropViewFn = cell -> {
+            int n = observeCalls.getAndIncrement();
+            if (n == 0) {
+                // First observation (at SETTLE_MIN_TICKS): still airborne, no stand computed yet.
+                return new DetourHost.DropView(true, null, false);
+            }
+            // Settled by the next observation, right where the bot already stands: forced pickup
+            // (called every settle tick) grabs it now that it is at rest and in reach.
+            host.inventoryTotal++;
+            return new DetourHost.DropView(true, host.feet(), true);
+        };
+        DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.start(host, sel);
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
+        assertEquals("done", r.reason());
+        assertEquals(0, engine.dropsLost(), "a still-falling item must not be written off as no_stand");
+        assertTrue(observeCalls.get() >= 2, "the settle logic must re-observe the drop instead of giving up on the first null stand");
+    }
+
+    @Test
+    void settleDropDeclaresNoStandOnceTheStillAirborneGraceWindowElapses() {
+        // The other half of the same fix: the "not yet known" grace period is bounded by
+        // SETTLE_NO_DROP_TICKS, so a drop that is STILL not at rest by then is finally written off
+        // instead of being chased forever (design 4.9's "at most 60 ticks" cap is not the only bound).
+        FakeDetourHost host = new FakeDetourHost();
+        host.pickupEnabled = false;
+        BlockPos seed = new BlockPos(1, 40, 0);
+        // Always airborne, stand never computed -- exercises the "before SETTLE_NO_DROP_TICKS" bound
+        // rather than the "at rest" one.
+        host.dropViewFn = cell -> new DetourHost.DropView(true, null, false);
+        DetourStartSelector.Selection sel = selectionFor(host, seed, "diamond_ore");
+        OreDigDetourEngine engine = new OreDigDetourEngine();
+        engine.start(host, sel);
+        OreDigDetourEngine.Result r = runToFinish(host, engine);
+
         assertEquals("done", r.reason());
         assertEquals(1, engine.dropsLost());
     }

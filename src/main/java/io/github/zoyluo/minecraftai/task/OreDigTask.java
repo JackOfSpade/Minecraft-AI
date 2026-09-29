@@ -5785,7 +5785,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     && ObservableWorldQuery.canObserveBlock(bot, stand.down())
                     && Standability.isStandable(world, stand)
                     && OreScan.adjacentHazard(bot, stand) == OreScan.Observation.OBSERVED_GONE;
-            return new DropView(true, legal ? stand.toImmutable() : null);
+            // A freshly spawned item is still falling for a few ticks; only treat it as settled
+            // (design 4.9) once physics says it has actually come to rest.
+            boolean atRest = best.isOnGround() || best.getVelocity().lengthSquared() < 1.0E-4D;
+            return new DropView(true, legal ? stand.toImmutable() : null, atRest);
         }
 
         // ---- safety and progress --------------------------------------------------------------------------------

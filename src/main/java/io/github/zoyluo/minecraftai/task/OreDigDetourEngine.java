@@ -963,13 +963,20 @@ final class OreDigDetourEngine {
                 dv = host.observeDrop(debt.cell);
             }
             if (dv.visible()) {
-                if (dv.stand() == null || noStep.contains(dv.stand())) {
+                // A null stand while the item is still airborne (not yet at rest) and before
+                // SETTLE_NO_DROP_TICKS just means the item has not finished falling out of the break
+                // cell yet -- keep settling instead of writing the drop off (SETTLE_TOTAL_TICKS still
+                // bounds the wait). Once it settles down (or that grace period elapses), a null stand
+                // is a real "no reachable floor" verdict, same as a stand the fluid probe put in noStep.
+                boolean stillFalling = dv.stand() == null && !dv.atRest() && t < SETTLE_NO_DROP_TICKS;
+                if (!stillFalling && (dv.stand() == null || noStep.contains(dv.stand()))) {
                     dropsLost++;
                     host.log("ore_dig_detour_drop_lost", "reason", "no_stand", "pos", debt.cell);
                     leaveSettle(host);
                     return toNext(host);
                 }
-                if (!dv.stand().equals(host.feet()) && (chaseAttempts == 0 || now - lastChase >= ROUTE_ATTEMPT_GAP_TICKS)) {
+                if (!stillFalling && dv.stand() != null
+                        && !dv.stand().equals(host.feet()) && (chaseAttempts == 0 || now - lastChase >= ROUTE_ATTEMPT_GAP_TICKS)) {
                     SafeReason r = host.safety(SafeGate.Stage.TICK_FULL, dv.stand(), null);
                     if (r != SafeReason.OK) {
                         return abort(host, r.abortReason());

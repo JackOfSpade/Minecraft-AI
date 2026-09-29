@@ -374,4 +374,64 @@ class DetourStartSelectorTest {
         assertEquals("diamond_ore", r.selection().blockId());
         assertTrue(host.myClaims.contains(pos));
     }
+
+    // =================================================================================================
+    // A break-peek style sighting (design 3.3's "break peek": a DIFFERENT block revealed as the neighbour
+    // of a break folds into SightingLedger like any other hit, design 4.7/4.8) sits in the ledger as an
+    // ordinary opportunistic nomination -- OreDigDetourEngineTest's
+    // aDifferentBlockSightingRevealedByABreakNeverBecomesAMemberOfTheRunningSameBlockVein covers that it
+    // never gets swept into a same-block vein follow. These cover the other half of that lifecycle: a
+    // LATER, independent start check re-proving it live from wherever the bot happens to be by then
+    // (never trusting the old sighting), and only starting when that live re-proof still says PRESENT.
+    // =================================================================================================
+
+    @Test
+    void laterStartCheckReProvesABreakRevealedSightingLiveFromWhereverTheBotThenIsAndStartsWhenPresent() {
+        FakeDetourHost host = new FakeDetourHost();
+        host.now = 1000;
+        BlockPos sighted = new BlockPos(5, 40, 5);
+        host.sightings.add(sighting(sighted, "gold_ore", 45));
+        // The bot has walked well away from the break that revealed this sighting by the time the next
+        // start check runs -- the re-proof must be live from here, not from wherever it was seen.
+        host.feet = new BlockPos(10, 40, 10); // within admission range (<=14 eye distance) but not where it was sighted
+        host.poseFn = ore -> new DetourHost.Pose(host.feet(), true);
+        java.util.ArrayDeque<DetourHost.Seen> script = new java.util.ArrayDeque<>();
+        script.add(DetourHost.Seen.PRESENT);
+        host.seenScript.put(sighted, script);
+
+        DetourStartSelector.Result r = DetourStartSelector.select(host);
+
+        assertEquals(sighted, r.selection().seed());
+        assertTrue(script.isEmpty(), "the selector must re-observe the cell live before starting on it");
+    }
+
+    @Test
+    void laterStartCheckSkipsABreakRevealedSightingAsStaleWhenTheLiveReproofReadsUnknown() {
+        FakeDetourHost host = new FakeDetourHost();
+        host.now = 1000;
+        BlockPos sighted = new BlockPos(5, 40, 5);
+        host.sightings.add(sighting(sighted, "gold_ore", 45));
+        host.feet = new BlockPos(10, 40, 10); // within admission range (<=14 eye distance) but not where it was sighted
+        host.seenScript.computeIfAbsent(sighted, p -> new java.util.ArrayDeque<>()).add(DetourHost.Seen.UNKNOWN);
+
+        DetourStartSelector.Result r = DetourStartSelector.select(host);
+
+        assertNull(r.selection(), "a sighting the bot cannot currently observe must not start a detour");
+        assertFalse(host.forgotten.contains(sighted), "UNKNOWN keeps the nomination -- it is not proven gone");
+    }
+
+    @Test
+    void laterStartCheckSkipsABreakRevealedSightingAsStaleWhenTheLiveReproofFindsItAbsent() {
+        FakeDetourHost host = new FakeDetourHost();
+        host.now = 1000;
+        BlockPos sighted = new BlockPos(5, 40, 5);
+        host.sightings.add(sighting(sighted, "gold_ore", 45));
+        host.feet = new BlockPos(10, 40, 10); // within admission range (<=14 eye distance) but not where it was sighted
+        host.seenScript.computeIfAbsent(sighted, p -> new java.util.ArrayDeque<>()).add(DetourHost.Seen.GONE);
+
+        DetourStartSelector.Result r = DetourStartSelector.select(host);
+
+        assertNull(r.selection());
+        assertTrue(host.forgotten.contains(sighted), "a live re-proof that finds it gone forgets the stale sighting");
+    }
 }

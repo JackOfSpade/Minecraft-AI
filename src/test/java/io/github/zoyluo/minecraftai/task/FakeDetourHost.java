@@ -597,8 +597,10 @@ class FakeDetourHost implements DetourHost {
             return dropViewFn.apply(breakCell);
         }
         // The drop stays visible until it is picked up (lastBrokenCell is cleared only by the pickup), so with
-        // pickupEnabled = false it stays for ever: the engine then reaches its 60-tick drop_lost timeout.
-        return lastBrokenCell != null ? new DropView(true, feet) : DropView.NONE;
+        // pickupEnabled = false it stays for ever: the engine then reaches its 60-tick drop_lost timeout. It is
+        // simulated at rest from the start (no falling phase to script by default; a test that needs one sets
+        // dropViewFn).
+        return lastBrokenCell != null ? new DropView(true, feet, true) : DropView.NONE;
     }
 
     // ===========================================================================================================

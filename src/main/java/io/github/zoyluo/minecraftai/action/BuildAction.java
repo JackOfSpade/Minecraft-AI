@@ -16,6 +16,7 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 public final class BuildAction {
     // Shared with ObservableWorldQuery.FACE_SAMPLE_INSET (both sample the same 3x3 inset grid on a face).
@@ -119,11 +120,13 @@ public final class BuildAction {
 
     /**
      * Whether {@link #placeBlockAt} would find an acceptable support at {@code pos} -- the SAME
-     * visible/in-reach support-face predicate placeBlockAt itself uses ({@link
-     * #visibleSupportFaceHit} + {@code canInteractWithBlockAt}), without any world mutation or
-     * requiring an item in hand. Lets a caller (e.g. CraftTask's placement-candidate search) filter
-     * candidate cells down to ones BuildAction would actually accept, instead of only checking
-     * "open air" and then discovering support_face_not_visible after already committing to a cell.
+     * reach and obstruction test placeBlockAt itself uses ({@link #probeSupportFaceHit} +
+     * {@code canInteractWithBlockAt}), without any world mutation, requiring an item in hand, or
+     * turning the bot's head (a candidate probe must not have that side effect; see
+     * {@link #probeSupportFaceHit}). Lets a caller (e.g. CraftTask's placement-candidate search)
+     * filter candidate cells down to ones BuildAction would actually accept, instead of only
+     * checking "open air" and then discovering support_face_not_visible after already committing
+     * to a cell.
      */
     public static boolean canAcceptPlacementAt(AIPlayerEntity player, BlockPos pos) {
         double reach = player.getBlockInteractionRange();
@@ -149,7 +152,7 @@ public final class BuildAction {
                                                      BlockPos against,
                                                      Direction face,
                                                      double sampleRange) {
-        return visibleSupportFaceHit(player, against, face, sampleRange) != null
+        return probeSupportFaceHit(player, against, face, sampleRange) != null
                 && player.canInteractWithBlockAt(against, 0.0D);
     }
 
@@ -184,12 +187,39 @@ public final class BuildAction {
     /**
      * Returns a vanilla ray-proven hit on the requested support face. A face can be physically
      * clickable at an exposed edge even when its center is hidden by the neighbouring mining
-     * wall, so sample a small deterministic inset grid before declaring it inaccessible.
+     * wall, so sample a small deterministic inset grid before declaring it inaccessible. This is
+     * the real placement's own proof: it physically turns the bot's head to look at each sampled
+     * point, exactly as a player would, before asking vanilla what that look direction hits.
      */
     private static BlockHitResult visibleSupportFaceHit(AIPlayerEntity player,
                                                         BlockPos against,
                                                         Direction face,
                                                         double sampleRange) {
+        return supportFaceHit(player, against, face, sampleRange, true);
+    }
+
+    /**
+     * {@link #canAcceptPlacementAt}'s query form of {@link #visibleSupportFaceHit}: the identical
+     * exact-edge search and the identical reach/obstruction result, but side-effect free. Turning
+     * the head is an action a real placement performs; a mere candidate probe must not perform it
+     * (it would jitter the bot's look direction once per sampled cell while it is only evaluating
+     * candidates). Instead each candidate ray is cast directly from the eye toward the sampled
+     * point with {@link #rayTo}, the pure equivalent of what {@code Entity.raycast} computes once
+     * the head is turned to face that exact point.
+     */
+    private static BlockHitResult probeSupportFaceHit(AIPlayerEntity player,
+                                                        BlockPos against,
+                                                        Direction face,
+                                                        double sampleRange) {
+        return supportFaceHit(player, against, face, sampleRange, false);
+    }
+
+    /** Shared exact-edge sampler behind {@link #visibleSupportFaceHit} and {@link #probeSupportFaceHit}. */
+    private static BlockHitResult supportFaceHit(AIPlayerEntity player,
+                                                   BlockPos against,
+                                                   Direction face,
+                                                   double sampleRange,
+                                                   boolean rotate) {
         double sampleRangeSquared = sampleRange * sampleRange;
         Vec3d eye = player.getEyePos();
         Vec3d center = Vec3d.ofCenter(against).add(
@@ -205,9 +235,10 @@ public final class BuildAction {
             if (eye.squaredDistanceTo(target) > sampleRangeSquared) {
                 continue;
             }
-            LookAction.lookAt(player, target);
-            var lookedAt = player.raycast(sampleRange, 1.0F, false);
-            if (!(lookedAt instanceof BlockHitResult hit)
+            BlockHitResult hit = rotate
+                    ? rotateAndRaycast(player, target, sampleRange)
+                    : rayTo(player, eye, target, sampleRange);
+            if (hit == null
                     || hit.getBlockPos() == null
                     || !hit.getBlockPos().equals(against)
                     || hit.getSide() != face) {
@@ -216,6 +247,27 @@ public final class BuildAction {
             return hit;
         }
         return null;
+    }
+
+    /** The real placement's ray: turn the head to {@code target}, then vanilla's own look-direction raycast. */
+    private static BlockHitResult rotateAndRaycast(AIPlayerEntity player, Vec3d target, double sampleRange) {
+        LookAction.lookAt(player, target);
+        var lookedAt = player.raycast(sampleRange, 1.0F, false);
+        return lookedAt instanceof BlockHitResult hit ? hit : null;
+    }
+
+    /**
+     * The pure equivalent of {@code Entity.raycast(sampleRange, 1.0F, false)} after aiming exactly at
+     * {@code target}: same start (the eye), same end (eye plus that direction times {@code sampleRange}),
+     * same shape and fluid handling (OUTLINE, no fluids) -- built directly from the two points instead of
+     * through the entity's own look vector, so it never reads or writes yaw or pitch.
+     */
+    private static BlockHitResult rayTo(AIPlayerEntity player, Vec3d eye, Vec3d target, double sampleRange) {
+        Vec3d toTarget = target.subtract(eye);
+        Vec3d direction = toTarget.lengthSquared() < 1.0E-9D ? new Vec3d(0.0D, -1.0D, 0.0D) : toTarget.normalize();
+        Vec3d end = eye.add(direction.multiply(sampleRange));
+        return player.getEntityWorld().raycast(new RaycastContext(
+                eye, end, RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, player));
     }
 
     private static ActionResult directPlaceFallback(AIPlayerEntity player, BlockPos pos, Hand hand) {

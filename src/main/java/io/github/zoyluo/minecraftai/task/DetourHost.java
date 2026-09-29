@@ -151,10 +151,13 @@ interface DetourHost {
      * Result of {@link #observeDrop}: {@code visible} is true when at least one observable, visible item entity lies within
      * 3.5 blocks of the break cell and 8 of the bot (the one nearest the BREAK CELL counts, whatever else lies nearer to the
      * bot); {@code stand} is that item's floor cell when that cell passes
-     * the strict stand tests, else null (an item in an unreachable pit is a lost drop, not a reason to dig).
+     * the strict stand tests, else null (an item in an unreachable pit is a lost drop, not a reason to dig);
+     * {@code atRest} is that item's own settled state (on the ground, or velocity ~0) -- a freshly spawned item is
+     * still falling for the first few ticks, during which its floor cell is not yet meaningful, so a null
+     * {@code stand} while {@code atRest} is false means "not yet known", not "unreachable" (design 4.9).
      */
-    record DropView(boolean visible, BlockPos stand) {
-        static final DropView NONE = new DropView(false, null);
+    record DropView(boolean visible, BlockPos stand, boolean atRest) {
+        static final DropView NONE = new DropView(false, null, true);
     }
 
     // ------------------------------------------------------------------------------------------------------
