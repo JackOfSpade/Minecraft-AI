@@ -149,19 +149,26 @@ public final class BrainCoordinator {
         // A fresh instruction also gets a fresh LLM context. This avoids old tool calls and
         // goals biasing the planner toward a request the player has already replaced.
         conversation.history.clear();
-        conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name())));
+        conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), senderName)));
         if (supersededDecision) {
             BotLog.comm(bot, "decision_superseded",
                     "epoch", lease.epoch(),
                     "request_sequence", lease.requestSequence());
         }
 
+        // The recent-chat block must reflect only what was said BEFORE this instruction; render
+        // it first, then record this instruction so later calls see it as history.
+        String recentChat = ChatTranscript.renderRecentChat(bot.getUuid());
+        ChatTranscript.recordPlayerLine(bot.getUuid(), senderName, text);
+        String recentChatBlock = recentChat.isEmpty() ? "" : recentChat + "\n\n";
+
         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
         conversation.lastPerceptionDigest = perceptionDigest(snapshot);
         String speakerView = speakerViewJson == null || speakerViewJson.isBlank()
                 ? ""
                 : "\n\nSpeaker visual context:\n" + speakerViewJson;
-        conversation.history.add(ChatMessage.user("[" + senderName + "] says: " + text
+        conversation.history.add(ChatMessage.user(recentChatBlock
+                + "New instruction -- [" + senderName + "] says: " + text
                 + "\n\nCurrent state:\n" + snapshot.toJson() + speakerView));
         trimHistory(conversation);
         conversation.callBudget.beginPlayerInstruction(callsAlreadyUsed);
@@ -635,6 +642,7 @@ public final class BrainCoordinator {
         awaitingTask.remove(bot.getUuid());
         nextGoalWakeTick.remove(bot.getUuid());
         BotRuntimeOptions.INSTANCE.clear(bot);
+        ChatTranscript.clear(bot.getUuid());
         BotLog.comm(bot, "conversation_reset");
     }
 
@@ -711,7 +719,7 @@ public final class BrainCoordinator {
             return false;
         }
         if (conversation.history.isEmpty()) {
-            conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name())));
+            conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), "")));
         }
         conversation.continuationTaskPolls = 0;
         if (conversation.callBudget.exhausted()) {
@@ -760,6 +768,7 @@ public final class BrainCoordinator {
         manualModes.clear();
         nextGoalWakeTick.clear();
         awaitingTask.clear();
+        ChatTranscript.clearAll();
     }
 
     public BrainStatus status(AIPlayerEntity bot) {
@@ -785,6 +794,7 @@ public final class BrainCoordinator {
             return;
         }
         String concise = text.length() > 240 ? text.substring(0, 240) : text;
+        ChatTranscript.recordBotReply(bot.getUuid(), bot.getGameProfile().name(), concise);
         sendPanelChat(bot, "bot", concise);
         bot.getEntityWorld().getServer().getPlayerManager().broadcast(
                 Text.literal("<" + bot.getGameProfile().name() + "> ").append(Text.literal(concise)), false);
@@ -1021,7 +1031,7 @@ public final class BrainCoordinator {
         TaskManager.INSTANCE.resetToIdle(bot);
         bot.getActionPack().stopAll();
         awaitingTask.remove(bot.getUuid());
-        sendBotReply(bot, "I could not start that after three AI attempts. I stopped safely; the MinecraftAi log records each failed tool call.");
+        sendBotReply(bot, "Sorry, I could not work out how to do that. Could you say it another way?");
     }
 
     private static String conciseFailureMessage(String message) {
@@ -1189,9 +1199,19 @@ public final class BrainCoordinator {
                 "callback", callback);
     }
 
-    private static String systemPrompt(String botName) {
+    /**
+     * Package-private (not private) so the prompt assembly is directly unit-testable, mirroring
+     * {@link #trimmedTail}. {@code speakingParty} is the name of the player or bot whose message
+     * is starting this fresh instruction; pass "" or null for the automatic-wake path, which has
+     * no single speaking party.
+     */
+    static String systemPrompt(String botName, String speakingParty) {
+        String speakerLine = speakingParty == null || speakingParty.isBlank()
+                ? ""
+                : " The player or bot currently speaking to you is " + speakingParty
+                        + "; you are " + botName + " and you speak and act only as " + botName + ", never on their behalf.";
         return """
-                You are a player in Minecraft named %s. You exist as a real player in the world and can interact with it using the tools provided.
+                You are a player in Minecraft named %s. You exist as a real player in the world and can interact with it using the tools provided.%s
 
                 Rules:
                 1. Understand the human's intent first, then break it into tool calls.
@@ -1208,7 +1228,7 @@ public final class BrainCoordinator {
                 12. You are fully autonomous and self-reliant. NEVER ask the human for help, for resources, or to move/carry you — the human will not help. NEVER mine ore with bare hands and NEVER use strip_mine or assign_task mine to dig without a proper pickaxe (that wastes blocks and drops nothing). To get ore always use mine_ore, and to get an item/tool use achieve_goal — these automatically walk to find wood, craft the needed pickaxe, then mine. If mine_ore/achieve_goal reports it cannot proceed, just retry the SAME mine_ore once (do NOT switch to an easier or different goal such as achieve_goal a pickaxe — mine_ore already auto-prepares the pickaxe, so switching only loses the real goal); if it still cannot, state the situation in one short sentence and stop — do not flail with move/strip_mine and do not beg.
 
                 Available tools are declared in the tools field. You MUST use them; do not invent tools. All player-facing replies and plans must be concise English.
-                """.formatted(botName);
+                """.formatted(botName, speakerLine);
     }
 
     private static final class BotConversation {

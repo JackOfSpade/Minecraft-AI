@@ -515,7 +515,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("follow", "Follow a player continuously, keeping roughly 2-4 blocks of distance and re-pathing as they keep moving. Call this every time the player asks to be followed, even if the bot is already standing right next to them right now -- being nearby this instant does not mean the bot is actively tracking their movement; only a running follow task does that, and it is not running unless this was just called. It automatically mirrors travel: if the player rides a boat, use a nearby empty boat first, otherwise craft, launch, and board one, then swim if that is impossible; if the player swims, swim without launching a boat; if the player reaches land while the bot is boating, get to a dry shore, exit, and continue on foot. Omit player_name to follow this bot's owner.", objectSchema()
+        register("follow", "Follow me / come with me / stick with me / stay close: follow a player continuously, keeping roughly 2-4 blocks of distance and re-pathing as they keep moving. Call this every time the player asks to be followed, even if the bot is already standing right next to them right now -- being nearby this instant does not mean the bot is actively tracking their movement; only a running follow task does that, and it is not running unless this was just called. It automatically mirrors travel: if the player rides a boat, use a nearby empty boat first, otherwise craft, launch, and board one, then swim if that is impossible; if the player swims, swim without launching a boat; if the player reaches land while the bot is boating, get to a dry shore, exit, and continue on foot. Omit player_name to follow this bot's owner.", objectSchema()
                 .property("player_name", stringSchema("optional player name; defaults to owner"))
                 .build(), (bot, args) -> {
             Task task = new FollowTask(optionalString(args, "player_name", ""));
@@ -551,7 +551,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("hold", "Hold the current position until another task is assigned. DangerWatcher can still interrupt for survival threats.", objectSchema().build(), (bot, args) -> {
+        register("hold", "Stay here / stay put / wait here / hold position / don't move: stop moving and stay at the current spot until told otherwise. Hold the current position until another task is assigned. DangerWatcher can still interrupt for survival threats.", objectSchema().build(), (bot, args) -> {
             Task task = new HoldTask();
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
@@ -640,13 +640,13 @@ public final class ToolRegistry {
 
     /** Terminal/mission-control commands: stop, pause, resume, cancel_all. */
     private void registerControlTools() {
-        register("stop", "Cancel the current mission/task but preserve explicitly queued missions. Use immediately before a replacement goal.", objectSchema().build(), (bot, args) -> {
+        register("stop", "Stop / stop that / cancel it / never mind: cancel the current mission/task but preserve explicitly queued missions. Use immediately before a replacement goal.", objectSchema().build(), (bot, args) -> {
             IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelCurrent(
                     bot, IntentController.ControlOrigin.LLM_TOOL, "tool_stop");
             return ok(outcome.changed() ? "cancelled_current" : "already_idle");
         });
 
-        register("pause", "Pause the current mission without deleting it or its queue; safety actions may still run.",
+        register("pause", "Pause / hold on / wait a sec / hang on: pause the current mission without deleting it or its queue; safety actions may still run.",
                 objectSchema().build(), (bot, args) -> {
             boolean changed = IntentController.INSTANCE.pause(
                     bot, IntentController.ControlOrigin.LLM_TOOL, "tool_pause");
