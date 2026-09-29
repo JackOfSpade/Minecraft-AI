@@ -83,7 +83,7 @@ final class BotLogWriterEnabledCheckTest {
     void enabledMatchesTheThresholdOnceStartedAndConfigEnabled() throws ReflectiveOperationException {
         startedField.setBoolean(BotLogWriter.INSTANCE, true);
         configField.set(BotLogWriter.INSTANCE,
-                new MinecraftAiConfig.Logging(true, "logs/minecraftai", true, "daily", 50, 30, 3, true, Map.of()));
+                new MinecraftAiConfig.Logging(true, "logs/minecraftai", true, "daily", 50, 30, 3, 10, true, Map.of()));
         thresholds.clear();
         thresholds.put(LogCategory.PERCEPTION, Level.INFO);
 
@@ -98,7 +98,7 @@ final class BotLogWriterEnabledCheckTest {
     void enabledIsFalseWhenLoggingIsConfiguredOff() throws ReflectiveOperationException {
         startedField.setBoolean(BotLogWriter.INSTANCE, true);
         configField.set(BotLogWriter.INSTANCE,
-                new MinecraftAiConfig.Logging(false, "logs/minecraftai", true, "daily", 50, 30, 3, true, Map.of()));
+                new MinecraftAiConfig.Logging(false, "logs/minecraftai", true, "daily", 50, 30, 3, 10, true, Map.of()));
 
         assertFalse(BotLogWriter.INSTANCE.enabled(LogCategory.ACTION, Level.INFO));
     }

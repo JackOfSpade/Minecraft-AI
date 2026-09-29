@@ -162,7 +162,6 @@ public final class BrainCoordinator {
         // A fresh instruction also gets a fresh LLM context. This avoids old tool calls and
         // goals biasing the planner toward a request the player has already replaced.
         conversation.history.clear();
-        conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), senderName)));
         if (supersededDecision) {
             BotLog.comm(bot, "decision_superseded",
                     "epoch", lease.epoch(),
@@ -173,6 +172,10 @@ public final class BrainCoordinator {
         // it first, then record this instruction so later calls see it as history.
         String recentChat = ChatTranscript.renderRecentChat(bot.getUUID());
         ChatTranscript.recordPlayerLine(bot.getUUID(), senderName, text);
+        // The system context carries the conversation memory (older chat summary), read after the line above was
+        // recorded so lines it pushed out of the recent-chat window are already visible there.
+        conversation.history.addFirst(ChatMessage.system(systemMessageText(bot, senderName)));
+        summariseOlderChat(bot);
         String recentChatBlock = recentChat.isEmpty() ? "" : recentChat + "\n\n";
 
         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
@@ -784,6 +787,9 @@ public final class BrainCoordinator {
         nextGoalWakeTick.remove(bot.getUUID());
         deferredRequests.remove(bot.getUUID());
         BotRuntimeOptions.INSTANCE.clear(bot);
+        // The recent chat is kept as older lines of the bot's conversation memory, not thrown away; an explicit
+        // brain reset forgets the memory too (RuntimeLifecycleCoordinator.resetBot).
+        ChatMemory.keepRecentChat(bot.getUUID());
         ChatTranscript.clear(bot.getUUID());
         BotLog.comm(bot, "conversation_reset");
     }
@@ -900,7 +906,7 @@ public final class BrainCoordinator {
             return false;
         }
         if (conversation.history.isEmpty()) {
-            conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().name(), "")));
+            conversation.history.add(ChatMessage.system(systemMessageText(bot, "")));
         }
         boolean withholdSayBeforeWake = conversation.withholdSayNextCall;
         conversation.withholdSayNextCall = false;
@@ -1003,6 +1009,7 @@ public final class BrainCoordinator {
         awaitingTask.clear();
         deferredRequests.clear();
         ChatTranscript.clearAll();
+        ChatMemory.shutdown();
     }
 
     public BrainStatus status(AIPlayerEntity bot) {
@@ -1370,6 +1377,29 @@ public final class BrainCoordinator {
     private void ensureConfigured() {
         if (executor == null) {
             configure(MinecraftAiConfig.get());
+        }
+    }
+
+    /** The system prompt plus the bot's conversation memory block (empty when disabled or nothing is remembered). */
+    private static String systemMessageText(AIPlayerEntity bot, String speakingParty) {
+        String prompt = systemPrompt(bot.getGameProfile().name(), speakingParty);
+        String memory = ChatMemory.render(bot.getUUID(), MinecraftAiConfig.get().brain().memorySettings());
+        return memory.isEmpty() ? prompt : prompt + "\n\n" + memory;
+    }
+
+    /**
+     * Starts, when one is due, the background model call that folds older chat into the bot's memory summary. It
+     * returns at once (the call runs on its own worker thread) and any failure only leaves the lines pending.
+     */
+    private static void summariseOlderChat(AIPlayerEntity bot) {
+        var server = bot.level().getServer();
+        boolean started = ChatMemory.maybeSummarise(bot.getUUID(), MinecraftAiConfig.get(), () -> {
+            if (server != null) {
+                server.execute(() -> io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(server));
+            }
+        });
+        if (started) {
+            BotLog.comm(bot, "chat_memory_summary_started");
         }
     }
 

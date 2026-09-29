@@ -80,11 +80,57 @@ public final class ChatTranscript {
         }
         Entry entry = new Entry(label, truncateLine(text), nowMillis);
         Deque<Entry> ring = RINGS.computeIfAbsent(botId, ignored -> new ArrayDeque<>());
+        List<Entry> evicted = new ArrayList<>();
         synchronized (ring) {
             ring.addLast(entry);
-            while (ring.size() > MAX_LINES) {
-                ring.removeFirst();
+            // Lines that age out of the window or overflow the ring are not lost outright: they move to the
+            // bot's conversation memory (ChatMemory), which folds them into a summary later.
+            while (ring.size() > 1 && nowMillis - ring.peekFirst().timestampMillis() > MAX_AGE_MILLIS) {
+                evicted.add(ring.removeFirst());
             }
+            while (ring.size() > MAX_LINES) {
+                evicted.add(ring.removeFirst());
+            }
+        }
+        if (!evicted.isEmpty()) {
+            ChatMemory.offerEvicted(botId, evicted);
+        }
+    }
+
+    /** The newest {@code count} raw lines of one bot's ring, oldest first (for persistence). */
+    static List<Entry> tail(UUID botId, int count) {
+        Deque<Entry> ring = botId == null ? null : RINGS.get(botId);
+        if (ring == null || count <= 0) {
+            return List.of();
+        }
+        synchronized (ring) {
+            List<Entry> all = new ArrayList<>(ring);
+            return List.copyOf(all.subList(Math.max(0, all.size() - count), all.size()));
+        }
+    }
+
+    /** Puts restored lines (oldest first, all still inside the age window) back in front of the ring. */
+    static void restore(UUID botId, List<Entry> entries) {
+        if (botId == null || entries == null || entries.isEmpty()) {
+            return;
+        }
+        Deque<Entry> ring = RINGS.computeIfAbsent(botId, ignored -> new ArrayDeque<>());
+        synchronized (ring) {
+            List<Entry> merged = new ArrayList<>(entries);
+            merged.addAll(ring);
+            ring.clear();
+            ring.addAll(merged.subList(Math.max(0, merged.size() - MAX_LINES), merged.size()));
+        }
+    }
+
+    /** Removes and returns one bot's whole ring, oldest first (a conversation reset keeps the lines as memory). */
+    static List<Entry> drain(UUID botId) {
+        Deque<Entry> ring = botId == null ? null : RINGS.remove(botId);
+        if (ring == null) {
+            return List.of();
+        }
+        synchronized (ring) {
+            return List.copyOf(ring);
         }
     }
 

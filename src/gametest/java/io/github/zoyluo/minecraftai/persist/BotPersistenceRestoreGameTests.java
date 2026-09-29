@@ -238,6 +238,68 @@ public final class BotPersistenceRestoreGameTests {
         context.succeed();
     }
 
+    /**
+     * The conversation memory survives a restart: chat lines that overflow the recent-chat window are folded
+     * into a summary by the (stubbed) model call, the summary and a tail of recent chat are captured with the
+     * bot (the exact save path), pushed through the runtime.json codec, and restored on respawn. The remembered
+     * user fact must be in what the model was asked to summarise and in the restored system-context block.
+     */
+    @GameTest(environment = ENV + "conversation_memory_survives_despawn_and_respawn", maxTicks = 200)
+    public void conversationMemorySurvivesDespawnAndRespawn(GameTestHelper context) throws Exception {
+        String name = "RestartChatGT";
+        AIPlayerEntity bot = spawn(context, name);
+        java.util.UUID botId = bot.getUUID();
+        String fact = "please remember that my base is at the birch forest";
+        java.util.concurrent.atomic.AtomicReference<String> asked = new java.util.concurrent.atomic.AtomicReference<>();
+        io.github.zoyluo.minecraftai.brain.ChatMemory.setTransportForTest((system, user) -> {
+            asked.set(user);
+            return "Player Jack; base is at the birch forest";
+        });
+        try {
+            io.github.zoyluo.minecraftai.brain.ChatTranscript.recordPlayerLine(botId, "Jack", fact);
+            for (int i = 0; i < 40; i++) {
+                io.github.zoyluo.minecraftai.brain.ChatTranscript.recordPlayerLine(botId, "Jack", "filler line " + i);
+            }
+            require(context, io.github.zoyluo.minecraftai.brain.ChatMemory.maybeSummarise(
+                            botId, io.github.zoyluo.minecraftai.MinecraftAiConfig.get(), null),
+                    "no summary call was started although lines overflowed the recent chat");
+            require(context, io.github.zoyluo.minecraftai.brain.ChatMemory.awaitIdleForTest(botId, 5000L),
+                    "summary call did not finish");
+            require(context, asked.get() != null && asked.get().contains(fact),
+                    "the remembered user fact was not part of what the model summarised: " + asked.get());
+            require(context, "Player Jack; base is at the birch forest"
+                            .equals(io.github.zoyluo.minecraftai.brain.ChatMemory.summaryOf(botId)),
+                    "summary not stored: " + io.github.zoyluo.minecraftai.brain.ChatMemory.summaryOf(botId));
+        } finally {
+            io.github.zoyluo.minecraftai.brain.ChatMemory.setTransportForTest(null);
+        }
+
+        BotRecord record = roundTrip(capture(bot, context));
+        require(context, record.conversationMemoryJson() != null
+                        && record.conversationMemoryJson().contains("birch forest"),
+                "capture did not save the conversation memory: " + record.conversationMemoryJson());
+        require(context, AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name), "despawn failed");
+
+        context.runAfterDelay(3, () -> {
+            AIPlayerEntity restored = AIPlayerManager.INSTANCE
+                    .respawnFromRecord(context.getLevel().getServer(), record)
+                    .orElseThrow(() -> new IllegalStateException("restore failed"));
+            try {
+                java.util.UUID restoredId = restored.getUUID();
+                String block = io.github.zoyluo.minecraftai.brain.ChatMemory.render(restoredId,
+                        io.github.zoyluo.minecraftai.MinecraftAiConfig.get().brain().memorySettings());
+                require(context, block.contains("Summary: Player Jack; base is at the birch forest"),
+                        "restored bot lost its conversation summary: " + block);
+                String recent = io.github.zoyluo.minecraftai.brain.ChatTranscript.renderRecentChat(restoredId);
+                require(context, recent.contains("filler line 39"),
+                        "restored bot lost its recent chat tail: " + recent);
+            } finally {
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
+            }
+            context.succeed();
+        });
+    }
+
     private static BotRecord capture(AIPlayerEntity bot, GameTestHelper context) {
         BotRecord record = BotPersistence.capture(bot);
         require(context, record != null, "capture returned null");

@@ -192,9 +192,9 @@ public record MinecraftAiConfig(
                 // starting/finishing a task in natural language, so the templated "Starting X 0/4." /
                 // "Completed: X N/M." progress lines this flag adds are redundant, debug-phrased chat spam
                 // unless a player explicitly opts back in for blow-by-blow task telemetry.
-                new Brain(36, 6, 3, false, true, false, 3, false),
+                new Brain(36, 6, 3, false, true, false, 3, false, ConversationMemory.defaults()),
                 new Watchdog(200),
-                new Logging(true, "logs/minecraftai", true, "daily", 50, 30, 3, true, Map.of(
+                new Logging(true, "logs/minecraftai", true, "daily", 50, 30, 3, 10, true, Map.of(
                         "LIFECYCLE", "INFO",
                         "COMM", "INFO",
                         "API", "INFO",
@@ -320,8 +320,23 @@ public record MinecraftAiConfig(
             Boolean enableMemoryTools,
             Boolean enableCoordinationTools,
             int maxTaskRetries,
-            Boolean verboseReports
+            Boolean verboseReports,
+            /** Conversation memory (summary of older chat that survives restarts); null = defaults. */
+            ConversationMemory memory
     ) {
+        /** Pre-{@code memory} shape, kept so older callers and tests still compile. */
+        public Brain(int maxHistoryMessages, int maxToolCallsPerTurn, int maxTurnsPerRequest,
+                     Boolean exposeLowLevelTools, Boolean enableMemoryTools, Boolean enableCoordinationTools,
+                     int maxTaskRetries, Boolean verboseReports) {
+            this(maxHistoryMessages, maxToolCallsPerTurn, maxTurnsPerRequest, exposeLowLevelTools,
+                    enableMemoryTools, enableCoordinationTools, maxTaskRetries, verboseReports, null);
+        }
+
+        /** The memory settings, never null. */
+        public ConversationMemory memorySettings() {
+            return memory == null ? ConversationMemory.defaults() : memory;
+        }
+
         Brain withDefaults(Brain defaults) {
             return new Brain(
                     positiveOrDefault(maxHistoryMessages, defaults.maxHistoryMessages),
@@ -331,7 +346,8 @@ public record MinecraftAiConfig(
                     boolOrDefault(enableMemoryTools, defaults.enableMemoryTools),
                     boolOrDefault(enableCoordinationTools, defaults.enableCoordinationTools),
                     positiveOrDefault(maxTaskRetries, defaults.maxTaskRetries),
-                    boolOrDefault(verboseReports, defaults.verboseReports));
+                    boolOrDefault(verboseReports, defaults.verboseReports),
+                    memory == null ? defaults.memory : memory.withDefaults(defaults.memory));
         }
 
         public boolean exposesLowLevelTools() {
@@ -348,6 +364,50 @@ public record MinecraftAiConfig(
 
         public boolean verboseReportsEnabled() {
             return Boolean.TRUE.equals(verboseReports);
+        }
+    }
+
+    /**
+     * Per-bot conversation memory. Chat lines that fall out of the short recent-chat window are folded, with ONE
+     * extra model call at a time on a background thread, into a compact summary that is kept in the bot's saved
+     * data and shown to the model as background notes. Every call fails soft: on any error the old lines are
+     * simply dropped (plain trimming), never blocking the server thread.
+     */
+    public record ConversationMemory(
+            Boolean enabled,
+            /** Hard cap on the stored summary length in characters. */
+            int maxSummaryChars,
+            /** Summarise once this many older lines are waiting; fewer stay visible verbatim until then. */
+            int summarizeAfterLines,
+            /** Cap on older lines waiting for a summary; the oldest beyond this are dropped. */
+            int maxPendingLines,
+            /** Most recent chat lines saved verbatim with the bot (restored on load). */
+            int persistTailLines,
+            /** Wall-clock limit of the summary call, in seconds. */
+            int timeoutSeconds,
+            /** Minimum seconds between two summary calls for the same bot (call budget). */
+            int minIntervalSeconds,
+            /** Output token limit of the summary call. */
+            int maxTokens
+    ) {
+        public static ConversationMemory defaults() {
+            return new ConversationMemory(true, 500, 8, 40, 12, 20, 60, 400);
+        }
+
+        public ConversationMemory withDefaults(ConversationMemory defaults) {
+            return new ConversationMemory(
+                    boolOrDefault(enabled, defaults.enabled),
+                    positiveOrDefault(maxSummaryChars, defaults.maxSummaryChars),
+                    positiveOrDefault(summarizeAfterLines, defaults.summarizeAfterLines),
+                    positiveOrDefault(maxPendingLines, defaults.maxPendingLines),
+                    positiveOrDefault(persistTailLines, defaults.persistTailLines),
+                    positiveOrDefault(timeoutSeconds, defaults.timeoutSeconds),
+                    positiveOrDefault(minIntervalSeconds, defaults.minIntervalSeconds),
+                    positiveOrDefault(maxTokens, defaults.maxTokens));
+        }
+
+        public boolean isEnabled() {
+            return Boolean.TRUE.equals(enabled);
         }
     }
 
@@ -502,10 +562,12 @@ public record MinecraftAiConfig(
              *  regardless of how many archive files exist; it is a day-based age cutoff, not a count
              *  of archive files to retain. See {@code BotLogWriter.cleanupArchives()}. */
             int maxBackups,
-            /** How many play sessions' (one per server start) logs to keep under
-             *  {@code <directory>/sessions/}; older sessions are deleted outright on the next
-             *  start regardless of size, so history never grows past this many sessions. */
+            /** How many bot-less play sessions (one per server start, no bot ever logged) to keep under
+             *  {@code <directory>/sessions/}, counting the session just started. Sessions with bot activity are
+             *  bounded separately by {@code maxBotSessions}, so bot-less restarts never evict them. */
             int maxSessions,
+            /** How many of the newest sessions that contain bot activity to keep. */
+            int maxBotSessions,
             Boolean mirrorToSlf4j,
             Map<String, String> categories
     ) {
@@ -518,6 +580,7 @@ public record MinecraftAiConfig(
                     positiveOrDefault(maxFileSizeMb, defaults.maxFileSizeMb),
                     positiveOrDefault(maxBackups, defaults.maxBackups),
                     positiveOrDefault(maxSessions, defaults.maxSessions),
+                    positiveOrDefault(maxBotSessions, defaults.maxBotSessions),
                     boolOrDefault(mirrorToSlf4j, defaults.mirrorToSlf4j),
                     categories == null || categories.isEmpty() ? defaults.categories : categories);
         }

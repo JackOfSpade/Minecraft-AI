@@ -58,10 +58,10 @@ public final class BotLogWriter {
 
     /**
      * Each server start is one play session (matching the played-session-then-review workflow):
-     * logs live under {@code <directory>/sessions/<sessionId>/}, and only the {@link
-     * MinecraftAiConfig.Logging#maxSessions()} most recently started sessions are kept -- older session
-     * directories are deleted outright on the next start, so historical logs never accumulate
-     * past that bound regardless of how much any one session logs.
+     * logs live under {@code <directory>/sessions/<sessionId>/}. Older session directories are deleted on the
+     * next start by {@link SessionRetention}: the newest {@link MinecraftAiConfig.Logging#maxBotSessions()}
+     * sessions with bot activity survive, plus a few bot-less ones ({@link MinecraftAiConfig.Logging#maxSessions()}),
+     * so restarts without bots can never evict the sessions worth reviewing.
      */
     public synchronized void start(MinecraftAiConfig config) {
         if (started) {
@@ -107,18 +107,19 @@ public final class BotLogWriter {
     }
 
     private void pruneOldSessions(Path sessionsDir) throws IOException {
-        int keep = Math.max(1, config.maxSessions());
-        List<Path> sessions;
+        String current = baseDir.getFileName().toString();
+        List<SessionRetention.Session> previous;
         try (var stream = Files.list(sessionsDir)) {
-            sessions = stream.filter(Files::isDirectory)
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+            previous = stream.filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().equals(current))
+                    .map(path -> new SessionRetention.Session(path.getFileName().toString(), SessionRetention.hasBotActivity(path)))
                     .toList();
         }
-        List<Path> stale = sessions.size() > keep
-                ? sessions.subList(0, sessions.size() - keep)
-                : List.of();
-        for (Path old : new ArrayList<>(stale)) {
-            deleteRecursively(old);
+        // maxSessions bounds the bot-less sessions and includes the one just started, so it keeps its old meaning
+        // for them; sessions with bot activity are kept separately (maxBotSessions) so restarts never evict them.
+        int keepBotless = Math.max(0, config.maxSessions() - 1);
+        for (String name : SessionRetention.sessionsToDelete(previous, config.maxBotSessions(), keepBotless)) {
+            deleteRecursively(sessionsDir.resolve(name));
         }
     }
 

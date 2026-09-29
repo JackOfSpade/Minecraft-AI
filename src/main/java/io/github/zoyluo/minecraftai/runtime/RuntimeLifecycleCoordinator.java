@@ -88,6 +88,9 @@ public final class RuntimeLifecycleCoordinator {
     public void resetBot(AIPlayerEntity bot, IntentController.ControlOrigin origin, String reason) {
         IntentController.INSTANCE.cancelAll(bot, origin, reason);
         BrainCoordinator.INSTANCE.reset(bot);
+        // An explicit brain reset is a clean slate: the conversation memory is forgotten as well (death and
+        // unload keep it).
+        io.github.zoyluo.minecraftai.brain.ChatMemory.forget(bot.getUUID());
         GoalExecutor.INSTANCE.unload(bot);
         NavEngineSelector.hook("baritone_reset", () -> BaritoneRegistry.INSTANCE.reset(bot, "runtime_reset"));
         TaskManager.INSTANCE.resetToIdle(bot);
@@ -163,6 +166,7 @@ public final class RuntimeLifecycleCoordinator {
         BotRuntimeOptions.INSTANCE.clear(bot);
         NavEngineSelector.clearBotEngine(bot.getUUID());
         BotMemoryStore.INSTANCE.remove(bot.getUUID());
+        io.github.zoyluo.minecraftai.brain.ChatMemory.forget(bot.getUUID());
         EpisodeLog.INSTANCE.clearFor(bot.getUUID());
         KnowledgeBase.INSTANCE.forget(bot.getUUID());
         ReplayRecorder.INSTANCE.clear(bot.getUUID());
@@ -183,6 +187,7 @@ public final class RuntimeLifecycleCoordinator {
         EpisodeMemory.INSTANCE.clearAll();
         EpisodeLog.INSTANCE.clearAll();
         BotMemoryStore.INSTANCE.clear();
+        io.github.zoyluo.minecraftai.brain.ChatMemory.clearAll();
         BotRuntimeOptions.INSTANCE.clearAll();
         BotReporter.INSTANCE.clearAll();
         DiagnosticLogger.INSTANCE.clearAll();

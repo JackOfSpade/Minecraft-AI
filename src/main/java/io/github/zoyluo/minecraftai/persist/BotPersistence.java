@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.persist;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.coordination.Job;
 import io.github.zoyluo.minecraftai.coordination.TaskBoard;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -219,7 +220,9 @@ public final class BotPersistence {
                 BotMemoryStore.INSTANCE.saveString(bot.getUUID()),
                 AIPlayerManager.INSTANCE.ownerOf(bot).map(UUID::toString).orElse(""),
                 AIPlayerManager.INSTANCE.skinIndex(bot),
-                BotPlayerState.encode(bot));
+                BotPlayerState.encode(bot),
+                io.github.zoyluo.minecraftai.brain.ChatMemory.encode(bot.getUUID(),
+                        MinecraftAiConfig.get().brain().memorySettings()));
     }
 
     /** Restores equipment, ender chest, XP, effects etc. (see {@link BotPlayerState}); null = old record. */

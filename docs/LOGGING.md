@@ -6,9 +6,25 @@ Every bot log line is automatically tagged with the scope of the current request
 `log/BotLog.java` reads it live from `TaskManager.activeOrigin(bot)`, so callers never have to
 pass it manually). To debug a single player command, you just filter by scope instead of digging
 through the entire session's log. Logs are saved in a directory per server startup, under
-`logs/minecraftai/sessions/<session-id>/`; `MinecraftAiConfig.Logging.maxSessions` (default 3)
-controls how many of the most recent startups' logs are kept, with older ones automatically
-pruned (`pruneOldSessions` in `log/BotLogWriter.java`).
+`logs/minecraftai/sessions/<session-id>/`. Retention is by kind of session, not just recency (see
+"Session retention" below).
+
+## Session retention
+
+A plain "keep the newest N sessions" rule let a few bot-less game starts (menu only, a world without
+bots, a crash on load) evict every session in which the bots actually did something, so the log review
+after a restart had nothing to read. Retention is therefore applied to two groups separately, on the next
+start (`pruneOldSessions` in `log/BotLogWriter.java`, the pure rule is `log/SessionRetention.java`):
+
+- the newest `logging.maxBotSessions` (default 10) sessions **with bot activity** are kept;
+- at most `logging.maxSessions` (default 3) **bot-less** sessions are kept, counting the session that has
+  just started (so 2 older ones plus the current one).
+
+A session has bot activity when it holds a per-bot log other than the `_system` pseudo-bot's (live in
+`by-bot/` or rotated into `archive/`). The session being started is never deleted. A session directory that
+cannot be read counts as having bot activity, so an I/O error can never delete a real session. Older ones
+are deleted outright. Both values are in the `logging` section of the config file; a missing or
+non-positive value falls back to the default.
 
 The design deliberately avoids logging everything — it only records the information necessary to
 determine whether a given category of request completed normally. Log volume is inversely related
