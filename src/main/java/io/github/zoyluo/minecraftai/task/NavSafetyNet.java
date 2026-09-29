@@ -52,9 +52,9 @@ public final class NavSafetyNet {
     // (FollowOxygen.SURFACE_FLOOR_AIR sits above AIR_SURFACE_THRESHOLD, so follow always gets there
     // first).  The moment air reaches AIR_SURFACE_THRESHOLD the lease ends and the crisis machine
     // owns the bot; follow then makes NO movement at all, so neither undoes the other's step.
-    // 20 ticks (not 6): a task tick skipped under server lag must not let the lease lapse mid-swim
-    // and hand a healthy swimmer to the shore-rescue, which follow would then swim back out of.
-    private static final int FOLLOW_SWIM_LEASE_TICKS = 20;
+    // Kept at the original 6 ticks: a 20-tick lease was tried for lag tolerance but the shallow-swim
+    // ping-pong GameTest passes identically with 6, so a longer window was never shown to matter.
+    private static final int FOLLOW_SWIM_LEASE_TICKS = 6;
     private static final int BREATHE_SCAN_UP = 5;          // Number of cells scanned upward above the head to find air
     private static final int RESCUE_RADIUS_H = 16;
     private static final int RESCUE_RADIUS_V = 16;

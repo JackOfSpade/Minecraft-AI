@@ -371,6 +371,12 @@ public final class ActionPack {
         // an adjacent legal landing exists. Recover that one-cell movement physically before asking
         // for the privileged long-distance snap. In strict_survival this is the difference between
         // continuing a hunt and every subsequent path request failing NO_START in one tick.
+        if (physicalSnapSuppressed(current, reason)) {
+            // A suppressed snap is a refusal to re-snap out of a cell the bot was just walked back into --
+            // it must NOT fall through to the privileged relocation below, which would turn the
+            // yo-yo guard into a teleport. The caller's search simply fails this time.
+            return false;
+        }
         if (tryPhysicalSnap(world, current, reason)) {
             return true;
         }
@@ -412,15 +418,23 @@ public final class ActionPack {
         return true;
     }
 
-    private boolean tryPhysicalSnap(ServerWorld world, BlockPos current, String reason) {
+    /**
+     * True when a second physical snap out of the same cell inside the guard window is being refused:
+     * whatever walked the bot back in would just be undone again (see SnapRepeatGuard). One re-snap
+     * per stall.
+     */
+    private boolean physicalSnapSuppressed(BlockPos current, String reason) {
         int nowTick = player.getEntityWorld().getServer().getTicks();
-        if (!physicalSnapGuard.allows(current, nowTick)) {
-            // Second snap out of the same cell inside the window: whatever walked the bot back in
-            // would just be undone again (see SnapRepeatGuard). One re-snap per stall.
-            BotLog.path(player, "path_start_physical_snap_suppressed",
-                    "reason", reason, "from", LogFields.pos(current));
+        if (physicalSnapGuard.allows(current, nowTick)) {
             return false;
         }
+        BotLog.path(player, "path_start_physical_snap_suppressed",
+                "reason", reason, "from", LogFields.pos(current));
+        return true;
+    }
+
+    private boolean tryPhysicalSnap(ServerWorld world, BlockPos current, String reason) {
+        int nowTick = player.getEntityWorld().getServer().getTicks();
         // Same-level steps first, then a one-block drop, finally a vanilla-style jump. A vertical
         // move may include one horizontal axis; three-axis corner jumps are never legitimate.
         int[][] horizontalOffsets = {

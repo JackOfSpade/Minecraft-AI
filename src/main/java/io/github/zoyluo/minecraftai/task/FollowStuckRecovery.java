@@ -74,6 +74,11 @@ final class FollowStuckRecovery {
     private boolean forceRepathPending;
     private final FollowDigOut digOut = new FollowDigOut();
 
+    /** True while a dig-out owns the bot (it is breaking blocks toward the player). */
+    boolean isDigging() {
+        return digOut.isActive();
+    }
+
     void reset(AIPlayerEntity bot, int nowTick) {
         digOut.cancel(bot);
         lastPos = bot.getBlockPos().toImmutable();

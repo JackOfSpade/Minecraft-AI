@@ -253,41 +253,52 @@ public final class FollowSwimGameTests {
     }
 
     /**
-     * The recovery ladder's dig-out step, driven directly: three bots stand against the same
+     * The recovery ladder's dig-out step, driven directly: four bots stand against the same
      * 2-high, 2-thick wall on a sealed island (no walk route).  Only the bot that carries a pickaxe
-     * and faces natural stone may dig through -- and only after its whole stall window, as the last
-     * step; the bot without a tool and the bot facing a player-built planks wall must leave the wall
-     * exactly as it was.
+     * and faces plain natural stone may dig through -- and only after its whole stall window, as the
+     * last step; the bot without a tool, the bot facing a cobblestone wall and the bot facing a
+     * planks wall must leave the wall exactly as it was. (Plain stone that a player placed is
+     * indistinguishable from natural stone; only building-block types and the bots' own placed-block
+     * ledger are refused -- see {@link FollowDigOut}.)
      */
-    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_recovery_digs_natural_stone_only_with_a_tool_and_never_player_built_walls", maxTicks = 700)
-    public void stuckRecoveryDigsNaturalStoneOnlyWithAToolAndNeverPlayerBuiltWalls(TestContext context) {
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_recovery_digs_plain_stone_only_with_tool_never_building_blocks", maxTicks = 700)
+    public void stuckRecoveryDigsPlainStoneOnlyWithToolNeverBuildingBlocks(TestContext context) {
         BlockPos feet = context.getAbsolutePos(new BlockPos(0, 24, 0));
         ServerWorld world = context.getWorld();
-        buildIsland(world, feet, z -> z >= 8 ? Blocks.OAK_PLANKS.getDefaultState() : Blocks.STONE.getDefaultState());
-        // Lane z=2: pickaxe + stone.  Lane z=5: stone but no tool.  Lane z=10: pickaxe + planks.
+        buildIsland(world, feet, z -> z >= 10 ? Blocks.OAK_PLANKS.getDefaultState()
+                : z >= 7 ? Blocks.COBBLESTONE.getDefaultState() : Blocks.STONE.getDefaultState());
+        // Lane z=2: pickaxe + stone.  Lane z=5: stone but no tool.  Lane z=8: pickaxe + cobblestone.
+        // Lane z=11: pickaxe + planks.
         AIPlayerEntity digger = spawnBot(world, "RecDigBot", feet.add(9, 0, 2));
         InventoryAction.giveItem(digger, new ItemStack(Items.IRON_PICKAXE, 1));
         AIPlayerEntity toolless = spawnBot(world, "RecNoToolBot", feet.add(9, 0, 5));
-        AIPlayerEntity builder = spawnBot(world, "RecPlanksBot", feet.add(9, 0, 10));
+        AIPlayerEntity cobbler = spawnBot(world, "RecCobbleBot", feet.add(9, 0, 8));
+        InventoryAction.giveItem(cobbler, new ItemStack(Items.IRON_PICKAXE, 1));
+        AIPlayerEntity builder = spawnBot(world, "RecPlanksBot", feet.add(9, 0, 11));
         InventoryAction.giveItem(builder, new ItemStack(Items.IRON_PICKAXE, 1));
         // One target per lane, so no bot is ever "closer" by sidestepping into another lane.
         AIPlayerEntity diggerTarget = spawnBot(world, "RecDigTgt", feet.add(20, 0, 2));
         AIPlayerEntity toollessTarget = spawnBot(world, "RecNoToolTgt", feet.add(20, 0, 5));
-        AIPlayerEntity builderTarget = spawnBot(world, "RecPlanksTgt", feet.add(20, 0, 10));
-        for (AIPlayerEntity bot : new AIPlayerEntity[]{digger, toolless, builder, diggerTarget, toollessTarget, builderTarget}) {
+        AIPlayerEntity cobblerTarget = spawnBot(world, "RecCobbleTgt", feet.add(20, 0, 8));
+        AIPlayerEntity builderTarget = spawnBot(world, "RecPlanksTgt", feet.add(20, 0, 11));
+        for (AIPlayerEntity bot : new AIPlayerEntity[]{digger, toolless, cobbler, builder, diggerTarget,
+                toollessTarget, cobblerTarget, builderTarget}) {
             holdStill(bot);
         }
         FollowStuckRecovery diggerRecovery = new FollowStuckRecovery();
         FollowStuckRecovery toollessRecovery = new FollowStuckRecovery();
+        FollowStuckRecovery cobblerRecovery = new FollowStuckRecovery();
         FollowStuckRecovery builderRecovery = new FollowStuckRecovery();
         diggerRecovery.reset(digger, 0);
         toollessRecovery.reset(toolless, 0);
+        cobblerRecovery.reset(cobbler, 0);
         builderRecovery.reset(builder, 0);
         AtomicInteger tick = new AtomicInteger();
         context.runAtEveryTick(() -> {
             int now = tick.incrementAndGet();
             diggerRecovery.tick(digger, diggerTarget, now, 3.0D);
             toollessRecovery.tick(toolless, toollessTarget, now, 3.0D);
+            cobblerRecovery.tick(cobbler, cobblerTarget, now, 3.0D);
             builderRecovery.tick(builder, builderTarget, now, 3.0D);
             if (now < 95) {
                 require(context, wallIntact(world, feet, 0, 12) && digger.getX() < feet.getX() + 10.0D,
@@ -295,9 +306,12 @@ public final class FollowSwimGameTests {
             }
             require(context, wallIntact(world, feet, 4, 6),
                     "the bot without a tool dug the wall (tick " + now + ")");
-            require(context, wallIntact(world, feet, 8, 12),
-                    "the bot dug a player-built planks wall (tick " + now + ")");
-            require(context, toolless.getX() < feet.getX() + 10.0D && builder.getX() < feet.getX() + 10.0D,
+            require(context, wallIntact(world, feet, 7, 9),
+                    "the bot dug a cobblestone (building block) wall (tick " + now + ")");
+            require(context, wallIntact(world, feet, 10, 12),
+                    "the bot dug a planks wall (tick " + now + ")");
+            require(context, toolless.getX() < feet.getX() + 10.0D && cobbler.getX() < feet.getX() + 10.0D
+                            && builder.getX() < feet.getX() + 10.0D,
                     "a bot without a legal dig walked through the wall (tick " + now + ")");
             for (int x = 4; x <= 17; x++) {
                 require(context, !world.getBlockState(feet.add(x, -1, 2)).isAir(),
@@ -307,8 +321,102 @@ public final class FollowSwimGameTests {
                 require(context, now >= 95, "impossible instant dig-through");
                 require(context, wallIntact(world, feet, 4, 12),
                         "the digger broke more than its own lane");
-                despawn(world, digger, toolless, builder, diggerTarget, toollessTarget, builderTarget);
+                despawn(world, digger, toolless, cobbler, builder, diggerTarget, toollessTarget,
+                        cobblerTarget, builderTarget);
                 context.complete();
+            }
+        });
+    }
+
+    /**
+     * Wading is ordinary walking: a bot one step from a bank, feet wet in a 1-deep shallow, must be led
+     * out by land follow (its pathfinder and start snap) without the swim exit ever running a water
+     * search.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_wading_bot_next_to_shore_walks_out_with_land_follow_and_no_water_searches", maxTicks = 500)
+    public void wadingBotNextToShoreWalksOutWithLandFollowAndNoWaterSearches(TestContext context) {
+        Pond pond = buildPond(context, 8, 19, 1, 26);
+        ServerWorld world = context.getWorld();
+        AIPlayerEntity target = spawnBot(world, "WadeShoreTgt", pond.feet().add(2, 0, LANE_Z));
+        holdStill(target);
+        AIPlayerEntity bot = spawnBot(world, "WadeShoreBot", pond.feet().add(8, -1, LANE_Z));
+        FollowTask follow = new FollowTask("WadeShoreTgt");
+        TaskManager.INSTANCE.assign(bot, follow,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_wade_shore"));
+        AtomicInteger tick = new AtomicInteger();
+        boolean[] startedWet = {false};
+        context.runAtEveryTick(() -> {
+            int now = tick.incrementAndGet();
+            requireRunning(context, follow, bot);
+            startedWet[0] |= bot.isTouchingWater();
+            require(context, follow.swimRouteSearchCount() == 0,
+                    "the swim exit ran a water search for a bot that was only wading (tick " + now + ")");
+            require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
+                    "the safety net's water crisis took over a wading bot at tick " + now);
+            if (now > 10 && !bot.isTouchingWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
+                require(context, startedWet[0], "the bot never stood in the shallow");
+                finish(context, pond, bot, target);
+            }
+        });
+    }
+
+    /**
+     * In the middle of a shallow land follow has no legal start cell (wet cells are never standable and
+     * its snap only reaches a dry neighbour), so the swim exit wades the bot out along a water route.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_bot_wading_mid_shallows_wades_out_to_land_target", maxTicks = 700)
+    public void botWadingMidShallowsWadesOutToLandTarget(TestContext context) {
+        Pond pond = buildPond(context, 8, 19, 1, 26);
+        ServerWorld world = context.getWorld();
+        AIPlayerEntity target = spawnBot(world, "WadeMidTgt", pond.feet().add(2, 0, LANE_Z));
+        holdStill(target);
+        AIPlayerEntity bot = spawnBot(world, "WadeMidBot", pond.feet().add(14, -1, LANE_Z));
+        FollowTask follow = new FollowTask("WadeMidTgt");
+        TaskManager.INSTANCE.assign(bot, follow,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_wade_mid"));
+        AtomicInteger tick = new AtomicInteger();
+        context.runAtEveryTick(() -> {
+            int now = tick.incrementAndGet();
+            requireRunning(context, follow, bot);
+            require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
+                    "the safety net's water crisis took over a wading bot at tick " + now);
+            require(context, follow.swimRouteSearchCount() <= 4,
+                    "wading out ran a water search on every cooldown: " + follow.swimRouteSearchCount());
+            if (now > 10 && !bot.isTouchingWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
+                finish(context, pond, bot, target);
+            }
+        });
+    }
+
+    /**
+     * Heading for land does not excuse holding one's breath: a bot on the pond floor with little air
+     * whose player has climbed out must still turn up for air first (the follow-first air floor),
+     * not dive on toward a distant landing.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_submerged_bot_heading_for_land_still_surfaces_for_air_first", maxTicks = 700)
+    public void submergedBotHeadingForLandStillSurfacesForAirFirst(TestContext context) {
+        Pond pond = buildPond(context, 8, 19, 8, 26);
+        ServerWorld world = context.getWorld();
+        AIPlayerEntity target = spawnBot(world, "ExitAirTgt", pond.feet().add(2, 0, LANE_Z));
+        holdStill(target);
+        AIPlayerEntity bot = spawnBot(world, "ExitAirBot", pond.feet().add(14, -7, LANE_Z));
+        bot.setAir(FollowOxygen.SURFACE_FLOOR_AIR + 2);
+        FollowTask follow = new FollowTask("ExitAirTgt");
+        TaskManager.INSTANCE.assign(bot, follow,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_exit_air"));
+        AtomicInteger tick = new AtomicInteger();
+        int[] minAir = {Integer.MAX_VALUE};
+        context.runAtEveryTick(() -> {
+            int now = tick.incrementAndGet();
+            requireRunning(context, follow, bot);
+            minAir[0] = Math.min(minAir[0], bot.getAir());
+            require(context, bot.getAir() > FollowOxygen.RESCUE_AIR,
+                    "the bot let the drowning rescue take over while climbing out: air=" + bot.getAir()
+                            + " tick=" + now);
+            if (now > 10 && !bot.isTouchingWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
+                require(context, follow.swimAscendCount() >= 1,
+                        "the bot never turned up for breath while heading for land (min air " + minAir[0] + ")");
+                finish(context, pond, bot, target);
             }
         });
     }

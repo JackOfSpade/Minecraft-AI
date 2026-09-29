@@ -368,6 +368,44 @@ public final class FollowTaskGameTests {
         bot.setOnGround(true);
     }
 
+    /**
+     * Positive case for {@link FollowDirectWalk}: a straight segment whose every cell is real dry footing
+     * (flat, a one-block step up and a one-block drop) IS verified safe, while the same line with a water
+     * cell in it is refused. The refusal cases alone cannot show the fallback still works where it should.
+     */
+    @GameTest(maxTicks = 40)
+    public void directWalkVerifiesASafeStraightSegmentAndRefusesWaterOnTheLine(TestContext context) {
+        BlockPos platformFeet = context.getAbsolutePos(new BlockPos(4, 5, 4));
+        preparePlatform(context, platformFeet, 8);
+        ServerWorld world = context.getWorld();
+        // West of the platform centre: the test structure's barrier boundary sits two cells above the
+        // ground four cells east of it, which would (correctly) count as no headroom.
+        BlockPos start = platformFeet.add(-3, 0, 0);
+        BlockPos goal = start.add(4, 0, 0);
+        boolean[] done = {false};
+        context.runAtEveryTick(() -> {
+            if (done[0]) {
+                return;
+            }
+            done[0] = true;
+            FollowDirectWalk.Verdict flat = FollowDirectWalk.verify(world, start, goal);
+            require(context, flat.safe(), "a flat, dry straight segment was refused: " + flat.reason());
+
+            // A one-block step up at +2, along a raised pair, and a one-block drop at +4: still verified walkable.
+            world.setBlockState(start.add(2, 0, 0), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlockState(start.add(3, 0, 0), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            FollowDirectWalk.Verdict stepped = FollowDirectWalk.verify(world, start, goal);
+            require(context, stepped.safe(), "a segment with a one-block step up and drop was refused: " + stepped.reason());
+
+            // Water in the middle of the line: refused, never walked into.
+            world.setBlockState(start.add(2, 0, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlockState(start.add(2, -1, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+            FollowDirectWalk.Verdict wet = FollowDirectWalk.verify(world, start, goal);
+            require(context, !wet.safe(), "a segment through water was verified safe");
+            context.complete();
+        });
+    }
+
     private static void preparePlatform(TestContext context, BlockPos feet, int radius) {
         ServerWorld world = context.getWorld();
         for (int dx = -radius; dx <= radius; dx++) {

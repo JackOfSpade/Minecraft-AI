@@ -90,6 +90,105 @@ final class FollowSwimSourceContractTest {
         assertTrue(dig.contains("MAX_CELLS = 8"), "the tunnel is bounded");
     }
 
+    @Test
+    void landBoundExitOnlyTakesOverForRealSwimmingAndHonoursTheAirFloor() throws IOException {
+        String swim = read("task/FollowSwimming.java");
+        int exit = swim.indexOf("boolean exitWaterForLand(");
+        int end = swim.indexOf("// ---- entering the water");
+        assertTrue(exit >= 0 && end > exit);
+        String body = swim.substring(exit, end);
+        assertTrue(body.contains("needsWaterExit(bot, target, standoff)"),
+                "wading through shallows must stay with land follow, not run the swim exit");
+        assertFalse(body.contains("if (!isSwimCell(world, bot.getBlockPos()))"),
+                "merely having wet feet is not swimming");
+        int gate = body.indexOf("needsWaterExit(");
+        int search = body.indexOf("searchRoute(");
+        assertTrue(gate >= 0 && search > gate, "no water route search before the swimming gate");
+        assertTrue(body.contains("updateAscending(bot, air, lossRate(bot), true, blocksToAir)")
+                        && body.contains("ascendWhileSubmerged("),
+                "a submerged bot heading for land must still surface for air early");
+        assertTrue(swim.contains("static boolean isSwimming(AIPlayerEntity bot)")
+                        && swim.contains("bot.isSubmergedInWater()"),
+                "swimming = head under water or afloat with nothing solid underfoot");
+    }
+
+    @Test
+    void modeSwitchesAndPauseAbortResetLandRecoveryAndCancelTheDigOut() throws IOException {
+        String follow = read("task/FollowTask.java");
+        assertTrue(follow.contains("private void suspendLandRecovery(AIPlayerEntity bot)")
+                && follow.contains("stuckRecovery.reset(bot, elapsed);"));
+        for (String owner : new String[]{"protected void onPause(", "protected void onAbort(", "protected void onResume("}) {
+            int at = follow.indexOf(owner);
+            assertTrue(at >= 0, owner);
+            int next = follow.indexOf("@Override", at);
+            String body = follow.substring(at, next < 0 ? follow.length() : next);
+            assertTrue(body.contains("suspendLandRecovery(bot)"), owner + " must reset land recovery / cancel the dig-out");
+        }
+        int tick = follow.indexOf("protected void onTick(");
+        String onTick = follow.substring(tick, follow.indexOf("private static void faceTarget"));
+        assertTrue(count(onTick, "suspendLandRecovery(bot)") >= 5,
+                "offline, boat, swim, leave-boat and exit-water ticks must each suspend land recovery");
+        String recovery = read("task/FollowStuckRecovery.java");
+        assertTrue(recovery.contains("digOut.cancel(bot);"), "reset must cancel an active dig-out");
+    }
+
+    @Test
+    void digOutNeverBreaksBuildingBlocksOrBlocksTheBotsPlaced() throws IOException {
+        String dig = read("task/FollowDigOut.java");
+        assertTrue(dig.contains("isBuildingBlock(state)") && dig.contains("BotEdits.wasPlaced(world, cell)"),
+                "building blocks and the bots' own placements are never dug");
+        assertTrue(dig.contains("state.isOf(Blocks.COBBLESTONE)") && dig.contains("BlockTags.PLANKS")
+                && dig.contains("BlockTags.DOORS"));
+        assertFalse(dig.contains("never doors, chests, beds, glass, planks or any other block entity / built block"),
+                "the header must not claim it can tell built blocks from natural ones");
+        assertTrue(dig.contains("Limits (not a guarantee)"));
+        String tests = readGametest("task/FollowSwimGameTests.java");
+        assertFalse(tests.contains("NeverPlayerBuiltWalls"), "the test name must not overclaim");
+    }
+
+    @Test
+    void aSuppressedPhysicalSnapDoesNotEscalateToTheEmergencyTeleport() throws IOException {
+        String pack = read("action/ActionPack.java");
+        int suppressed = pack.indexOf("if (physicalSnapSuppressed(current, reason))");
+        int physical = pack.indexOf("if (tryPhysicalSnap(world, current, reason))");
+        int teleport = pack.indexOf("PrivilegedCapability.EMERGENCY_TELEPORT,\n                \"action_pack_snap:");
+        assertTrue(suppressed >= 0 && physical > suppressed && teleport > physical);
+        String between = pack.substring(suppressed, physical);
+        assertTrue(between.contains("return false;"), "a suppressed snap must return, not fall through to the teleport");
+    }
+
+    @Test
+    void followRechecksAHeldOwnCellGoalAsSoonAsThePlayerMoves() throws IOException {
+        String follow = read("task/FollowTask.java");
+        assertTrue(follow.contains("holdTargetPos = target.getBlockPos().toImmutable();"));
+        assertTrue(follow.contains("!holdTargetPos.equals(target.getBlockPos())")
+                && follow.contains("nextRepathTick = elapsed;"));
+    }
+
+    @Test
+    void combatIsLoggedAtHitDeathAndTaskLevel() throws IOException {
+        String entity = read("entity/AIPlayerEntity.java");
+        assertTrue(entity.contains("\"damage_taken\"") && entity.contains("\"bot_death\""),
+                "damage taken and death (source, attacker) must be logged");
+        String combat = read("task/CombatTask.java");
+        assertTrue(combat.contains("\"combat_target\"") && combat.contains("\"combat_phase\"")
+                && combat.contains("\"combat_kill\""));
+        String interact = read("action/InteractAction.java");
+        assertTrue(interact.contains("\"target_hp\""));
+    }
+
+    private static int count(String text, String needle) {
+        int n = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
+            n++;
+        }
+        return n;
+    }
+
+    private static String readGametest(String relative) throws IOException {
+        return Files.readString(Path.of("src/gametest/java/io/github/zoyluo/minecraftai").resolve(relative));
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }

@@ -81,10 +81,29 @@ public final class FollowTask extends AbstractTask {
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
     private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
     private int directWalkCount;
+    // Where the followed player stood when the resolved goal collapsed onto the bot's own cell (see
+    // followLand): the hold is re-evaluated as soon as they move rather than after a full REPATH_TICKS.
+    private BlockPos holdTargetPos;
+    private int nextHoldReevalTick;
     private final FollowSwimming swimming = new FollowSwimming();
 
     public FollowTask(String targetName) {
         this.targetName = FollowTargetResolver.normalize(targetName);
+    }
+
+    /** Package-visible for GameTests: bounded water-route searches run by the swim/exit logic. */
+    int swimRouteSearchCount() {
+        return swimming.routeSearchCount();
+    }
+
+    /** Package-visible for GameTests: how many times the swimmer turned up for breath. */
+    int swimAscendCount() {
+        return swimming.ascendCount();
+    }
+
+    /** Package-visible for GameTests: whether the stuck-recovery dig-out currently owns the bot. */
+    boolean digOutActive() {
+        return stuckRecovery.isDigging();
     }
 
     /** Package-visible for GameTests: how many straight-line walks land follow has started. */
@@ -120,6 +139,8 @@ public final class FollowTask extends AbstractTask {
         swimming.reset();
         waiting = false;
         repathBackoff = false;
+        holdTargetPos = null;
+        nextHoldReevalTick = 0;
         boatFollow = null;
         nextBoatAttemptTick = 0;
         boatAcquireFailures = 0;
@@ -136,6 +157,7 @@ public final class FollowTask extends AbstractTask {
         ServerPlayerEntity target = target(bot).orElse(null);
         if (target == null || target.getEntityWorld() != bot.getEntityWorld()) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+            suspendLandRecovery(bot);
             stopBoatAndActions(bot);
             waiting = true;
             if (elapsed % 200 == 1) {
@@ -159,10 +181,12 @@ public final class FollowTask extends AbstractTask {
         boolean targetSwimming = !targetInBoat && isWaterborne(target);
         if (targetInBoat) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+            suspendLandRecovery(bot);
             followBoat(bot, target);
             return;
         }
         if (targetSwimming) {
+            suspendLandRecovery(bot);
             abandonBoatChild(bot);
             followSwimming(bot, target);
             return;
@@ -173,12 +197,14 @@ public final class FollowTask extends AbstractTask {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         abandonBoatChild(bot);
         if (leaveBoatForLand(bot, target)) {
+            suspendLandRecovery(bot);
             waiting = true;
             return;
         }
         // The player has left the water but the bot is still in it: swim to a dry landing near
         // them first (this renews the narrow swim lease itself), then ordinary land follow runs.
         if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)) {
+            suspendLandRecovery(bot);
             waiting = swimming.isWaiting();
             return;
         }
@@ -205,6 +231,16 @@ public final class FollowTask extends AbstractTask {
         } else {
             CombatCore.lookAt(bot, target);
         }
+    }
+
+    /**
+     * Land stuck recovery (stall clock, forced-repath schedule, and above all a dig-out that owns the mining
+     * controller) belongs to land follow only. Whenever swim/boat/exit-water logic takes a tick, or the task
+     * pauses/aborts, its state is reset (which also cancels an active dig-out and stops its mining) so nothing
+     * stale carries over and nothing keeps breaking blocks while another mode drives the bot.
+     */
+    private void suspendLandRecovery(AIPlayerEntity bot) {
+        stuckRecovery.reset(bot, elapsed);
     }
 
     private void followBoat(AIPlayerEntity bot, ServerPlayerEntity target) {
@@ -342,6 +378,15 @@ public final class FollowTask extends AbstractTask {
         // after WalkToController's own multi-second stuck/sidle ladder gave up on walking through
         // it -- by then the player had already pulled well ahead. A* plans the jump immediately.
         BlockPos standNear = standOffsetFrom(target.getBlockPos(), bot.getBlockPos(), STOP_DISTANCE);
+        // The goal collapsed onto the bot's own cell earlier and the bot is holding: as soon as the player
+        // has moved (rate-limited), that answer is stale -- re-evaluate now instead of idling the full
+        // REPATH_TICKS while they walk away.
+        if (holdTargetPos != null && elapsed >= nextHoldReevalTick
+                && !holdTargetPos.equals(target.getBlockPos())) {
+            holdTargetPos = null;
+            nextRepathTick = elapsed;
+            repathBackoff = false;
+        }
         // Besides the periodic retarget schedule, also re-path the instant the controller goes
         // idle on its own (a short leg toward a close, moving target often finishes well before
         // nextRepathTick) -- unless we're deliberately backing off a just-failed distant search.
@@ -351,6 +396,7 @@ public final class FollowTask extends AbstractTask {
             // resolution (AStarPathfinder.resolveEndpoint / Standability.findNearestStandableForGoal:
             // nearby cell first, then a bounded fluid-refusing deep fallback), so no second
             // "surface-first" search is layered on top here.
+            holdTargetPos = null;
             ActionResult path = pack.startPathTo(standNear);
             nextRepathTick = elapsed + REPATH_TICKS;
             if (ActionPack.PATHFINDING_THROTTLED.equals(path.reason()) && path.isFailed()) {
@@ -378,6 +424,8 @@ public final class FollowTask extends AbstractTask {
                             "pos", io.github.zoyluo.minecraftai.log.LogFields.pos(bot.getBlockPos()),
                             "stand_near", io.github.zoyluo.minecraftai.log.LogFields.pos(standNear));
                     repathBackoff = true;
+                    holdTargetPos = target.getBlockPos().toImmutable();
+                    nextHoldReevalTick = elapsed + THROTTLED_RETRY_TICKS;
                     waiting = true;
                     return;
                 }
@@ -475,6 +523,8 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onPause(AIPlayerEntity bot) {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+        suspendLandRecovery(bot);
+        swimming.reset();
         shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.pause(bot);
@@ -484,6 +534,8 @@ public final class FollowTask extends AbstractTask {
 
     @Override
     protected void onResume(AIPlayerEntity bot) {
+        suspendLandRecovery(bot);
+        holdTargetPos = null;
         if (boatFollow != null && boatFollow.state() == TaskState.PAUSED) {
             boatFollow.resume(bot);
         }
@@ -492,6 +544,8 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+        suspendLandRecovery(bot);
+        swimming.reset();
         shelterExitDebtRepayer.cancel(bot);
         if (boatFollow != null && boatFollow.state() == TaskState.RUNNING) {
             boatFollow.abort(bot);

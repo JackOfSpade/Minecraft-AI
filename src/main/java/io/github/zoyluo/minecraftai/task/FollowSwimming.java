@@ -57,6 +57,8 @@ final class FollowSwimming {
     private static final int ENTRY_CANDIDATES_CHECKED = 8;
     private static final int VERTICAL_AIR_SCAN = 48;
     private static final int APPROACH_SHORE_RADIUS = 24;
+    /** Mirrors FollowTask's arrival slack: a wading bot this close to the player has already arrived. */
+    private static final double WADE_ARRIVAL_SLACK = 0.5D;
 
     private record Entry(BlockPos shore, BlockPos water) {
     }
@@ -81,6 +83,9 @@ final class FollowSwimming {
     private int routeFailures;
     private int exitFailedUntilTick;
 
+    private int routeSearches;
+    private int ascendCount;
+
     private double airRouteBlocks = Double.POSITIVE_INFINITY;
     private int nextAirRouteTick;
 
@@ -104,6 +109,16 @@ final class FollowSwimming {
 
     boolean isWaiting() {
         return waiting;
+    }
+
+    /** GameTests: how many bounded water-route searches this follower has run. */
+    int routeSearchCount() {
+        return routeSearches;
+    }
+
+    /** GameTests: how many times it turned up for breath. */
+    int ascendCount() {
+        return ascendCount;
     }
 
     /** True while the bot is in (or touching) water, i.e. this class owns its movement. */
@@ -149,16 +164,7 @@ final class FollowSwimming {
         updateAscending(bot, air, rate, submerged, blocksToAir);
         if (ascending) {
             if (submerged) {
-                if (Double.isInfinite(blocksToAir)) {
-                    // No known way to breathe: never dive on. Hand a low-air bot to the rescue.
-                    if (air <= FollowOxygen.SURFACE_FLOOR_AIR) {
-                        NavSafetyNet.INSTANCE.requestWaterRescue(bot);
-                        NavSafetyNet.INSTANCE.clearFollowSwim(bot);
-                    }
-                    bot.getActionPack().stopMovement();
-                    return true;
-                }
-                return !ascendStep(bot, world, elapsed);
+                return ascendWhileSubmerged(bot, world, elapsed, air, blocksToAir);
             }
             // Head above water again: keep company with the player at the surface while the lungs
             // refill, but never go back down until they have.
@@ -181,6 +187,26 @@ final class FollowSwimming {
         return !routeStepToward(bot, target, elapsed);
     }
 
+    /**
+     * One tick of heading for air while the head is under water (shared by swimming after a player and by
+     * climbing out after one).
+     *
+     * @return true when the bot deliberately made no progress this tick (waiting)
+     */
+    private boolean ascendWhileSubmerged(AIPlayerEntity bot, ServerWorld world, int elapsed, int air,
+                                         double blocksToAir) {
+        if (Double.isInfinite(blocksToAir)) {
+            // No known way to breathe: never dive on. Hand a low-air bot to the rescue.
+            if (air <= FollowOxygen.SURFACE_FLOOR_AIR) {
+                NavSafetyNet.INSTANCE.requestWaterRescue(bot);
+                NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+            }
+            bot.getActionPack().stopMovement();
+            return true;
+        }
+        return !ascendStep(bot, world, elapsed);
+    }
+
     private void updateAscending(AIPlayerEntity bot, int air, double rate, boolean submerged, double blocksToAir) {
         if (ascending) {
             if (FollowOxygen.mayResumeDive(air, bot.getMaxAir(), rate)) {
@@ -191,6 +217,7 @@ final class FollowSwimming {
         }
         if (FollowOxygen.shouldSurface(air, rate, blocksToAir)) {
             ascending = true;
+            ascendCount++;
             BotLog.action(bot, "follow_swim_ascend",
                     "air", air,
                     "loss", String.format(Locale.ROOT, "%.3f", rate),
@@ -307,21 +334,36 @@ final class FollowSwimming {
     boolean exitWaterForLand(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed, double standoff) {
         ServerWorld world = bot.getEntityWorld();
         observeAir(bot, world);
-        if (!isSwimCell(world, bot.getBlockPos())) {
+        if (!needsWaterExit(bot, target, standoff)) {
+            // Dry, or wading through shallows that land follow can handle itself (its pathfinder, stop
+            // distance and stuck recovery): nothing here may run a water search for it.
             clearRoute();
+            ascending = false;
             return false;
         }
-        if (elapsed < exitFailedUntilTick) {
-            return false;
-        }
-        if (bot.isSubmergedInWater() && bot.getAir() <= FollowOxygen.RESCUE_AIR) {
+        boolean submerged = bot.isSubmergedInWater();
+        int air = bot.getAir();
+        if (submerged && air <= FollowOxygen.RESCUE_AIR) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             bot.getActionPack().stopMovement();
             clearRoute();
             waiting = true;
             return true;
         }
+        if (elapsed < exitFailedUntilTick) {
+            return false;
+        }
         NavSafetyNet.INSTANCE.renewFollowSwim(bot);
+        if (submerged) {
+            // Heading for land does not excuse holding one's breath: honour the same follow-first air
+            // floor / early-ascent rule as swimming after the player.
+            double blocksToAir = blocksToAir(bot, world, elapsed);
+            updateAscending(bot, air, lossRate(bot), true, blocksToAir);
+            if (ascending) {
+                waiting = ascendWhileSubmerged(bot, world, elapsed, air, blocksToAir);
+                return true;
+            }
+        }
         if (route == null || routeGoal != SwimRoute.Goal.EXIT || elapsed >= routeExpiryTick) {
             if (elapsed < nextRouteSearchTick) {
                 waiting = true;
@@ -497,6 +539,7 @@ final class FollowSwimming {
     private void searchRoute(AIPlayerEntity bot, ServerWorld world, BlockPos target,
                              SwimRoute.Goal goal, int elapsed, double standoff) {
         nextRouteSearchTick = elapsed + ROUTE_COOLDOWN_TICKS;
+        routeSearches++;
         Standability.clearCache();
         Optional<List<BlockPos>> found = SwimRoute.search(world, bot.getBlockPos(), target, goal, standoff);
         if (found.isPresent() && !found.get().isEmpty()) {
@@ -544,6 +587,63 @@ final class FollowSwimming {
     }
 
     // ---- cell predicates ---------------------------------------------------------------------
+
+    /**
+     * True when the bot is genuinely swimming: its head is under water, or it is afloat with nothing
+     * solid under its feet. Standing on a solid bottom with the head clear is wading -- ordinary
+     * walking, not swimming -- however wet its feet are.
+     */
+    static boolean isSwimming(AIPlayerEntity bot) {
+        ServerWorld world = bot.getEntityWorld();
+        BlockPos feet = bot.getBlockPos();
+        if (!isSwimCell(world, feet)) {
+            return false;
+        }
+        if (bot.isSubmergedInWater()) {
+            return true;
+        }
+        BlockPos below = feet.down();
+        return world.getBlockState(below).getCollisionShape(world, below).isEmpty();
+    }
+
+    /**
+     * Whether this class must take a land-bound tick from land follow. Genuine swimming always does.
+     * Wading (feet wet, head clear, solid bottom) is ordinary walking and stays with land follow --
+     * except in the middle of a shallow, where land follow has no legal start cell (a wet cell is
+     * never "standable", and its start snap only reaches a dry neighbour): there the bot would sit
+     * forever, so it wades out along a water route.
+     */
+    private static boolean needsWaterExit(AIPlayerEntity bot, ServerPlayerEntity target, double standoff) {
+        if (isSwimming(bot)) {
+            return true;
+        }
+        ServerWorld world = bot.getEntityWorld();
+        BlockPos feet = bot.getBlockPos();
+        if (!isSwimCell(world, feet)) {
+            return false;
+        }
+        if (bot.distanceTo(target) <= standoff + WADE_ARRIVAL_SLACK) {
+            return false;
+        }
+        return !hasDryFootingWithinOneStep(world, feet);
+    }
+
+    /** A dry, standable cell one step away (same level, one up, one down) that land follow's start snap can reach. */
+    static boolean hasDryFootingWithinOneStep(ServerWorld world, BlockPos feet) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if ((dx == 0 && dz == 0 && dy == 0) || (dy != 0 && Math.abs(dx) + Math.abs(dz) > 1)) {
+                        continue;
+                    }
+                    if (Standability.isStandableFresh(world, feet.add(dx, dy, dz))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
 
     static boolean isSwimCell(ServerWorld world, BlockPos pos) {
         return BoatSupport.isWater(world, pos) || BoatSupport.isWater(world, pos.up());

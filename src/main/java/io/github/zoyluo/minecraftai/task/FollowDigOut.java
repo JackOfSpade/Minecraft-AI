@@ -9,10 +9,13 @@ import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.NeighborEnumerator;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.FallingBlock;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -28,13 +31,23 @@ import net.minecraft.util.math.Direction;
  * controller, the pathfinder's own dig whitelist, {@link DigNav}'s observed-hazard test):
  * <ul>
  *   <li>only horizontal, at the bot's own feet and head level -- never below the feet, and every
- *       cell it steps into must keep a solid floor, so it never digs into an unknown drop;</li>
+ *       cell it steps into must keep a solid floor, so it never digs into an unknown drop. The
+ *       floor test reads the same raw floor state the pathfinder's own dig-enterable check does
+ *       ({@code NeighborEnumerator#digEnterable}) and nothing more; once a cell is opened the bot
+ *       stands next to it and the floor is re-checked before it steps in;</li>
  *   <li>only cells in {@code NeighborEnumerator}'s natural-block whitelist (stone family, dirt,
  *       sand, gravel, ores) that are currently observable and that the carried tools can break --
- *       never doors, chests, beds, glass, planks or any other block entity / built block;</li>
+ *       and never a cell a bot placed itself (the mining-assist {@code BotEdits} ledger, which is
+ *       only kept while that assist mode is on) nor a typical building block
+ *       ({@link #isBuildingBlock}: cobblestone, bricks, planks, doors, glass, wool, stairs...);</li>
  *   <li>never through or next to an observed fluid, and never under a suspended falling block;</li>
  *   <li>at most {@link #MAX_CELLS} cells, and it stops as soon as the way ahead is open.</li>
  * </ul>
+ *
+ * <p><b>Limits (not a guarantee).</b> A block cannot tell natural terrain from a player's wall:
+ * plain stone, dirt, sand or gravel that somebody else placed looks exactly like the natural kind,
+ * and the placed-block ledger only knows the bots' own placements. What is guaranteed is exactly the
+ * list above; digging stays a last resort after a whole stall window, bounded to {@link #MAX_CELLS} cells.
  */
 final class FollowDigOut {
     static final int MAX_CELLS = 8;
@@ -169,6 +182,8 @@ final class FollowDigOut {
             }
             if (!state.getFluidState().isEmpty()
                     || !NeighborEnumerator.isMineable(world, cell)
+                    || isBuildingBlock(state)
+                    || BotEdits.wasPlaced(world, cell)
                     || !ObservableWorldQuery.canObserveBlock(bot, cell)
                     || !hasSuitableTool(bot, state)) {
                 return null;
@@ -185,6 +200,25 @@ final class FollowDigOut {
             return null;
         }
         return new Plan(first);
+    }
+
+    /**
+     * Blocks that are far more likely to be somebody's construction than terrain. The pathfinder's
+     * whitelist already excludes most of them; this is the explicit backstop (and the one place that
+     * removes cobblestone, which the whitelist allows for the bot's own mining).
+     */
+    static boolean isBuildingBlock(BlockState state) {
+        return state.isOf(Blocks.COBBLESTONE) || state.isOf(Blocks.MOSSY_COBBLESTONE)
+                || state.isOf(Blocks.STONE_BRICKS) || state.isOf(Blocks.BRICKS)
+                || state.isOf(Blocks.SMOOTH_STONE) || state.isOf(Blocks.POLISHED_ANDESITE)
+                || state.isOf(Blocks.POLISHED_DIORITE) || state.isOf(Blocks.POLISHED_GRANITE)
+                || state.isOf(Blocks.GLASS) || state.isOf(Blocks.GLASS_PANE)
+                || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.DOORS)
+                || state.isIn(BlockTags.TRAPDOORS) || state.isIn(BlockTags.FENCES)
+                || state.isIn(BlockTags.FENCE_GATES) || state.isIn(BlockTags.WALLS)
+                || state.isIn(BlockTags.STAIRS) || state.isIn(BlockTags.SLABS)
+                || state.isIn(BlockTags.WOOL) || state.isIn(BlockTags.BEDS)
+                || state.isIn(BlockTags.IMPERMEABLE) || state.isIn(BlockTags.ICE);
     }
 
     private static boolean isOpen(ServerWorld world, BlockPos pos) {

@@ -54,7 +54,7 @@ final class BoatFollowSourceContractTest {
         String boatSupport = read("task/BoatSupport.java");
         assertTrue(boatSupport.contains("nearbySafeDismountShore"),
                 "boat-to-land follow must wait for a real dry shore before dismounting");
-        assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 20"));
+        assertTrue(safety.contains("FOLLOW_SWIM_LEASE_TICKS = 6"));
         assertTrue(safety.contains("void renewFollowSwim(AIPlayerEntity bot)"));
         assertTrue(safety.contains("void clearFollowSwim(AIPlayerEntity bot)"));
         assertTrue(safety.contains("bot.getAir() <= AIR_SURFACE_THRESHOLD"),
