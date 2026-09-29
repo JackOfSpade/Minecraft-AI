@@ -1,10 +1,9 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 
 /**
  * The detour's private anti-thrash memory (mining-assist design 2.4, 4.3, 4.5): cells (valuables and stand poses)

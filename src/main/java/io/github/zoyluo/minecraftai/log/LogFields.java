@@ -1,6 +1,6 @@
 package io.github.zoyluo.minecraftai.log;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 public final class LogFields {
     private LogFields() {

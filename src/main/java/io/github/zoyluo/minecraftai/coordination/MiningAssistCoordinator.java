@@ -26,10 +26,9 @@ import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.server.level.ServerLevel;
 import java.util.UUID;
 
 /**
@@ -72,7 +71,7 @@ public final class MiningAssistCoordinator {
         if (!MiningAssistRuntime.senseConfigured()) {
             return;
         }
-        int tick = server.getTicks();
+        int tick = server.getTickCount();
         try {
             run(bot, tick, handled);
         } catch (RuntimeException exception) {
@@ -102,14 +101,14 @@ public final class MiningAssistCoordinator {
         } catch (RuntimeException ignored) {
             // must never take down the sensor pass that follows.
         }
-        UUID botId = bot.getUuid();
+        UUID botId = bot.getUUID();
         if (MiningAssistRuntime.failures().coolingDown(botId, tick)) {
             return;
         }
         SensePlan.Verdict verdict = SensePlan.decide(handled,
                 () -> isSensedTask(TaskManager.INSTANCE.getActive(bot).orElse(null)),
                 () -> MiningAssistRuntime.enabledFor(bot, tick),
-                () -> !bot.getEntityWorld().isSkyVisible(bot.getBlockPos()));
+                () -> !bot.level().canSeeSky(bot.blockPosition()));
         if (verdict.senses()) {
             sense(bot, tick);
         } else if (!verdict.neutral()) {
@@ -128,7 +127,7 @@ public final class MiningAssistCoordinator {
 
     /** Design 2.3 step 3b and 3c: live derivation of the published detour, orphan cleanup, tick-granular net. */
     private static void maintainDetour(AIPlayerEntity bot, int tick) {
-        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
         int hurt = bot.hurtTime;
         if (state == null || state.detourOwner() == null) {
             return;                     // note: hurtTimeSeen is NOT touched here (M-review): it must stay stale
@@ -141,7 +140,7 @@ public final class MiningAssistCoordinator {
         if (verdict != DetourLiveness.Verdict.LIVE) {
             DetourPhase phase = state.detourPhase();
             DetourControl control = state.detourControl();
-            int released = OreClaims.releaseAll(bot.getUuid());
+            int released = OreClaims.releaseAll(bot.getUUID());
             if (control != null) {
                 control.abandoned(tick);          // settles the CACHED mission ledger entry the engine itself cannot reach any more
             }
@@ -164,17 +163,17 @@ public final class MiningAssistCoordinator {
 
     private static void sense(AIPlayerEntity bot, int tick) {
         MiningAssistConfig config = MiningAssistRuntime.config();
-        ServerWorld world = bot.getEntityWorld();
-        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        ServerLevel world = bot.level();
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
         if (state == null) {
             state = MiningAssistRegistry.getOrCreate(bot);
         }
         // A state that was dropped by the fence and rebuilt is the recovery of a failed pass, not a new session:
         // the failure line already said so, and a persistent fault must not add an enabled line per cooldown.
         if (state.status().sensed(tick) == SenseStatus.Change.ENABLED
-                && !MiningAssistRuntime.failures().takeReenableSuppression(bot.getUuid())) {
+                && !MiningAssistRuntime.failures().takeReenableSuppression(bot.getUUID())) {
             MiningAssistLog.senseEnabled(bot, activeTaskName(bot), BotEdits.dimensionKey(world),
-                    bot.getBlockPos(), config.mode());
+                    bot.blockPosition(), config.mode());
         }
         state.maintain(tick);
 
@@ -204,14 +203,14 @@ public final class MiningAssistCoordinator {
 
     /** The bot is not being sensed this tick (not mining, gate closed, or on the surface). */
     private static void notSensing(AIPlayerEntity bot, int tick, SensePlan.Verdict verdict) {
-        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
         if (state == null) {
             return;
         }
         SenseStatus status = state.status();
         if (status.notSensed(tick) == SenseStatus.Change.DISABLED) {
             String deny = verdict == SensePlan.Verdict.GATE_CLOSED
-                    ? MiningAssistRuntime.lastDenyReason(bot.getUuid()) : null;
+                    ? MiningAssistRuntime.lastDenyReason(bot.getUUID()) : null;
             MiningAssistLog.senseDisabled(bot, verdict.reason(), deny, state);
         }
         if (status.idleFor(tick, SenseStatus.IDLE_RELEASE_TICKS)) {
@@ -235,8 +234,8 @@ public final class MiningAssistCoordinator {
      */
     private static void fail(AIPlayerEntity bot, int tick, RuntimeException exception) {
         MiningAssistRegistry.clear(bot);
-        if (MiningAssistRuntime.failures().recordFailure(bot.getUuid(), tick)) {
-            BlockPos feet = bot.getBlockPos();
+        if (MiningAssistRuntime.failures().recordFailure(bot.getUUID(), tick)) {
+            BlockPos feet = bot.blockPosition();
             BotLog.error(bot, "assist_tick_failed", exception,
                     "task", activeTaskName(bot),
                     "feet", feet.getX() + "," + feet.getY() + "," + feet.getZ());

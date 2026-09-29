@@ -5,18 +5,17 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.decoration.ArmorStandEntity;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Shadow POI evaluation for one bot (mining-assist design 6.2 and 6.3, phase P0: scoring and logging
@@ -108,9 +107,9 @@ public final class PoiDetector {
      * {@link #evaluate}, which used to run this only inside the shadow POI pass); {@code task/DetourSafetyGate}
      * calls it directly when {@code MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)}.
      */
-    public static void refreshBiome(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {
-        BlockPos feet = bot.getBlockPos();
-        state.setBiome(world.getBiome(feet).getKey().map(key -> key.getValue().toString()).orElse(""));
+    public static void refreshBiome(AIPlayerEntity bot, MiningAssistState state, ServerLevel world, int serverTick) {
+        BlockPos feet = bot.blockPosition();
+        state.setBiome(world.getBiome(feet).unwrapKey().map(key -> key.identifier().toString()).orElse(""));
         state.noteBiomeRead(serverTick);
     }
 
@@ -132,7 +131,7 @@ public final class PoiDetector {
      * Runs one shadow evaluation and schedules the next one. Never throws for a normal world; call only
      * while the assist gate is open and only when {@link #due} says so.
      */
-    public static Result evaluate(AIPlayerEntity bot, MiningAssistState state, ServerWorld world, int serverTick) {
+    public static Result evaluate(AIPlayerEntity bot, MiningAssistState state, ServerLevel world, int serverTick) {
         long started = System.nanoTime();
         state.setNextPoiEvalTick(serverTick + PoiScorer.EVAL_INTERVAL_TICKS);
         MiningAssistConfig config = MiningAssistRuntime.config();
@@ -140,14 +139,14 @@ public final class PoiDetector {
         String dimension = BotEdits.dimensionKey(world);
         state.enterDimension(dimension);
 
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         refreshBiome(bot, state, world, serverTick);
 
         EntityEvidence entities = scanEntities(bot, world, radius);
         state.counters().entityScans++;
         state.poiWindow().expire(serverTick);
 
-        Vec3d eye = bot.getEyePos();
+        Vec3 eye = bot.getEyePosition();
         FreeRunStats.Openness openness = state.ring().openness(
                 serverTick, SweepEngine.eyeCell(eye.x, eye.y, eye.z), radius);
         noteCavernGate(bot, state, config, openness, dimension, radius);
@@ -215,14 +214,14 @@ public final class PoiDetector {
      * {@value #ENTITY_EXAMINE_CAP} examined, {@value #ENTITY_CANDIDATE_CAP} accepted); each must be
      * visible (not invisible, not a marker armor stand) and pass {@code ObservableWorldQuery.canObserveEntity}.
      */
-    private static EntityEvidence scanEntities(AIPlayerEntity bot, ServerWorld world, double radius) {
+    private static EntityEvidence scanEntities(AIPlayerEntity bot, ServerLevel world, double radius) {
         EntityEvidence evidence = new EntityEvidence();
-        Box box = bot.getBoundingBox().expand(radius);
-        List<Entity> candidates = world.getEntitiesByClass(Entity.class, box,
+        AABB box = bot.getBoundingBox().inflate(radius);
+        List<Entity> candidates = world.getEntitiesOfClass(Entity.class, box,
                 entity -> entity != bot && entity.isAlive() && !entity.isInvisible() && isEvidenceType(entity));
         List<Entity> ordered = new ArrayList<>(candidates);
         ordered.sort(Comparator.<Entity, Boolean>comparing(entity -> !isWardenType(entity))
-                .thenComparingDouble(entity -> bot.squaredDistanceTo(entity)));
+                .thenComparingDouble(entity -> bot.distanceToSqr(entity)));
         int examined = 0;
         int accepted = 0;
         for (Entity entity : ordered) {
@@ -230,13 +229,13 @@ public final class PoiDetector {
                 break;
             }
             examined++;
-            if (entity instanceof ArmorStandEntity stand && stand.isMarker()) {
+            if (entity instanceof ArmorStand stand && stand.isMarker()) {
                 continue;
             }
             if (!ObservableWorldQuery.canObserveEntity(bot, entity)) {
                 continue;
             }
-            Identifier id = Registries.ENTITY_TYPE.getId(entity.getType());
+            Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
             evidence.add(id.getNamespace(), id.getPath());
             accepted++;
         }
@@ -244,12 +243,12 @@ public final class PoiDetector {
     }
 
     private static boolean isWardenType(Entity entity) {
-        Identifier id = Registries.ENTITY_TYPE.getId(entity.getType());
+        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         return PoiLexicon.isWarden(id.getNamespace(), id.getPath());
     }
 
     private static boolean isEvidenceType(Entity entity) {
-        Identifier id = Registries.ENTITY_TYPE.getId(entity.getType());
+        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         String namespace = id.getNamespace();
         String path = id.getPath();
         return PoiLexicon.entityScore(namespace, path) > 0.0D

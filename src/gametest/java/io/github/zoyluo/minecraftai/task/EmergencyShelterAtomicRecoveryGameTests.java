@@ -4,27 +4,26 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.entity.mob.HuskEntity;
-import net.minecraft.entity.vehicle.BoatEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.zombie.Husk;
+import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import net.minecraft.text.Text;
 
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.assertPhysicalExit;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.finish;
@@ -37,17 +36,17 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterS
 /** Physical regressions for the shelter's ordered build and sealed healing transaction. */
 public final class EmergencyShelterAtomicRecoveryGameTests {
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_moving_edge_anchor_settles_before_envelope_placement", maxTicks = 16000)
-    public void movingEdgeAnchorSettlesBeforeEnvelopePlacement(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void movingEdgeAnchorSettlesBeforeEnvelopePlacement(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterAnchorSettleGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
-        bot.teleport(context.getWorld(), feet.getX() + 0.78D, feet.getY(),
+        bot.teleportTo(context.getLevel(), feet.getX() + 0.78D, feet.getY(),
                 feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
         bot.setOnGround(true);
-        bot.setVelocity(new Vec3d(0.18D, 0.0D, 0.0D));
-        require(context, bot.getBlockPos().equals(feet)
-                        && new net.minecraft.util.math.Box(feet.east())
+        bot.setDeltaMovement(new Vec3(0.18D, 0.0D, 0.0D));
+        require(context, bot.blockPosition().equals(feet)
+                        && new net.minecraft.world.phys.AABB(feet.east())
                         .intersects(bot.getBoundingBox()),
                 "moving-edge fixture did not overlap the east wall cell");
 
@@ -57,18 +56,18 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         "gametest_shelter_anchor_settlement"));
         require(context, Math.abs(bot.getX() - (feet.getX() + 0.5D)) < 1.0E-6D
                         && Math.abs(bot.getZ() - (feet.getZ() + 0.5D)) < 1.0E-6D
-                        && bot.getVelocity().lengthSquared() <= 1.0E-8D,
+                        && bot.getDeltaMovement().lengthSqr() <= 1.0E-8D,
                 "shelter admission did not settle the moving edge pose");
 
         boolean[] eastWallSealed = {false};
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("moving-edge shelter ended as " + task.state()
+                context.fail(Component.nullToEmpty("moving-edge shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
-            if (isSealed(context, feet.east()) && isSealed(context, feet.east().up())) {
+            if (isSealed(context, feet.east()) && isSealed(context, feet.east().above())) {
                 eastWallSealed[0] = true;
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -82,8 +81,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_build_time_edge_correction_places_wall_in_same_tick", maxTicks = 30)
-    public void buildTimeEdgeCorrectionPlacesWallInSameTick(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void buildTimeEdgeCorrectionPlacesWallInSameTick(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
         AIPlayerEntity bot = spawn(context, "ShelterBuildSettleGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
@@ -92,12 +91,12 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         task.start(bot);
         require(context, task.state() == TaskState.RUNNING,
                 "build-time settlement fixture failed shelter admission");
-        bot.teleport(context.getWorld(), feet.getX() + 0.5D, feet.getY(),
+        bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(),
                 feet.getZ() + 0.22D, Set.of(), 0.0F, 0.0F, false);
         bot.setOnGround(true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         BlockPos northWall = feet.north();
-        require(context, new Box(northWall).intersects(bot.getBoundingBox()),
+        require(context, new AABB(northWall).intersects(bot.getBoundingBox()),
                 "build-time settlement fixture did not overlap its first wall");
 
         task.tick(bot);
@@ -112,13 +111,13 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_persistent_hostile_gets_one_strike_then_forces_physical_exit", maxTicks = 16000)
-    public void persistentHostileGetsOneStrikeThenForcesPhysicalExit(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void persistentHostileGetsOneStrikeThenForcesPhysicalExit(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterWallBlockerGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD, 1));
-        HuskEntity blocker = spawnHusk(context, feet.east());
+        Husk blocker = spawnHusk(context, feet.east());
         float blockerHealth = blocker.getHealth();
 
         EmergencyShelterTask task = new EmergencyShelterTask();
@@ -130,7 +129,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         int[] damageEvents = {0};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (blocker.getHealth() < previousBlockerHealth[0]) {
                 damageEvents[0]++;
                 struck[0] = true;
@@ -159,25 +158,25 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_occupied_centered_aabb_rejects_same_cell_correction", maxTicks = 30)
-    public void occupiedCenteredAabbRejectsSameCellCorrection(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void occupiedCenteredAabbRejectsSameCellCorrection(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
         AIPlayerEntity bot = spawn(context, "ShelterCenteredEntityGuardGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
-        bot.teleport(context.getWorld(), feet.getX() + 0.78D, feet.getY(),
+        bot.teleportTo(context.getLevel(), feet.getX() + 0.78D, feet.getY(),
                 feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
         double edgeX = bot.getX();
-        BoatEntity occupant = EntityType.OAK_BOAT.create(
-                context.getWorld(), SpawnReason.COMMAND);
+        Boat occupant = EntityType.OAK_BOAT.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (occupant == null) {
             finish(context, bot, "ShelterCenteredEntityGuardGT");
-            context.throwGameTestException(Text.of("failed to create centered non-living occupant"));
+            context.fail(Component.nullToEmpty("failed to create centered non-living occupant"));
             return;
         }
-        occupant.refreshPositionAndAngles(
+        occupant.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 0.0F, 0.0F);
-        require(context, context.getWorld().spawnEntity(occupant),
+        require(context, context.getLevel().addFreshEntity(occupant),
                 "failed to spawn centered non-living occupant");
 
         EmergencyShelterTask task = new EmergencyShelterTask();
@@ -194,8 +193,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_ai_enabled_close_pressure_uses_one_strike_and_low_health_bot_survives", maxTicks = 16000)
     public void aiEnabledClosePressureUsesOneStrikeAndLowHealthBotSurvives(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterAiPressureGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
@@ -204,22 +203,22 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         EmergencyShelterTask task = new EmergencyShelterTask();
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_ai_pressure"));
-        HuskEntity[] hostile = {null};
+        Husk[] hostile = {null};
         float[] previousHostileHealth = {Float.NaN};
         int[] damageEvents = {0};
         int[] closePressureTicks = {0};
         boolean[] lowHealthInjected = {false};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (hostile[0] == null
                     && isSealed(context, feet.north())
-                    && isSealed(context, feet.north().up())) {
+                    && isSealed(context, feet.north().above())) {
                 bot.setHealth(8.0F);
                 lowHealthInjected[0] = true;
                 hostile[0] = spawnAiHusk(context, feet.east(), bot);
                 previousHostileHealth[0] = hostile[0].getHealth();
-                require(context, !hostile[0].isAiDisabled(),
+                require(context, !hostile[0].isNoAi(),
                         "close-pressure hostile unexpectedly had AI disabled");
                 return;
             }
@@ -229,8 +228,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     damageEvents[0]++;
                     previousHostileHealth[0] = hostile[0].getHealth();
                 }
-                if (new Box(feet.east()).intersects(hostile[0].getBoundingBox())
-                        || bot.squaredDistanceTo(hostile[0]) <= 2.25D) {
+                if (new AABB(feet.east()).intersects(hostile[0].getBoundingBox())
+                        || bot.distanceToSqr(hostile[0]) <= 2.25D) {
                     closePressureTicks[0]++;
                 }
                 require(context, damageEvents[0] <= 1,
@@ -261,26 +260,26 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_melee_forbidden_occupied_egress_uses_alternate_owned_exit", maxTicks = 16000)
-    public void meleeForbiddenOccupiedEgressUsesAlternateOwnedExit(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void meleeForbiddenOccupiedEgressUsesAlternateOwnedExit(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterForbiddenBlockerGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD, 1));
-        CreeperEntity creeper = EntityType.CREEPER.create(
-                context.getWorld(), SpawnReason.COMMAND);
+        Creeper creeper = EntityType.CREEPER.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (creeper == null) {
             finish(context, bot, "ShelterForbiddenBlockerGT");
-            context.throwGameTestException(Text.of("failed to create forbidden wall blocker"));
+            context.fail(Component.nullToEmpty("failed to create forbidden wall blocker"));
             return;
         }
-        creeper.setPersistent();
-        creeper.setAiDisabled(true);
+        creeper.setPersistenceRequired();
+        creeper.setNoAi(true);
         BlockPos blockedEgress = feet.north();
-        creeper.refreshPositionAndAngles(
+        creeper.snapTo(
                 blockedEgress.getX() + 0.5D, blockedEgress.getY(),
                 blockedEgress.getZ() + 0.5D, 0.0F, 0.0F);
-        require(context, context.getWorld().spawnEntity(creeper),
+        require(context, context.getLevel().addFreshEntity(creeper),
                 "failed to spawn forbidden wall blocker");
         float creeperHealth = creeper.getHealth();
 
@@ -290,7 +289,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         "gametest_shelter_forbidden_wall_blocker"));
         boolean[] blockerReleasedAfterRejection = {false};
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             require(context, creeper.getHealth() == creeperHealth,
                     "shelter performed forbidden melee against a Creeper");
             // OPEN_EXIT proves the adjacent Creeper was already classified as a forbidden
@@ -313,9 +312,9 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                             + task.state() + ":" + task.failureReason());
             require(context, blockerReleasedAfterRejection[0],
                     "fixture never observed the committed alternate-exit transaction");
-            require(context, bot.getBlockPos().equals(feet.east()),
+            require(context, bot.blockPosition().equals(feet.east()),
                     "shelter entered the rejected Creeper egress instead of east: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             creeper.discard();
             finish(context, bot, "ShelterForbiddenBlockerGT");
         });
@@ -323,8 +322,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_adjacent_second_shelter_reuses_residual_roof_without_blocked_support_jump", maxTicks = 16000)
     public void adjacentSecondShelterReusesResidualRoofWithoutBlockedSupportJump(
-            TestContext context) {
-        BlockPos firstFeet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos firstFeet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, firstFeet, 5);
         AIPlayerEntity bot = spawn(context, "ShelterAdjacentGT", firstFeet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 40));
@@ -338,20 +337,20 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         BlockPos[] unnecessarySecondRim = {null};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (second[0] == null) {
                 if (first.state() == TaskState.FAILED || first.state() == TaskState.CANCELLED) {
-                    context.throwGameTestException(Text.of("first shelter ended as " + first.state()
+                    context.fail(Component.nullToEmpty("first shelter ended as " + first.state()
                             + ":" + first.failureReason() + " " + first.describe()));
                     return;
                 }
-                BlockPos firstRoof = firstFeet.up(2);
+                BlockPos firstRoof = firstFeet.above(2);
                 // Once OPEN_EXIT starts, the north head cell is intentionally mined while the
                 // center roof remains. Only the BUILD/HOLD window can prove construction order.
                 boolean envelopeOwned = first.describe().contains("phase=BUILD")
                         || first.describe().contains("phase=HOLD");
                 if (envelopeOwned && isSealed(context, firstRoof)) {
-                    require(context, isSealed(context, firstFeet.up().north()),
+                    require(context, isSealed(context, firstFeet.above().north()),
                             "center roof appeared before roofSupportBase");
                     require(context, isSealed(context, firstRoof.north()),
                             "center roof appeared before roofSupport");
@@ -360,16 +359,16 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     return;
                 }
 
-                secondFeet[0] = bot.getBlockPos().toImmutable();
+                secondFeet[0] = bot.blockPosition().immutable();
                 require(context, secondFeet[0].equals(firstFeet.north()),
                         "first shelter did not leave through its deterministic north doorway: "
                                 + secondFeet[0].toShortString());
-                inheritedCenterRoof[0] = secondFeet[0].up(2).toImmutable();
-                unnecessarySecondRim[0] = inheritedCenterRoof[0].north().toImmutable();
-                require(context, context.getWorld().getBlockState(inheritedCenterRoof[0])
-                                .isOf(Blocks.DIRT),
+                inheritedCenterRoof[0] = secondFeet[0].above(2).immutable();
+                unnecessarySecondRim[0] = inheritedCenterRoof[0].north().immutable();
+                require(context, context.getLevel().getBlockState(inheritedCenterRoof[0])
+                                .is(Blocks.DIRT),
                         "first shelter did not leave its rim as the adjacent center roof");
-                require(context, context.getWorld().getBlockState(unnecessarySecondRim[0]).isAir(),
+                require(context, context.getLevel().getBlockState(unnecessarySecondRim[0]).isAir(),
                         "adjacent fixture unexpectedly began with a second rim");
 
                 second[0] = new EmergencyShelterTask();
@@ -381,7 +380,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
             if (second[0].state() == TaskState.FAILED
                     || second[0].state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("adjacent second shelter ended as "
+                context.fail(Component.nullToEmpty("adjacent second shelter ended as "
                         + second[0].state() + ":" + second[0].failureReason()
                         + " " + second[0].describe()));
                 return;
@@ -389,10 +388,10 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             if (second[0].state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, context.getWorld().getBlockState(inheritedCenterRoof[0])
-                            .isOf(Blocks.DIRT),
+            require(context, context.getLevel().getBlockState(inheritedCenterRoof[0])
+                            .is(Blocks.DIRT),
                     "second shelter replaced or removed its inherited center roof");
-            require(context, context.getWorld().getBlockState(unnecessarySecondRim[0]).isAir(),
+            require(context, context.getLevel().getBlockState(unnecessarySecondRim[0]).isAir(),
                     "second shelter built an unnecessary rim despite an existing center roof");
             assertPhysicalExit(context, bot, secondFeet[0]);
             finish(context, bot, "ShelterAdjacentGT");
@@ -401,8 +400,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_low_health_shelter_consumes_backpack_food_and_heals_before_opening", maxTicks = 16000)
     public void lowHealthShelterConsumesBackpackFoodAndHealsBeforeOpening(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
         AIPlayerEntity bot = spawn(context, "ShelterSealedEatGT", feet);
@@ -418,17 +417,17 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         boolean[] safeThresholdObserved = {false};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("sealed-eat shelter ended as " + task.state()
+                context.fail(Component.nullToEmpty("sealed-eat shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
             if (!lowHealthInjected[0] && sealed) {
                 bot.setHealth(5.0F);
-                bot.getHungerManager().setFoodLevel(12);
-                bot.getHungerManager().setSaturationLevel(0.0F);
+                bot.getFoodData().setFoodLevel(12);
+                bot.getFoodData().setSaturation(0.0F);
                 lowHealthInjected[0] = true;
                 return;
             }
@@ -463,7 +462,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                             && bot.getHealth() >= 18.0F,
                     "shelter exited before physical healing reached 18 HP: hp="
                             + bot.getHealth());
-            require(context, bot.getHungerManager().getFoodLevel() > 12,
+            require(context, bot.getFoodData().getFoodLevel() > 12,
                     "food use did not increase the hunger level");
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterSealedEatGT");
@@ -471,8 +470,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_food_nineteen_waits_for_natural_healing_without_eating", maxTicks = 16000)
-    public void foodNineteenWaitsForNaturalHealingWithoutEating(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void foodNineteenWaitsForNaturalHealingWithoutEating(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
         AIPlayerEntity bot = spawn(context, "ShelterFoodNineteenGT", feet);
@@ -486,17 +485,17 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         boolean[] boundaryInjected = {false};
         boolean[] naturalHealingObserved = {false};
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("food-19 shelter ended as " + task.state()
+                context.fail(Component.nullToEmpty("food-19 shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             boolean sealed = shell.stream().allMatch(pos -> isSealed(context, pos));
             if (!boundaryInjected[0] && sealed) {
                 bot.setHealth(17.0F);
-                bot.getHungerManager().setFoodLevel(19);
-                bot.getHungerManager().setSaturationLevel(5.0F);
+                bot.getFoodData().setFoodLevel(19);
+                bot.getFoodData().setSaturation(5.0F);
                 boundaryInjected[0] = true;
                 return;
             }
@@ -525,11 +524,11 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_surface_shelter_stays_sealed_until_daylight", maxTicks = 16000)
-    public void surfaceShelterStaysSealedUntilDaylight(TestContext context) {
+    public void surfaceShelterStaysSealedUntilDaylight(GameTestHelper context) {
         BlockPos feet = highSurfaceFeet(context);
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterNightHoldGT", feet);
-        context.getWorld().setTimeOfDay(18000L);
+        context.getLevel().setDayTime(18000L);
         require(context, EmergencyShelterTask.isSurfaceShelterAnchor(bot, feet),
                 "high terrain anchor was not classified as a surface shelter");
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
@@ -545,24 +544,24 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
         runLocked(context, () -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("night shelter ended as " + task.state()
+                context.fail(Component.nullToEmpty("night shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             if (!daylightReleased[0] && task.describe().contains("phase=HOLD")) {
-                context.getWorld().setTimeOfDay(18000L);
+                context.getLevel().setDayTime(18000L);
                 sealedNightTicks[0]++;
                 require(context, shelterShell(feet).stream().allMatch(
                                 pos -> isSealed(context, pos)),
                         "surface shelter opened during the night hold");
                 if (sealedNightTicks[0] >= 140) {
                     daylightReleased[0] = true;
-                    context.getWorld().setTimeOfDay(1000L);
+                    context.getLevel().setDayTime(1000L);
                 }
                 return;
             }
             if (daylightReleased[0]) {
-                context.getWorld().setTimeOfDay(1000L);
+                context.getLevel().setDayTime(1000L);
                 int daylightTicks = describedInt(task, "daylight_ticks");
                 if (nightInterruptedGrace[0] && daylightTicks == 0) {
                     interruptedGraceReset[0] = true;
@@ -579,7 +578,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         firstDaylightTickHeld[0] = true;
                     }
                     if (daylightTicks == 50 && !nightInterruptedGrace[0]) {
-                        context.getWorld().setTimeOfDay(18000L);
+                        context.getLevel().setDayTime(18000L);
                         nightInterruptedGrace[0] = true;
                     }
                 }
@@ -601,14 +600,14 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_leaf_canopy_still_uses_surface_night_hold", maxTicks = 16000)
-    public void leafCanopyStillUsesSurfaceNightHold(TestContext context) {
+    public void leafCanopyStillUsesSurfaceNightHold(GameTestHelper context) {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.OAK_LEAVES, 4,
                 "ShelterCanopyNightGT", "leaf canopy");
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_shallow_overhang_still_uses_surface_night_hold", maxTicks = 16000)
-    public void shallowOverhangStillUsesSurfaceNightHold(TestContext context) {
+    public void shallowOverhangStillUsesSurfaceNightHold(GameTestHelper context) {
         verifyOccludedSurfaceNightHold(
                 context, Blocks.STONE, 5,
                 "ShelterOverhangNightGT", "shallow overhang");
@@ -616,8 +615,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_observed_hostile_at_head_port_is_resealed_before_foot_door_opens", maxTicks = 16000)
     public void observedHostileAtHeadPortIsResealedBeforeFootDoorOpens(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterObservationResealGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 24));
@@ -626,32 +625,32 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_observation_reseal"));
-        HuskEntity[] hostile = {null};
+        Husk[] hostile = {null};
         boolean[] resealObserved = {false};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("observation shelter ended as " + task.state()
+                context.fail(Component.nullToEmpty("observation shelter ended as " + task.state()
                         + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
             if (hostile[0] == null && !resealObserved[0]
                     && task.describe().contains("phase=HOLD")) {
                 BlockPos hostileFeet = feet.north(2);
-                HuskEntity husk = EntityType.HUSK.create(
-                        context.getWorld(), SpawnReason.COMMAND);
+                Husk husk = EntityType.HUSK.create(
+                        context.getLevel(), EntitySpawnReason.COMMAND);
                 if (husk == null) {
-                    context.throwGameTestException(Text.of(
+                    context.fail(Component.nullToEmpty(
                             "failed to create shelter observation hostile"));
                     return;
                 }
-                husk.setPersistent();
-                husk.setAiDisabled(true);
-                husk.refreshPositionAndAngles(
+                husk.setPersistenceRequired();
+                husk.setNoAi(true);
+                husk.snapTo(
                         hostileFeet.getX() + 0.5D, hostileFeet.getY(),
                         hostileFeet.getZ() + 0.5D, 0.0F, 0.0F);
-                context.getWorld().spawnEntity(husk);
+                context.getLevel().addFreshEntity(husk);
                 hostile[0] = husk;
                 return;
             }
@@ -659,7 +658,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     && task.describe().contains("phase=HOLD")
                     && task.describe().contains("observation_reseals=1")) {
                 require(context, isSealed(context, feet.north())
-                                && isSealed(context, feet.north().up()),
+                                && isSealed(context, feet.north().above()),
                         "hostile observation opened a passable foot doorway");
                 resealObserved[0] = true;
                 hostile[0].discard();
@@ -671,7 +670,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             }
             require(context, resealObserved[0],
                     "shelter completed without physically resealing observed pressure");
-            require(context, !bot.getBlockPos().equals(feet.north()),
+            require(context, !bot.blockPosition().equals(feet.north()),
                     "shelter reused the pressured north doorway instead of rotating egress");
             assertPhysicalExit(context, bot, feet);
             finish(context, bot, "ShelterObservationResealGT");
@@ -680,8 +679,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_four_sided_pressure_forces_physical_exit_only_after_global_deadline", maxTicks = 16000)
     public void fourSidedPressureForcesPhysicalExitOnlyAfterGlobalDeadline(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterAllPressureGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 32));
@@ -689,19 +688,19 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         EmergencyShelterTask task = new EmergencyShelterTask();
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_shelter_all_pressure"));
-        List<HuskEntity> hostiles = new ArrayList<>();
+        List<Husk> hostiles = new ArrayList<>();
         boolean[] allDirectionsPressured = {false};
         boolean[] forcedSupportsRemoved = {false};
         int[] forcedUnsupportedTicks = {0};
         int[] forcedAtExitAge = {-1};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (hostiles.isEmpty()
                     && task.state() == TaskState.RUNNING
                     && task.describe().contains("phase=HOLD")) {
-                for (Direction direction : Direction.Type.HORIZONTAL) {
-                    hostiles.add(spawnHusk(context, feet.offset(direction, 2)));
+                for (Direction direction : Direction.Plane.HORIZONTAL) {
+                    hostiles.add(spawnHusk(context, feet.relative(direction, 2)));
                 }
                 return;
             }
@@ -712,9 +711,9 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 if (task.describe().contains("force_pressure_exit=true")
                         && !forcedSupportsRemoved[0]) {
                     forcedAtExitAge[0] = describedInt(task, "exit_age");
-                    for (Direction direction : Direction.Type.HORIZONTAL) {
-                        context.getWorld().setBlockState(feet.offset(direction).down(),
-                                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    for (Direction direction : Direction.Plane.HORIZONTAL) {
+                        context.getLevel().setBlock(feet.relative(direction).below(),
+                                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                     }
                     forcedSupportsRemoved[0] = true;
                 }
@@ -723,15 +722,15 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     require(context, task.state() == TaskState.RUNNING,
                             "forced exit became terminal with every landing unsupported");
                     if (forcedUnsupportedTicks[0] == 80) {
-                        for (Direction direction : Direction.Type.HORIZONTAL) {
-                            context.getWorld().setBlockState(feet.offset(direction).down(),
-                                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                        for (Direction direction : Direction.Plane.HORIZONTAL) {
+                            context.getLevel().setBlock(feet.relative(direction).below(),
+                                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
                 if (!hostiles.isEmpty()
                         && !task.describe().contains("phase=STEP_OUT")) {
-                    require(context, bot.getBlockPos().equals(feet),
+                    require(context, bot.blockPosition().equals(feet),
                             "pressure rotation moved before a physical STEP_OUT: "
                                     + task.describe());
                 }
@@ -748,14 +747,14 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                     "shelter forced an exit before rotating across all four pressured doors: "
                             + task.describe());
             assertPhysicalExit(context, bot, feet);
-            hostiles.forEach(HuskEntity::discard);
+            hostiles.forEach(Husk::discard);
             finish(context, bot, "ShelterAllPressureGT");
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_missing_reseal_block_cannot_publish_terminal_inside_shelter", maxTicks = 16000)
-    public void missingResealBlockCannotPublishTerminalInsideShelter(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void missingResealBlockCannotPublishTerminalInsideShelter(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterResealFailureGT", feet);
         // Ten blocks exactly fund the supported envelope. Once sealed, a full non-block inventory
@@ -766,32 +765,32 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_reseal_failure"));
-        HuskEntity[] hostile = {null};
+        Husk[] hostile = {null};
         int[] sealedRetryTicks = {0};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (hostile[0] == null
                     && task.state() == TaskState.RUNNING
                     && task.describe().contains("phase=HOLD")) {
                 require(context, InventoryAction.countItem(bot, Items.NETHERRACK) == 0,
                         "exact-material fixture retained a reseal block");
-                for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-                    if (bot.getInventory().getMainStacks().get(slot).isEmpty()) {
-                        bot.getInventory().getMainStacks().set(slot, new ItemStack(Items.STICK, 64));
+                for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+                    if (bot.getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
+                        bot.getInventory().getNonEquipmentItems().set(slot, new ItemStack(Items.STICK, 64));
                     }
                 }
-                bot.getInventory().markDirty();
+                bot.getInventory().setChanged();
                 hostile[0] = spawnHusk(context, feet.north(2));
                 return;
             }
-            boolean observationOnly = context.getWorld().getBlockState(feet.north().up()).isAir()
+            boolean observationOnly = context.getLevel().getBlockState(feet.north().above()).isAir()
                     && isSealed(context, feet.north());
             if (hostile[0] != null
                     && task.state() == TaskState.RUNNING && observationOnly
                     && !task.describe().contains("force_pressure_exit=true")) {
                 sealedRetryTicks[0]++;
-                require(context, bot.getBlockPos().equals(feet)
+                require(context, bot.blockPosition().equals(feet)
                                 && !hasPassableEnvelopeSide(context, feet),
                         "failed reseal published movement or a passable door before deadline");
                 return;
@@ -814,8 +813,8 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_water_rescue_and_body_fluid_reject_fixed_shelter_admission", maxTicks = 30)
-    public void waterRescueAndBodyFluidRejectFixedShelterAdmission(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void waterRescueAndBodyFluidRejectFixedShelterAdmission(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
         AIPlayerEntity bot = spawn(context, "ShelterWaterAdmissionGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
@@ -836,19 +835,19 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                 "rejected water-rescue shelter mutated its enclosure");
 
         NavSafetyNet.INSTANCE.clear(bot);
-        context.getWorld().setBlockState(feet.up(),
-                Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(feet.above(),
+                Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         require(context, !EmergencyShelterTask.canStartAtCurrentPose(bot),
                 "head-column fluid admitted a fixed shelter anchor");
-        context.getWorld().setBlockState(feet.up(),
-                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(feet.above(),
+                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         finish(context, bot, "ShelterWaterAdmissionGT");
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_atomic_recovery_game_tests_sealed_shelter_reopens_owned_door_before_environmental_failure", maxTicks = 16000)
     public void sealedShelterReopensOwnedDoorBeforeEnvironmentalFailure(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterWaterExitGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 20));
@@ -859,14 +858,14 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         boolean[] injected = {false};
 
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (!injected[0]
                     && task.state() == TaskState.RUNNING
                     && task.describe().contains("phase=HOLD")) {
                 require(context, shelterShell(feet).stream().allMatch(pos -> isSealed(context, pos)),
                         "water was injected before the shelter proved a sealed envelope");
-                context.getWorld().setBlockState(feet,
-                        Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+                context.getLevel().setBlock(feet,
+                        Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
                 NavSafetyNet.INSTANCE.requestWaterRescue(bot);
                 injected[0] = true;
                 return;
@@ -874,7 +873,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
             if (!injected[0] && (task.state() == TaskState.FAILED
                     || task.state() == TaskState.CANCELLED
                     || task.state() == TaskState.COMPLETED)) {
-                context.throwGameTestException(Text.of("shelter ended before water injection: "
+                context.fail(Component.nullToEmpty("shelter ended before water injection: "
                         + task.state() + ":" + task.failureReason()));
                 return;
             }
@@ -893,7 +892,7 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    private static void verifyOccludedSurfaceNightHold(TestContext context,
+    private static void verifyOccludedSurfaceNightHold(GameTestHelper context,
                                                        Block overheadBlock,
                                                        int overheadHeight,
                                                        String botName,
@@ -902,16 +901,16 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         preparePlatform(context, feet, 4);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                context.getWorld().setBlockState(
-                        feet.add(dx, overheadHeight, dz),
-                        overheadBlock.getDefaultState(), Block.NOTIFY_ALL);
+                context.getLevel().setBlock(
+                        feet.offset(dx, overheadHeight, dz),
+                        overheadBlock.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = spawn(context, botName, feet);
-        context.getWorld().setTimeOfDay(18000L);
+        context.getLevel().setDayTime(18000L);
         require(context,
-                context.getWorld().getBlockState(feet.up(overheadHeight))
-                        .isOf(overheadBlock),
+                context.getLevel().getBlockState(feet.above(overheadHeight))
+                        .is(overheadBlock),
                 fixtureName + " did not install its overhead fixture");
         require(context, EmergencyShelterTask.isSurfaceShelterAnchor(bot, feet),
                 fixtureName + " was not admitted by the nearby surface heightmap");
@@ -923,9 +922,9 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
                         "gametest_shelter_occluded_surface_night"));
         int[] sealedNightTicks = {0};
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(18000L);
+            context.getLevel().setDayTime(18000L);
             if (task.state() != TaskState.RUNNING) {
-                context.throwGameTestException(Text.of(fixtureName + " shelter ended during night HOLD: "
+                context.fail(Component.nullToEmpty(fixtureName + " shelter ended during night HOLD: "
                         + task.state() + ":" + task.failureReason()));
                 return;
             }
@@ -941,33 +940,33 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         });
     }
 
-    private static HuskEntity spawnHusk(TestContext context, BlockPos feet) {
-        HuskEntity husk = EntityType.HUSK.create(context.getWorld(), SpawnReason.COMMAND);
+    private static Husk spawnHusk(GameTestHelper context, BlockPos feet) {
+        Husk husk = EntityType.HUSK.create(context.getLevel(), EntitySpawnReason.COMMAND);
         if (husk == null) {
             throw new IllegalStateException("failed to create shelter pressure husk");
         }
-        husk.setPersistent();
-        husk.setAiDisabled(true);
-        husk.refreshPositionAndAngles(
+        husk.setPersistenceRequired();
+        husk.setNoAi(true);
+        husk.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 0.0F, 0.0F);
-        context.getWorld().spawnEntity(husk);
+        context.getLevel().addFreshEntity(husk);
         return husk;
     }
 
-    private static HuskEntity spawnAiHusk(TestContext context,
+    private static Husk spawnAiHusk(GameTestHelper context,
                                           BlockPos feet,
                                           AIPlayerEntity target) {
-        HuskEntity husk = EntityType.HUSK.create(context.getWorld(), SpawnReason.COMMAND);
+        Husk husk = EntityType.HUSK.create(context.getLevel(), EntitySpawnReason.COMMAND);
         if (husk == null) {
             throw new IllegalStateException("failed to create AI shelter pressure husk");
         }
-        husk.setPersistent();
-        husk.refreshPositionAndAngles(
+        husk.setPersistenceRequired();
+        husk.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 0.0F, 0.0F);
         husk.setTarget(target);
-        if (!context.getWorld().spawnEntity(husk)) {
+        if (!context.getLevel().addFreshEntity(husk)) {
             throw new IllegalStateException("failed to spawn AI shelter pressure husk");
         }
         return husk;
@@ -986,35 +985,35 @@ public final class EmergencyShelterAtomicRecoveryGameTests {
         return Integer.parseInt(value);
     }
 
-    private static BlockPos highSurfaceFeet(TestContext context) {
-        BlockPos template = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    private static BlockPos highSurfaceFeet(GameTestHelper context) {
+        BlockPos template = context.absolutePos(new BlockPos(4, 4, 4));
         return new BlockPos(template.getX(), 64, template.getZ());
     }
 
-    private static boolean hasPassableEnvelopeSide(TestContext context, BlockPos feet) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos side = feet.offset(direction);
-            if (context.getWorld().getBlockState(side)
-                    .getCollisionShape(context.getWorld(), side).isEmpty()
-                    && context.getWorld().getBlockState(side.up())
-                    .getCollisionShape(context.getWorld(), side.up()).isEmpty()) {
+    private static boolean hasPassableEnvelopeSide(GameTestHelper context, BlockPos feet) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos side = feet.relative(direction);
+            if (context.getLevel().getBlockState(side)
+                    .getCollisionShape(context.getLevel(), side).isEmpty()
+                    && context.getLevel().getBlockState(side.above())
+                    .getCollisionShape(context.getLevel(), side.above()).isEmpty()) {
                 return true;
             }
         }
         return false;
     }
 
-    private static AIPlayerEntity spawn(TestContext context, String name, BlockPos feet) {
-        context.getWorld().setTimeOfDay(1000L);
+    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
+        context.getLevel().setDayTime(1000L);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(),
-                        Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(context.getWorld(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         return bot;
     }
 }

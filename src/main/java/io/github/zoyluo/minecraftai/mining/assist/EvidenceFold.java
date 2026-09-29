@@ -1,8 +1,7 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.function.LongPredicate;
+import net.minecraft.core.BlockPos;
 
 /**
  * Folds one observed block into the per-bot memories (mining-assist design 3.3 steps 2 to 4):

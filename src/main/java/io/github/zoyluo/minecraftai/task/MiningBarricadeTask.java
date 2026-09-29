@@ -9,10 +9,9 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.BlockState;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Mining-specific hostile recovery: walk back through the already opened branch, then leave a
@@ -40,8 +39,8 @@ public final class MiningBarricadeTask extends AbstractTask {
     private String lastPlacementFailure = "none";
 
     public MiningBarricadeTask(BlockPos retreatFeet, BlockPos barrierFeet) {
-        this.retreatFeet = retreatFeet == null ? null : retreatFeet.toImmutable();
-        this.barrierFeet = barrierFeet == null ? null : barrierFeet.toImmutable();
+        this.retreatFeet = retreatFeet == null ? null : retreatFeet.immutable();
+        this.barrierFeet = barrierFeet == null ? null : barrierFeet.immutable();
     }
 
     /** A freshly selected narrow mining gate always has one open feet and one open head cell. */
@@ -91,12 +90,12 @@ public final class MiningBarricadeTask extends AbstractTask {
             return;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(bot.getEntityWorld(), retreatFeet)) {
+        if (!Standability.isStandable(bot.level(), retreatFeet)) {
             fail("mining_barricade_retreat_not_standable");
             return;
         }
         int required = (isSealed(bot, barrierFeet) ? 0 : 1)
-                + (isSealed(bot, barrierFeet.up()) ? 0 : 1);
+                + (isSealed(bot, barrierFeet.above()) ? 0 : 1);
         int available = MaterialPalette.countShelterBlocks(bot);
         if (available < required) {
             fail("missing barricade_blocks required=" + required + " available=" + available);
@@ -115,7 +114,7 @@ public final class MiningBarricadeTask extends AbstractTask {
     }
 
     private void tickRetreat(AIPlayerEntity bot) {
-        if (bot.getBlockPos().equals(retreatFeet)) {
+        if (bot.blockPosition().equals(retreatFeet)) {
             bot.getActionPack().stopAll();
             enterPhase(Phase.SEAL);
             return;
@@ -127,7 +126,7 @@ public final class MiningBarricadeTask extends AbstractTask {
         if (!bot.getActionPack().isPathExecutorIdle()) {
             return;
         }
-        BlockPos here = bot.getBlockPos();
+        BlockPos here = bot.blockPosition();
         if (here.getY() == retreatFeet.getY()
                 && horizontalManhattan(here, retreatFeet) == 1
                 && FakePlayerMotion.stepToStandable(bot, retreatFeet, "mining_barricade_retreat")) {
@@ -141,13 +140,13 @@ public final class MiningBarricadeTask extends AbstractTask {
     }
 
     private void tickSeal(AIPlayerEntity bot) {
-        if (!bot.getBlockPos().equals(retreatFeet)) {
+        if (!bot.blockPosition().equals(retreatFeet)) {
             bot.getActionPack().stopAll();
             enterPhase(Phase.RETREAT);
             return;
         }
         BlockPos target = !isSealed(bot, barrierFeet) ? barrierFeet
-                : !isSealed(bot, barrierFeet.up()) ? barrierFeet.up() : null;
+                : !isSealed(bot, barrierFeet.above()) ? barrierFeet.above() : null;
         if (target == null) {
             bot.getActionPack().stopAll();
             enterPhase(Phase.HOLD);
@@ -179,7 +178,7 @@ public final class MiningBarricadeTask extends AbstractTask {
     }
 
     private void tickHold(AIPlayerEntity bot) {
-        if (!isSealed(bot, barrierFeet) || !isSealed(bot, barrierFeet.up())) {
+        if (!isSealed(bot, barrierFeet) || !isSealed(bot, barrierFeet.above())) {
             enterPhase(Phase.SEAL);
             return;
         }
@@ -208,9 +207,9 @@ public final class MiningBarricadeTask extends AbstractTask {
         if (bot == null || pos == null) {
             return false;
         }
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockState state = world.getBlockState(pos);
-        return !state.isReplaceable() && !state.getCollisionShape(world, pos).isEmpty();
+        return !state.canBeReplaced() && !state.getCollisionShape(world, pos).isEmpty();
     }
 
     private static int horizontalManhattan(BlockPos first, BlockPos second) {

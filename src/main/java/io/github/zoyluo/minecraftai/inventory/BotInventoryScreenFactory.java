@@ -1,33 +1,32 @@
 package io.github.zoyluo.minecraftai.inventory;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.screen.NamedScreenHandlerFactory;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.text.Text;
-
 import java.util.UUID;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 
 /** Opens the exact bot inventory handler with a deliberately short title. */
-public final class BotInventoryScreenFactory implements NamedScreenHandlerFactory {
+public final class BotInventoryScreenFactory implements MenuProvider {
     private static final int MAX_TITLE_NAME_LENGTH = 10;
 
     private final AIPlayerEntity bot;
     private final UUID viewerId;
 
-    public BotInventoryScreenFactory(AIPlayerEntity bot, PlayerEntity viewer) {
+    public BotInventoryScreenFactory(AIPlayerEntity bot, Player viewer) {
         this.bot = bot;
-        this.viewerId = viewer.getUuid();
+        this.viewerId = viewer.getUUID();
     }
 
     @Override
-    public Text getDisplayName() {
-        return Text.literal(shortName(bot.getGameProfile().name()) + " gear");
+    public Component getDisplayName() {
+        return Component.literal(shortName(bot.getGameProfile().name()) + " gear");
     }
 
     @Override
-    public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
+    public AbstractContainerMenu createMenu(int syncId, Inventory playerInventory, Player player) {
         return new BotInventoryScreenHandler(syncId, playerInventory, bot, viewerId);
     }
 

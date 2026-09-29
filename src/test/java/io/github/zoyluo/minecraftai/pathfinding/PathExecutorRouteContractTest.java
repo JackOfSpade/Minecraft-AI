@@ -1,10 +1,10 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -121,7 +121,7 @@ class PathExecutorRouteContractTest {
         assertFalse(PathExecutor.isExactConstrainedRoute(
                 success(origin, destination.east()), origin, destination, 64));
         assertFalse(PathExecutor.isExactConstrainedRoute(
-                success(origin, origin.east().down(), destination),
+                success(origin, origin.east().below(), destination),
                 origin, destination, 64));
         assertFalse(PathExecutor.isExactConstrainedRoute(
                 PathfindingResult.failure(FailureReason.TIMEOUT, 200, 51L),

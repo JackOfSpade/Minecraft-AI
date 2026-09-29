@@ -3,17 +3,16 @@ package io.github.zoyluo.minecraftai.network;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.netty.channel.Channel;
 import io.netty.channel.embedded.EmbeddedChannel;
-import net.minecraft.network.ClientConnection;
-import net.minecraft.server.network.ServerPlayNetworkHandler;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
+import net.minecraft.network.Connection;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 
 /**
  * Tells server-side "bot" players apart from real humans, so that vanilla rules that count every
- * {@link ServerPlayerEntity} (the sleep vote) can be limited to humans.
+ * {@link ServerPlayer} (the sleep vote) can be limited to humans.
  *
  * <p>A player is a bot when it is one of our {@link AIPlayerEntity} bots, or when its connection runs
  * over a netty {@link EmbeddedChannel}: that is how every fake-player mod (this one and PvP BOT's
@@ -30,15 +29,15 @@ public final class PlayerKind {
         return channel instanceof EmbeddedChannel;
     }
 
-    public static boolean isBot(ServerPlayerEntity player) {
+    public static boolean isBot(ServerPlayer player) {
         if (player instanceof AIPlayerEntity) {
             return true;
         }
-        ServerPlayNetworkHandler handler = player.networkHandler;
+        ServerGamePacketListenerImpl handler = player.connection;
         if (!(handler instanceof ServerConnectionAccessor accessor)) {
             return false;
         }
-        ClientConnection connection = accessor.minecraftai$getConnection();
+        Connection connection = accessor.minecraftai$getConnection();
         return connection instanceof ClientConnectionAccessor channelAccess
                 && isBotChannel(channelAccess.minecraftai$getChannel());
     }
@@ -62,7 +61,7 @@ public final class PlayerKind {
         return humans == null ? players : humans;
     }
 
-    public static List<ServerPlayerEntity> humansOnly(List<ServerPlayerEntity> players) {
+    public static List<ServerPlayer> humansOnly(List<ServerPlayer> players) {
         return withoutBots(players, PlayerKind::isBot);
     }
 }

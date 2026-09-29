@@ -18,21 +18,21 @@ import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.persist.MissionSpec;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.fluid.Fluids;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-import net.minecraft.world.LightType;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,7 +45,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import net.minecraft.text.Text;
 
 /** Mission-level restart boundaries for the 32-block obsidian expedition. */
 public final class CreateObsidianMissionRecoveryGameTests {
@@ -53,7 +52,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     private static final int TARGET_BUDGET = 76800;
 
     @GameTest(maxTicks = 20)
-    public void fifteenOfThirtyTwoRestoresMakeObsidianWithoutDroppingCheckpoint(TestContext context) {
+    public void fifteenOfThirtyTwoRestoresMakeObsidianWithoutDroppingCheckpoint(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMission15GT", 15, true);
         Map<String, String> taskCheckpoint = taskCheckpoint(
                 fixture.start(), CreateObsidianTask.Phase.SCAN, 15, null);
@@ -68,19 +67,19 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void placedWaterDebtRestoresRecoveryBeforeAcquireWater(TestContext context) {
+    public void placedWaterDebtRestoresRecoveryBeforeAcquireWater(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMissionWaterGT", 15, false);
         BlockPos waterSource = fixture.start().east(2);
-        fixture.bot().getEntityWorld().setBlockState(
-                waterSource, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        fixture.bot().level().setBlock(
+                waterSource, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         Map<String, String> taskCheckpoint = taskCheckpoint(
                 fixture.start(), CreateObsidianTask.Phase.RECOVER_WATER, 15, waterSource);
 
         restore(context, fixture, taskCheckpoint);
 
         assertRunningMakeObsidian(context, fixture, taskCheckpoint);
-        require(context, fixture.bot().getEntityWorld().getFluidState(waterSource).isOf(Fluids.WATER)
-                        && fixture.bot().getEntityWorld().getFluidState(waterSource).isStill(),
+        require(context, fixture.bot().level().getFluidState(waterSource).is(Fluids.WATER)
+                        && fixture.bot().level().getFluidState(waterSource).isSource(),
                 "fixture water_source is not live at restore");
         require(context, InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 1
                         && InventoryAction.countItem(fixture.bot(), Items.WATER_BUCKET) == 0,
@@ -92,7 +91,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void thirtyOneOfThirtyTwoDoesNotCompleteOrReplaceCheckpoint(TestContext context) {
+    public void thirtyOneOfThirtyTwoDoesNotCompleteOrReplaceCheckpoint(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMission31GT", 31, true);
         Map<String, String> taskCheckpoint = taskCheckpoint(
                 fixture.start(), CreateObsidianTask.Phase.SCAN, 31, null);
@@ -111,14 +110,14 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 160)
-    public void eightBlockBoundaryRunsObsidianPolicyThenResumesOriginalThirtyTwo(TestContext context) {
+    public void eightBlockBoundaryRunsObsidianPolicyThenResumesOriginalThirtyTwo(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianBoundary8GT", 8, true);
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
 
         restore(context, fixture, pending);
         AtomicBoolean serviceSeen = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             Task active = TaskManager.INSTANCE.getActive(fixture.bot()).orElse(null);
             if (active instanceof MiningServiceTask) {
                 serviceSeen.set(true);
@@ -158,7 +157,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 80)
-    public void doneServiceCheckpointAcknowledgesBoundaryWithoutReplay(TestContext context) {
+    public void doneServiceCheckpointAcknowledgesBoundaryWithoutReplay(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceDoneGT", 8, true);
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
 
@@ -200,7 +199,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 80)
-    public void doneServiceCheckpointAlreadyAcknowledgedResumesWithoutReplay(TestContext context) {
+    public void doneServiceCheckpointAlreadyAcknowledgedResumesWithoutReplay(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceAlreadyAckGT", 8, true);
         Map<String, String> acknowledged = CreateObsidianTask.acknowledgeServiceBoundary(
                 pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
@@ -238,7 +237,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void doneBoundaryEightCannotAcknowledgePendingBoundarySixteen(TestContext context) {
+    public void doneBoundaryEightCannotAcknowledgePendingBoundarySixteen(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianWrongBoundaryGT", 16, true);
         MiningServiceTask staleBoundary = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
@@ -277,7 +276,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void staleTargetThirtyTwoBoundaryCannotImpersonateFreshRemainingEight(TestContext context) {
+    public void staleTargetThirtyTwoBoundaryCannotImpersonateFreshRemainingEight(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianBoundaryWrongTargetGT", 8, true);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 16);
         GoalPlanner.GoalPlan fresh = GoalPlanner.plan(fixture.bot(), goal);
@@ -313,7 +312,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void staleActiveMakeTargetCannotImpersonateFreshRemainingEight(TestContext context) {
+    public void staleActiveMakeTargetCannotImpersonateFreshRemainingEight(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMakeWrongTargetGT", 8, true);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 16);
         GoalPlanner.GoalPlan fresh = GoalPlanner.plan(fixture.bot(), goal);
@@ -340,7 +339,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void committedMakeDoneAdvancesToStockpileWithoutReplay(TestContext context) {
+    public void committedMakeDoneAdvancesToStockpileWithoutReplay(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianMakeDoneStockpileGT", TARGET, true);
         Goal goal = new Goal.Stockpile(Items.OBSIDIAN, TARGET);
         GoalPlanner.GoalPlan fresh = GoalPlanner.plan(fixture.bot(), goal);
@@ -375,7 +374,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void interruptedBoundaryServiceRestoresOnlyServiceThenOriginalMake(TestContext context) {
+    public void interruptedBoundaryServiceRestoresOnlyServiceThenOriginalMake(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceRunningGT", 8, true);
         Map<String, String> pending = pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8);
         MiningServiceTask interrupted = new MiningServiceTask(
@@ -388,8 +387,8 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 "boundary service fixture did not remain resumable");
         Map<String, String> serviceCheckpoint = interrupted.checkpoint();
         BlockPos displaced = fixture.start().east();
-        fixture.bot().teleport(
-                fixture.bot().getEntityWorld(),
+        fixture.bot().teleportTo(
+                fixture.bot().level(),
                 displaced.getX() + 0.5D, displaced.getY(), displaced.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
 
@@ -420,7 +419,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void runningBoundaryRestorePreservesUnrelatedBuildMaterialPrefix(TestContext context) {
+    public void runningBoundaryRestorePreservesUnrelatedBuildMaterialPrefix(GameTestHelper context) {
         String blueprint = "obsidian_restore_mixed_"
                 + UUID.randomUUID().toString().replace("-", "");
         Path blueprintPath = writeMixedObsidianBlueprint(blueprint);
@@ -470,7 +469,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void runningBoundaryServiceCannotRestoreAfterBoundaryWasAcknowledged(TestContext context) {
+    public void runningBoundaryServiceCannotRestoreAfterBoundaryWasAcknowledged(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianServiceOrphanGT", 8, true);
         Map<String, String> acknowledged = CreateObsidianTask.acknowledgeServiceBoundary(
                 pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
@@ -493,7 +492,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void interruptedPreflightReplacesTheFreshPlannerCopyWithoutBoundaryAck(TestContext context) {
+    public void interruptedPreflightReplacesTheFreshPlannerCopyWithoutBoundaryAck(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightRestoreGT", 0, true);
 
         MiningServiceTask interrupted = new MiningServiceTask(
@@ -536,7 +535,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void runningPreflightUsesCheckpointIdentityWhenFreshTargetIsUnknown(TestContext context) {
+    public void runningPreflightUsesCheckpointIdentityWhenFreshTargetIsUnknown(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightUnknownGT", 0, true);
         BlockPos depotPos = movePreflightReadinessToDepot(context, fixture);
 
@@ -579,7 +578,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void committedPreflightUsesCheckpointIdentityWhenFreshTargetIsUnknown(TestContext context) {
+    public void committedPreflightUsesCheckpointIdentityWhenFreshTargetIsUnknown(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightDoneUnknownGT", 0, true);
         MiningServiceTask committed = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
@@ -621,7 +620,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void stalePreflightCannotUseUnknownFreshTargetAuthority(TestContext context) {
+    public void stalePreflightCannotUseUnknownFreshTargetAuthority(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightUnknownStaleGT", 0, true);
         movePreflightReadinessToDepot(context, fixture);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, TARGET);
@@ -650,7 +649,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void compoundBuildCannotUseUnknownPreflightAuthority(TestContext context) {
+    public void compoundBuildCannotUseUnknownPreflightAuthority(GameTestHelper context) {
         String blueprint = "obsidian_unknown_build_"
                 + UUID.randomUUID().toString().replace("-", "");
         Path blueprintPath = writeMixedObsidianBlueprint(blueprint);
@@ -689,7 +688,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void compoundBuildWithFailedFreshPlanCannotReplayOnlyBoundaryAndMake(TestContext context) {
+    public void compoundBuildWithFailedFreshPlanCannotReplayOnlyBoundaryAndMake(GameTestHelper context) {
         String blueprint = "obsidian_unknown_boundary_build_"
                 + UUID.randomUUID().toString().replace("-", "");
         Path blueprintPath = writeMixedObsidianBlueprint(blueprint);
@@ -732,7 +731,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void runningPreflightWithStaleTargetCannotReplaceFreshTarget(TestContext context) {
+    public void runningPreflightWithStaleTargetCannotReplaceFreshTarget(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightWrongTargetGT", 0, true);
         MiningServiceTask stale = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
@@ -753,7 +752,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void committedStalePreflightCannotSkipFreshTargetPreflight(TestContext context) {
+    public void committedStalePreflightCannotSkipFreshTargetPreflight(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightStaleDoneGT", 0, true);
         // Keep the fresh target32 plan at its preflight boundary. Without carried torches or the
         // required expedition weapon, the stricter readiness contract legitimately prepends an
@@ -795,7 +794,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void remainingTargetPreflightCanRepairAnAcknowledgedTransaction(TestContext context) {
+    public void remainingTargetPreflightCanRepairAnAcknowledgedTransaction(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightRemainingGT", 8, true);
         Map<String, String> acknowledged = CreateObsidianTask.acknowledgeServiceBoundary(
                 pendingBoundaryCheckpoint(fixture.start(), 8, 0, 8)).orElseThrow();
@@ -820,7 +819,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void committedPreflightIsNotReplayedAfterCrashWindowRestore(TestContext context) {
+    public void committedPreflightIsNotReplayedAfterCrashWindowRestore(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPreflightDoneGT", 0, true);
         MiningServiceTask committed = new MiningServiceTask(
                 Set.of(Blocks.OBSIDIAN), Map.of(),
@@ -854,11 +853,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void searchPreservesHigherTierOreAndClosesTheStoneOnlyLeg(TestContext context) {
+    public void searchPreservesHigherTierOreAndClosesTheStoneOnlyLeg(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchGoldGT", 0, true);
-        BlockPos gold = fixture.start().north().up();
-        fixture.bot().getEntityWorld().setBlockState(
-                gold, Blocks.GOLD_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos gold = fixture.start().north().above();
+        fixture.bot().level().setBlock(
+                gold, Blocks.GOLD_ORE.defaultBlockState(), Block.UPDATE_ALL);
         require(context, ObservableWorldQuery.canObserveCell(fixture.bot(), gold),
                 "fixture head-level gold must be directly observable");
         require(context, !ObservableWorldQuery.canObserveCell(
@@ -868,15 +867,15 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
         ObsidianSearchCursor.initial(fixture.start(), 12).beginNextLeg().encode()
                 .forEach(checkpoint::put);
-        int stoneDamageBefore = fixture.bot().getInventory().getMainStacks().stream()
-                .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
-                .mapToInt(ItemStack::getDamage)
+        int stoneDamageBefore = fixture.bot().getInventory().getNonEquipmentItems().stream()
+                .filter(stack -> stack.is(Items.STONE_PICKAXE))
+                .mapToInt(ItemStack::getDamageValue)
                 .sum();
 
         CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
         task.start(fixture.bot());
         AtomicInteger ticks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(fixture.bot());
             }
@@ -884,11 +883,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
                     "higher-tier search obstruction ended the obsidian task: "
                             + task.failureReason());
             require(context,
-                    fixture.bot().getEntityWorld().getBlockState(gold).isOf(Blocks.GOLD_ORE),
+                    fixture.bot().level().getBlockState(gold).is(Blocks.GOLD_ORE),
                     "stone-only obsidian search destroyed the finite gold obstruction");
             if (!"0".equals(task.checkpoint().get("steps_left"))) {
                 if (ticks.incrementAndGet() > 10) {
-                    context.throwGameTestException(Text.of(
+                    context.fail(Component.nullToEmpty(
                             "gold-facing search leg was not durably closed: "
                                     + task.checkpoint()));
                 }
@@ -896,9 +895,9 @@ public final class CreateObsidianMissionRecoveryGameTests {
             }
             require(context, "0".equals(task.checkpoint().get("direction")),
                     "gold obstruction changed the wrong search leg: " + task.checkpoint());
-            int stoneDamageAfter = fixture.bot().getInventory().getMainStacks().stream()
-                    .filter(stack -> stack.isOf(Items.STONE_PICKAXE))
-                    .mapToInt(ItemStack::getDamage)
+            int stoneDamageAfter = fixture.bot().getInventory().getNonEquipmentItems().stream()
+                    .filter(stack -> stack.is(Items.STONE_PICKAXE))
+                    .mapToInt(ItemStack::getDamageValue)
                     .sum();
             require(context, stoneDamageAfter == stoneDamageBefore,
                     "gold reroute consumed stone-pick durability");
@@ -907,26 +906,26 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 220)
-    public void restoredScanReturnsToDedicatedRimBeforeBindingDisplacedObsidian(TestContext context) {
+    public void restoredScanReturnsToDedicatedRimBeforeBindingDisplacedObsidian(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianScanResumeGT", 0, true);
-        var world = fixture.bot().getEntityWorld();
+        var world = fixture.bot().level();
         BlockPos cursorFace = fixture.start();
         BlockPos scanFace = fixture.start().east(2);
         BlockPos displaced = fixture.start().east(5);
         for (int dx = 0; dx <= 5; dx++) {
             BlockPos feet = fixture.start().east(dx);
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         BlockPos displacedObsidian = displaced.north();
-        world.setBlockState(displacedObsidian.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(displacedObsidian,
-                Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(displacedObsidian.up(),
-                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        fixture.bot().teleport(world,
+        world.setBlock(displacedObsidian.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(displacedObsidian,
+                Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(displacedObsidian.above(),
+                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        fixture.bot().teleportTo(world,
                 displaced.getX() + 0.5D, displaced.getY(), displaced.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
 
@@ -941,23 +940,23 @@ public final class CreateObsidianMissionRecoveryGameTests {
                         .equals(task.checkpoint().get("phase")),
                 "displaced SCAN restore did not enter its dedicated return phase: "
                         + task.checkpoint());
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("scan resume failed before its durable face: "
+                context.fail(Component.nullToEmpty("scan resume failed before its durable face: "
                         + task.failureReason()));
             }
             Map<String, String> live = task.checkpoint();
             require(context, !live.containsKey("obsidian")
-                            && world.getBlockState(displacedObsidian).isOf(Blocks.OBSIDIAN),
+                            && world.getBlockState(displacedObsidian).is(Blocks.OBSIDIAN),
                     "displaced restore bound or mutated a target before returning: " + live);
-            if (!fixture.bot().getBlockPos().equals(scanFace)
+            if (!fixture.bot().blockPosition().equals(scanFace)
                     || !CreateObsidianTask.Phase.SCAN.name().equals(live.get("phase"))) {
                 return;
             }
-            require(context, !fixture.bot().getBlockPos().equals(cursorFace),
+            require(context, !fixture.bot().blockPosition().equals(cursorFace),
                     "SCAN resume reused the corridor cursor instead of the dedicated rim");
             require(context, encode(scanFace).equals(live.get("scan_resume_face")),
                     "SCAN resume identity changed during physical return");
@@ -967,13 +966,13 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
     @GameTest(maxTicks = 40)
     public void auditScanDefersPreExistingObsidianAndBindsOnlyWaterBackedCell(
-            TestContext context) {
+            GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditGateGT", 0, true);
-        var world = fixture.bot().getEntityWorld();
+        var world = fixture.bot().level();
         BlockPos preExisting = fixture.start().north();
         BlockPos waterBacked = fixture.start().east(2);
-        world.setBlockState(preExisting, Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(waterBacked, Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(preExisting, Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(waterBacked, Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
 
         MiningEvidenceAudit.begin(fixture.bot(), MiningEvidenceAudit.Target.OBSIDIAN);
         MiningEvidenceAudit.recordWaterPlacement(fixture.bot(), Set.of(waterBacked));
@@ -991,7 +990,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                         + task.state() + ":" + task.failureReason());
         require(context, encode(waterBacked).equals(live.get("obsidian")),
                 "audit-gated scan bound a cell without exact conversion provenance: " + live);
-        require(context, world.getBlockState(preExisting).isOf(Blocks.OBSIDIAN),
+        require(context, world.getBlockState(preExisting).is(Blocks.OBSIDIAN),
                 "audit-gated scan mutated the pre-existing obsidian cell");
         require(context, MiningEvidenceAudit.snapshot(fixture.bot())
                         .map(snapshot -> snapshot.lavaConversions() == 1
@@ -1007,11 +1006,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
     @GameTest(maxTicks = 40)
     public void auditedServiceRestartDoesNotPromoteUnrelatedInventoryObsidian(
-            TestContext context) {
+            GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditServiceRestartGT", 0, true);
         MiningEvidenceAudit.begin(fixture.bot(), MiningEvidenceAudit.Target.OBSIDIAN);
         for (int index = 0; index < 8; index++) {
-            BlockPos exact = fixture.start().add(index + 2, -1, 0);
+            BlockPos exact = fixture.start().offset(index + 2, -1, 0);
             MiningEvidenceAudit.recordWaterPlacement(fixture.bot(), Set.of(exact));
             require(context, MiningEvidenceAudit.recordLavaToObsidian(fixture.bot(), exact)
                             && MiningEvidenceAudit.recordObsidianBreak(fixture.bot(), exact)
@@ -1047,7 +1046,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
     @GameTest(maxTicks = 40)
     public void strictAuditSessionLossAndReplacementMismatchFailBeforeAnotherAction(
-            TestContext context) {
+            GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianAuditSessionGT", 0, true);
         MiningEvidenceAudit.begin(fixture.bot(), MiningEvidenceAudit.Target.OBSIDIAN);
         CreateObsidianTask live = new CreateObsidianTask(TARGET);
@@ -1080,26 +1079,26 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 80)
-    public void searchPhysicallyLightsTheDarkTrailBehindItsReachedFace(TestContext context) {
+    public void searchPhysicallyLightsTheDarkTrailBehindItsReachedFace(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchTorchGT", 0, true);
-        var world = fixture.bot().getEntityWorld();
+        var world = fixture.bot().level();
         BlockPos next = fixture.start().north();
         for (BlockPos cell : List.of(fixture.start(), next)) {
-            world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(cell.up(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            for (net.minecraft.util.math.Direction side : List.of(
-                    net.minecraft.util.math.Direction.EAST,
-                    net.minecraft.util.math.Direction.WEST)) {
-                world.setBlockState(cell.offset(side),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell.offset(side).up(),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            for (net.minecraft.core.Direction side : List.of(
+                    net.minecraft.core.Direction.EAST,
+                    net.minecraft.core.Direction.WEST)) {
+                world.setBlock(cell.relative(side),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.relative(side).above(),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         for (BlockPos end : List.of(fixture.start().south(), next.north())) {
-            world.setBlockState(end, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(end.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(end, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(end.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH));
         Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
@@ -1113,18 +1112,18 @@ public final class CreateObsidianMissionRecoveryGameTests {
         // a fixed tick. Gate on the observed darkness instead, so the assertions cannot race
         // the engine.
         AtomicBoolean started = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!started.get()) {
-                if (world.isSkyVisible(fixture.start()) || world.isSkyVisible(next)
-                        || world.getLightLevel(LightType.BLOCK, fixture.start()) >= 8
-                        || world.getLightLevel(LightType.SKY, fixture.start()) >= 8) {
+                if (world.canSeeSky(fixture.start()) || world.canSeeSky(next)
+                        || world.getBrightness(LightLayer.BLOCK, fixture.start()) >= 8
+                        || world.getBrightness(LightLayer.SKY, fixture.start()) >= 8) {
                     return;
                 }
                 started.set(true);
-                require(context, !world.isSkyVisible(fixture.start()) && !world.isSkyVisible(next),
+                require(context, !world.canSeeSky(fixture.start()) && !world.canSeeSky(next),
                         "dark search fixture still exposed its corridor to the sky");
-                require(context, world.getLightLevel(LightType.BLOCK, fixture.start()) < 8
-                                && world.getLightLevel(LightType.SKY, fixture.start()) < 8,
+                require(context, world.getBrightness(LightLayer.BLOCK, fixture.start()) < 8
+                                && world.getBrightness(LightLayer.SKY, fixture.start()) < 8,
                         "dark search fixture was not actually dark");
                 CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
                 task.start(fixture.bot());
@@ -1139,22 +1138,22 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("dark search trail failed before lighting: "
+                context.fail(Component.nullToEmpty("dark search trail failed before lighting: "
                         + task.failureReason()));
             }
-            if (fixture.bot().getEntityWorld().getBlockState(fixture.start()).isOf(Blocks.TORCH)
-                    && fixture.bot().getBlockPos().equals(fixture.start())) {
+            if (fixture.bot().level().getBlockState(fixture.start()).is(Blocks.TORCH)
+                    && fixture.bot().blockPosition().equals(fixture.start())) {
                 litBeforeMove.set(true);
             }
-            if (!fixture.bot().getEntityWorld().getBlockState(fixture.start()).isOf(Blocks.TORCH)) {
+            if (!fixture.bot().level().getBlockState(fixture.start()).is(Blocks.TORCH)) {
                 return;
             }
-            if (!fixture.bot().getBlockPos().equals(fixture.start().north())) {
+            if (!fixture.bot().blockPosition().equals(fixture.start().north())) {
                 return;
             }
             require(context, litBeforeMove.get(),
                     "dark SEARCH moved or mined before physically lighting its initial face");
-            require(context, fixture.bot().getBlockPos().equals(fixture.start().north()),
+            require(context, fixture.bot().blockPosition().equals(fixture.start().north()),
                     "search torch appeared without a physical one-cell advance");
             require(context, InventoryAction.countItem(fixture.bot(), Items.TORCH) == 0,
                     "search lighting did not consume exactly one physical torch");
@@ -1166,15 +1165,15 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 100)
-    public void threeBlockedDirectionsClearOnlyAfterTheOpenFaceIsReached(TestContext context) {
+    public void threeBlockedDirectionsClearOnlyAfterTheOpenFaceIsReached(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchOneExitGT", 0, true);
-        for (net.minecraft.util.math.Direction direction : List.of(
-                net.minecraft.util.math.Direction.NORTH,
-                net.minecraft.util.math.Direction.EAST,
-                net.minecraft.util.math.Direction.SOUTH)) {
-            fixture.bot().getEntityWorld().setBlockState(
-                    fixture.start().offset(direction).up(),
-                    Blocks.GOLD_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        for (net.minecraft.core.Direction direction : List.of(
+                net.minecraft.core.Direction.NORTH,
+                net.minecraft.core.Direction.EAST,
+                net.minecraft.core.Direction.SOUTH)) {
+            fixture.bot().level().setBlock(
+                    fixture.start().relative(direction).above(),
+                    Blocks.GOLD_ORE.defaultBlockState(), Block.UPDATE_ALL);
         }
         Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
                 fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
@@ -1182,15 +1181,15 @@ public final class CreateObsidianMissionRecoveryGameTests {
         CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
         task.start(fixture.bot());
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("one-exit search failed before moving: "
+                context.fail(Component.nullToEmpty("one-exit search failed before moving: "
                         + task.failureReason()));
             }
-            if (!fixture.bot().getBlockPos().equals(fixture.start().west())) {
+            if (!fixture.bot().blockPosition().equals(fixture.start().west())) {
                 return;
             }
             require(context, "0".equals(task.checkpoint().get("blocked_directions")),
@@ -1202,7 +1201,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 80)
-    public void skyLitSearchDoesNotSpendTheUndergroundTorchReserve(TestContext context) {
+    public void skyLitSearchDoesNotSpendTheUndergroundTorchReserve(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchSkyGT", 0, true);
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH));
         Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
@@ -1219,9 +1218,9 @@ public final class CreateObsidianMissionRecoveryGameTests {
         // asserting it synchronously right after spawn, so the assertion and the task start
         // cannot race the engine.
         AtomicBoolean started = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!started.get()) {
-                if (!fixture.bot().getEntityWorld().isSkyVisible(fixture.start())) {
+                if (!fixture.bot().level().canSeeSky(fixture.start())) {
                     return;
                 }
                 started.set(true);
@@ -1238,13 +1237,13 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 task.tick(fixture.bot());
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("sky-lit search failed: " + task.failureReason()));
+                context.fail(Component.nullToEmpty("sky-lit search failed: " + task.failureReason()));
             }
-            if (!fixture.bot().getBlockPos().equals(fixture.start().north())) {
+            if (!fixture.bot().blockPosition().equals(fixture.start().north())) {
                 return;
             }
-            require(context, !fixture.bot().getEntityWorld().getBlockState(
-                            fixture.start()).isOf(Blocks.TORCH),
+            require(context, !fixture.bot().level().getBlockState(
+                            fixture.start()).is(Blocks.TORCH),
                     "sky-lit search placed an unnecessary underground torch");
             require(context, InventoryAction.countItem(fixture.bot(), Items.TORCH) == 1,
                     "sky-lit search consumed its torch reserve");
@@ -1253,47 +1252,47 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 80)
-    public void fourClosedSearchDirectionsFailTypedWithoutRotatingAsProgress(TestContext context) {
+    public void fourClosedSearchDirectionsFailTypedWithoutRotatingAsProgress(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianSearchClosedGT", 0, true);
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.IRON_PICKAXE));
-        List<net.minecraft.util.math.Direction> blockedDirections = new ArrayList<>();
-        for (net.minecraft.util.math.Direction direction
-                : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+        List<net.minecraft.core.Direction> blockedDirections = new ArrayList<>();
+        for (net.minecraft.core.Direction direction
+                : net.minecraft.core.Direction.Plane.HORIZONTAL) {
             blockedDirections.add(direction);
         }
         for (int index = 0; index < blockedDirections.size(); index++) {
-            fixture.bot().getEntityWorld().setBlockState(
-                    fixture.start().offset(blockedDirections.get(index)),
-                    Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
-            fixture.bot().getEntityWorld().setBlockState(
-                    fixture.start().offset(blockedDirections.get(index)).up(),
-                    Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+            fixture.bot().level().setBlock(
+                    fixture.start().relative(blockedDirections.get(index)),
+                    Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
+            fixture.bot().level().setBlock(
+                    fixture.start().relative(blockedDirections.get(index)).above(),
+                    Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
         }
         Map<String, String> checkpoint = new LinkedHashMap<>(taskCheckpoint(
                 fixture.start(), CreateObsidianTask.Phase.SEARCH, 0, null));
         ObsidianSearchCursor.initial(fixture.start(), 12).encode().forEach(checkpoint::put);
         CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
         task.start(fixture.bot());
-        int toolDamageBefore = fixture.bot().getInventory().getMainStacks().stream()
-                .filter(stack -> stack.isOf(Items.STONE_PICKAXE)
-                        || stack.isOf(Items.IRON_PICKAXE)
-                        || stack.isOf(Items.DIAMOND_PICKAXE))
-                .mapToInt(ItemStack::getDamage)
+        int toolDamageBefore = fixture.bot().getInventory().getNonEquipmentItems().stream()
+                .filter(stack -> stack.is(Items.STONE_PICKAXE)
+                        || stack.is(Items.IRON_PICKAXE)
+                        || stack.is(Items.DIAMOND_PICKAXE))
+                .mapToInt(ItemStack::getDamageValue)
                 .sum();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 // GameTests run in parallel and several mining fixtures deliberately tunnel
                 // beyond their tiny empty templates. Reassert this test-owned one-cell shell
                 // before every task tick so a neighbouring fixture cannot turn a factual closed
                 // direction into ordinary mineable stone midway through the four-face sweep.
-                for (net.minecraft.util.math.Direction direction : blockedDirections) {
-                    fixture.bot().getEntityWorld().setBlockState(
-                            fixture.start().offset(direction),
-                            Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
-                    fixture.bot().getEntityWorld().setBlockState(
-                            fixture.start().offset(direction).up(),
-                            Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+                for (net.minecraft.core.Direction direction : blockedDirections) {
+                    fixture.bot().level().setBlock(
+                            fixture.start().relative(direction),
+                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
+                    fixture.bot().level().setBlock(
+                            fixture.start().relative(direction).above(),
+                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 task.tick(fixture.bot());
                 return;
@@ -1305,27 +1304,27 @@ public final class CreateObsidianMissionRecoveryGameTests {
                             + task.failureReason());
             require(context, "15".equals(task.checkpoint().get("blocked_directions")),
                     "closed-direction mask was not durably persisted: " + task.checkpoint());
-            require(context, fixture.bot().getBlockPos().equals(fixture.start()),
+            require(context, fixture.bot().blockPosition().equals(fixture.start()),
                     "closed-direction sweep moved away from its factual work face");
             require(context, "0".equals(task.checkpoint().get("topology_epoch"))
                             && "390".equals(task.checkpoint().get("last_progress")),
                     "pure blocked rotation was recorded as topology/progress: " + task.checkpoint());
-            int toolDamageAfter = fixture.bot().getInventory().getMainStacks().stream()
-                    .filter(stack -> stack.isOf(Items.STONE_PICKAXE)
-                            || stack.isOf(Items.IRON_PICKAXE)
-                            || stack.isOf(Items.DIAMOND_PICKAXE))
-                    .mapToInt(ItemStack::getDamage)
+            int toolDamageAfter = fixture.bot().getInventory().getNonEquipmentItems().stream()
+                    .filter(stack -> stack.is(Items.STONE_PICKAXE)
+                            || stack.is(Items.IRON_PICKAXE)
+                            || stack.is(Items.DIAMOND_PICKAXE))
+                    .mapToInt(ItemStack::getDamageValue)
                     .sum();
             require(context, toolDamageAfter == toolDamageBefore,
                     "closed-direction sweep spent a reserved mining tool");
             for (int index = 0; index < blockedDirections.size(); index++) {
-                require(context, fixture.bot().getEntityWorld().getBlockState(
-                                fixture.start().offset(blockedDirections.get(index)))
-                                .isOf(Blocks.BEDROCK),
+                require(context, fixture.bot().level().getBlockState(
+                                fixture.start().relative(blockedDirections.get(index)))
+                                .is(Blocks.BEDROCK),
                         "closed search destroyed its feet-level factual blocker");
-                require(context, fixture.bot().getEntityWorld().getBlockState(
-                                fixture.start().offset(blockedDirections.get(index)).up())
-                                .isOf(Blocks.BEDROCK),
+                require(context, fixture.bot().level().getBlockState(
+                                fixture.start().relative(blockedDirections.get(index)).above())
+                                .is(Blocks.BEDROCK),
                         "closed search destroyed its head-level factual blocker");
             }
             finish(context, fixture);
@@ -1333,25 +1332,25 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void darkRestoredClosedMaskOutranksMissingTorch(TestContext context) {
+    public void darkRestoredClosedMaskOutranksMissingTorch(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianDarkClosedGT", 0, true);
-        var world = fixture.bot().getEntityWorld();
+        var world = fixture.bot().level();
         BlockPos start = fixture.start();
         // A single centre roof still admits propagated skylight from the four upper corners and
         // made the strict no-torch precondition depend on parallel fixture placement. Own a small
         // complete roof instead; the production branch under test remains mask=15 ordering.
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                world.setBlockState(start.add(dx, 2, dz),
-                        Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(start.offset(dx, 2, dz),
+                        Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        for (net.minecraft.util.math.Direction direction
-                : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-            world.setBlockState(start.offset(direction),
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(start.offset(direction).up(),
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        for (net.minecraft.core.Direction direction
+                : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            world.setBlock(start.relative(direction),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(start.relative(direction).above(),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(start, 12);
         for (int direction = 0; direction < 4; direction++) {
@@ -1363,25 +1362,25 @@ public final class CreateObsidianMissionRecoveryGameTests {
         CreateObsidianTask task = new CreateObsidianTask(TARGET, Map.copyOf(checkpoint));
         task.start(fixture.bot());
 
-        context.runAtTick(1, () -> {
+        context.runAtTickTime(1, () -> {
             // Long-running mining GameTests share the world and can cross the small empty-template
             // spacing. Reassert this fixture's owned shell in the same tick as the light check so
             // an unrelated tunnel cannot transiently turn a factual dark restore into skylight.
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    world.setBlockState(start.add(dx, 2, dz),
-                            Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, 2, dz),
+                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
-            for (net.minecraft.util.math.Direction direction
-                    : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-                world.setBlockState(start.offset(direction),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(start.offset(direction).up(),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            for (net.minecraft.core.Direction direction
+                    : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+                world.setBlock(start.relative(direction),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.relative(direction).above(),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
-            require(context, world.getLightLevel(LightType.BLOCK, start) < 8
-                            && world.getLightLevel(LightType.SKY, start) < 8
+            require(context, world.getBrightness(LightLayer.BLOCK, start) < 8
+                            && world.getBrightness(LightLayer.SKY, start) < 8
                             && InventoryAction.countItem(fixture.bot(), Items.TORCH) == 0,
                     "closed-mask fixture is not a dark no-torch restore");
             task.tick(fixture.bot());
@@ -1389,7 +1388,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                     "persisted mask=15 did not fail terminally");
             require(context, task.failureReason().startsWith("create_obsidian_search_enclosed"),
                     "missing torch obscured the factual enclosure: " + task.failureReason());
-            require(context, fixture.bot().getBlockPos().equals(start)
+            require(context, fixture.bot().blockPosition().equals(start)
                             && "15".equals(task.checkpoint().get("blocked_directions")),
                     "terminal enclosed restore moved or lost its factual mask");
             finish(context, fixture);
@@ -1397,35 +1396,35 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void pickupMicrostepsCloseTwoCellGapWithoutAcceptingAdjacentPathSnap(TestContext context) {
+    public void pickupMicrostepsCloseTwoCellGapWithoutAcceptingAdjacentPathSnap(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupMicroGT", 0, true);
         BlockPos start = fixture.start();
-        BlockPos target = start.add(2, 0, 1);
+        BlockPos target = start.offset(2, 0, 1);
 
         require(context, CreateObsidianTask.stepTowardPickupCell(fixture.bot(), target),
                 "first bounded pickup microstep was not issued");
-        require(context, fixture.bot().getBlockPos().equals(start.east()),
+        require(context, fixture.bot().blockPosition().equals(start.east()),
                 "first pickup microstep skipped the exact adjacent transit cell: "
-                        + fixture.bot().getBlockPos().toShortString());
+                        + fixture.bot().blockPosition().toShortString());
 
-        context.runAtTick(1, () -> {
+        context.runAtTickTime(1, () -> {
             require(context, CreateObsidianTask.stepTowardPickupCell(fixture.bot(), target),
                     "final bounded pickup collision step was not issued");
-            require(context, fixture.bot().getBlockPos().equals(target),
+            require(context, fixture.bot().blockPosition().equals(target),
                     "pickup microsteps stopped beside the factual drop cell: "
-                            + fixture.bot().getBlockPos().toShortString());
+                            + fixture.bot().blockPosition().toShortString());
             finish(context, fixture);
         });
     }
 
     @GameTest(maxTicks = 120)
-    public void pickupCheckpointPhysicallyCollectsSurvivingItemEntity(TestContext context) {
+    public void pickupCheckpointPhysicallyCollectsSurvivingItemEntity(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupEntityGT", 0, true);
-        BlockPos target = fixture.start().add(2, 0, 1);
-        ItemEntity drop = new ItemEntity(fixture.bot().getEntityWorld(),
+        BlockPos target = fixture.start().offset(2, 0, 1);
+        ItemEntity drop = new ItemEntity(fixture.bot().level(),
                 target.getX() + 0.5D, target.getY() + 0.1D, target.getZ() + 0.5D,
                 new ItemStack(Items.OBSIDIAN));
-        fixture.bot().getEntityWorld().spawnEntity(drop);
+        fixture.bot().level().addFreshEntity(drop);
 
         CreateObsidianTask task = new CreateObsidianTask(1,
                 pickupCheckpoint(fixture.start(), target));
@@ -1433,14 +1432,14 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_obsidian_pickup_entity"));
         AtomicBoolean collisionPickupObserved = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("obsidian pickup task ended as " + task.state()
+                context.fail(Component.nullToEmpty("obsidian pickup task ended as " + task.state()
                         + ":" + task.failureReason() + " checkpoint=" + task.checkpoint()));
             }
             int obsidian = InventoryAction.countItem(fixture.bot(), Items.OBSIDIAN);
             if (obsidian > 0 && !collisionPickupObserved.get()) {
-                require(context, fixture.bot().getEntityPos().squaredDistanceTo(target.toCenterPos()) <= 4.0D,
+                require(context, fixture.bot().position().distanceToSqr(target.getCenter()) <= 4.0D,
                         "obsidian entered inventory away from the surviving ItemEntity");
                 collisionPickupObserved.set(true);
             }
@@ -1458,10 +1457,10 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_rebuilds_protected_pickup_transaction", maxTicks = 40)
-    public void airAtRestoredActiveBreakRebuildsProtectedPickupTransaction(TestContext context) {
+    public void airAtRestoredActiveBreakRebuildsProtectedPickupTransaction(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakAirGT", 1, true);
         BlockPos target = fixture.start().east();
-        require(context, fixture.bot().getEntityWorld().getBlockState(target).isAir(),
+        require(context, fixture.bot().level().getBlockState(target).isAir(),
                 "active-break restore fixture must begin after the physical block break");
 
         CreateObsidianTask task = new CreateObsidianTask(1,
@@ -1469,7 +1468,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         TaskManager.INSTANCE.assign(fixture.bot(), task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_obsidian_active_break_air"));
 
-        context.runAtTick(8, () -> {
+        context.runAtTickTime(8, () -> {
             Map<String, String> live = task.checkpoint();
             require(context, task.state() == TaskState.RUNNING,
                     "AIR restore did not retain a live pickup transaction: "
@@ -1497,11 +1496,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:create_obsidian_mission_recovery_game_tests_air_at_restored_active_break_retains_live_source_for_fresh_protection_window", maxTicks = 40)
     public void airAtRestoredActiveBreakRetainsLiveSourceForFreshProtectionWindow(
-            TestContext context) {
+            GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianActiveBreakWaterGT", 0, false);
         BlockPos target = fixture.start().east();
-        fixture.bot().getEntityWorld().setBlockState(
-                target, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        fixture.bot().level().setBlock(
+                target, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
 
         Map<String, String> checkpoint = new LinkedHashMap<>(
                 activeBreakCheckpoint(fixture.start(), target, fixture.start()));
@@ -1516,14 +1515,14 @@ public final class CreateObsidianMissionRecoveryGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_obsidian_active_break_live_source"));
 
-        context.runAtTick(8, () -> {
+        context.runAtTickTime(8, () -> {
             Map<String, String> live = task.checkpoint();
             require(context, task.state() == TaskState.RUNNING
                             && CreateObsidianTask.Phase.PROTECT_PICKUP.name()
                             .equals(live.get("phase")),
                     "AIR promotion reclaimed its live source before protection: " + live);
             require(context, encode(target).equals(live.get("water_source"))
-                            && fixture.bot().getEntityWorld().getFluidState(target).isStill()
+                            && fixture.bot().level().getFluidState(target).isSource()
                             && InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 1
                             && InventoryAction.countItem(fixture.bot(), Items.WATER_BUCKET) == 0,
                     "fresh post-break protection did not retain the committed source: " + live);
@@ -1535,16 +1534,16 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:create_obsidian_mission_recovery_game_tests_raw_two_pick_settles_final_break_and_physical_pickup_at_raw_one", maxTicks = 800)
-    public void rawTwoPickSettlesFinalBreakAndPhysicalPickupAtRawOne(TestContext context) {
+    public void rawTwoPickSettlesFinalBreakAndPhysicalPickupAtRawOne(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianLastDurabilityGT", 0, true);
         BlockPos target = fixture.start().east();
-        fixture.bot().getEntityWorld().setBlockState(
-                target, Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
+        fixture.bot().level().setBlock(
+                target, Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
 
         int diamondSlot = InventoryAction.findItem(fixture.bot(), Items.DIAMOND_PICKAXE)
                 .orElseThrow(() -> new IllegalStateException("fixture missing diamond pickaxe"));
-        ItemStack diamond = fixture.bot().getInventory().getMainStacks().get(diamondSlot);
-        diamond.setDamage(diamond.getMaxDamage() - 2);
+        ItemStack diamond = fixture.bot().getInventory().getNonEquipmentItems().get(diamondSlot);
+        diamond.setDamageValue(diamond.getMaxDamage() - 2);
 
         Map<String, String> checkpoint = activeBreakCheckpoint(
                 fixture.start(), target, fixture.start());
@@ -1560,11 +1559,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
         AtomicBoolean rimReturnObserved = new AtomicBoolean();
         AtomicInteger protectionStartedBudget = new AtomicInteger(-1);
         AtomicInteger drainStartedBudget = new AtomicInteger(-1);
-        AtomicReference<Vec3d> lastObservedDropPosition = new AtomicReference<>();
+        AtomicReference<Vec3> lastObservedDropPosition = new AtomicReference<>();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("last-durability obsidian task ended as "
+                context.fail(Component.nullToEmpty("last-durability obsidian task ended as "
                         + task.state() + ":" + task.failureReason()
                         + " checkpoint=" + task.checkpoint()));
             }
@@ -1600,16 +1599,16 @@ public final class CreateObsidianMissionRecoveryGameTests {
             if (CreateObsidianTask.Phase.RETURN_TO_RIM.name().equals(live.get("phase"))) {
                 rimReturnObserved.set(true);
             }
-            fixture.bot().getEntityWorld().getEntitiesByClass(
-                            ItemEntity.class, new Box(target).expand(8.0D, 4.0D, 8.0D),
+            fixture.bot().level().getEntitiesOfClass(
+                            ItemEntity.class, new AABB(target).inflate(8.0D, 4.0D, 8.0D),
                             entity -> entity.isAlive()
-                                    && entity.getStack().isOf(Items.OBSIDIAN)
+                                    && entity.getItem().is(Items.OBSIDIAN)
                                     && ObservableWorldQuery.canObserveEntity(fixture.bot(), entity))
                     .stream()
                     .min(java.util.Comparator.comparingDouble(
-                            entity -> entity.getEntityPos().squaredDistanceTo(target.toCenterPos())))
+                            entity -> entity.position().distanceToSqr(target.getCenter())))
                     .ifPresent(entity -> {
-                        lastObservedDropPosition.set(entity.getEntityPos());
+                        lastObservedDropPosition.set(entity.position());
                         if (CreateObsidianTask.Phase.PROTECT_PICKUP.name()
                                 .equals(live.get("phase"))
                                 && live.containsKey("water_source")
@@ -1617,13 +1616,13 @@ public final class CreateObsidianMissionRecoveryGameTests {
                             // Make the old intermittent water-wash failure deterministic: the drop
                             // crosses the east lip and lands three blocks lower, where the platform
                             // occludes it until the durable last-seen route reaches that edge.
-                            entity.setVelocity(0.12D, entity.getVelocity().y, 0.0D);
+                            entity.setDeltaMovement(0.12D, entity.getDeltaMovement().y, 0.0D);
                         }
                     });
             if (obsidian > 0 && !collisionPickupObserved.get()) {
-                Vec3d dropPosition = lastObservedDropPosition.get();
+                Vec3 dropPosition = lastObservedDropPosition.get();
                 require(context, dropPosition != null
-                                && fixture.bot().getEntityPos().squaredDistanceTo(dropPosition) <= 4.0D,
+                                && fixture.bot().position().distanceToSqr(dropPosition) <= 4.0D,
                         "final obsidian entered inventory away from the last observed ItemEntity");
                 collisionPickupObserved.set(true);
             }
@@ -1632,9 +1631,9 @@ public final class CreateObsidianMissionRecoveryGameTests {
             }
             require(context, collisionPickupObserved.get() && obsidian == 1,
                     "raw-one settlement did not physically collect the final obsidian");
-            require(context, fixture.bot().getEntityWorld().getBlockState(target).isAir(),
+            require(context, fixture.bot().level().getBlockState(target).isAir(),
                     "final obsidian block was not physically mined");
-            require(context, diamond.getMaxDamage() - diamond.getDamage() == 1,
+            require(context, diamond.getMaxDamage() - diamond.getDamageValue() == 1,
                     "final break did not consume raw-2 pick to raw-1");
             require(context, InventoryAction.countItem(fixture.bot(), Items.WATER_BUCKET) == 1
                             && InventoryAction.countItem(fixture.bot(), Items.BUCKET) == 0,
@@ -1645,7 +1644,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
             require(context, edgeImpulseInjected.get() && shiftedLastSeenObserved.get(),
                     "adversarial water wash never advanced the durable last-seen pickup cell");
             require(context, rimReturnObserved.get()
-                            && fixture.bot().getBlockPos().equals(fixture.start()),
+                            && fixture.bot().blockPosition().equals(fixture.start()),
                     "final completion skipped its durable dry-rim return debt");
             require(context, !task.checkpoint().containsKey("active_break_pos")
                             && !task.checkpoint().containsKey("pending_pickup_pos")
@@ -1656,15 +1655,15 @@ public final class CreateObsidianMissionRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void unsafePickupEndpointIsRejectedWithoutDiscardingLedger(TestContext context) {
+    public void unsafePickupEndpointIsRejectedWithoutDiscardingLedger(GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianPickupGuardGT", 0, true);
-        BlockPos target = fixture.start().add(2, 0, 1);
+        BlockPos target = fixture.start().offset(2, 0, 1);
         BlockPos[] unsupported = {
                 target, target.north(), target.east(), target.south(), target.west()
         };
         for (BlockPos cell : unsupported) {
-            fixture.bot().getEntityWorld().setBlockState(
-                    cell.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            fixture.bot().level().setBlock(
+                    cell.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         CreateObsidianTask task = new CreateObsidianTask(1,
@@ -1672,15 +1671,15 @@ public final class CreateObsidianMissionRecoveryGameTests {
         TaskManager.INSTANCE.assign(fixture.bot(), task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_obsidian_pickup_guard"));
 
-        context.runAtTick(12, () -> {
+        context.runAtTickTime(12, () -> {
             require(context, task.state() == TaskState.RUNNING,
                     "unsafe pickup endpoint prematurely terminated the transaction: "
                             + task.state() + ":" + task.failureReason());
-            require(context, !fixture.bot().getBlockPos().equals(target),
+            require(context, !fixture.bot().blockPosition().equals(target),
                     "pickup guard moved the bot into an unsupported drop cell");
             require(context, fixture.bot().getActionPack().activePathGoal() == null
                             || !fixture.bot().getActionPack().activePathGoal()
-                            .equals(fixture.bot().getBlockPos()),
+                            .equals(fixture.bot().blockPosition()),
                     "pickup guard accepted a path snapped to the current cell");
             require(context, encode(target).equals(task.checkpoint().get("pending_pickup_pos")),
                     "unsafe pickup endpoint discarded the durable ledger: " + task.checkpoint());
@@ -1698,7 +1697,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
      */
     @GameTest(maxTicks = 220)
     public void missingToolFailureWithOpenTransactionResuppliesBeforeResuming(
-            TestContext context) {
+            GameTestHelper context) {
         Fixture fixture = spawnPreparedBot(context, "ObsidianResupplyFirstGT", 0, true);
         // Fill out expedition readiness besides the diamond pickaxe (torch / weapon / sealed
         // log), and pre-stock 3 diamonds so the resupply prefix collapses to a single CRAFT
@@ -1708,11 +1707,11 @@ public final class CreateObsidianMissionRecoveryGameTests {
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.TORCH, 64));
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.STONE_SWORD));
         InventoryAction.giveItem(fixture.bot(), new ItemStack(Items.OAK_LOG, 16));
-        var world = fixture.bot().getEntityWorld();
+        var world = fixture.bot().level();
         BlockPos obsidian = fixture.start().east(2);
         BlockPos stand = fixture.start().east();
-        world.setBlockState(obsidian.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(obsidian, Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(obsidian.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(obsidian, Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
         Map<String, String> openTransaction = openBreakCheckpoint(
                 fixture.start(), obsidian, stand);
 
@@ -1742,7 +1741,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
                         + fresh.steps() + " unresolved=" + fresh.unresolved());
 
         AtomicBoolean resupplyObserved = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, GoalExecutor.INSTANCE.hasActivePlan(fixture.bot())
                             && GoalExecutor.INSTANCE.lastResult(fixture.bot()).isEmpty(),
                     "open-transaction missing-tool failure killed the mission: "
@@ -1788,7 +1787,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         });
     }
 
-    private static void restore(TestContext context,
+    private static void restore(GameTestHelper context,
                                 Fixture fixture,
                                 Map<String, String> taskCheckpoint) {
         require(context, ObsidianCheckpoint.decode(taskCheckpoint, TARGET, TARGET_BUDGET).isPresent(),
@@ -1863,34 +1862,34 @@ public final class CreateObsidianMissionRecoveryGameTests {
         }
     }
 
-    private static BlockPos movePreflightReadinessToDepot(TestContext context, Fixture fixture) {
+    private static BlockPos movePreflightReadinessToDepot(GameTestHelper context, Fixture fixture) {
         require(context, InventoryAction.removeItems(fixture.bot(), Items.COOKED_BEEF, 24)
                         && InventoryAction.removeItems(fixture.bot(), Items.STONE_PICKAXE, 4),
                 "unknown-target fixture did not remove carried readiness supplies");
         BlockPos depotPos = fixture.start().east(2);
-        fixture.bot().getEntityWorld().setBlockState(
-                depotPos, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
-        Inventory depot = ContainerAction.resolve(fixture.bot(), depotPos).orElseThrow();
-        depot.setStack(0, new ItemStack(Items.COOKED_BEEF, 8));
+        fixture.bot().level().setBlock(
+                depotPos, Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
+        Container depot = ContainerAction.resolve(fixture.bot(), depotPos).orElseThrow();
+        depot.setItem(0, new ItemStack(Items.COOKED_BEEF, 8));
         for (int slot = 1; slot <= 4; slot++) {
-            depot.setStack(slot, new ItemStack(Items.STONE_PICKAXE));
+            depot.setItem(slot, new ItemStack(Items.STONE_PICKAXE));
         }
-        depot.markDirty();
-        BotMemoryStore.INSTANCE.of(fixture.bot().getUuid()).markPlace(
-                "depot", fixture.bot().getEntityWorld(), depotPos);
-        return depotPos.toImmutable();
+        depot.setChanged();
+        BotMemoryStore.INSTANCE.of(fixture.bot().getUUID()).markPlace(
+                "depot", fixture.bot().level(), depotPos);
+        return depotPos.immutable();
     }
 
     private static Map<String, String> baseMissionCheckpoint(Fixture fixture) {
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(fixture.start()));
         missionCheckpoint.put("started_tick",
-                String.valueOf(fixture.bot().getEntityWorld().getServer().getTicks()));
+                String.valueOf(fixture.bot().level().getServer().getTickCount()));
         missionCheckpoint.put("revision", "0");
         return missionCheckpoint;
     }
 
-    private static void assertRunningMakeObsidian(TestContext context,
+    private static void assertRunningMakeObsidian(GameTestHelper context,
                                                    Fixture fixture,
                                                    Map<String, String> expectedCheckpoint) {
         Task active = TaskManager.INSTANCE.getActive(fixture.bot()).orElse(null);
@@ -1917,7 +1916,7 @@ public final class CreateObsidianMissionRecoveryGameTests {
         }
     }
 
-    private static void assertTaskCheckpoint(TestContext context,
+    private static void assertTaskCheckpoint(GameTestHelper context,
                                              Fixture fixture,
                                              String key,
                                              String expected) {
@@ -2053,33 +2052,33 @@ public final class CreateObsidianMissionRecoveryGameTests {
         return checkpoint;
     }
 
-    private static Fixture spawnPreparedBot(TestContext context,
+    private static Fixture spawnPreparedBot(GameTestHelper context,
                                             String name,
                                             int obsidian,
                                             boolean hasWaterBucket) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(2, 2, 2));
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(2, 2, 2));
         // EMPTY_STRUCTURE is 8x8. Keep every owned block inside relative x/z 0..7 so concurrent
         // GameTest batches cannot erase this platform while a long pickup transaction is running.
         for (int dx = -2; dx <= 5; dx++) {
             for (int dz = -2; dz <= 5; dz++) {
-                world.setBlockState(start.add(dx, -1, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
+                world.setBlock(start.offset(dx, -1, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
                 }
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
 
         InventoryAction.giveItem(bot, new ItemStack(Items.OBSIDIAN, obsidian));
         InventoryAction.giveItem(bot, new ItemStack(Items.COOKED_BEEF, 24));
@@ -2093,19 +2092,19 @@ public final class CreateObsidianMissionRecoveryGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(hasWaterBucket ? Items.WATER_BUCKET : Items.BUCKET));
-        return new Fixture(name, bot, start.toImmutable(), UUID.randomUUID());
+        return new Fixture(name, bot, start.immutable(), UUID.randomUUID());
     }
 
-    private static void finish(TestContext context, Fixture fixture) {
+    private static void finish(GameTestHelper context, Fixture fixture) {
         TaskManager.INSTANCE.cancelIntentTasks(fixture.bot(), "gametest_complete");
         GoalExecutor.INSTANCE.unload(fixture.bot());
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

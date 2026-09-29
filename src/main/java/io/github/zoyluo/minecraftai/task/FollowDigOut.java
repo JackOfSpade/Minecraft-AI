@@ -9,17 +9,17 @@ import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.NeighborEnumerator;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.FallingBlock;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 
 /**
  * The last thing {@link FollowStuckRecovery} tries before telling the player it is stuck: with a
@@ -69,12 +69,12 @@ final class FollowDigOut {
      *
      * @return true when a dig-out is now active
      */
-    boolean start(AIPlayerEntity bot, ServerPlayerEntity target) {
+    boolean start(AIPlayerEntity bot, ServerPlayer target) {
         if (active) {
             return true;
         }
         Standability.clearCache();
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         int dx = target.getBlockX() - feet.getX();
         int dz = target.getBlockZ() - feet.getZ();
         Direction along = Math.abs(dx) >= Math.abs(dz)
@@ -92,7 +92,7 @@ final class FollowDigOut {
                     ticks = 0;
                     stepFailures = 0;
                     BotLog.action(bot, "follow_dig_out_started",
-                            "pos", LogFields.pos(feet), "dir", candidate.asString());
+                            "pos", LogFields.pos(feet), "dir", candidate.getSerializedName());
                     return true;
                 }
             }
@@ -112,10 +112,10 @@ final class FollowDigOut {
         if (!pack.isMiningIdle()) {
             return true;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        BlockPos ahead = feet.offset(direction);
-        if (isOpen(world, ahead) && isOpen(world, ahead.up())) {
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        BlockPos ahead = feet.relative(direction);
+        if (isOpen(world, ahead) && isOpen(world, ahead.above())) {
             return stepInto(bot, world, ahead);
         }
         Plan plan = plan(bot, feet, direction);
@@ -133,10 +133,10 @@ final class FollowDigOut {
         }
     }
 
-    private boolean stepInto(AIPlayerEntity bot, ServerWorld world, BlockPos ahead) {
+    private boolean stepInto(AIPlayerEntity bot, ServerLevel world, BlockPos ahead) {
         Standability.clearCache();
-        if (!isSolidFloor(world, ahead.down()) || DigNav.adjacentHazardFluid(bot, ahead)
-                || DigNav.adjacentHazardFluid(bot, ahead.up())) {
+        if (!isSolidFloor(world, ahead.below()) || DigNav.adjacentHazardFluid(bot, ahead)
+                || DigNav.adjacentHazardFluid(bot, ahead.above())) {
             return finish(bot, "step_unsafe");
         }
         if (!FakePlayerMotion.stepToStandable(bot, ahead, "follow_dig_step")) {
@@ -145,8 +145,8 @@ final class FollowDigOut {
         }
         advanced++;
         stepFailures = 0;
-        BlockPos next = ahead.offset(direction);
-        if (advanced >= MAX_CELLS || (isOpen(world, next) && isOpen(world, next.up()))) {
+        BlockPos next = ahead.relative(direction);
+        if (advanced >= MAX_CELLS || (isOpen(world, next) && isOpen(world, next.above()))) {
             return finish(bot, "through");
         }
         return true;
@@ -156,7 +156,7 @@ final class FollowDigOut {
         if (active) {
             bot.getActionPack().stopMining();
             BotLog.action(bot, "follow_dig_out_finished", "reason", reason, "cells", advanced,
-                    "pos", LogFields.pos(bot.getBlockPos()));
+                    "pos", LogFields.pos(bot.blockPosition()));
         }
         active = false;
         direction = null;
@@ -168,10 +168,10 @@ final class FollowDigOut {
 
     /** The next block to break (feet cell first, then head cell), or null when it is not safe/possible. */
     private static Plan plan(AIPlayerEntity bot, BlockPos feet, Direction direction) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos stand = feet.offset(direction);
-        BlockPos head = stand.up();
-        if (!isSolidFloor(world, stand.down())) {
+        ServerLevel world = bot.level();
+        BlockPos stand = feet.relative(direction);
+        BlockPos head = stand.above();
+        if (!isSolidFloor(world, stand.below())) {
             return null;
         }
         BlockPos first = null;
@@ -196,7 +196,7 @@ final class FollowDigOut {
             return null;
         }
         if (DigNav.adjacentHazardFluid(bot, stand) || DigNav.adjacentHazardFluid(bot, head)
-                || world.getBlockState(head.up()).getBlock() instanceof FallingBlock) {
+                || world.getBlockState(head.above()).getBlock() instanceof FallingBlock) {
             return null;
         }
         return new Plan(first);
@@ -208,40 +208,40 @@ final class FollowDigOut {
      * removes cobblestone, which the whitelist allows for the bot's own mining).
      */
     static boolean isBuildingBlock(BlockState state) {
-        return state.isOf(Blocks.COBBLESTONE) || state.isOf(Blocks.MOSSY_COBBLESTONE)
-                || state.isOf(Blocks.STONE_BRICKS) || state.isOf(Blocks.BRICKS)
-                || state.isOf(Blocks.SMOOTH_STONE) || state.isOf(Blocks.POLISHED_ANDESITE)
-                || state.isOf(Blocks.POLISHED_DIORITE) || state.isOf(Blocks.POLISHED_GRANITE)
-                || state.isOf(Blocks.GLASS) || state.isOf(Blocks.GLASS_PANE)
-                || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.DOORS)
-                || state.isIn(BlockTags.TRAPDOORS) || state.isIn(BlockTags.FENCES)
-                || state.isIn(BlockTags.FENCE_GATES) || state.isIn(BlockTags.WALLS)
-                || state.isIn(BlockTags.STAIRS) || state.isIn(BlockTags.SLABS)
-                || state.isIn(BlockTags.WOOL) || state.isIn(BlockTags.BEDS)
-                || state.isIn(BlockTags.IMPERMEABLE) || state.isIn(BlockTags.ICE);
+        return state.is(Blocks.COBBLESTONE) || state.is(Blocks.MOSSY_COBBLESTONE)
+                || state.is(Blocks.STONE_BRICKS) || state.is(Blocks.BRICKS)
+                || state.is(Blocks.SMOOTH_STONE) || state.is(Blocks.POLISHED_ANDESITE)
+                || state.is(Blocks.POLISHED_DIORITE) || state.is(Blocks.POLISHED_GRANITE)
+                || state.is(Blocks.GLASS) || state.is(Blocks.GLASS_PANE)
+                || state.is(BlockTags.PLANKS) || state.is(BlockTags.DOORS)
+                || state.is(BlockTags.TRAPDOORS) || state.is(BlockTags.FENCES)
+                || state.is(BlockTags.FENCE_GATES) || state.is(BlockTags.WALLS)
+                || state.is(BlockTags.STAIRS) || state.is(BlockTags.SLABS)
+                || state.is(BlockTags.WOOL) || state.is(BlockTags.BEDS)
+                || state.is(BlockTags.IMPERMEABLE) || state.is(BlockTags.ICE);
     }
 
-    private static boolean isOpen(ServerWorld world, BlockPos pos) {
+    private static boolean isOpen(ServerLevel world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         return state.getCollisionShape(world, pos).isEmpty() && state.getFluidState().isEmpty()
                 && !Standability.isDangerous(state);
     }
 
-    private static boolean isSolidFloor(ServerWorld world, BlockPos pos) {
+    private static boolean isSolidFloor(ServerLevel world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         return !state.getCollisionShape(world, pos).isEmpty()
                 && state.getFluidState().isEmpty() && !Standability.isDangerous(state);
     }
 
     private static boolean hasSuitableTool(AIPlayerEntity bot, BlockState state) {
-        if (!state.isToolRequired()) {
+        if (!state.requiresCorrectToolForDrops()) {
             return true;
         }
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
-            if (!stack.isEmpty() && stack.isSuitableFor(state)) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (!stack.isEmpty() && stack.isCorrectToolForDrops(state)) {
                 return true;
             }
         }
-        return bot.getEquippedStack(EquipmentSlot.OFFHAND).isSuitableFor(state);
+        return bot.getItemBySlot(EquipmentSlot.OFFHAND).isCorrectToolForDrops(state);
     }
 }

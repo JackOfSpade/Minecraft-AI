@@ -16,13 +16,12 @@ import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
@@ -63,7 +62,7 @@ public final class IdleCoordinator {
         if (bot.getActionPack().hasActiveActions()) {
             return false;
         }
-        UUID currentJob = claimedJobs.remove(bot.getUuid());
+        UUID currentJob = claimedJobs.remove(bot.getUUID());
         if (currentJob != null) {
             finishClaimedJob(bot, currentJob);
         }
@@ -79,7 +78,7 @@ public final class IdleCoordinator {
     }
 
     public void onBotRemoved(AIPlayerEntity bot) {
-        UUID jobId = claimedJobs.remove(bot.getUuid());
+        UUID jobId = claimedJobs.remove(bot.getUUID());
         if (jobId != null) {
             TaskBoard.INSTANCE.markFailed(jobId, "bot_removed");
             markDirty(bot);
@@ -88,7 +87,7 @@ public final class IdleCoordinator {
 
     /** Server unload keeps the persisted lease; the next runtime session will reopen it as stale. */
     public void onBotUnloaded(AIPlayerEntity bot) {
-        claimedJobs.remove(bot.getUuid());
+        claimedJobs.remove(bot.getUUID());
     }
 
     public void clearAllRuntime() {
@@ -96,7 +95,7 @@ public final class IdleCoordinator {
     }
 
     public boolean cancelClaimedJob(AIPlayerEntity bot, String reason) {
-        UUID jobId = claimedJobs.remove(bot.getUuid());
+        UUID jobId = claimedJobs.remove(bot.getUUID());
         if (jobId == null) {
             return false;
         }
@@ -122,12 +121,12 @@ public final class IdleCoordinator {
             markDirty(bot);
             return;
         }
-        claimedJobs.put(bot.getUuid(), job.id());
+        claimedJobs.put(bot.getUUID(), job.id());
         TaskManager.INSTANCE.assign(bot, task.get(), TaskOrigin.job(job.id(), "task_board"));
     }
 
     private static void markDirty(AIPlayerEntity bot) {
-        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.level().getServer());
     }
 
     public static Optional<Task> jobToTask(AIPlayerEntity bot, Job job) {
@@ -153,14 +152,14 @@ public final class IdleCoordinator {
     }
 
     private static Block requiredBlock(Map<String, String> params, String name) {
-        Identifier id = Identifier.of(required(params, name));
-        return Registries.BLOCK.getOptionalValue(id)
+        Identifier id = Identifier.parse(required(params, name));
+        return BuiltInRegistries.BLOCK.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id));
     }
 
     private static Item requiredItem(Map<String, String> params, String name) {
-        Identifier id = Identifier.of(required(params, name));
-        return Registries.ITEM.getOptionalValue(id)
+        Identifier id = Identifier.parse(required(params, name));
+        return BuiltInRegistries.ITEM.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_item: " + id));
     }
 

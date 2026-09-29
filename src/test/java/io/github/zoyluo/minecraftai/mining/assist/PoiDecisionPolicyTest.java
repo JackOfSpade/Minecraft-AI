@@ -8,6 +8,9 @@ import static io.github.zoyluo.minecraftai.mining.assist.PoiDecisionPolicy.Decis
 import static io.github.zoyluo.minecraftai.mining.assist.PoiDecisionPolicy.Decision.STOP;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.CavernKeylessPolicy;
+import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig.UnavailablePolicy;
+
 /** Design 6.7: the full fallback matrix, including the fix that makes {@link PoiDecisionPolicy} actually total
  * over every {@link PoiScorer.Band} (a {@code NONE} band must never leak a stop through a stale score). */
 class PoiDecisionPolicyTest {

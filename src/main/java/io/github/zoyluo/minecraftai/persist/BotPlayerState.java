@@ -2,22 +2,21 @@ package io.github.zoyluo.minecraftai.persist;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.StackWithSlot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.StringNbtReader;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.storage.NbtReadView;
-import net.minecraft.storage.NbtWriteView;
-import net.minecraft.storage.ReadView;
-import net.minecraft.storage.WriteView;
-import net.minecraft.util.ErrorReporter;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.TagParser;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.ItemStackWithSlot;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.world.level.storage.TagValueOutput;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 
 /**
  * Everything a real player's vanilla save keeps (beyond the 36 main inventory slots that
@@ -62,7 +61,7 @@ import java.util.List;
  * the snapshot schema therefore stays at {@link RuntimeSnapshot#CURRENT_SCHEMA}. Every section is
  * encoded and restored independently: a failing section is logged as {@code bot_state_*_failed} with
  * its field name and never aborts the rest of the bot restore. Restoration writes each equipment slot
- * exactly once through {@link PlayerInventory#setStack}, which replaces (never adds to) the slot, so
+ * exactly once through {@link Inventory#setItem}, which replaces (never adds to) the slot, so
  * nothing can be duplicated.
  */
 public final class BotPlayerState {
@@ -82,110 +81,110 @@ public final class BotPlayerState {
     }
 
     /** Serializes the bot's persistent player state; never throws (a failed section is just omitted). */
-    public static String encode(ServerPlayerEntity player) {
-        NbtWriteView view = NbtWriteView.create(ErrorReporter.EMPTY, player.getRegistryManager());
-        PlayerInventory inventory = player.getInventory();
+    public static String encode(ServerPlayer player) {
+        TagValueOutput view = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, player.registryAccess());
+        Inventory inventory = player.getInventory();
         section(player, EQUIPMENT, true, () -> {
-            WriteView equipment = view.get(EQUIPMENT);
-            for (var entry : PlayerInventory.EQUIPMENT_SLOTS.int2ObjectEntrySet()) {
-                ItemStack stack = inventory.getStack(entry.getIntKey());
+            ValueOutput equipment = view.child(EQUIPMENT);
+            for (var entry : Inventory.EQUIPMENT_SLOT_MAPPING.int2ObjectEntrySet()) {
+                ItemStack stack = inventory.getItem(entry.getIntKey());
                 if (!stack.isEmpty()) {
-                    equipment.put(entry.getValue().asString(), ItemStack.CODEC, stack);
+                    equipment.store(entry.getValue().getSerializedName(), ItemStack.CODEC, stack);
                 }
             }
         });
         section(player, SELECTED_SLOT, true, () -> view.putInt(SELECTED_SLOT, inventory.getSelectedSlot()));
         section(player, ENDER_ITEMS, true, () ->
-                player.getEnderChestInventory().writeData(view.getListAppender(ENDER_ITEMS, StackWithSlot.CODEC)));
+                player.getEnderChestInventory().storeAsSlots(view.list(ENDER_ITEMS, ItemStackWithSlot.CODEC)));
         section(player, XP_LEVEL, true, () -> {
             view.putInt(XP_LEVEL, player.experienceLevel);
             view.putFloat(XP_PROGRESS, player.experienceProgress);
             view.putInt(XP_TOTAL, player.totalExperience);
         });
-        section(player, HUNGER, true, () -> player.getHungerManager().writeData(view.get(HUNGER)));
+        section(player, HUNGER, true, () -> player.getFoodData().addAdditionalSaveData(view.child(HUNGER)));
         section(player, ACTIVE_EFFECTS, true, () -> {
-            var appender = view.getListAppender(ACTIVE_EFFECTS, StatusEffectInstance.CODEC);
-            for (StatusEffectInstance effect : player.getStatusEffects()) {
+            var appender = view.list(ACTIVE_EFFECTS, MobEffectInstance.CODEC);
+            for (MobEffectInstance effect : player.getActiveEffects()) {
                 appender.add(effect);
             }
         });
-        section(player, AIR, true, () -> view.putInt(AIR, player.getAir()));
+        section(player, AIR, true, () -> view.putInt(AIR, player.getAirSupply()));
         section(player, FIRE, true, () -> {
-            if (player.getFireTicks() > 0) {
-                view.putInt(FIRE, player.getFireTicks());
+            if (player.getRemainingFireTicks() > 0) {
+                view.putInt(FIRE, player.getRemainingFireTicks());
             }
         });
         section(player, ABSORPTION, true, () -> view.putFloat(ABSORPTION, player.getAbsorptionAmount()));
-        return view.getNbt().toString();
+        return view.buildResult().toString();
     }
 
     /**
      * Restores the state written by {@link #encode}. A null/blank string (a record from before this
      * feature existed) restores nothing. Returns the names of the sections that failed to restore.
      */
-    public static List<String> apply(ServerPlayerEntity player, String snbt) {
+    public static List<String> apply(ServerPlayer player, String snbt) {
         List<String> failed = new ArrayList<>();
         if (snbt == null || snbt.isBlank()) {
             return failed;
         }
-        NbtCompound root;
+        CompoundTag root;
         try {
-            root = StringNbtReader.readCompound(snbt);
+            root = TagParser.parseCompoundFully(snbt);
         } catch (Exception exception) {
             BotLog.error(asBot(player), "bot_state_restore_failed", exception, "field", "*", "reason", "unparseable");
             failed.add("*");
             return failed;
         }
-        ReadView view = NbtReadView.create(ErrorReporter.EMPTY, player.getRegistryManager(), root);
-        PlayerInventory inventory = player.getInventory();
+        ValueInput view = TagValueInput.create(ProblemReporter.DISCARDING, player.registryAccess(), root);
+        Inventory inventory = player.getInventory();
 
         restore(player, failed, EQUIPMENT, root, () -> {
-            ReadView equipment = view.getReadView(EQUIPMENT);
-            NbtCompound saved = root.getCompoundOrEmpty(EQUIPMENT);
-            for (var entry : PlayerInventory.EQUIPMENT_SLOTS.int2ObjectEntrySet()) {
+            ValueInput equipment = view.childOrEmpty(EQUIPMENT);
+            CompoundTag saved = root.getCompoundOrEmpty(EQUIPMENT);
+            for (var entry : Inventory.EQUIPMENT_SLOT_MAPPING.int2ObjectEntrySet()) {
                 EquipmentSlot slot = entry.getValue();
-                if (!saved.contains(slot.asString())) {
+                if (!saved.contains(slot.getSerializedName())) {
                     continue;
                 }
-                ItemStack stack = equipment.read(slot.asString(), ItemStack.CODEC).orElse(null);
+                ItemStack stack = equipment.read(slot.getSerializedName(), ItemStack.CODEC).orElse(null);
                 if (stack == null) {
-                    failed.add(EQUIPMENT + "." + slot.asString());
+                    failed.add(EQUIPMENT + "." + slot.getSerializedName());
                     BotLog.error(asBot(player), "bot_state_restore_failed", null,
-                            "field", EQUIPMENT + "." + slot.asString(), "reason", "undecodable_stack");
+                            "field", EQUIPMENT + "." + slot.getSerializedName(), "reason", "undecodable_stack");
                     continue;
                 }
                 // PlayerInventory.setStack replaces the slot: applying twice can never duplicate an item.
-                inventory.setStack(entry.getIntKey(), stack);
+                inventory.setItem(entry.getIntKey(), stack);
             }
         });
         restore(player, failed, SELECTED_SLOT, root, () ->
-                inventory.setSelectedSlot(Math.max(0, Math.min(8, view.getInt(SELECTED_SLOT, 0)))));
+                inventory.setSelectedSlot(Math.max(0, Math.min(8, view.getIntOr(SELECTED_SLOT, 0)))));
         restore(player, failed, ENDER_ITEMS, root, () ->
-                view.getOptionalTypedListView(ENDER_ITEMS, StackWithSlot.CODEC)
-                        .ifPresent(list -> player.getEnderChestInventory().readData(list)));
+                view.list(ENDER_ITEMS, ItemStackWithSlot.CODEC)
+                        .ifPresent(list -> player.getEnderChestInventory().fromSlots(list)));
         restore(player, failed, XP_LEVEL, root, () -> {
-            player.setExperienceLevel(Math.max(0, view.getInt(XP_LEVEL, 0)));
-            player.experienceProgress = Math.max(0.0F, Math.min(1.0F, view.getFloat(XP_PROGRESS, 0.0F)));
-            player.totalExperience = Math.max(0, view.getInt(XP_TOTAL, 0));
+            player.setExperienceLevels(Math.max(0, view.getIntOr(XP_LEVEL, 0)));
+            player.experienceProgress = Math.max(0.0F, Math.min(1.0F, view.getFloatOr(XP_PROGRESS, 0.0F)));
+            player.totalExperience = Math.max(0, view.getIntOr(XP_TOTAL, 0));
         });
-        restore(player, failed, HUNGER, root, () -> player.getHungerManager().readData(view.getReadView(HUNGER)));
+        restore(player, failed, HUNGER, root, () -> player.getFoodData().readAdditionalSaveData(view.childOrEmpty(HUNGER)));
         restore(player, failed, ACTIVE_EFFECTS, root, () ->
-                view.getOptionalTypedListView(ACTIVE_EFFECTS, StatusEffectInstance.CODEC)
+                view.list(ACTIVE_EFFECTS, MobEffectInstance.CODEC)
                         .ifPresent(list -> {
-                            for (StatusEffectInstance effect : list) {
-                                player.addStatusEffect(new StatusEffectInstance(effect));
+                            for (MobEffectInstance effect : list) {
+                                player.addEffect(new MobEffectInstance(effect));
                             }
                         }));
         restore(player, failed, AIR, root, () ->
-                player.setAir(Math.min(player.getMaxAir(), view.getInt(AIR, player.getMaxAir()))));
-        restore(player, failed, FIRE, root, () -> player.setFireTicks(Math.max(0, view.getInt(FIRE, 0))));
+                player.setAirSupply(Math.min(player.getMaxAirSupply(), view.getIntOr(AIR, player.getMaxAirSupply()))));
+        restore(player, failed, FIRE, root, () -> player.setRemainingFireTicks(Math.max(0, view.getIntOr(FIRE, 0))));
         restore(player, failed, ABSORPTION, root, () ->
-                player.setAbsorptionAmount(Math.max(0.0F, view.getFloat(ABSORPTION, 0.0F))));
-        inventory.markDirty();
+                player.setAbsorptionAmount(Math.max(0.0F, view.getFloatOr(ABSORPTION, 0.0F))));
+        inventory.setChanged();
         return failed;
     }
 
-    private static void restore(ServerPlayerEntity player, List<String> failed, String field, NbtCompound root,
+    private static void restore(ServerPlayer player, List<String> failed, String field, CompoundTag root,
                                 Runnable action) {
         if (!root.contains(field)) {
             return; // absent section == nothing to restore
@@ -195,7 +194,7 @@ public final class BotPlayerState {
         }
     }
 
-    private static boolean section(ServerPlayerEntity player, String field, boolean encoding, Runnable action) {
+    private static boolean section(ServerPlayer player, String field, boolean encoding, Runnable action) {
         try {
             action.run();
             return true;
@@ -206,7 +205,7 @@ public final class BotPlayerState {
         }
     }
 
-    private static AIPlayerEntity asBot(ServerPlayerEntity player) {
+    private static AIPlayerEntity asBot(ServerPlayer player) {
         return player instanceof AIPlayerEntity bot ? bot : null;
     }
 }

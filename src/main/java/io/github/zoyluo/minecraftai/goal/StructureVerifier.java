@@ -2,17 +2,17 @@ package io.github.zoyluo.minecraftai.goal;
 
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.task.BlueprintSchema;
-import net.minecraft.block.Block;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Block;
 
 public final class StructureVerifier {
     private StructureVerifier() {
     }
 
-    public static StructureReport verify(ServerWorld world,
+    public static StructureReport verify(ServerLevel world,
                                          BlueprintSchema blueprint,
                                          BlockPos anchor,
                                          int placed,
@@ -32,7 +32,7 @@ public final class StructureVerifier {
         return new StructureReport(compact(anchor), blueprint.placements().size(), matched, placed, skipped, mismatched);
     }
 
-    public static boolean matches(ServerWorld world,
+    public static boolean matches(ServerLevel world,
                                   BlockPos anchor,
                                   BlueprintSchema.BlockPlacement placement) {
         if (placement == null || placement.blockId() == null) {
@@ -40,14 +40,14 @@ public final class StructureVerifier {
         }
         Identifier expectedId;
         try {
-            expectedId = Identifier.of(placement.blockId());
+            expectedId = Identifier.parse(placement.blockId());
         } catch (RuntimeException exception) {
             return false;
         }
         if (world == null || anchor == null) {
             return false;
         }
-        BlockPos pos = anchor.add(placement.dx(), placement.dy(), placement.dz());
+        BlockPos pos = anchor.offset(placement.dx(), placement.dy(), placement.dz());
         var state = world.getBlockState(pos);
         if ("minecraft:air".equals(placement.blockId())) {
             return state.isAir();
@@ -55,8 +55,8 @@ public final class StructureVerifier {
         if (placement.palette() != null && !placement.palette().isBlank()) {
             return MaterialPalette.matchesBlock(state, placement.palette());
         }
-        Block expected = Registries.BLOCK.getOptionalValue(expectedId).orElse(null);
-        return expected != null && state.isOf(expected);
+        Block expected = BuiltInRegistries.BLOCK.getOptional(expectedId).orElse(null);
+        return expected != null && state.is(expected);
     }
 
     private static String compact(BlockPos pos) {

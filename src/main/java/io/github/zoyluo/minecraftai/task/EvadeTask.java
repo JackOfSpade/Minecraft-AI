@@ -6,13 +6,12 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.phys.Vec3;
 
 public final class EvadeTask extends AbstractTask {
     private static final double GOAL_REACHED_SQUARED = 6.25D;
@@ -73,7 +72,7 @@ public final class EvadeTask extends AbstractTask {
             return;
         }
         bot.getActionPack().setSprinting(true); // keep this set continuously (other controllers may reset it every tick)
-        if (bot.getBlockPos().getSquaredDistance(escapeGoal) <= GOAL_REACHED_SQUARED) {
+        if (bot.blockPosition().distSqr(escapeGoal) <= GOAL_REACHED_SQUARED) {
             // Reaching the originally projected point is not the same as escaping a moving mob.
             // The strict obsidian run reached its first waypoint while the same Creeper was still
             // visible, completed Evade, and immediately let AcquireWater path back toward it.
@@ -88,7 +87,7 @@ public final class EvadeTask extends AbstractTask {
                 BotLog.action(bot, "evade_pressure_extended",
                         "from_goal", previous,
                         "to_goal", escapeGoal,
-                        "source", threat.entity().getBlockPos());
+                        "source", threat.entity().blockPosition());
                 return;
             }
             DangerWatcher.INSTANCE.noteEvadeCompleted(bot);
@@ -148,7 +147,7 @@ public final class EvadeTask extends AbstractTask {
                 // failed admission makes ActionPack permanently busy and blocks paused work resume.
                 bot.getActionPack().setSprinting(true);
                 BlockPos resolved = bot.getActionPack().activePathGoal();
-                return resolved == null ? candidate : resolved.toImmutable();
+                return resolved == null ? candidate : resolved.immutable();
             }
             if (attempts >= MAX_PATH_ADMISSION_ATTEMPTS) {
                 break;
@@ -162,43 +161,43 @@ public final class EvadeTask extends AbstractTask {
                                                LivingEntity source,
                                                BlockPos rememberedSource,
                                                int distance) {
-        Vec3d away = new Vec3d(1.0D, 0.0D, 0.0D);
+        Vec3 away = new Vec3(1.0D, 0.0D, 0.0D);
         if (source != null
                 && source.isAlive()
                 && ObservableWorldQuery.canObserveEntity(bot, source)) {
-            away = bot.getEntityPos().subtract(source.getEntityPos());
+            away = bot.position().subtract(source.position());
         } else if (rememberedSource != null) {
-            away = bot.getEntityPos().subtract(Vec3d.ofCenter(rememberedSource));
+            away = bot.position().subtract(Vec3.atCenterOf(rememberedSource));
         }
         // Escape is surface displacement, never vertical excavation. An entity-less LOW_HP used
         // to point at the bot's own block center; the only non-zero component was Y=-0.5, which
         // normalized into a destination twenty blocks underground. Flatten every source vector so
         // even defensive or future threat types cannot turn "run away" into "dig into a cave".
-        away = new Vec3d(away.x, 0.0D, away.z);
-        if (away.lengthSquared() < 0.01D) {
+        away = new Vec3(away.x, 0.0D, away.z);
+        if (away.lengthSqr() < 0.01D) {
             return List.of(); // no spatial direction is safer than inventing an arbitrary route
         }
 
         // A straight projection can land on a cliff or over a ravine even when a factual lateral
         // escape exists. Search one bounded twelve-block fan and give all five directions one path
         // admission; a still-observed moving threat causes the next leg to be projected later.
-        Vec3d normalized = away.normalize();
+        Vec3 normalized = away.normalize();
         List<BlockPos> goals = new ArrayList<>();
         for (double angle : ESCAPE_ANGLES) {
             double cos = Math.cos(angle);
             double sin = Math.sin(angle);
-            Vec3d direction = new Vec3d(
+            Vec3 direction = new Vec3(
                     normalized.x * cos - normalized.z * sin,
                     0.0D,
                     normalized.x * sin + normalized.z * cos);
-            Vec3d horizontal = bot.getEntityPos().add(direction.multiply(Math.max(1, distance)));
+            Vec3 horizontal = bot.position().add(direction.scale(Math.max(1, distance)));
             BlockPos base = new BlockPos(
-                    net.minecraft.util.math.MathHelper.floor(horizontal.x),
-                    bot.getBlockPos().getY(),
-                    net.minecraft.util.math.MathHelper.floor(horizontal.z));
+                    net.minecraft.util.Mth.floor(horizontal.x),
+                    bot.blockPosition().getY(),
+                    net.minecraft.util.Mth.floor(horizontal.z));
             BlockPos goal = findStandableNear(bot, base);
             if (goal != null
-                    && bot.getBlockPos().getSquaredDistance(goal) > GOAL_REACHED_SQUARED
+                    && bot.blockPosition().distSqr(goal) > GOAL_REACHED_SQUARED
                     && !goals.contains(goal)) {
                 goals.add(goal);
             }
@@ -208,11 +207,11 @@ public final class EvadeTask extends AbstractTask {
 
     private static BlockPos findStandableNear(AIPlayerEntity bot, BlockPos base) {
         for (int radius = 0; radius <= 4; radius++) {
-            for (BlockPos candidate : BlockPos.iterate(
-                    base.add(-radius, -2, -radius), base.add(radius, 2, radius))) {
+            for (BlockPos candidate : BlockPos.betweenClosed(
+                    base.offset(-radius, -2, -radius), base.offset(radius, 2, radius))) {
                 if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
-                        bot.getEntityWorld(), candidate)) {
-                    return candidate.toImmutable();
+                        bot.level(), candidate)) {
+                    return candidate.immutable();
                 }
             }
         }
@@ -229,7 +228,7 @@ public final class EvadeTask extends AbstractTask {
         // Creepers are never a melee target and can close the ordinary ten-block contact envelope
         // while mission work reverses direction. Continue until this exact source leaves factual
         // perception. Other mobs use the shared close/ranged combat pressure boundary.
-        return source instanceof CreeperEntity
+        return source instanceof Creeper
                 || CombatCore.isWithinHostilePressureEnvelope(bot, source);
     }
 }

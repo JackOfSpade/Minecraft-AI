@@ -7,12 +7,11 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 /**
  * Low-priority cleanup for an emergency enclosure after danger clears.  It never identifies a
@@ -59,7 +58,7 @@ final class ShelterCleanupTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         if (DangerWatcher.hasObservableHostilePressure(bot)
-                || bot.getHungerManager().getFoodLevel() < 20) {
+                || bot.getFoodData().getFoodLevel() < 20) {
             complete();
             return;
         }
@@ -117,7 +116,7 @@ final class ShelterCleanupTask extends AbstractTask {
             target = null;
             return;
         }
-        if (bot.getEyePos().squaredDistanceTo(target.toCenterPos()) <= MINE_REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(target.getCenter()) <= MINE_REACH_SQUARED) {
             if (miner.target() == null || !target.equals(miner.target())) {
                 miner.begin(bot, target);
             }
@@ -139,7 +138,7 @@ final class ShelterCleanupTask extends AbstractTask {
 
     private boolean tickRecoveryEating(AIPlayerEntity bot) {
         if (recoveryEatTask == null) {
-            if (bot.getHungerManager().getFoodLevel() >= 20) {
+            if (bot.getFoodData().getFoodLevel() >= 20) {
                 return false;
             }
             if (InventoryAction.findFoodSlot(bot) < 0) {
@@ -155,7 +154,7 @@ final class ShelterCleanupTask extends AbstractTask {
             recoveryEatTask = new EatTask();
             recoveryEatTask.start(bot);
             BotLog.action(bot, "shelter_cleanup_recovery_eat_started",
-                    "food", bot.getHungerManager().getFoodLevel(), "health", bot.getHealth());
+                    "food", bot.getFoodData().getFoodLevel(), "health", bot.getHealth());
         }
         recoveryEatTask.tick(bot);
         if (recoveryEatTask.state() == TaskState.RUNNING) {
@@ -176,7 +175,7 @@ final class ShelterCleanupTask extends AbstractTask {
             target = null;
             return;
         }
-        boolean arrived = bot.getBlockPos().getSquaredDistance(desired) <= 2.25D;
+        boolean arrived = bot.blockPosition().distSqr(desired) <= 2.25D;
         if (arrived) {
             approachGoal = null;
             return;
@@ -197,7 +196,7 @@ final class ShelterCleanupTask extends AbstractTask {
             }
             approachGoal = bot.getActionPack().activePathGoal();
             if (approachGoal == null) {
-                approachGoal = desired.toImmutable();
+                approachGoal = desired.immutable();
             }
         }
     }
@@ -206,14 +205,14 @@ final class ShelterCleanupTask extends AbstractTask {
         BlockPos best = null;
         double bestDistance = Double.POSITIVE_INFINITY;
         for (int dy = -1; dy <= 1; dy++) {
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos candidate = target.offset(direction).up(dy);
-                if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos candidate = target.relative(direction).above(dy);
+                if (!Standability.isStandable(bot.level(), candidate)) {
                     continue;
                 }
-                double distance = candidate.getSquaredDistance(target);
+                double distance = candidate.distSqr(target);
                 if (distance < bestDistance) {
-                    best = candidate.toImmutable();
+                    best = candidate.immutable();
                     bestDistance = distance;
                 }
             }

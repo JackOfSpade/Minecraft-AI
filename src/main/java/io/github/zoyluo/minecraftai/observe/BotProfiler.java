@@ -25,7 +25,7 @@ public final class BotProfiler {
         if (bot == null || section == null || section.isBlank() || nanos < 0L) {
             return;
         }
-        record(bot.getUuid(), bot.getGameProfile().name(), section, nanos);
+        record(bot.getUUID(), bot.getGameProfile().name(), section, nanos);
     }
 
     public void record(UUID botId, String botName, String section, long nanos) {

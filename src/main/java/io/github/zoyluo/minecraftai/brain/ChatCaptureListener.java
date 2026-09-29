@@ -12,10 +12,9 @@ import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.perception.PerceptionCollector;
 import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.text.Text;
-
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +34,7 @@ public final class ChatCaptureListener {
             if (sender instanceof AIPlayerEntity) {
                 return;
             }
-            String text = message.getContent().getString();
+            String text = message.decoratedContent().getString();
             if (text == null || text.isBlank()) {
                 return;
             }
@@ -44,7 +43,7 @@ public final class ChatCaptureListener {
             if (candidates.isEmpty()) {
                 return;
             }
-            long epoch = nextEpoch(sender.getUuid());
+            long epoch = nextEpoch(sender.getUUID());
             ChatRecipientRouter.INSTANCE.select(
                     sender,
                     text,
@@ -54,27 +53,27 @@ public final class ChatCaptureListener {
         });
     }
 
-    private static List<ChatRecipientRouter.Candidate> candidatesFor(ServerPlayerEntity sender) {
+    private static List<ChatRecipientRouter.Candidate> candidatesFor(ServerPlayer sender) {
         List<AIPlayerEntity> eligible = AIPlayerManager.INSTANCE.all().stream()
                 .filter(AIPlayerEntity::isAlive)
                 .filter(bot -> BotAuthorizationGate.INSTANCE.canCommand(sender, bot))
                 .sorted(Comparator.comparing(bot -> bot.getGameProfile().name(), String.CASE_INSENSITIVE_ORDER))
                 .toList();
         Optional<AIPlayerEntity> nearest = eligible.stream()
-                .filter(bot -> bot.getEntityWorld() == sender.getEntityWorld())
-                .min(Comparator.comparingDouble(bot -> bot.squaredDistanceTo(sender)));
-        UUID nearestId = nearest.map(AIPlayerEntity::getUuid).orElse(null);
+                .filter(bot -> bot.level() == sender.level())
+                .min(Comparator.comparingDouble(bot -> bot.distanceToSqr(sender)));
+        UUID nearestId = nearest.map(AIPlayerEntity::getUUID).orElse(null);
 
         return eligible.stream()
                 .map(bot -> {
-                    boolean sameDimension = bot.getEntityWorld() == sender.getEntityWorld();
-                    double distance = sameDimension ? Math.sqrt(bot.squaredDistanceTo(sender)) : -1.0D;
+                    boolean sameDimension = bot.level() == sender.level();
+                    double distance = sameDimension ? Math.sqrt(bot.distanceToSqr(sender)) : -1.0D;
                     return new ChatRecipientRouter.Candidate(
-                            bot.getUuid(),
+                            bot.getUUID(),
                             bot.getGameProfile().name(),
                             sameDimension,
                             distance,
-                            bot.getUuid().equals(nearestId),
+                            bot.getUUID().equals(nearestId),
                             capabilityFor(bot));
                 })
                 .toList();
@@ -106,7 +105,7 @@ public final class ChatCaptureListener {
 
     private static int freeMainSlots(AIPlayerEntity bot) {
         int free = 0;
-        for (var stack : bot.getInventory().getMainStacks()) {
+        for (var stack : bot.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 free++;
             }
@@ -126,21 +125,21 @@ public final class ChatCaptureListener {
     }
 
     private static String travelMode(AIPlayerEntity bot) {
-        if (bot.getVehicle() instanceof AbstractBoatEntity) {
+        if (bot.getVehicle() instanceof AbstractBoat) {
             return "boat";
         }
-        if (bot.isTouchingWater() || bot.isSubmergedInWater()) {
+        if (bot.isInWater() || bot.isUnderWater()) {
             return "swimming";
         }
         return "on_foot";
     }
 
-    private static void applyDecision(ServerPlayerEntity sender,
+    private static void applyDecision(ServerPlayer sender,
                                       String text,
                                       List<ChatRecipientRouter.Candidate> candidates,
                                       long epoch,
                                       ChatRecipientRouter.Decision decision) {
-        if (!isCurrent(sender.getUuid(), epoch)) {
+        if (!isCurrent(sender.getUUID(), epoch)) {
             return;
         }
         List<AIPlayerEntity> recipients = switch (decision.target()) {
@@ -161,8 +160,8 @@ public final class ChatCaptureListener {
         }
     }
 
-    private static void reportRoutingFailure(ServerPlayerEntity sender, long epoch, Throwable failure) {
-        if (!isCurrent(sender.getUuid(), epoch)) {
+    private static void reportRoutingFailure(ServerPlayer sender, long epoch, Throwable failure) {
+        if (!isCurrent(sender.getUUID(), epoch)) {
             return;
         }
         String reason = failure == null || failure.getMessage() == null
@@ -171,7 +170,7 @@ public final class ChatCaptureListener {
         BotLog.warn(LogCategory.COMM, null, "chat_recipient_routing_failed",
                 "sender", sender.getGameProfile().name(),
                 "reason", reason);
-        sender.sendMessage(Text.literal("[Minecraft-AI] I couldn't determine which companion you meant. Please try again."), false);
+        sender.displayClientMessage(Component.literal("[Minecraft-AI] I couldn't determine which companion you meant. Please try again."), false);
     }
 
     private static long nextEpoch(UUID senderId) {
@@ -182,7 +181,7 @@ public final class ChatCaptureListener {
         return ROUTING_EPOCHS.getOrDefault(senderId, 0L) == epoch;
     }
 
-    private static void route(ServerPlayerEntity sender,
+    private static void route(ServerPlayer sender,
                               AIPlayerEntity bot,
                               String body,
                               String channel,

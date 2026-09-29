@@ -6,7 +6,7 @@ import io.github.zoyluo.minecraftai.mining.assist.MiningAssistRuntime;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.minecraft.server.command.CommandManager;
+import net.minecraft.commands.Commands;
 
 /** Test-only command harness. This class and both subcommands are excluded from the production jar. */
 public final class MinecraftAiHarnessTestMod implements ModInitializer {
@@ -17,7 +17,7 @@ public final class MinecraftAiHarnessTestMod implements ModInitializer {
         // the config first (this mod depends on it) and setHarnessDefaultOff re-parses either way.
         MiningAssistRuntime.setHarnessDefaultOff(true);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
-                dispatcher.register(CommandManager.literal("minecraftai")
+                dispatcher.register(Commands.literal("minecraftai")
                         .then(MinecraftAiTestSubcommand.build(registryAccess))
                         .then(MinecraftAiVerifySubcommand.build())
                         .then(MinecraftAiRestartHarnessCommand.build())));

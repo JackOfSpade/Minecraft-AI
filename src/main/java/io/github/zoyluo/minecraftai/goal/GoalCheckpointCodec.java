@@ -18,14 +18,6 @@ import io.github.zoyluo.minecraftai.task.OreDigTask;
 import io.github.zoyluo.minecraftai.task.ServicePolicy;
 import io.github.zoyluo.minecraftai.task.ServiceProfile;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -35,6 +27,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * S8: the mostly-pure checkpoint encode/decode cluster extracted from {@link GoalExecutor} --
@@ -346,7 +345,7 @@ final class GoalCheckpointCodec {
     }
 
     private static String encodeRegistryItem(Item item) {
-        return item == null ? "" : Registries.ITEM.getId(item).toString();
+        return item == null ? "" : BuiltInRegistries.ITEM.getKey(item).toString();
     }
 
     private static Item decodeRegistryItem(String encoded) {
@@ -357,16 +356,16 @@ final class GoalCheckpointCodec {
             return null;
         }
         Identifier id = Identifier.tryParse(encoded);
-        Item item = id == null ? null : Registries.ITEM.getOptionalValue(id).orElse(null);
+        Item item = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
         if (item == null || !id.toString().equals(encoded)
-                || !Registries.ITEM.getId(item).toString().equals(encoded)) {
+                || !BuiltInRegistries.ITEM.getKey(item).toString().equals(encoded)) {
             throw new IllegalArgumentException("invalid item id");
         }
         return item;
     }
 
     private static String encodeRegistryBlock(Block block) {
-        return block == null ? "" : Registries.BLOCK.getId(block).toString();
+        return block == null ? "" : BuiltInRegistries.BLOCK.getKey(block).toString();
     }
 
     private static Block decodeRegistryBlock(String encoded) {
@@ -377,9 +376,9 @@ final class GoalCheckpointCodec {
             return null;
         }
         Identifier id = Identifier.tryParse(encoded);
-        Block block = id == null ? null : Registries.BLOCK.getOptionalValue(id).orElse(null);
+        Block block = id == null ? null : BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
         if (block == null || !id.toString().equals(encoded)
-                || !Registries.BLOCK.getId(block).toString().equals(encoded)) {
+                || !BuiltInRegistries.BLOCK.getKey(block).toString().equals(encoded)) {
             throw new IllegalArgumentException("invalid block id");
         }
         return block;
@@ -724,7 +723,7 @@ final class GoalCheckpointCodec {
             for (String encoded : fingerprint.split(",", -1)) {
                 Identifier id = Identifier.tryParse(encoded);
                 Block block = id == null
-                        ? null : Registries.BLOCK.getOptionalValue(id).orElse(null);
+                        ? null : BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
                 if (block == null || block == Blocks.AIR || !blocks.add(block)) {
                     return false;
                 }

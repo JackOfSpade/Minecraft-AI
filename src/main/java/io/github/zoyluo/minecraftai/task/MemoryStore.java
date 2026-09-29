@@ -26,7 +26,7 @@ public final class MemoryStore {
         if ("system".equals(first.role())) {
             compact.add(first);
         }
-        String memory = BotMemoryStore.INSTANCE.of(bot.getUuid()).inject();
+        String memory = BotMemoryStore.INSTANCE.of(bot.getUUID()).inject();
         if (!memory.isBlank()) {
             compact.add(ChatMessage.system("Persistent memory:\n" + memory));
         }
@@ -84,7 +84,7 @@ public final class MemoryStore {
     }
 
     private List<ChatMessage> injectPersistentMemory(AIPlayerEntity bot, List<ChatMessage> rawHistory) {
-        String memory = BotMemoryStore.INSTANCE.of(bot.getUuid()).inject();
+        String memory = BotMemoryStore.INSTANCE.of(bot.getUUID()).inject();
         if (memory.isBlank()) {
             return rawHistory;
         }

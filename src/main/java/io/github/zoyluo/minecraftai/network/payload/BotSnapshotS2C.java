@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.network.payload;
 
 import io.github.zoyluo.minecraftai.MinecraftAiMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 public record BotSnapshotS2C(
         String botName,
@@ -42,38 +41,38 @@ public record BotSnapshotS2C(
         boolean verboseReportsEnabled,
         List<ItemEntry> inventory,
         List<ItemEntry> equipment
-) implements CustomPayload {
-    public static final Id<BotSnapshotS2C> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "bot_snapshot"));
-    public static final PacketCodec<RegistryByteBuf, BotSnapshotS2C> CODEC = PacketCodec.of(BotSnapshotS2C::write, BotSnapshotS2C::new);
+) implements CustomPacketPayload {
+    public static final Type<BotSnapshotS2C> ID = new Type<>(Identifier.fromNamespaceAndPath(MinecraftAiMod.MOD_ID, "bot_snapshot"));
+    public static final StreamCodec<RegistryFriendlyByteBuf, BotSnapshotS2C> CODEC = StreamCodec.ofMember(BotSnapshotS2C::write, BotSnapshotS2C::new);
 
-    private BotSnapshotS2C(RegistryByteBuf buf) {
+    private BotSnapshotS2C(RegistryFriendlyByteBuf buf) {
         this(
-                buf.readString(),
+                buf.readUtf(),
                 buf.readFloat(),
                 buf.readFloat(),
                 buf.readInt(),
                 buf.readInt(),
                 buf.readInt(),
                 buf.readInt(),
-                buf.readString(),
-                buf.readString(),
+                buf.readUtf(),
+                buf.readUtf(),
                 buf.readFloat(),
                 buf.readBoolean(),
                 buf.readInt(),
                 buf.readInt(),
-                buf.readString(),
-                buf.readString(),
+                buf.readUtf(),
+                buf.readUtf(),
                 buf.readInt(),
                 buf.readInt(),
                 readStrings(buf),
                 buf.readLong(),
-                buf.readString(),
-                buf.readString(),
+                buf.readUtf(),
+                buf.readUtf(),
                 buf.readInt(),
                 buf.readInt(),
                 buf.readBoolean(),
                 buf.readInt(),
-                buf.readString(),
+                buf.readUtf(),
                 readStrings(buf),
                 buf.readBoolean(),
                 buf.readBoolean(),
@@ -82,77 +81,77 @@ public record BotSnapshotS2C(
                 readInventory(buf));
     }
 
-    private void write(RegistryByteBuf buf) {
-        buf.writeString(botName);
+    private void write(RegistryFriendlyByteBuf buf) {
+        buf.writeUtf(botName);
         buf.writeFloat(health);
         buf.writeFloat(maxHealth);
         buf.writeInt(food);
         buf.writeInt(x);
         buf.writeInt(y);
         buf.writeInt(z);
-        buf.writeString(taskName);
-        buf.writeString(taskState);
+        buf.writeUtf(taskName);
+        buf.writeUtf(taskState);
         buf.writeFloat(progress);
         buf.writeBoolean(brainBusy);
         buf.writeInt(promptTokens);
         buf.writeInt(completionTokens);
-        buf.writeString(goalTitle);
-        buf.writeString(goalCurrentStep);
+        buf.writeUtf(goalTitle);
+        buf.writeUtf(goalCurrentStep);
         buf.writeInt(goalCurrentStepIndex);
         buf.writeInt(goalTotalSteps);
         buf.writeInt(goalSteps.size());
         for (String step : goalSteps) {
-            buf.writeString(step);
+            buf.writeUtf(step);
         }
         buf.writeLong(goalResultSequence);
-        buf.writeString(goalResultStatus);
-        buf.writeString(goalResultSummary);
+        buf.writeUtf(goalResultStatus);
+        buf.writeUtf(goalResultSummary);
         buf.writeInt(goalResultMatched);
         buf.writeInt(goalResultRequired);
         buf.writeBoolean(missionPaused);
         buf.writeInt(executionStackDepth);
-        buf.writeString(operatingProfile);
+        buf.writeUtf(operatingProfile);
         buf.writeInt(effectiveCapabilities.size());
         for (String capability : effectiveCapabilities) {
-            buf.writeString(capability);
+            buf.writeUtf(capability);
         }
         buf.writeBoolean(manualMode);
         buf.writeBoolean(memoryToolsEnabled);
         buf.writeBoolean(verboseReportsEnabled);
         buf.writeInt(inventory.size());
         for (ItemEntry entry : inventory) {
-            buf.writeString(entry.itemId());
+            buf.writeUtf(entry.itemId());
             buf.writeInt(entry.count());
             buf.writeInt(entry.slot());
         }
         buf.writeInt(equipment.size());
         for (ItemEntry entry : equipment) {
-            buf.writeString(entry.itemId());
+            buf.writeUtf(entry.itemId());
             buf.writeInt(entry.count());
             buf.writeInt(entry.slot());
         }
     }
 
-    private static List<String> readStrings(RegistryByteBuf buf) {
+    private static List<String> readStrings(RegistryFriendlyByteBuf buf) {
         int size = buf.readInt();
         List<String> values = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
-            values.add(buf.readString());
+            values.add(buf.readUtf());
         }
         return values;
     }
 
-    private static List<ItemEntry> readInventory(RegistryByteBuf buf) {
+    private static List<ItemEntry> readInventory(RegistryFriendlyByteBuf buf) {
         int size = buf.readInt();
         List<ItemEntry> entries = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
-            entries.add(new ItemEntry(buf.readString(), buf.readInt(), buf.readInt()));
+            entries.add(new ItemEntry(buf.readUtf(), buf.readInt(), buf.readInt()));
         }
         return entries;
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 

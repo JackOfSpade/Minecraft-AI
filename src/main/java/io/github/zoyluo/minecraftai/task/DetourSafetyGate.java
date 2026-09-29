@@ -15,10 +15,9 @@ import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
 import io.github.zoyluo.minecraftai.mining.assist.SafeGateInputs;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * The Minecraft side of the detour SAFE gate (mining-assist design 4.4, invariant I7): reads live state and hands
@@ -88,7 +87,7 @@ public final class DetourSafetyGate {
      * yet); when given they extend the lava and trap radius checks to those cells.
      */
     public static SafeGateInputs inputs(AIPlayerEntity bot, SafeGate.Stage stage, BlockPos pose, BlockPos ore) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         MiningAssistConfig cfg = MiningAssistRuntime.config();
         MiningAssistState state = MiningAssistRegistry.getIfPresent(uuid);
         int tick = MiningAssistRuntime.serverTick(bot);
@@ -123,9 +122,9 @@ public final class DetourSafetyGate {
                     .hurtTime(bot.hurtTime)
                     .onFire(bot.isOnFire())
                     .inLava(bot.isInLava())
-                    .submerged(bot.isSubmergedInWater())
-                    .touchingWater(bot.isTouchingWater())
-                    .foodLevel(bot.getHungerManager().getFoodLevel())
+                    .submerged(bot.isUnderWater())
+                    .touchingWater(bot.isInWater())
+                    .foodLevel(bot.getFoodData().getFoodLevel())
                     .hungerCritical(survival.hungerCriticalThreshold());
         }
         if (stage.reads(4)) {
@@ -145,7 +144,7 @@ public final class DetourSafetyGate {
             b.lavaInThreatBox(DangerWatcher.observedLavaInThreatBox(bot, ore).isPresent());
             int radius = cfg.detour().lavaClearRadius();
             boolean hazardLavaNear = state != null && (
-                    state.hazards().anyLavaWithin(bot.getBlockPos(), radius)
+                    state.hazards().anyLavaWithin(bot.blockPosition(), radius)
                     || (pose != null && state.hazards().anyLavaWithin(pose, radius))
                     || (ore != null && state.hazards().anyLavaWithin(ore, radius)));
             b.hazardLavaNear(hazardLavaNear);
@@ -155,7 +154,7 @@ public final class DetourSafetyGate {
                 b.deepDark(false);
             } else {
                 if (MiningAssistState.staleOrNever(tick, state.biomeTick(), 20)) {
-                    ServerWorld world = bot.getEntityWorld();
+                    ServerLevel world = bot.level();
                     PoiDetector.refreshBiome(bot, state, world, tick);
                 }
                 b.deepDark(cfg.safety().deepDarkVeto() && state.deepDark());
@@ -174,13 +173,13 @@ public final class DetourSafetyGate {
                         .poiWindowVeto(SafeGate.poiWindowVeto(state.poiWindow()))
                         .poiCandidatePending(SafeGate.candidatePending(state.lastPoiBand(), anyCandidateSatisfied,
                                 CAVERN_BLOCKS_DETOUR))
-                        .inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.getBlockPos()));
+                        .inNoDetourZone(MandatoryLatch.inNoDetourZone(uuid, state.dimensionKey(), bot.blockPosition()));
             }
         }
         if (stage.reads(10)) {
             int radius = 3;
             boolean trapNear = state != null && (
-                    state.hazards().anyTrapWithin(bot.getBlockPos(), radius)
+                    state.hazards().anyTrapWithin(bot.blockPosition(), radius)
                     || (pose != null && state.hazards().anyTrapWithin(pose, radius))
                     || (ore != null && state.hazards().anyTrapWithin(ore, radius)));
             b.trapNear(trapNear);

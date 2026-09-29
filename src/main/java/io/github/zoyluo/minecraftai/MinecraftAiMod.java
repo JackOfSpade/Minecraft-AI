@@ -72,7 +72,7 @@ public class MinecraftAiMod implements ModInitializer {
         MinecraftAiServerNetworking.INSTANCE.register();
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-            BotLog.lifecycle("server_started", "motd", server.getServerMotd());
+            BotLog.lifecycle("server_started", "motd", server.getMotd());
             RuntimeLifecycleCoordinator.INSTANCE.onServerStarted(server, config);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(RuntimeLifecycleCoordinator.INSTANCE::onServerStopping);
@@ -85,16 +85,16 @@ public class MinecraftAiMod implements ModInitializer {
             MinecraftAiServerNetworking.INSTANCE.tick(server);
             io.github.zoyluo.minecraftai.log.DiagnosticLogger.INSTANCE.tick(server);
             io.github.zoyluo.minecraftai.log.InventoryAudit.INSTANCE.tick(server);
-            io.github.zoyluo.minecraftai.mode.CapabilityRuntime.flushDue(server.getTicks());
-            if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {
+            io.github.zoyluo.minecraftai.mode.CapabilityRuntime.flushDue(server.getTickCount());
+            if (server.getTickCount() > 0 && server.getTickCount() % 6000 == 0) {
                 BotPersistence.INSTANCE.saveAllAsync(server);
             }
-            BotEdits.snapshotIfDue(server.getTicks(), assistSidecar);
+            BotEdits.snapshotIfDue(server.getTickCount(), assistSidecar);
             // One-shot idle-moment build a few seconds after start (lazy build stays the fallback).
             io.github.zoyluo.minecraftai.loot.RuntimeDropIndex.tickWarmup(server,
                     () -> io.github.zoyluo.minecraftai.task.TaskManager.INSTANCE.activeCount() == 0);
             // Keep last: feeds this tick's measured work to the mining assist's TickHeadroom.
-            MiningAssistRuntime.endTick(server.getTicks());
+            MiningAssistRuntime.endTick(server.getTickCount());
         });
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 MinecraftAiCommand.register(dispatcher, registryAccess));

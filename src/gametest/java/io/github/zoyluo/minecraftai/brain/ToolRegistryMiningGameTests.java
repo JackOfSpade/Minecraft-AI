@@ -12,47 +12,46 @@ import io.github.zoyluo.minecraftai.task.AbstractTask;
 import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.command.permission.LeveledPermissionPredicate;
-import net.minecraft.server.command.CommandOutput;
-import net.minecraft.server.command.ServerCommandSource;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.commands.CommandSource;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Runtime registry coverage for the public mine_ore argument contract. */
 public final class ToolRegistryMiningGameTests {
     @GameTest(maxTicks = 20)
-    public void aliasesResolveOnlyTheirRequestedOreFamily(TestContext context) {
+    public void aliasesResolveOnlyTheirRequestedOreFamily(GameTestHelper context) {
         if (!OreScan.oreFamily(Blocks.DIAMOND_ORE)
                 .equals(ToolRegistry.oreTargetsFrom("minecraft:diamond"))) {
-            context.throwGameTestException(Text.of("diamond alias resolved to the wrong ore family"));
+            context.fail(Component.nullToEmpty("diamond alias resolved to the wrong ore family"));
             return;
         }
         if (!OreScan.oreFamily(Blocks.IRON_ORE)
                 .equals(ToolRegistry.oreTargetsFrom("minecraft:raw_iron"))) {
-            context.throwGameTestException(Text.of("raw_iron alias resolved to the wrong ore family"));
+            context.fail(Component.nullToEmpty("raw_iron alias resolved to the wrong ore family"));
             return;
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void obsidianAndNonOreTargetsFailClosed(TestContext context) {
+    public void obsidianAndNonOreTargetsFailClosed(GameTestHelper context) {
         requireRejected(context, "minecraft:obsidian", true);
         requireRejected(context, "minecraft:stone", false);
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void strictDirectHandlersRejectWithoutDisturbingActiveWork(TestContext context) {
+    public void strictDirectHandlersRejectWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "StripDirectGT");
         try {
             ToolRegistry registry = new ToolRegistry();
@@ -65,11 +64,11 @@ public final class ToolRegistryMiningGameTests {
         } finally {
             cleanupFixture(context, fixture);
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void strictAssignTaskRejectsWithoutDisturbingActiveWork(TestContext context) {
+    public void strictAssignTaskRejectsWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "StripAssignGT");
         try {
             ToolRegistry registry = new ToolRegistry();
@@ -88,11 +87,11 @@ public final class ToolRegistryMiningGameTests {
         } finally {
             cleanupFixture(context, fixture);
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void unknownMineOreModeFailsClosedWithoutDisturbingActiveWork(TestContext context) {
+    public void unknownMineOreModeFailsClosedWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "MineOreModeGT");
         try {
             ToolDefinition definition = new ToolRegistry().get("mine_ore").orElse(null);
@@ -117,17 +116,17 @@ public final class ToolRegistryMiningGameTests {
         } finally {
             cleanupFixture(context, fixture);
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void strictPlayerCommandsRejectWithoutDisturbingActiveWork(TestContext context) {
+    public void strictPlayerCommandsRejectWithoutDisturbingActiveWork(GameTestHelper context) {
         ActiveFixture fixture = activeFixture(context, "StripCmdGT");
         try {
             RecordingCommandOutput output = new RecordingCommandOutput();
-            ServerCommandSource playerSource = fixture.bot().getCommandSource()
-                    .withPermissions(LeveledPermissionPredicate.OWNERS)
-                    .withOutput(output);
+            CommandSourceStack playerSource = fixture.bot().createCommandSourceStack()
+                    .withPermission(LevelBasedPermissionSet.OWNER)
+                    .withSource(output);
 
             runRejectedCommand(context, fixture, playerSource, output,
                     "minecraftai task assign StripCmdGT strip_mine north 8 4");
@@ -136,25 +135,25 @@ public final class ToolRegistryMiningGameTests {
         } finally {
             cleanupFixture(context, fixture);
         }
-        context.complete();
+        context.succeed();
     }
 
-    private static void requireRejected(TestContext context, String id, boolean requireCorrection) {
+    private static void requireRejected(GameTestHelper context, String id, boolean requireCorrection) {
         try {
             ToolRegistry.oreTargetsFrom(id);
-            context.throwGameTestException(Text.of(id + " silently became a common-ore target"));
+            context.fail(Component.nullToEmpty(id + " silently became a common-ore target"));
         } catch (IllegalArgumentException expected) {
             String message = expected.getMessage();
             if (message == null || !message.contains("unsupported_mine_ore_target: " + id)) {
-                context.throwGameTestException(Text.of("unexpected rejection for " + id + ": " + message));
+                context.fail(Component.nullToEmpty("unexpected rejection for " + id + ": " + message));
             }
             if (requireCorrection && !message.contains("use achieve_goal with item=" + id)) {
-                context.throwGameTestException(Text.of("missing achieve_goal correction for " + id));
+                context.fail(Component.nullToEmpty("missing achieve_goal correction for " + id));
             }
         }
     }
 
-    private static void requireToolRejected(TestContext context,
+    private static void requireToolRejected(GameTestHelper context,
                                             ActiveFixture fixture,
                                             ToolRegistry registry,
                                             String toolName,
@@ -169,13 +168,13 @@ public final class ToolRegistryMiningGameTests {
         requireUndisturbed(context, fixture, toolName);
     }
 
-    private static void runRejectedCommand(TestContext context,
+    private static void runRejectedCommand(GameTestHelper context,
                                            ActiveFixture fixture,
-                                           ServerCommandSource playerSource,
+                                           CommandSourceStack playerSource,
                                            RecordingCommandOutput output,
                                            String command) {
         output.clear();
-        fixture.bot().getEntityWorld().getServer().getCommandManager().parseAndExecute(playerSource, command);
+        fixture.bot().level().getServer().getCommands().performPrefixedCommand(playerSource, command);
         require(context, output.messages().stream().anyMatch(message ->
                         message.contains(StripMineTask.STRICT_SURVIVAL_REJECTION)),
                 command + " did not publish the typed rejection: " + output.messages());
@@ -185,20 +184,20 @@ public final class ToolRegistryMiningGameTests {
         requireUndisturbed(context, fixture, command);
     }
 
-    private static ActiveFixture activeFixture(TestContext context, String botName) {
-        var world = context.getWorld();
-        BlockPos spawn = context.getAbsolutePos(new BlockPos(1, 126, 1));
+    private static ActiveFixture activeFixture(GameTestHelper context, String botName) {
+        var world = context.getLevel();
+        BlockPos spawn = context.absolutePos(new BlockPos(1, 126, 1));
         prepareCell(world, spawn);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), botName, world, Vec3d.ofBottomCenter(spawn),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), botName, world, Vec3.atBottomCenterOf(spawn),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + botName));
 
         BotRuntimeOptions.INSTANCE.setVerboseReportsEnabled(bot, true);
         SentinelTask sentinel = new SentinelTask();
         TaskOrigin origin = TaskOrigin.of(TaskOrigin.Kind.VERIFY, "strip_mine_strict_gate_sentinel");
         TaskManager.INSTANCE.assign(bot, sentinel, origin);
-        ActionResult action = bot.getActionPack().startWalkTo(bot.getEntityPos().add(2.0D, 0.0D, 0.0D));
+        ActionResult action = bot.getActionPack().startWalkTo(bot.position().add(2.0D, 0.0D, 0.0D));
         require(context, action.isInProgress(), "sentinel walk action did not start");
 
         long reportSequence = BotReporter.INSTANCE.taskReportSequence(bot);
@@ -216,7 +215,7 @@ public final class ToolRegistryMiningGameTests {
                 actionSnapshot);
     }
 
-    private static void requireUndisturbed(TestContext context,
+    private static void requireUndisturbed(GameTestHelper context,
                                            ActiveFixture fixture,
                                            String route) {
         require(context, TaskManager.INSTANCE.getActive(fixture.bot()).orElse(null)
@@ -234,29 +233,29 @@ public final class ToolRegistryMiningGameTests {
                 route + " stopped or replaced the active walk action");
     }
 
-    private static void cleanupFixture(TestContext context, ActiveFixture fixture) {
+    private static void cleanupFixture(GameTestHelper context, ActiveFixture fixture) {
         IntentController.INSTANCE.cancelAll(
                 fixture.bot(), IntentController.ControlOrigin.SYSTEM,
                 "strip_mine_strict_gate_gametest_cleanup");
-        AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), fixture.botName());
+        AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), fixture.botName());
     }
 
-    private static void prepareCell(net.minecraft.server.world.ServerWorld world, BlockPos center) {
+    private static void prepareCell(net.minecraft.server.level.ServerLevel world, BlockPos center) {
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
-                world.setBlockState(center.add(dx, -1, dz), Blocks.STONE.getDefaultState(),
-                        Block.NOTIFY_LISTENERS);
-                world.setBlockState(center.add(dx, 0, dz), Blocks.AIR.getDefaultState(),
-                        Block.NOTIFY_LISTENERS);
-                world.setBlockState(center.add(dx, 1, dz), Blocks.AIR.getDefaultState(),
-                        Block.NOTIFY_LISTENERS);
+                world.setBlock(center.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(),
+                        Block.UPDATE_CLIENTS);
+                world.setBlock(center.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(),
+                        Block.UPDATE_CLIENTS);
+                world.setBlock(center.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(),
+                        Block.UPDATE_CLIENTS);
             }
         }
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 
@@ -309,26 +308,26 @@ public final class ToolRegistryMiningGameTests {
         }
     }
 
-    private static final class RecordingCommandOutput implements CommandOutput {
+    private static final class RecordingCommandOutput implements CommandSource {
         private final List<String> messages = new ArrayList<>();
 
         @Override
-        public void sendMessage(Text message) {
+        public void sendSystemMessage(Component message) {
             messages.add(message.getString());
         }
 
         @Override
-        public boolean shouldReceiveFeedback() {
+        public boolean acceptsSuccess() {
             return true;
         }
 
         @Override
-        public boolean shouldTrackOutput() {
+        public boolean acceptsFailure() {
             return true;
         }
 
         @Override
-        public boolean shouldBroadcastConsoleToOps() {
+        public boolean shouldInformAdmins() {
             return false;
         }
 

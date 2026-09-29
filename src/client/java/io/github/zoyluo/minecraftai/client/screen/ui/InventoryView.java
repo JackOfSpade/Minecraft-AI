@@ -4,18 +4,16 @@ import io.github.zoyluo.minecraftai.client.BotClientState;
 import io.github.zoyluo.minecraftai.client.BotCommandBridge;
 import io.github.zoyluo.minecraftai.network.payload.BotItemMoveC2S;
 import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-
 import java.util.List;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 /**
  * Interactive inventory panel: top half = AI inventory (click to take an item to the player),
@@ -110,13 +108,13 @@ public final class InventoryView implements PanelComponent {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer) {
-        PlayerInventory playerInv = playerInventory();
+    public void render(GuiGraphics context, int mouseX, int mouseY, float delta, Font renderer) {
+        Inventory playerInv = playerInventory();
 
         ItemStack hovered = ItemStack.EMPTY;
 
         // -- AI equipment (head/chest/legs/feet/main hand/off hand, display only, not transferable) --
-        context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.section_equip"), gridX, y, Theme.TEXT_DIM);
+        context.drawString(renderer, Theme.tr("inventory.minecraftai.section_equip"), gridX, y, Theme.TEXT_DIM);
         for (int i = 0; i < equipSlots.length; i++) {
             int gx = gridX + i * SLOT;
             boolean hot = inCell(mouseX, mouseY, gx, equipRowY);
@@ -127,7 +125,7 @@ public final class InventoryView implements PanelComponent {
         }
 
         // -- AI inventory --
-        context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.section_ai"), gridX, aiLabelY, Theme.TEXT_DIM);
+        context.drawString(renderer, Theme.tr("inventory.minecraftai.section_ai"), gridX, aiLabelY, Theme.TEXT_DIM);
         for (int slot = 0; slot < aiSlots.length; slot++) {
             int gx = gridX + (slot % COLS) * SLOT;
             int gy = aiGridY + (slot / COLS) * SLOT;
@@ -139,7 +137,7 @@ public final class InventoryView implements PanelComponent {
         }
 
         // -- Player inventory --
-        context.drawTextWithShadow(renderer, Theme.tr("inventory.minecraftai.section_self"), gridX, plLabelY, Theme.TEXT_DIM);
+        context.drawString(renderer, Theme.tr("inventory.minecraftai.section_self"), gridX, plLabelY, Theme.TEXT_DIM);
         if (playerInv != null) {
             for (int row = 0; row < PL_MAIN_ROWS; row++) {
                 for (int col = 0; col < COLS; col++) {
@@ -147,7 +145,7 @@ public final class InventoryView implements PanelComponent {
                     int gx = gridX + col * SLOT;
                     int gy = plMainY + row * SLOT;
                     boolean hot = inCell(mouseX, mouseY, gx, gy);
-                    ItemStack stack = playerInv.getStack(slot);
+                    ItemStack stack = playerInv.getItem(slot);
                     drawSlot(context, renderer, gx, gy, stack, hot);
                     if (hot && !stack.isEmpty()) {
                         hovered = stack;
@@ -157,7 +155,7 @@ public final class InventoryView implements PanelComponent {
             for (int col = 0; col < COLS; col++) {
                 int gx = gridX + col * SLOT;
                 boolean hot = inCell(mouseX, mouseY, gx, plHotbarY);
-                ItemStack stack = playerInv.getStack(col);
+                ItemStack stack = playerInv.getItem(col);
                 drawSlot(context, renderer, gx, plHotbarY, stack, hot);
                 if (hot && !stack.isEmpty()) {
                     hovered = stack;
@@ -166,7 +164,7 @@ public final class InventoryView implements PanelComponent {
         }
 
         if (!hovered.isEmpty()) {
-            context.drawItemTooltip(renderer, hovered, mouseX, mouseY);
+            context.setTooltipForNextFrame(renderer, hovered, mouseX, mouseY);
         }
     }
 
@@ -177,7 +175,7 @@ public final class InventoryView implements PanelComponent {
         if (!left && !right) {
             return false;
         }
-        boolean single = left && MinecraftClient.getInstance().isShiftPressed(); // Shift+left-click = single item
+        boolean single = left && Minecraft.getInstance().hasShiftDown(); // Shift+left-click = single item
         boolean half = right;                            // right-click = half stack
 
         // AI slots: take out
@@ -193,7 +191,7 @@ public final class InventoryView implements PanelComponent {
             }
         }
         // Player main inventory: give item
-        PlayerInventory inv = playerInventory();
+        Inventory inv = playerInventory();
         for (int row = 0; row < PL_MAIN_ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
                 int gx = gridX + col * SLOT;
@@ -215,11 +213,11 @@ public final class InventoryView implements PanelComponent {
         return false;
     }
 
-    private void putFromPlayer(PlayerInventory inv, int slot, boolean single, boolean half) {
+    private void putFromPlayer(Inventory inv, int slot, boolean single, boolean half) {
         if (inv == null) {
             return;
         }
-        ItemStack src = inv.getStack(slot);
+        ItemStack src = inv.getItem(slot);
         if (!src.isEmpty()) {
             BotCommandBridge.moveItem(target, BotItemMoveC2S.PUT, slot, amountFor(src, single, half));
         }
@@ -240,28 +238,28 @@ public final class InventoryView implements PanelComponent {
         return mx >= gx && mx < gx + SLOT && my >= gy && my < gy + SLOT;
     }
 
-    private void drawSlot(DrawContext context, TextRenderer renderer, int gx, int gy, ItemStack stack, boolean hovered) {
+    private void drawSlot(GuiGraphics context, Font renderer, int gx, int gy, ItemStack stack, boolean hovered) {
         context.fill(gx, gy, gx + SLOT, gy + SLOT, Theme.TRACK);
-        context.drawHorizontalLine(gx, gx + SLOT - 1, gy, Theme.BORDER);
-        context.drawHorizontalLine(gx, gx + SLOT - 1, gy + SLOT - 1, Theme.BORDER);
-        context.drawVerticalLine(gx, gy, gy + SLOT - 1, Theme.BORDER);
-        context.drawVerticalLine(gx + SLOT - 1, gy, gy + SLOT - 1, Theme.BORDER);
+        context.hLine(gx, gx + SLOT - 1, gy, Theme.BORDER);
+        context.hLine(gx, gx + SLOT - 1, gy + SLOT - 1, Theme.BORDER);
+        context.vLine(gx, gy, gy + SLOT - 1, Theme.BORDER);
+        context.vLine(gx + SLOT - 1, gy, gy + SLOT - 1, Theme.BORDER);
         if (stack != null && !stack.isEmpty()) {
-            context.drawItem(stack, gx + 1, gy + 1);
-            context.drawStackOverlay(renderer, stack, gx + 1, gy + 1);
+            context.renderItem(stack, gx + 1, gy + 1);
+            context.renderItemDecorations(renderer, stack, gx + 1, gy + 1);
         }
         if (hovered) {
             context.fill(gx + 1, gy + 1, gx + SLOT - 1, gy + SLOT - 1, HOVER);
         }
     }
 
-    private static PlayerInventory playerInventory() {
-        MinecraftClient client = MinecraftClient.getInstance();
+    private static Inventory playerInventory() {
+        Minecraft client = Minecraft.getInstance();
         return client.player == null ? null : client.player.getInventory();
     }
 
     private static ItemStack stack(BotSnapshotS2C.ItemEntry entry) {
-        Item item = Registries.ITEM.getOptionalValue(Identifier.of(entry.itemId())).orElse(Items.BARRIER);
+        Item item = BuiltInRegistries.ITEM.getOptional(Identifier.parse(entry.itemId())).orElse(Items.BARRIER);
         return new ItemStack(item, entry.count());
     }
 }

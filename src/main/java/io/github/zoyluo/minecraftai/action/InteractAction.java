@@ -2,37 +2,37 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 
 public final class InteractAction {
     private InteractAction() {
     }
 
     public static ActionResult attackEntity(AIPlayerEntity player, Entity target) {
-        Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
+        Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
         LookAction.lookAt(player, targetCenter);
         player.attack(target);
-        player.swingHand(Hand.MAIN_HAND);
-        player.resetTicksSinceLastAttack();
-        player.updateLastActionTime();
+        player.swing(InteractionHand.MAIN_HAND);
+        player.resetOnlyAttackStrengthTicker();
+        player.resetLastActionTime();
         BotLog.action(player, "attack", "target_type", target.getType(), "target_id", target.getId(),
-                "target_hp", target instanceof net.minecraft.entity.LivingEntity living ? living.getHealth() : -1.0F);
+                "target_hp", target instanceof net.minecraft.world.entity.LivingEntity living ? living.getHealth() : -1.0F);
         return ActionResult.SUCCESS;
     }
 
-    public static ActionResult useItemOnEntity(AIPlayerEntity player, Entity target, Hand hand) {
-        net.minecraft.util.ActionResult result = target.interact(player, hand);
-        return result.isAccepted() ? ActionResult.SUCCESS : ActionResult.failed("interact_entity_" + result.getClass().getSimpleName());
+    public static ActionResult useItemOnEntity(AIPlayerEntity player, Entity target, InteractionHand hand) {
+        net.minecraft.world.InteractionResult result = target.interact(player, hand);
+        return result.consumesAction() ? ActionResult.SUCCESS : ActionResult.failed("interact_entity_" + result.getClass().getSimpleName());
     }
 
-    public static ActionResult useItemInAir(AIPlayerEntity player, Hand hand) {
-        net.minecraft.util.ActionResult result = player.interactionManager.interactItem(
+    public static ActionResult useItemInAir(AIPlayerEntity player, InteractionHand hand) {
+        net.minecraft.world.InteractionResult result = player.gameMode.useItem(
                 player,
-                player.getEntityWorld(),
-                player.getStackInHand(hand),
+                player.level(),
+                player.getItemInHand(hand),
                 hand);
-        return result.isAccepted() ? ActionResult.SUCCESS : ActionResult.failed("interact_item_" + result.getClass().getSimpleName());
+        return result.consumesAction() ? ActionResult.SUCCESS : ActionResult.failed("interact_item_" + result.getClass().getSimpleName());
     }
 }

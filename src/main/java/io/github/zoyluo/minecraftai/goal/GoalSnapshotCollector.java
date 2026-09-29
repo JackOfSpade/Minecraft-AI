@@ -8,15 +8,6 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.task.BlueprintSchema;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -26,6 +17,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 
 public final class GoalSnapshotCollector {
     private static final int STATION_RADIUS = 8;
@@ -43,10 +42,10 @@ public final class GoalSnapshotCollector {
             int buildSkipped
     ) {
         public Context {
-            origin = origin == null ? BlockPos.ORIGIN : origin.toImmutable();
+            origin = origin == null ? BlockPos.ZERO : origin.immutable();
             boundContainers = boundContainers == null ? Set.of() : boundContainers.stream()
-                    .map(BlockPos::toImmutable).collect(java.util.stream.Collectors.toUnmodifiableSet());
-            buildAnchor = buildAnchor == null ? null : buildAnchor.toImmutable();
+                    .map(BlockPos::immutable).collect(java.util.stream.Collectors.toUnmodifiableSet());
+            buildAnchor = buildAnchor == null ? null : buildAnchor.immutable();
         }
 
         public static Context at(BlockPos origin) {
@@ -55,7 +54,7 @@ public final class GoalSnapshotCollector {
     }
 
     public static GoalSnapshot collect(AIPlayerEntity bot, Goal goal, Context context) {
-        Context resolved = context == null ? Context.at(bot.getBlockPos()) : context;
+        Context resolved = context == null ? Context.at(bot.blockPosition()) : context;
         Map<String, Integer> inventory = inventoryCounts(bot);
         Set<String> capabilities = armorCapabilities(bot);
         if (goal instanceof Goal.Workstation || goal instanceof Goal.Stockpile) {
@@ -69,7 +68,7 @@ public final class GoalSnapshotCollector {
                 ? MiningFoodReserve.units(bot.getInventory()) : 0;
         Optional<StructureReport> structure = Optional.empty();
         if (goal instanceof Goal.Build && resolved.blueprint() != null && resolved.buildAnchor() != null) {
-            structure = Optional.of(StructureVerifier.verify(bot.getEntityWorld(), resolved.blueprint(),
+            structure = Optional.of(StructureVerifier.verify(bot.level(), resolved.blueprint(),
                     resolved.buildAnchor(), resolved.buildPlaced(), resolved.buildSkipped()));
         }
         return new GoalSnapshot(inventory, ToolTier.bestPickaxeTier(bot), capabilities,
@@ -80,7 +79,7 @@ public final class GoalSnapshotCollector {
         Map<String, Integer> counts = new HashMap<>();
         for (ItemStack stack : allStacks(bot)) {
             if (!stack.isEmpty() && !nearlyBroken(stack)) {
-                counts.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+                counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
             }
         }
         return counts;
@@ -110,27 +109,27 @@ public final class GoalSnapshotCollector {
 
     private static List<ItemStack> allStacks(AIPlayerEntity bot) {
         List<ItemStack> stacks = new ArrayList<>();
-        stacks.addAll(bot.getInventory().getMainStacks());
-        stacks.add(bot.getEquippedStack(EquipmentSlot.OFFHAND));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.HEAD));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.CHEST));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.LEGS));
-        stacks.add(bot.getEquippedStack(EquipmentSlot.FEET));
+        stacks.addAll(bot.getInventory().getNonEquipmentItems());
+        stacks.add(bot.getItemBySlot(EquipmentSlot.OFFHAND));
+        stacks.add(bot.getItemBySlot(EquipmentSlot.HEAD));
+        stacks.add(bot.getItemBySlot(EquipmentSlot.CHEST));
+        stacks.add(bot.getItemBySlot(EquipmentSlot.LEGS));
+        stacks.add(bot.getItemBySlot(EquipmentSlot.FEET));
         return stacks;
     }
 
     private static Map<String, Integer> stationCounts(AIPlayerEntity bot, BlockPos origin) {
         Map<String, Integer> counts = new HashMap<>();
-        for (BlockPos pos : BlockPos.iterateOutwards(origin, STATION_RADIUS, 4, STATION_RADIUS)) {
+        for (BlockPos pos : BlockPos.withinManhattan(origin, STATION_RADIUS, 4, STATION_RADIUS)) {
             if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 continue;
             }
-            var state = bot.getEntityWorld().getBlockState(pos);
-            if (state.isOf(Blocks.CRAFTING_TABLE)) {
+            var state = bot.level().getBlockState(pos);
+            if (state.is(Blocks.CRAFTING_TABLE)) {
                 counts.merge("minecraft:crafting_table", 1, Integer::sum);
-            } else if (state.isOf(Blocks.FURNACE)) {
+            } else if (state.is(Blocks.FURNACE)) {
                 counts.merge("minecraft:furnace", 1, Integer::sum);
-            } else if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+            } else if (state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST)) {
                 counts.merge("minecraft:chest", 1, Integer::sum);
             }
         }
@@ -141,20 +140,20 @@ public final class GoalSnapshotCollector {
         List<BlockPos> positions = context.boundContainers().isEmpty()
                 ? scanContainerPositions(bot, context.origin())
                 : List.copyOf(context.boundContainers());
-        Set<Inventory> unique = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Container> unique = Collections.newSetFromMap(new IdentityHashMap<>());
         Map<String, Integer> counts = new HashMap<>();
         for (BlockPos pos : positions) {
             if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 continue;
             }
-            Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
+            Container inventory = ContainerAction.resolve(bot, pos).orElse(null);
             if (inventory == null || !unique.add(inventory)) {
                 continue;
             }
-            for (int slot = 0; slot < inventory.size(); slot++) {
-                ItemStack stack = inventory.getStack(slot);
+            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                ItemStack stack = inventory.getItem(slot);
                 if (!stack.isEmpty()) {
-                    counts.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+                    counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
                 }
             }
         }
@@ -163,16 +162,16 @@ public final class GoalSnapshotCollector {
 
     private static List<BlockPos> scanContainerPositions(AIPlayerEntity bot, BlockPos origin) {
         List<BlockPos> positions = new ArrayList<>();
-        for (BlockPos pos : BlockPos.iterateOutwards(origin, CONTAINER_RADIUS, 6, CONTAINER_RADIUS)) {
+        for (BlockPos pos : BlockPos.withinManhattan(origin, CONTAINER_RADIUS, 6, CONTAINER_RADIUS)) {
             if (ObservableWorldQuery.canObserveBlock(bot, pos)
-                    && bot.getEntityWorld().getBlockEntity(pos) instanceof Inventory) {
-                positions.add(pos.toImmutable());
+                    && bot.level().getBlockEntity(pos) instanceof Container) {
+                positions.add(pos.immutable());
             }
         }
         return positions;
     }
 
     private static boolean nearlyBroken(ItemStack stack) {
-        return stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1;
+        return stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1;
     }
 }

@@ -4,10 +4,9 @@ import io.github.zoyluo.minecraftai.client.BotClientState;
 import io.github.zoyluo.minecraftai.client.screen.ui.PanelComponent;
 import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
 import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-
 import java.util.List;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 
 public abstract class PanelCard implements PanelComponent {
     protected int x;
@@ -37,10 +36,10 @@ public abstract class PanelCard implements PanelComponent {
     }
 
     @Override
-    public final void render(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer) {
+    public final void render(GuiGraphics context, int mouseX, int mouseY, float delta, Font renderer) {
         Theme.panel(context, x, y, w, h, Theme.CARD_BG);
-        context.drawTextWithShadow(renderer, Theme.tr(titleKey()), x + Theme.PAD, y + 7, Theme.TEXT_STRONG);
-        context.drawHorizontalLine(x + Theme.PAD, x + w - Theme.PAD - 1, y + 19, Theme.BORDER);
+        context.drawString(renderer, Theme.tr(titleKey()), x + Theme.PAD, y + 7, Theme.TEXT_STRONG);
+        context.hLine(x + Theme.PAD, x + w - Theme.PAD - 1, y + 19, Theme.BORDER);
         renderBody(context, mouseX, mouseY, delta, renderer, x + Theme.PAD, y + 25, w - Theme.PAD * 2, h - 31);
     }
 
@@ -48,5 +47,5 @@ public abstract class PanelCard implements PanelComponent {
 
     protected abstract int bodyHeight();
 
-    protected abstract void renderBody(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer, int bx, int by, int bw, int bh);
+    protected abstract void renderBody(GuiGraphics context, int mouseX, int mouseY, float delta, Font renderer, int bx, int by, int bw, int bh);
 }

@@ -3,12 +3,11 @@ package io.github.zoyluo.minecraftai.mining.assist;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * The shadow-mode log lines of the sensor (mining-assist design 7: {@code sense.shadowLog} logs band
@@ -108,7 +107,7 @@ public final class MiningAssistLog {
     private static void emitSummary(AIPlayerEntity bot, MiningAssistState state, int serverTick,
                                     SenseCounters window, int windowStart, boolean last) {
         double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
-        Vec3d eye = bot.getEyePos();
+        Vec3 eye = bot.getEyePosition();
         FreeRunStats.Openness openness = state.ring().openness(
                 serverTick, SweepEngine.eyeCell(eye.x, eye.y, eye.z), radius);
         List<SightingLedger.Sighting> top = state.sightings().snapshotSortedByValueDesc();
@@ -235,7 +234,7 @@ public final class MiningAssistLog {
         if (!shadowLog()) {
             return 0;
         }
-        Vec3d eye = bot.getEyePos();
+        Vec3 eye = bot.getEyePosition();
         int written = 0;
         for (SightingLedger.Sighting sighting : state.sightings().snapshotSortedByValueDesc()) {
             if (sighting.rawValue() < minValue) {

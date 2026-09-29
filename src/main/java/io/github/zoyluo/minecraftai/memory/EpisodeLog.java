@@ -1,8 +1,6 @@
 package io.github.zoyluo.minecraftai.memory;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -10,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
 
 /**
  * Episodic memory (layer 2 of the three-layer memory model): per-bot event timeline —
@@ -33,9 +32,9 @@ public final class EpisodeLog {
     }
 
     public void record(AIPlayerEntity bot, Type type, BlockPos pos, String detail) {
-        Deque<EpisodeEvent> deque = events.computeIfAbsent(bot.getUuid(), k -> new ArrayDeque<>());
-        EpisodeEvent event = new EpisodeEvent(bot.getEntityWorld().getServer().getTicks(), type,
-                pos.toImmutable(), detail == null ? "" : detail);
+        Deque<EpisodeEvent> deque = events.computeIfAbsent(bot.getUUID(), k -> new ArrayDeque<>());
+        EpisodeEvent event = new EpisodeEvent(bot.level().getServer().getTickCount(), type,
+                pos.immutable(), detail == null ? "" : detail);
         synchronized (deque) {
             deque.addLast(event);
             while (deque.size() > CAP) {
@@ -44,7 +43,7 @@ public final class EpisodeLog {
         }
         // Distillation hook: episodes flow in -> semantic knowledge is deposited
         // (death clustering -> danger zones / resource found -> resource points / failure -> lessons).
-        KnowledgeBase.INSTANCE.distill(bot, event, snapshot(bot.getUuid()));
+        KnowledgeBase.INSTANCE.distill(bot, event, snapshot(bot.getUUID()));
     }
 
     /** Test isolation: clears this bot's episode stream (suite scenarios cross-contaminate:

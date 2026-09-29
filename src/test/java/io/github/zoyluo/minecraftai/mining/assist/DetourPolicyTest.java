@@ -4,14 +4,14 @@ import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy.Admission;
 import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy.Ranked;
 import io.github.zoyluo.minecraftai.mining.assist.DetourPolicy.TargetLock;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger.Sighting;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -22,7 +22,7 @@ class DetourPolicyTest {
     private static final double DELTA = 1e-9;
     private static final MiningAssistConfig.Detour DEFAULT_CFG = MiningAssistConfig.Detour.DEFAULTS;
     /** {@code eye} placed at the feet cell's own block centre, so eye distance equals block-to-block distance. */
-    private static final Vec3d ORIGIN_EYE = new Vec3d(0.5D, 0.5D, 0.5D);
+    private static final Vec3 ORIGIN_EYE = new Vec3(0.5D, 0.5D, 0.5D);
     private static final BlockPos ORIGIN = pos(0, 0, 0);
 
     private static BlockPos pos(int x, int y, int z) {
@@ -37,8 +37,8 @@ class DetourPolicyTest {
         return new Sighting(p, id, rawValue, 0, 0);
     }
 
-    private static Vec3d centre(BlockPos p) {
-        return new Vec3d(p.getX() + 0.5D, p.getY() + 0.5D, p.getZ() + 0.5D);
+    private static Vec3 centre(BlockPos p) {
+        return new Vec3(p.getX() + 0.5D, p.getY() + 0.5D, p.getZ() + 0.5D);
     }
 
     private static MiningAssistConfig.Detour cfg(int minValue, double minScore, int maxRadius, int maxUp, int maxDown,
@@ -133,7 +133,7 @@ class DetourPolicyTest {
     @Test
     void ironAtEightAdmitsUnlockedAndFailsLockedScore() {
         BlockPos ore = pos(8, 0, 0);
-        Vec3d eye = centre(ore);
+        Vec3 eye = centre(ore);
         Admission unlocked = DetourPolicy.admit(30, 1, ore, ORIGIN, eye, ORIGIN, TargetLock.NONE, DEFAULT_CFG);
         assertEquals(Admission.ADMIT, unlocked);
         assertEquals(30.0D / 14.0D, DetourPolicy.score(30, 1, DetourPolicy.cost(8, 0, 0)), DELTA);
@@ -184,9 +184,9 @@ class DetourPolicyTest {
     @Test
     void rangeEyeDistanceBoundary() {
         BlockPos ore = pos(5, 0, 5);
-        Vec3d centre = centre(ore);
-        Vec3d eyeAtFourteen = new Vec3d(centre.getX(), centre.getY(), centre.getZ() - 14.0D);
-        Vec3d eyeAtFourteenOhOne = new Vec3d(centre.getX(), centre.getY(), centre.getZ() - 14.01D);
+        Vec3 centre = centre(ore);
+        Vec3 eyeAtFourteen = new Vec3(centre.x(), centre.y(), centre.z() - 14.0D);
+        Vec3 eyeAtFourteenOhOne = new Vec3(centre.x(), centre.y(), centre.z() - 14.01D);
         assertEquals(Admission.ADMIT,
                 DetourPolicy.admit(100, 1, ore, ORIGIN, eyeAtFourteen, ORIGIN, TargetLock.NONE, DEFAULT_CFG));
         assertEquals(Admission.RANGE,

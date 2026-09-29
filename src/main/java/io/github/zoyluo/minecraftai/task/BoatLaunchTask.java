@@ -5,13 +5,12 @@ import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.item.Item;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.item.Item;
 
 /**
  * Crafts (when possible), launches, and optionally boards a boat using ordinary player actions.
@@ -183,7 +182,7 @@ public final class BoatLaunchTask extends AbstractTask {
                 return;
             }
         }
-        boolean arrived = bot.getEntityPos().squaredDistanceTo(waterApproach.toCenterPos()) <= 2.25D;
+        boolean arrived = bot.position().distanceToSqr(waterApproach.getCenter()) <= 2.25D;
         if (arrived) {
             bot.getActionPack().stopAll();
             phase = Phase.FIND_WATER;
@@ -194,7 +193,7 @@ public final class BoatLaunchTask extends AbstractTask {
         }
         ActionResult path = bot.getActionPack().startPathTo(waterApproach);
         if (path.isFailed()) {
-            ActionResult walk = bot.getActionPack().startWalkTo(waterApproach.toCenterPos(), 1.0D);
+            ActionResult walk = bot.getActionPack().startWalkTo(waterApproach.getCenter(), 1.0D);
             if (walk.isFailed()) {
                 lastProblem = "water_unreachable:" + path.reason();
                 phase = Phase.FIND_WATER;
@@ -204,11 +203,11 @@ public final class BoatLaunchTask extends AbstractTask {
     }
 
     private void approachShore(AIPlayerEntity bot) {
-        if (launchSite == null || !BoatSupport.isWater(bot.getEntityWorld(), launchSite.water())) {
+        if (launchSite == null || !BoatSupport.isWater(bot.level(), launchSite.water())) {
             phase = Phase.FIND_WATER;
             return;
         }
-        double distanceSquared = bot.getEntityPos().squaredDistanceTo(launchSite.shore().toCenterPos());
+        double distanceSquared = bot.position().distanceToSqr(launchSite.shore().getCenter());
         if (distanceSquared <= 2.25D) {
             bot.getActionPack().stopAll();
             phase = Phase.LAUNCH;
@@ -219,7 +218,7 @@ public final class BoatLaunchTask extends AbstractTask {
         }
         ActionResult path = bot.getActionPack().startPathTo(launchSite.shore());
         if (path.isFailed()) {
-            ActionResult walk = bot.getActionPack().startWalkTo(launchSite.shore().toCenterPos(), 1.0D);
+            ActionResult walk = bot.getActionPack().startWalkTo(launchSite.shore().getCenter(), 1.0D);
             if (walk.isFailed()) {
                 lastProblem = "shore_unreachable:" + path.reason();
                 // Give up on this shore and go back to FIND_WATER to try another one: if it
@@ -237,7 +236,7 @@ public final class BoatLaunchTask extends AbstractTask {
     }
 
     private void launch(AIPlayerEntity bot) {
-        if (launchSite == null || !BoatSupport.isWater(bot.getEntityWorld(), launchSite.water())) {
+        if (launchSite == null || !BoatSupport.isWater(bot.level(), launchSite.water())) {
             phase = Phase.FIND_WATER;
             return;
         }
@@ -248,8 +247,8 @@ public final class BoatLaunchTask extends AbstractTask {
         }
         BoatAction.Placement placement = BoatAction.placeBoatInWater(bot, launchSite.water());
         if (placement.success()) {
-            AbstractBoatEntity boat = placement.boat().orElseThrow();
-            launchedBoatId = boat.getUuid();
+            AbstractBoat boat = placement.boat().orElseThrow();
+            launchedBoatId = boat.getUUID();
             BotLog.action(bot, "boat_launch_complete", "boat_id", launchedBoatId,
                     "water", launchSite.water().toShortString());
             if (boardAfterLaunch) {
@@ -271,12 +270,12 @@ public final class BoatLaunchTask extends AbstractTask {
 
     private void board(AIPlayerEntity bot) {
         if (BoatSupport.mountedBoat(bot)
-                .map(boat -> boat.getUuid().equals(launchedBoatId))
+                .map(boat -> boat.getUUID().equals(launchedBoatId))
                 .orElse(false)) {
             complete();
             return;
         }
-        AbstractBoatEntity boat = BoatSupport.boatById(bot, launchedBoatId).orElse(null);
+        AbstractBoat boat = BoatSupport.boatById(bot, launchedBoatId).orElse(null);
         if (boat == null) {
             fail("launched_boat_unavailable");
             return;

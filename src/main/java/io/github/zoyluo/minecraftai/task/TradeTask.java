@@ -6,17 +6,16 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mixin.MerchantEntityInvokerMixin;
-import net.minecraft.entity.passive.VillagerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.Box;
-import net.minecraft.village.TradeOffer;
-
 import java.util.Comparator;
 import java.lang.reflect.Method;
 import java.util.Optional;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.trading.MerchantOffer;
+import net.minecraft.world.phys.AABB;
 
 public final class TradeTask extends AbstractTask {
     private enum Phase {
@@ -32,7 +31,7 @@ public final class TradeTask extends AbstractTask {
     private final int maxDistance;
 
     private Phase phase = Phase.FIND_VILLAGER;
-    private VillagerEntity villager;
+    private Villager villager;
     private int phaseTicks;
 
     public TradeTask(Item targetItem, int maxDistance) {
@@ -49,7 +48,7 @@ public final class TradeTask extends AbstractTask {
     public String describe() {
         return targetItem == null
                 ? "Trading with nearby villager"
-                : "Trading for " + Registries.ITEM.getId(targetItem);
+                : "Trading for " + BuiltInRegistries.ITEM.getKey(targetItem);
     }
 
     @Override
@@ -93,9 +92,9 @@ public final class TradeTask extends AbstractTask {
             transition(Phase.TRADE);
             return;
         }
-        ActionResult result = bot.getActionPack().startPathTo(villager.getBlockPos());
+        ActionResult result = bot.getActionPack().startPathTo(villager.blockPosition());
         if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(villager.getEntityPos());
+            bot.getActionPack().startWalkTo(villager.position());
         }
         transition(Phase.MOVE_TO_VILLAGER);
     }
@@ -105,16 +104,16 @@ public final class TradeTask extends AbstractTask {
             transition(Phase.FIND_VILLAGER);
             return;
         }
-        LookAction.lookAt(bot, villager.getEntityPos().add(0.0D, villager.getHeight() * 0.5D, 0.0D));
+        LookAction.lookAt(bot, villager.position().add(0.0D, villager.getBbHeight() * 0.5D, 0.0D));
         if (bot.distanceTo(villager) <= TRADE_RANGE) {
             bot.getActionPack().stopAll();
             transition(Phase.TRADE);
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle() && phaseTicks > 20) {
-            ActionResult result = bot.getActionPack().startPathTo(villager.getBlockPos());
+            ActionResult result = bot.getActionPack().startPathTo(villager.blockPosition());
             if (result.isFailed()) {
-                bot.getActionPack().startWalkTo(villager.getEntityPos());
+                bot.getActionPack().startWalkTo(villager.position());
             }
         }
         phaseTicks++;
@@ -125,14 +124,14 @@ public final class TradeTask extends AbstractTask {
             fail("villager_lost");
             return;
         }
-        LookAction.lookAt(bot, villager.getEntityPos().add(0.0D, villager.getHeight() * 0.5D, 0.0D));
-        TradeOffer offer = selectOffer(bot).orElse(null);
+        LookAction.lookAt(bot, villager.position().add(0.0D, villager.getBbHeight() * 0.5D, 0.0D));
+        MerchantOffer offer = selectOffer(bot).orElse(null);
         if (offer == null) {
             fail("no_affordable_offer");
             return;
         }
-        ItemStack firstBuy = offer.getDisplayedFirstBuyItem();
-        ItemStack sell = offer.copySellItem();
+        ItemStack firstBuy = offer.getCostA();
+        ItemStack sell = offer.assemble();
         if (!canFit(bot, sell)) {
             fail("inventory_full");
             return;
@@ -146,7 +145,7 @@ public final class TradeTask extends AbstractTask {
             fail("give_failed:" + give.reason());
             return;
         }
-        offer.use();
+        offer.increaseUses();
         if (!afterUsing(villager, offer)) {
             fail("after_using_failed");
             return;
@@ -154,54 +153,54 @@ public final class TradeTask extends AbstractTask {
         // task_completed only carries elapsed_ticks; without this, what was actually bought/sold
         // (the whole point of this task) leaves no trace at all once it succeeds.
         BotLog.action(bot, "trade_completed",
-                "received", Registries.ITEM.getId(sell.getItem()), "received_count", sell.getCount(),
-                "paid", Registries.ITEM.getId(firstBuy.getItem()), "paid_count", firstBuy.getCount());
+                "received", BuiltInRegistries.ITEM.getKey(sell.getItem()), "received_count", sell.getCount(),
+                "paid", BuiltInRegistries.ITEM.getKey(firstBuy.getItem()), "paid_count", firstBuy.getCount());
         complete();
     }
 
-    private Optional<VillagerEntity> nearestVillager(AIPlayerEntity bot) {
+    private Optional<Villager> nearestVillager(AIPlayerEntity bot) {
         double range = Math.min(maxDistance, SEARCH_RANGE);
-        Box box = bot.getBoundingBox().expand(range);
-        return bot.getEntityWorld()
-                .getEntitiesByClass(VillagerEntity.class, box, entity -> entity.isAlive() && !entity.isBaby())
+        AABB box = bot.getBoundingBox().inflate(range);
+        return bot.level()
+                .getEntitiesOfClass(Villager.class, box, entity -> entity.isAlive() && !entity.isBaby())
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
     }
 
-    private Optional<TradeOffer> selectOffer(AIPlayerEntity bot) {
+    private Optional<MerchantOffer> selectOffer(AIPlayerEntity bot) {
         return villager.getOffers().stream()
-                .filter(offer -> !offer.isDisabled())
+                .filter(offer -> !offer.isOutOfStock())
                 .filter(this::isSimpleOneInputOffer)
-                .filter(offer -> targetItem == null || offer.getSellItem().isOf(targetItem))
+                .filter(offer -> targetItem == null || offer.getResult().is(targetItem))
                 .filter(offer -> canAfford(bot, offer))
                 .findFirst();
     }
 
-    private boolean isSimpleOneInputOffer(TradeOffer offer) {
-        return offer.getDisplayedSecondBuyItem().isEmpty();
+    private boolean isSimpleOneInputOffer(MerchantOffer offer) {
+        return offer.getCostB().isEmpty();
     }
 
-    private boolean canAfford(AIPlayerEntity bot, TradeOffer offer) {
-        ItemStack firstBuy = offer.getDisplayedFirstBuyItem();
+    private boolean canAfford(AIPlayerEntity bot, MerchantOffer offer) {
+        ItemStack firstBuy = offer.getCostA();
         return !firstBuy.isEmpty()
                 && InventoryAction.countItem(bot, firstBuy.getItem()) >= firstBuy.getCount();
     }
 
     private boolean canFit(AIPlayerEntity bot, ItemStack output) {
-        PlayerInventory inventory = bot.getInventory();
-        for (ItemStack stack : inventory.getMainStacks()) {
+        Inventory inventory = bot.getInventory();
+        for (ItemStack stack : inventory.getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 return true;
             }
-            if (stack.isOf(output.getItem()) && stack.getCount() < Math.min(stack.getMaxCount(), output.getMaxCount())) {
+            if (stack.is(output.getItem()) && stack.getCount() < Math.min(stack.getMaxStackSize(), output.getMaxStackSize())) {
                 return true;
             }
         }
         return false;
     }
 
-    private boolean afterUsing(VillagerEntity villager, TradeOffer offer) {
+    private boolean afterUsing(Villager villager, MerchantOffer offer) {
         try {
             ((MerchantEntityInvokerMixin) villager).minecraftai$invokeAfterUsing(offer);
             return true;
@@ -212,7 +211,7 @@ public final class TradeTask extends AbstractTask {
             Class<?> type = villager.getClass();
             while (type != null) {
                 try {
-                    Method method = type.getDeclaredMethod(methodName, TradeOffer.class);
+                    Method method = type.getDeclaredMethod(methodName, MerchantOffer.class);
                     method.setAccessible(true);
                     method.invoke(villager, offer);
                     return true;

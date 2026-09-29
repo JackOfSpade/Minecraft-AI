@@ -1,27 +1,27 @@
 package io.github.zoyluo.minecraftai.network.payload;
 
 import io.github.zoyluo.minecraftai.MinecraftAiMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record SetOptionC2S(String botName, String key, boolean value) implements CustomPayload {
-    public static final Id<SetOptionC2S> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "set_option"));
-    public static final PacketCodec<RegistryByteBuf, SetOptionC2S> CODEC = PacketCodec.of(SetOptionC2S::write, SetOptionC2S::new);
+public record SetOptionC2S(String botName, String key, boolean value) implements CustomPacketPayload {
+    public static final Type<SetOptionC2S> ID = new Type<>(Identifier.fromNamespaceAndPath(MinecraftAiMod.MOD_ID, "set_option"));
+    public static final StreamCodec<RegistryFriendlyByteBuf, SetOptionC2S> CODEC = StreamCodec.ofMember(SetOptionC2S::write, SetOptionC2S::new);
 
-    private SetOptionC2S(RegistryByteBuf buf) {
-        this(buf.readString(), buf.readString(), buf.readBoolean());
+    private SetOptionC2S(RegistryFriendlyByteBuf buf) {
+        this(buf.readUtf(), buf.readUtf(), buf.readBoolean());
     }
 
-    private void write(RegistryByteBuf buf) {
-        buf.writeString(botName);
-        buf.writeString(key);
+    private void write(RegistryFriendlyByteBuf buf) {
+        buf.writeUtf(botName);
+        buf.writeUtf(key);
         buf.writeBoolean(value);
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

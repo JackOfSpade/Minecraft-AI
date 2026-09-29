@@ -1,12 +1,14 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static io.github.zoyluo.minecraftai.mining.assist.ObservedReach.Status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.github.zoyluo.minecraftai.mining.assist.ObservedReach.Status;
+import net.minecraft.core.BlockPos;
 
 /**
  * Pins the design 4.3 reachability rules of {@link ObservedReach} (P1 contract section B.1, G.3): the

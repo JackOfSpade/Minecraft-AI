@@ -2,35 +2,34 @@ package io.github.zoyluo.minecraftai.network;
 
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.embedded.EmbeddedChannel;
-import net.minecraft.network.ClientConnection;
-import net.minecraft.network.DisconnectionInfo;
-import net.minecraft.network.NetworkSide;
-import net.minecraft.network.state.NetworkState;
-import net.minecraft.network.listener.PacketListener;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.text.Text;
-
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import net.minecraft.network.Connection;
+import net.minecraft.network.DisconnectionDetails;
+import net.minecraft.network.PacketListener;
+import net.minecraft.network.ProtocolInfo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketFlow;
 
-public class FakeClientConnection extends ClientConnection {
+public class FakeClientConnection extends Connection {
     private static final SocketAddress FAKE_ADDRESS = new InetSocketAddress("127.0.0.1", 0);
 
-    public FakeClientConnection(NetworkSide side) {
+    public FakeClientConnection(PacketFlow side) {
         super(side);
         ((ClientConnectionAccessor) this).minecraftai$setChannel(new EmbeddedChannel());
     }
 
     @Override
-    public <T extends PacketListener> void transitionInbound(NetworkState<T> state, T packetListener) {
+    public <T extends PacketListener> void setupInboundProtocol(ProtocolInfo<T> state, T packetListener) {
     }
 
     @Override
-    public void transitionOutbound(NetworkState<?> state) {
+    public void setupOutboundProtocol(ProtocolInfo<?> state) {
     }
 
     @Override
-    public void setInitialPacketListener(PacketListener packetListener) {
+    public void setListenerForServerboundHandshake(PacketListener packetListener) {
     }
 
     @Override
@@ -48,11 +47,11 @@ public class FakeClientConnection extends ClientConnection {
     }
 
     @Override
-    public void disconnect(Text disconnectReason) {
+    public void disconnect(Component disconnectReason) {
     }
 
     @Override
-    public void disconnect(DisconnectionInfo disconnectionInfo) {
+    public void disconnect(DisconnectionDetails disconnectionInfo) {
     }
 
     @Override
@@ -60,12 +59,12 @@ public class FakeClientConnection extends ClientConnection {
     }
 
     @Override
-    public SocketAddress getAddress() {
+    public SocketAddress getRemoteAddress() {
         return FAKE_ADDRESS;
     }
 
     @Override
-    public String getAddressAsString(boolean useSnooperSetting) {
+    public String getLoggableAddress(boolean useSnooperSetting) {
         return "127.0.0.1";
     }
 }

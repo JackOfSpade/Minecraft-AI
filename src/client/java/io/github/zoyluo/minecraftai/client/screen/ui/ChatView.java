@@ -2,11 +2,10 @@ package io.github.zoyluo.minecraftai.client.screen.ui;
 
 import io.github.zoyluo.minecraftai.client.BotClientState;
 import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 
 public final class ChatView implements PanelComponent {
     private static final int BUBBLE_PAD = 4;
@@ -47,10 +46,10 @@ public final class ChatView implements PanelComponent {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer) {
+    public void render(GuiGraphics context, int mouseX, int mouseY, float delta, Font renderer) {
         Theme.panel(context, x, y, w, h, Theme.CHAT_BG);
         context.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0xF7101216);
-        context.drawHorizontalLine(x + 1, x + w - 2, y + 1, 0xFF2F3743);
+        context.hLine(x + 1, x + w - 2, y + 1, 0xFF2F3743);
         context.enableScissor(x + 1, y + 1, x + w - 1, y + h - 1);
         try {
             if (lines.isEmpty()) {
@@ -85,7 +84,7 @@ public final class ChatView implements PanelComponent {
         return true;
     }
 
-    private List<RenderLine> layout(TextRenderer renderer) {
+    private List<RenderLine> layout(Font renderer) {
         List<RenderLine> result = new ArrayList<>();
         int bubbleMax = Math.max(86, (int) (w * 0.78D));
         int textMax = Math.max(40, bubbleMax - BUBBLE_PAD * 2);
@@ -94,10 +93,10 @@ public final class ChatView implements PanelComponent {
             List<String> wrapped = wrap(renderer, line.text(), textMax);
             int bubbleW = 0;
             for (String part : wrapped) {
-                bubbleW = Math.max(bubbleW, renderer.getWidth(part));
+                bubbleW = Math.max(bubbleW, renderer.width(part));
             }
             String label = roleLabel(line.role());
-            bubbleW = Math.max(bubbleW, renderer.getWidth(label + " "));
+            bubbleW = Math.max(bubbleW, renderer.width(label + " "));
             bubbleW = Math.min(bubbleMax, bubbleW + BUBBLE_PAD * 2);
             int bubbleH = wrapped.size() * Theme.LINE_H + BUBBLE_PAD * 2;
             result.add(new RenderLine(line.role(), label, wrapped, bubbleW, bubbleH));
@@ -112,7 +111,7 @@ public final class ChatView implements PanelComponent {
         return result;
     }
 
-    private void drawBubble(DrawContext context, TextRenderer renderer, RenderLine line, int by) {
+    private void drawBubble(GuiGraphics context, Font renderer, RenderLine line, int by) {
         int border = switch (line.role()) {
             case "user" -> 0xFF73AEFF;
             case "bot" -> 0xFF8BE896;
@@ -131,35 +130,35 @@ public final class ChatView implements PanelComponent {
             default -> x + EDGE_PAD;
         };
         context.fill(bx, by, bx + line.width(), by + line.height(), bg);
-        context.drawHorizontalLine(bx, bx + line.width() - 1, by, border);
-        context.drawHorizontalLine(bx, bx + line.width() - 1, by + line.height() - 1, border);
-        context.drawVerticalLine(bx, by, by + line.height() - 1, border);
-        context.drawVerticalLine(bx + line.width() - 1, by, by + line.height() - 1, border);
+        context.hLine(bx, bx + line.width() - 1, by, border);
+        context.hLine(bx, bx + line.width() - 1, by + line.height() - 1, border);
+        context.vLine(bx, by, by + line.height() - 1, border);
+        context.vLine(bx + line.width() - 1, by, by + line.height() - 1, border);
         // No longer draws a "System/You/Bob" label on its own line: role is distinguished by border color + background color + left/right alignment (more compact, shows more history)
         int ty = by + BUBBLE_PAD;
         for (String part : line.parts()) {
-            context.drawTextWithShadow(renderer, part, bx + BUBBLE_PAD, ty, Theme.TEXT_STRONG);
+            context.drawString(renderer, part, bx + BUBBLE_PAD, ty, Theme.TEXT_STRONG);
             ty += Theme.LINE_H;
         }
     }
 
-    private void drawEmpty(DrawContext context, TextRenderer renderer) {
+    private void drawEmpty(GuiGraphics context, Font renderer) {
         String first = Theme.tr("chat.minecraftai.empty");
         int maxTextW = Math.max(40, w - EDGE_PAD * 4);
         String second = Theme.trim(renderer, Theme.tr("chat.minecraftai.hint"), maxTextW);
-        int emptyW = Math.min(w - EDGE_PAD * 2, Math.max(renderer.getWidth(first), renderer.getWidth(second)) + BUBBLE_PAD * 2);
+        int emptyW = Math.min(w - EDGE_PAD * 2, Math.max(renderer.width(first), renderer.width(second)) + BUBBLE_PAD * 2);
         int emptyX = x + Math.max(EDGE_PAD, (w - emptyW) / 2);
         int emptyY = y + h / 2 - 18;
         context.fill(emptyX, emptyY, emptyX + emptyW, emptyY + 34, 0xF01B2028);
-        context.drawHorizontalLine(emptyX, emptyX + emptyW - 1, emptyY, Theme.BORDER_BRIGHT);
-        context.drawHorizontalLine(emptyX, emptyX + emptyW - 1, emptyY + 33, Theme.BORDER);
-        context.drawVerticalLine(emptyX, emptyY, emptyY + 33, Theme.BORDER);
-        context.drawVerticalLine(emptyX + emptyW - 1, emptyY, emptyY + 33, Theme.BORDER);
-        context.drawTextWithShadow(renderer, first, x + Math.max(0, (w - renderer.getWidth(first)) / 2), emptyY + 7, Theme.TEXT);
-        context.drawTextWithShadow(renderer, second, x + Math.max(0, (w - renderer.getWidth(second)) / 2), emptyY + 20, Theme.TEXT_DIM);
+        context.hLine(emptyX, emptyX + emptyW - 1, emptyY, Theme.BORDER_BRIGHT);
+        context.hLine(emptyX, emptyX + emptyW - 1, emptyY + 33, Theme.BORDER);
+        context.vLine(emptyX, emptyY, emptyY + 33, Theme.BORDER);
+        context.vLine(emptyX + emptyW - 1, emptyY, emptyY + 33, Theme.BORDER);
+        context.drawString(renderer, first, x + Math.max(0, (w - renderer.width(first)) / 2), emptyY + 7, Theme.TEXT);
+        context.drawString(renderer, second, x + Math.max(0, (w - renderer.width(second)) / 2), emptyY + 20, Theme.TEXT_DIM);
     }
 
-    private void drawScrollbar(DrawContext context) {
+    private void drawScrollbar(GuiGraphics context) {
         if (contentHeight <= h) {
             return;
         }
@@ -182,13 +181,13 @@ public final class ChatView implements PanelComponent {
         };
     }
 
-    private static List<String> wrap(TextRenderer renderer, String text, int maxWidth) {
+    private static List<String> wrap(Font renderer, String text, int maxWidth) {
         String value = text == null || text.isBlank() ? " " : text;
         List<String> lines = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         for (String token : value.split(" ")) {
             String candidate = current.isEmpty() ? token : current + " " + token;
-            if (renderer.getWidth(candidate) <= maxWidth) {
+            if (renderer.width(candidate) <= maxWidth) {
                 current.setLength(0);
                 current.append(candidate);
                 continue;
@@ -205,11 +204,11 @@ public final class ChatView implements PanelComponent {
         return lines.isEmpty() ? List.of(" ") : lines;
     }
 
-    private static void splitLong(TextRenderer renderer, String token, int maxWidth, List<String> lines, StringBuilder current) {
+    private static void splitLong(Font renderer, String token, int maxWidth, List<String> lines, StringBuilder current) {
         StringBuilder part = new StringBuilder();
         for (int offset = 0; offset < token.length(); offset++) {
             String candidate = part.toString() + token.charAt(offset);
-            if (renderer.getWidth(candidate) > maxWidth && !part.isEmpty()) {
+            if (renderer.width(candidate) > maxWidth && !part.isEmpty()) {
                 lines.add(part.toString());
                 part.setLength(0);
             }

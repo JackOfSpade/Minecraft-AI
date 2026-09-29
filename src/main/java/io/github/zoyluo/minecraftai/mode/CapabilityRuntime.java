@@ -30,12 +30,12 @@ public final class CapabilityRuntime {
                 config.profile(), config.operatorCapabilities(), capability);
         MiningEvidenceAudit.recordCapabilityDecision(bot, decision.allowed());
         String normalizedContext = context == null ? "" : context;
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         lastTick = now;
-        BOT_NAMES.put(bot.getUuid(), bot.getGameProfile().name());
+        BOT_NAMES.put(bot.getUUID(), bot.getGameProfile().name());
         boolean alwaysAudit = capability == PrivilegedCapability.MANUAL_TELEPORT
                 || (capability == PrivilegedCapability.EMERGENCY_TELEPORT && decision.allowed());
-        CapabilityAuditThrottle.Outcome outcome = AUDIT.observe(bot.getUuid(), capability, decision.allowed(),
+        CapabilityAuditThrottle.Outcome outcome = AUDIT.observe(bot.getUUID(), capability, decision.allowed(),
                 decision.reason(), normalizedContext, now, alwaysAudit);
         if (outcome.logDecision()) {
             BotLog.action(bot, "capability_decision",
@@ -76,12 +76,12 @@ public final class CapabilityRuntime {
 
     public static void clear(AIPlayerEntity bot) {
         // Flush counted-but-unreported repeats first so the last window of a bot's life is not lost.
-        int now = bot.getEntityWorld().getServer() == null ? 0 : bot.getEntityWorld().getServer().getTicks();
-        for (CapabilityAuditThrottle.Summary summary : AUDIT.drain(bot.getUuid(), now)) {
+        int now = bot.level().getServer() == null ? 0 : bot.level().getServer().getTickCount();
+        for (CapabilityAuditThrottle.Summary summary : AUDIT.drain(bot.getUUID(), now)) {
             logSummary(botName(summary), summary, MinecraftAiConfig.get().profile().configValue());
         }
-        AUDIT.clear(bot.getUuid());
-        BOT_NAMES.remove(bot.getUuid());
+        AUDIT.clear(bot.getUUID());
+        BOT_NAMES.remove(bot.getUUID());
     }
 
     /**

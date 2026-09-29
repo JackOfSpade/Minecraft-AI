@@ -1,29 +1,29 @@
 package io.github.zoyluo.minecraftai.network.payload;
 
 import io.github.zoyluo.minecraftai.MinecraftAiMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record BotCommandC2S(String botName, String action, String arg1, String arg2, int count) implements CustomPayload {
-    public static final Id<BotCommandC2S> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "bot_command"));
-    public static final PacketCodec<RegistryByteBuf, BotCommandC2S> CODEC = PacketCodec.of(BotCommandC2S::write, BotCommandC2S::new);
+public record BotCommandC2S(String botName, String action, String arg1, String arg2, int count) implements CustomPacketPayload {
+    public static final Type<BotCommandC2S> ID = new Type<>(Identifier.fromNamespaceAndPath(MinecraftAiMod.MOD_ID, "bot_command"));
+    public static final StreamCodec<RegistryFriendlyByteBuf, BotCommandC2S> CODEC = StreamCodec.ofMember(BotCommandC2S::write, BotCommandC2S::new);
 
-    private BotCommandC2S(RegistryByteBuf buf) {
-        this(buf.readString(), buf.readString(), buf.readString(), buf.readString(), buf.readInt());
+    private BotCommandC2S(RegistryFriendlyByteBuf buf) {
+        this(buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt());
     }
 
-    private void write(RegistryByteBuf buf) {
-        buf.writeString(botName);
-        buf.writeString(action);
-        buf.writeString(arg1);
-        buf.writeString(arg2);
+    private void write(RegistryFriendlyByteBuf buf) {
+        buf.writeUtf(botName);
+        buf.writeUtf(action);
+        buf.writeUtf(arg1);
+        buf.writeUtf(arg2);
         buf.writeInt(count);
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

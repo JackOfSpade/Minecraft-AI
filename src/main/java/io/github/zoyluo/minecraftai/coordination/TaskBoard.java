@@ -52,9 +52,9 @@ public final class TaskBoard {
                         || !current.claimableBy(ownerUuid)) {
                     return current;
                 }
-                return current.claim(bot.getUuid(), runtimeSessionId);
+                return current.claim(bot.getUUID(), runtimeSessionId);
             });
-            if (claimed != null && claimed.status() == Job.Status.CLAIMED && bot.getUuid().equals(claimed.claimant())) {
+            if (claimed != null && claimed.status() == Job.Status.CLAIMED && bot.getUUID().equals(claimed.claimant())) {
                 BotLog.task(bot, "job_claimed", "id", claimed.id(), "kind", claimed.kind());
                 return Optional.of(claimed);
             }

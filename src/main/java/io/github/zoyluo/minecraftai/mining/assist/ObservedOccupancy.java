@@ -1,8 +1,7 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Arrays;
+import net.minecraft.core.BlockPos;
 
 /**
  * What one bot has actually seen of the blocks around it: a cubic window of {@value #SIZE}^3 cells,

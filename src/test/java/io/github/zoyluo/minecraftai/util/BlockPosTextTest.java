@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.util;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -27,7 +27,7 @@ class BlockPosTextTest {
     @Test
     void compactOrElseSubstitutesTextForNull() {
         assertEquals("missing", BlockPosText.compactOrElse(null, "missing"));
-        assertEquals("0,0,0", BlockPosText.compactOrElse(BlockPos.ORIGIN, "missing"));
+        assertEquals("0,0,0", BlockPosText.compactOrElse(BlockPos.ZERO, "missing"));
     }
 
     // ---- encodePos / encodePosOrEmpty / encodeOptionalPos ----

@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.util;
 
 import java.util.Optional;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 /**
  * Shared "x,y,z" text codec helpers for {@link BlockPos}, plus compact log formatting.

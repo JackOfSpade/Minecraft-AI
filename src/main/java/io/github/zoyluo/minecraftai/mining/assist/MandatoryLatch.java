@@ -1,11 +1,10 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 /**
  * The mandatory-repeat suppression of mining-assist design 6.4, entirely separate from {@link PoiRegistry}
@@ -33,7 +32,7 @@ public final class MandatoryLatch {
     private record Site(String dimensionKey, BlockPos centroid, int recordedTick, int acknowledgedTick, int lastWardenNoticeTick) {
         private Site {
             dimensionKey = Objects.requireNonNull(dimensionKey, "dimensionKey");
-            centroid = Objects.requireNonNull(centroid, "centroid").toImmutable();
+            centroid = Objects.requireNonNull(centroid, "centroid").immutable();
         }
     }
 

@@ -7,17 +7,16 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 public final class ResupplyTask extends AbstractTask {
     private static final int BASE_RADIUS = 8;
@@ -82,7 +81,7 @@ public final class ResupplyTask extends AbstractTask {
 
     @Override
     public String describe() {
-        String target = requestedItem == null ? need.name().toLowerCase(java.util.Locale.ROOT) : Registries.ITEM.getId(requestedItem).toString();
+        String target = requestedItem == null ? need.name().toLowerCase(java.util.Locale.ROOT) : BuiltInRegistries.ITEM.getKey(requestedItem).toString();
         return "Resupplying " + target + " phase=" + phase + (note.isBlank() ? "" : " note=" + note);
     }
 
@@ -145,8 +144,8 @@ public final class ResupplyTask extends AbstractTask {
             startCrafting(bot);
             return;
         }
-        basePos = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "base")
+        basePos = BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "base")
                 .orElse(null);
         if (basePos == null) {
             // No base (deep-underground mining / wilderness expedition): don't stall out on no_base -- craft
@@ -168,14 +167,14 @@ public final class ResupplyTask extends AbstractTask {
 
     private void findContainer(AIPlayerEntity bot) {
         containers.clear();
-        BlockPos.stream(basePos.add(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.add(BASE_RADIUS, 4, BASE_RADIUS))
-                .map(BlockPos::toImmutable)
+        BlockPos.betweenClosedStream(basePos.offset(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.offset(BASE_RADIUS, 4, BASE_RADIUS))
+                .map(BlockPos::immutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(containers::add);
         containers.sort(Comparator
                 .comparing((BlockPos pos) -> !containsSupply(bot, pos))
-                .thenComparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())));
+                .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())));
         containerIndex = 0;
         if (containers.isEmpty()) {
             walkToBaseOrCraft(bot);
@@ -194,7 +193,7 @@ public final class ResupplyTask extends AbstractTask {
             return;
         }
         containerPos = containers.get(containerIndex++);
-        if (bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
             phase = Phase.WITHDRAWING;
             return;
         }
@@ -213,7 +212,7 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private void walkToBaseOrCraft(AIPlayerEntity bot) {
-        if (bot.getEyePos().squaredDistanceTo(basePos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(basePos.getCenter()) <= REACH_SQUARED) {
             startCrafting(bot);
             return;
         }
@@ -231,7 +230,7 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private void goToBase(AIPlayerEntity bot) {
-        if (bot.getEyePos().squaredDistanceTo(basePos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(basePos.getCenter()) <= REACH_SQUARED) {
             bot.getActionPack().stopAll();
             startCrafting(bot);
             return;
@@ -246,7 +245,7 @@ public final class ResupplyTask extends AbstractTask {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        if (bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
             bot.getActionPack().stopAll();
             phase = Phase.WITHDRAWING;
             return;
@@ -258,12 +257,12 @@ public final class ResupplyTask extends AbstractTask {
 
     private void withdraw(AIPlayerEntity bot) {
         if (containerPos == null
-                || bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) > REACH_SQUARED
+                || bot.getEyePosition().distanceToSqr(containerPos.getCenter()) > REACH_SQUARED
                 || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        Inventory container = ContainerAction.resolve(bot, containerPos).orElse(null);
+        Container container = ContainerAction.resolve(bot, containerPos).orElse(null);
         if (container == null) {
             selectNextContainer(bot);
             return;
@@ -279,7 +278,7 @@ public final class ResupplyTask extends AbstractTask {
         selectNextContainer(bot);
     }
 
-    private boolean withdrawTool(Inventory container, AIPlayerEntity bot) {
+    private boolean withdrawTool(Container container, AIPlayerEntity bot) {
         if (requestedItem == null) {
             return false;
         }
@@ -291,7 +290,7 @@ public final class ResupplyTask extends AbstractTask {
         return equipUsableTool(bot);
     }
 
-    private boolean withdrawFood(Inventory container, AIPlayerEntity bot) {
+    private boolean withdrawFood(Container container, AIPlayerEntity bot) {
         Item food = firstFood(container);
         if (food == null) {
             return false;
@@ -329,7 +328,7 @@ public final class ResupplyTask extends AbstractTask {
                 // target, no food slot, this one); the craft just reported success, so without this
                 // line a reader could not tell this specific case apart from the others.
                 BotLog.warn(LogCategory.TASK, bot, "resupply_crafted_tool_unusable",
-                        "item", Registries.ITEM.getId(requestedItem).toString());
+                        "item", BuiltInRegistries.ITEM.getKey(requestedItem).toString());
                 fail("no_supply");
                 return;
             }
@@ -343,7 +342,7 @@ public final class ResupplyTask extends AbstractTask {
                     && InventoryAction.dropJunkUntilFreeSlots(bot, 1, 16) > 0) {
                 craftTask = null;
                 BotLog.action(bot, "resupply_craft_capacity_recovered",
-                        "item", Registries.ITEM.getId(
+                        "item", BuiltInRegistries.ITEM.getKey(
                                 need == Need.FOOD ? Items.BREAD : requestedItem).toString(),
                         "reason", reason);
                 startCrafting(bot);
@@ -354,7 +353,7 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private void eat(AIPlayerEntity bot) {
-        if (bot.getHungerManager().getFoodLevel() >= 20) {
+        if (bot.getFoodData().getFoodLevel() >= 20) {
             phase = Phase.DONE;
             return;
         }
@@ -378,7 +377,7 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private Phase afterSupplyPhase(AIPlayerEntity bot) {
-        if (need == Need.FOOD && bot.getHungerManager().getFoodLevel() < 20) {
+        if (need == Need.FOOD && bot.getFoodData().getFoodLevel() < 20) {
             return Phase.EATING;
         }
         return Phase.DONE;
@@ -397,12 +396,12 @@ public final class ResupplyTask extends AbstractTask {
         }
         int bestSlot = -1;
         int bestRemaining = -1;
-        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
-            if (!stack.isOf(requestedItem) || !isUsable(stack)) {
+        for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = bot.getInventory().getNonEquipmentItems().get(slot);
+            if (!stack.is(requestedItem) || !isUsable(stack)) {
                 continue;
             }
-            int remaining = stack.isDamageable() ? stack.getMaxDamage() - stack.getDamage() : Integer.MAX_VALUE;
+            int remaining = stack.isDamageableItem() ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
             if (remaining > bestRemaining) {
                 bestRemaining = remaining;
                 bestSlot = slot;
@@ -416,7 +415,7 @@ public final class ResupplyTask extends AbstractTask {
     }
 
     private boolean containsSupply(AIPlayerEntity bot, BlockPos pos) {
-        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
+        Container inventory = ContainerAction.resolve(bot, pos).orElse(null);
         if (inventory == null) {
             return false;
         }
@@ -426,10 +425,10 @@ public final class ResupplyTask extends AbstractTask {
         };
     }
 
-    private static Item firstFood(Inventory inventory) {
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            ItemStack stack = inventory.getStack(slot);
-            if (!stack.isEmpty() && stack.contains(DataComponentTypes.FOOD)) {
+    private static Item firstFood(Container inventory) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && stack.has(DataComponents.FOOD)) {
                 return stack.getItem();
             }
         }
@@ -440,14 +439,14 @@ public final class ResupplyTask extends AbstractTask {
         if (stack.isEmpty()) {
             return false;
         }
-        if (!stack.isDamageable()) {
+        if (!stack.isDamageableItem()) {
             return true;
         }
         int max = stack.getMaxDamage();
         if (max <= 0) {
             return true;
         }
-        return stack.getMaxDamage() - stack.getDamage() > max * LOW_DURABILITY_FRACTION;
+        return stack.getMaxDamage() - stack.getDamageValue() > max * LOW_DURABILITY_FRACTION;
     }
 
 }

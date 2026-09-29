@@ -4,27 +4,26 @@ import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.stat.Stats;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import net.minecraft.text.Text;
 
 /** Strict-survival regressions for Gather's physical drop transaction. */
 public final class GatherPickupGameTests {
     @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_vanilla_pickup_stat_survives_concurrent_log_consumption", maxTicks = 500)
-    public void vanillaPickupStatSurvivesConcurrentLogConsumption(TestContext context) {
+    public void vanillaPickupStatSurvivesConcurrentLogConsumption(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherPickupStatGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
@@ -32,22 +31,22 @@ public final class GatherPickupGameTests {
         // selection, so give the bot an axe up front to keep exercising that machinery.
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos first = fixture.start().east(3);
-        bot.getEntityWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(first, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG));
-        int pickupBaseline = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OAK_LOG);
+        int pickupBaseline = bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.OAK_LOG);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 2);
         task.start(bot);
         AtomicBoolean consumed = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (!consumed.get() && task.describe().contains("phase=PICKUP")) {
                 require(context, InventoryAction.removeItems(bot, Items.OAK_LOG, 1),
                         "failed to simulate concurrent resupply consumption");
                 consumed.set(true);
             }
-            boolean pickupRecorded = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OAK_LOG)
+            boolean pickupRecorded = bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.OAK_LOG)
                     > pickupBaseline;
             boolean atomicPhaseResolved = !task.describe().contains("phase=PICKUP")
                     && !task.describe().contains("phase=HARVEST");
@@ -63,7 +62,7 @@ public final class GatherPickupGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_real_miss_retries_nearby_resource_before_regional_roam", maxTicks = 700)
-    public void realMissRetriesNearbyResourceBeforeRegionalRoam(TestContext context) {
+    public void realMissRetriesNearbyResourceBeforeRegionalRoam(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherMissRetryGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
@@ -72,8 +71,8 @@ public final class GatherPickupGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos first = fixture.start().east(2);
         BlockPos second = fixture.start().east(5);
-        bot.getEntityWorld().setBlockState(first, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getEntityWorld().setBlockState(second, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(first, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+        bot.level().setBlock(second, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
@@ -81,7 +80,7 @@ public final class GatherPickupGameTests {
         AtomicBoolean revisitedBreakCell = new AtomicBoolean();
         AtomicBoolean localRetryHarvestStarted = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (!discarded.get() && task.describe().contains("phase=PICKUP")) {
                 ItemEntity drop = nearestOakDrop(bot, first, 3.0D);
@@ -89,12 +88,12 @@ public final class GatherPickupGameTests {
                 drop.discard();
                 discarded.set(true);
             }
-            if (discarded.get() && bot.getBlockPos().equals(first)) {
+            if (discarded.get() && bot.blockPosition().equals(first)) {
                 revisitedBreakCell.set(true);
             }
             if (discarded.get()
                     && task.describe().contains("phase=HARVEST")
-                    && bot.getEntityWorld().getBlockState(second).isOf(Blocks.OAK_LOG)) {
+                    && bot.level().getBlockState(second).is(Blocks.OAK_LOG)) {
                 localRetryHarvestStarted.set(true);
             }
             if (discarded.get() && !localRetryHarvestStarted.get()
@@ -104,13 +103,13 @@ public final class GatherPickupGameTests {
                         "one real pickup miss bypassed the local retry budget: " + task.describe());
             }
             if (!localRetryHarvestStarted.get()
-                    || !bot.getEntityWorld().getBlockState(second).isAir()) {
+                    || !bot.level().getBlockState(second).isAir()) {
                 return;
             }
             require(context, discarded.get(), "real-miss fixture never activated");
             require(context, revisitedBreakCell.get(),
                     "invisible drop did not fall back to its remembered break coordinate");
-            require(context, bot.getBlockPos().getSquaredDistance(fixture.start()) < 20.0D * 20.0D,
+            require(context, bot.blockPosition().distSqr(fixture.start()) < 20.0D * 20.0D,
                     "gather escaped the local test area before retrying the nearby log");
             require(context, !task.describe().contains("phase=ROAM")
                             && !task.describe().contains("phase=EXPLORE"),
@@ -120,7 +119,7 @@ public final class GatherPickupGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_reachable_harvest_restarts_immediately_after_safety_pause", maxTicks = 300)
-    public void reachableHarvestRestartsImmediatelyAfterSafetyPause(TestContext context) {
+    public void reachableHarvestRestartsImmediatelyAfterSafetyPause(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherResumeHarvestGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
@@ -128,13 +127,13 @@ public final class GatherPickupGameTests {
         // selection, so give the bot an axe up front to keep exercising that machinery.
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
-        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
         AtomicBoolean resumed = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (!resumed.get()) {
                 if (!task.describe().contains("phase=HARVEST")) {
@@ -155,7 +154,7 @@ public final class GatherPickupGameTests {
                 resumed.set(true);
                 return;
             }
-            if (!bot.getEntityWorld().getBlockState(log).isAir()) {
+            if (!bot.level().getBlockState(log).isAir()) {
                 return;
             }
             require(context, task.state() == TaskState.RUNNING
@@ -167,7 +166,7 @@ public final class GatherPickupGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_safety_displacement_reselects_instead_of_mining_remote_target", maxTicks = 300)
-    public void safetyDisplacementReselectsInsteadOfMiningRemoteTarget(TestContext context) {
+    public void safetyDisplacementReselectsInsteadOfMiningRemoteTarget(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherResumeReselectGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
@@ -175,21 +174,21 @@ public final class GatherPickupGameTests {
         // selection, so give the bot an axe up front to keep exercising that machinery.
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
-        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (!task.describe().contains("phase=HARVEST")) {
                 return;
             }
             task.pause(bot);
             BlockPos displaced = fixture.start().west(2);
-            bot.teleport(bot.getEntityWorld(),
+            bot.teleportTo(bot.level(),
                     displaced.getX() + 0.5D, displaced.getY(), displaced.getZ() + 0.5D,
-                    Set.of(), bot.getYaw(), bot.getPitch(), true);
+                    Set.of(), bot.getYRot(), bot.getXRot(), true);
             require(context, !HarvestCore.canReach(bot, log),
                     "fixture displacement left the old harvest inside interaction reach");
             task.resume(bot);
@@ -199,14 +198,14 @@ public final class GatherPickupGameTests {
                     "displaced resume retained stale HARVEST: " + task.describe());
             require(context, bot.getActionPack().isMiningIdle(),
                     "displaced resume started an out-of-reach mining controller");
-            require(context, bot.getEntityWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
+            require(context, bot.level().getBlockState(log).is(Blocks.OAK_LOG),
                     "resume fixture unexpectedly consumed the remote target");
             finish(context, fixture);
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_out_of_reach_retry_cannot_renew_harvest_deadline", maxTicks = 400)
-    public void outOfReachRetryCannotRenewHarvestDeadline(TestContext context) {
+    public void outOfReachRetryCannotRenewHarvestDeadline(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherHarvestLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
@@ -214,23 +213,23 @@ public final class GatherPickupGameTests {
         // selection, so give the bot an axe up front to keep exercising that machinery.
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
-        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
         AtomicBoolean displaced = new AtomicBoolean();
         int[] ticksAfterDisplacement = {0};
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (!displaced.get()) {
                 if (!task.describe().contains("phase=HARVEST")) {
                     return;
                 }
                 BlockPos remote = fixture.start().west(2);
-                bot.teleport(bot.getEntityWorld(),
+                bot.teleportTo(bot.level(),
                         remote.getX() + 0.5D, remote.getY(), remote.getZ() + 0.5D,
-                        Set.of(), bot.getYaw(), bot.getPitch(), true);
+                        Set.of(), bot.getYRot(), bot.getXRot(), true);
                 require(context, !HarvestCore.canReach(bot, log),
                         "fixture displacement left the target reachable");
                 displaced.set(true);
@@ -245,14 +244,14 @@ public final class GatherPickupGameTests {
             require(context, task.state() == TaskState.RUNNING
                             && task.describe().contains("phase=SURVEY"),
                     "expired atomic harvest did not return to survey: " + task.describe());
-            require(context, bot.getEntityWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
+            require(context, bot.level().getBlockState(log).is(Blocks.OAK_LOG),
                     "out-of-reach fixture unexpectedly broke the target");
             finish(context, fixture);
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_pickup_game_tests_repeated_safety_resume_cannot_renew_harvest_deadline", maxTicks = 400)
-    public void repeatedSafetyResumeCannotRenewHarvestDeadline(TestContext context) {
+    public void repeatedSafetyResumeCannotRenewHarvestDeadline(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherResumeLeaseGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         // GatherQuotaTask now gates the optimal tool category before harvesting (an axe for
@@ -260,14 +259,14 @@ public final class GatherPickupGameTests {
         // selection, so give the bot an axe up front to keep exercising that machinery.
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         BlockPos log = fixture.start().east(3);
-        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
         GatherQuotaTask task = new GatherQuotaTask(Items.OAK_LOG, 1);
         task.start(bot);
         AtomicBoolean interrupting = new AtomicBoolean();
         int[] interruptions = {0};
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (!interrupting.get()) {
                 if (!task.describe().contains("phase=HARVEST")) {
@@ -290,61 +289,61 @@ public final class GatherPickupGameTests {
             require(context, task.state() == TaskState.RUNNING
                             && task.describe().contains("phase=SURVEY"),
                     "interrupted atomic harvest did not expire into survey: " + task.describe());
-            require(context, bot.getEntityWorld().getBlockState(log).isOf(Blocks.OAK_LOG),
+            require(context, bot.level().getBlockState(log).is(Blocks.OAK_LOG),
                     "interrupted fixture unexpectedly broke the target");
             finish(context, fixture);
         });
     }
 
-    private static Fixture fixture(TestContext context, String name, BlockPos relativeStart, int east) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(relativeStart);
+    private static Fixture fixture(GameTestHelper context, String name, BlockPos relativeStart, int east) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(relativeStart);
         // Keep every mutation inside FabricGameTest.EMPTY_STRUCTURE (8x8). Tests from other
         // batches can overlap in wall-clock time; writing a long runway beyond the template lets
         // a later fixture erase this floor and turns a pickup assertion into a random void fall.
         for (int dx = -2; dx <= east; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         return new Fixture(bot, start, name);
     }
 
     private static ItemEntity nearestOakDrop(AIPlayerEntity bot, BlockPos center, double radius) {
-        return bot.getEntityWorld().getEntitiesByClass(
-                        ItemEntity.class, new Box(center).expand(radius),
-                        entity -> entity.getStack().isOf(Items.OAK_LOG))
+        return bot.level().getEntitiesOfClass(
+                        ItemEntity.class, new AABB(center).inflate(radius),
+                        entity -> entity.getItem().is(Items.OAK_LOG))
                 .stream()
                 .findFirst()
                 .orElse(null);
     }
 
-    private static void tickOrFail(TestContext context, GatherQuotaTask task, AIPlayerEntity bot) {
+    private static void tickOrFail(GameTestHelper context, GatherQuotaTask task, AIPlayerEntity bot) {
         if (task.state() == TaskState.RUNNING) {
             task.tick(bot);
         }
         if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-            context.throwGameTestException(Text.of("gather ended as " + task.state() + ":" + task.failureReason()));
+            context.fail(Component.nullToEmpty("gather ended as " + task.state() + ":" + task.failureReason()));
         }
     }
 
-    private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+    private static void finish(GameTestHelper context, Fixture fixture) {
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

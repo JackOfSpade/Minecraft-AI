@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
 
 /**
  * Bounded per-bot ledger of valuable sightings (mining-assist design 2.4 and 3.3, cap {@value #CAP}).
@@ -39,7 +38,7 @@ public final class SightingLedger {
      */
     public record Sighting(BlockPos pos, String blockId, int rawValue, int firstTick, int lastTick) {
         public Sighting {
-            pos = Objects.requireNonNull(pos, "pos").toImmutable();
+            pos = Objects.requireNonNull(pos, "pos").immutable();
             Objects.requireNonNull(blockId, "blockId");
             rawValue = Math.max(0, rawValue);
         }

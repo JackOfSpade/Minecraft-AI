@@ -17,19 +17,18 @@ import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -60,7 +59,7 @@ import java.util.UUID;
  */
 public final class OreDigFrontierGameTests {
 
-    private static final BlockState AIR = Blocks.AIR.getDefaultState();
+    private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final String ENV_PREFIX = "minecraftai-gametest:ore_dig_frontier_game_tests_";
 
     // Half-extent of the main open cavern both tests spawn the bot at the centre of: big enough that the
@@ -91,7 +90,7 @@ public final class OreDigFrontierGameTests {
 
     @GameTest(environment = ENV_PREFIX + "frontier_waypoints_stay_near_observed_path_with_shorter_unobserved_corridor",
             maxTicks = 1600)
-    public void frontierWaypointsStayNearObservedPathWithShorterUnobservedCorridor(TestContext context) {
+    public void frontierWaypointsStayNearObservedPathWithShorterUnobservedCorridor(GameTestHelper context) {
         Harness h = new Harness(context);
         Room cavern = h.newRoom(10, -CAVERN_HALF, CAVERN_HALF, -CAVERN_HALF, CAVERN_HALF, CAVERN_HEIGHT);
         // The "shorter unobserved corridor... branching toward a large open cavern" (design 5.4): a second,
@@ -111,12 +110,12 @@ public final class OreDigFrontierGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         OreDigTask[] task = new OreDigTask[1];
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -226,7 +225,7 @@ public final class OreDigFrontierGameTests {
      */
     private static void checkFrontierWalkInvariant(Harness h, MiningAssistState state, AIPlayerEntity bot,
             Room cavern, Room hidden) {
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         h.require(cavern.contains(feet),
                 "FRONTIER_WALK left the mapped cavern at " + feet.toShortString()
                         + " -- the observed corridor's own path never goes there");
@@ -244,7 +243,7 @@ public final class OreDigFrontierGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "frontier_excursion_mines_a_valuable_and_returns_to_anchor", maxTicks = 2400)
-    public void frontierExcursionMinesAValuableAndReturnsToAnchor(TestContext context) {
+    public void frontierExcursionMinesAValuableAndReturnsToAnchor(GameTestHelper context) {
         Harness h = new Harness(context);
         Room cavern = h.newRoom(60, -CAVERN_HALF, CAVERN_HALF, -CAVERN_HALF, CAVERN_HALF, CAVERN_HEIGHT);
         // A single valuable, sealed on all 6 faces inside its own little pillar (the hub()/x-ray-canary idiom
@@ -271,7 +270,7 @@ public final class OreDigFrontierGameTests {
         cavern.set(5, 1, -2, Blocks.STONE);
         cavern.set(5, 1, -4, Blocks.STONE);
         for (Direction direction : Direction.values()) {
-            BlockState neighbour = cavern.world.getBlockState(ore.offset(direction));
+            BlockState neighbour = cavern.world.getBlockState(ore.relative(direction));
             h.require(!neighbour.isAir(), "fixture error: the sealed valuable at " + ore.toShortString()
                     + " touches air on its " + direction + " face before the excursion ever runs");
         }
@@ -279,21 +278,21 @@ public final class OreDigFrontierGameTests {
         // must refuse anything within the configured lava-clear radius of it), and never anywhere near the
         // accepted route or the diamond, so it only ever proves a negative.
         BlockPos lava = cavern.at(-9, -1, -9);
-        cavern.world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+        cavern.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigFrontierExcursionGT", cavern, 0, 0);
         h.enableFrontier(bot, 256, 0.02D);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
-        BlockPos anchor = bot.getBlockPos();
+        UUID id = bot.getUUID();
+        BlockPos anchor = bot.blockPosition();
         OreDigTask[] task = new OreDigTask[1];
         int[] stage = {0};
         int[] stageStart = {0};
         boolean[] sawApproachOrMineAfterReturn = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -364,9 +363,9 @@ public final class OreDigFrontierGameTests {
                         h.require(tick - stageStart[0] < 400, "RETURN from the frontier excursion never finished");
                         return;
                     }
-                    h.require(bot.getBlockPos().equals(anchor),
+                    h.require(bot.blockPosition().equals(anchor),
                             "the bot did not return to the exact anchor after the frontier excursion: at "
-                                    + bot.getBlockPos().toShortString() + ", anchor " + anchor.toShortString());
+                                    + bot.blockPosition().toShortString() + ", anchor " + anchor.toShortString());
                     // The frontier excursion's own design-5.4 assertions (waypoints stayed observed, arrival ran
                     // the panorama burst, an unproductive excursion walked RETURN and landed on the exact anchor)
                     // are already proven by this point. Switch explore.frontier back off now, before revealing the
@@ -378,7 +377,7 @@ public final class OreDigFrontierGameTests {
                     h.disableFrontier(256);
                     // Reveal the sealed diamond now, well after the excursion is over: the west face becomes the
                     // exposed one, with (4,0,-3) -- one open-floor step further west -- as its ordinary stand.
-                    cavern.world.setBlockState(cavern.at(4, 1, -3), AIR, Block.NOTIFY_ALL);
+                    cavern.world.setBlock(cavern.at(4, 1, -3), AIR, Block.UPDATE_ALL);
                     stage[0] = 5;
                     stageStart[0] = tick;
                 }
@@ -396,7 +395,7 @@ public final class OreDigFrontierGameTests {
                 }
                 case 6 -> {
                     requireNotFailed(h, task[0]);
-                    if (cavern.world.getBlockState(ore).isOf(Blocks.DIAMOND_ORE)) {
+                    if (cavern.world.getBlockState(ore).is(Blocks.DIAMOND_ORE)) {
                         MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
                         if (state != null && state.detourOwner() == task[0]
                                 && (state.detourPhase() == DetourPhase.APPROACH || state.detourPhase() == DetourPhase.MINE)) {
@@ -407,15 +406,15 @@ public final class OreDigFrontierGameTests {
                                 "the now-visible diamond, well within an ordinary P1 detour's reach, was never mined"
                                         + " by a LATER opportunistic detour after the frontier excursion returned"
                                         + " [diag: sighted=" + (state != null && state.sightings().contains(ore))
-                                        + " bot=" + bot.getBlockPos().toShortString()
+                                        + " bot=" + bot.blockPosition().toShortString()
                                         + " ore=" + ore.toShortString()
                                         + " anchor=" + anchor.toShortString()
                                         + " chebyshevXZ=" + Math.max(
-                                                Math.abs(ore.getX() - bot.getBlockPos().getX()),
-                                                Math.abs(ore.getZ() - bot.getBlockPos().getZ()))
-                                        + " dy=" + (ore.getY() - bot.getBlockPos().getY())
-                                        + " eyeDist=" + bot.getEyePos().distanceTo(
-                                                net.minecraft.util.math.Vec3d.ofCenter(ore))
+                                                Math.abs(ore.getX() - bot.blockPosition().getX()),
+                                                Math.abs(ore.getZ() - bot.blockPosition().getZ()))
+                                        + " dy=" + (ore.getY() - bot.blockPosition().getY())
+                                        + " eyeDist=" + bot.getEyePosition().distanceTo(
+                                                net.minecraft.world.phys.Vec3.atCenterOf(ore))
                                         + "]");
                         return;
                     }
@@ -433,11 +432,11 @@ public final class OreDigFrontierGameTests {
                         h.require(tick - stageStart[0] < 500, "the ORE-kind detour that mined the diamond never finished");
                         return;
                     }
-                    int driftXZ = Math.max(Math.abs(bot.getBlockPos().getX() - anchor.getX()),
-                            Math.abs(bot.getBlockPos().getZ() - anchor.getZ()));
+                    int driftXZ = Math.max(Math.abs(bot.blockPosition().getX() - anchor.getX()),
+                            Math.abs(bot.blockPosition().getZ() - anchor.getZ()));
                     h.require(driftXZ <= LATER_DETOUR_RETURN_TOLERANCE_XZ,
                             "the bot did not return near the anchor after mining the diamond: at "
-                                    + bot.getBlockPos().toShortString() + ", anchor " + anchor.toShortString()
+                                    + bot.blockPosition().toShortString() + ", anchor " + anchor.toShortString()
                                     + ", driftXZ=" + driftXZ);
                     h.assertStrict(bot, "ore_dig_frontier_excursion_end");
                     h.pass();
@@ -451,7 +450,7 @@ public final class OreDigFrontierGameTests {
     /** During FRONTIER_WALK: never an unobserved cell, and never within the lava clearance (design 5.4, 4.4). */
     private static void checkFrontierWalkSafety(Harness h, MiningAssistState state, AIPlayerEntity bot,
             Room cavern, BlockPos lava) {
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         h.require(cavern.contains(feet),
                 "FRONTIER_WALK left the mapped cavern at " + feet.toShortString());
         ObservedOccupancy occ = state.occupancyIfPresent();
@@ -462,7 +461,7 @@ public final class OreDigFrontierGameTests {
 
     private static void checkNeverLavaAdjacent(Harness h, AIPlayerEntity bot, BlockPos lava) {
         int lavaClearRadius = MiningAssistRuntime.config().detour().lavaClearRadius();
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         int chebyshev = Math.max(Math.max(Math.abs(feet.getX() - lava.getX()), Math.abs(feet.getY() - lava.getY())),
                 Math.abs(feet.getZ() - lava.getZ()));
         h.require(chebyshev > lavaClearRadius,
@@ -533,7 +532,7 @@ public final class OreDigFrontierGameTests {
 
     /** Cleanup-on-failure, strict-capability and DETOUR-mode config plumbing shared by every test. */
     private static final class Harness {
-        final TestContext context;
+        final GameTestHelper context;
         final List<String> bots = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
         final List<UUID> forced = new ArrayList<>();
@@ -542,7 +541,7 @@ public final class OreDigFrontierGameTests {
         boolean done;
         int tick;
 
-        Harness(TestContext context) {
+        Harness(GameTestHelper context) {
             this.context = context;
         }
 
@@ -553,19 +552,19 @@ public final class OreDigFrontierGameTests {
         }
 
         AIPlayerEntity spawn(String name, Room room, int dx, int dz) {
-            ServerWorld world = room.world;
+            ServerLevel world = room.world;
             BlockPos feet = room.at(dx, 0, dz);
             bots.add(name);
             var spawned = AIPlayerManager.INSTANCE.spawn(
-                    world.getServer(), name, world, Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL);
+                    world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL);
             if (spawned.isEmpty()) {
                 fail("failed to spawn " + name + " (a bot of that name is still alive)");
             }
             AIPlayerEntity bot = spawned.get();
-            bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+            bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
             bot.setHealth(bot.getMaxHealth());
-            bot.getHungerManager().setFoodLevel(20);
-            bot.getHungerManager().setSaturationLevel(5.0F);
+            bot.getFoodData().setFoodLevel(20);
+            bot.getFoodData().setSaturation(5.0F);
             return bot;
         }
 
@@ -577,8 +576,8 @@ public final class OreDigFrontierGameTests {
             MiningAssistRuntime.install(frontierConfig(raysPerTick, frontierMinUtility));
             MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
             tpsOverridden = true;
-            MiningAssistRuntime.forceEnable(bot.getUuid());
-            forced.add(bot.getUuid());
+            MiningAssistRuntime.forceEnable(bot.getUUID());
+            forced.add(bot.getUUID());
         }
 
         /** Switches the already-installed config's {@code explore.frontier} back off (see {@link #noFrontierConfig}). */
@@ -594,7 +593,7 @@ public final class OreDigFrontierGameTests {
 
         void fail(String message) {
             cleanup();
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
 
         /** Runs one tick of a test body; anything thrown cleans up first so a failure never leaves a bot behind. */
@@ -610,7 +609,7 @@ public final class OreDigFrontierGameTests {
         void cleanup() {
             done = true;
             for (String name : new ArrayList<>(bots)) {
-                AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
             bots.clear();
             for (Room room : rooms) {
@@ -637,7 +636,7 @@ public final class OreDigFrontierGameTests {
 
         void pass() {
             cleanup();
-            context.complete();
+            context.succeed();
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {

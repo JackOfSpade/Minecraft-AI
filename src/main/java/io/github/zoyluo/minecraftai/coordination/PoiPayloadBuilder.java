@@ -10,15 +10,14 @@ import io.github.zoyluo.minecraftai.mining.assist.PoiRegistry;
 import io.github.zoyluo.minecraftai.mining.assist.PoiScorer;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Design 6.6's R4 LLM-payload-building cluster, extracted out of {@link PoiCoordinator}: every method here
@@ -51,7 +50,7 @@ final class PoiPayloadBuilder {
                 evidence, entities,
                 score.c(), -1.0D, score.c(),
                 nearestEvidenceDistance(bot, state),
-                priorPoisFor(bot.getUuid(), dim, anchor));
+                priorPoisFor(bot.getUUID(), dim, anchor));
     }
 
     /** Evidence lines for the payload: {@link PoiEvidenceWindow}'s structural (non-natural) cells grouped by
@@ -79,7 +78,7 @@ final class PoiPayloadBuilder {
     /** Euclidean distance from the bot's eyes to the nearest evidence cell in {@code state}'s POI window,
      * cell-centre to eye-position; 0 when the window is empty. */
     static double nearestEvidenceDistance(AIPlayerEntity bot, MiningAssistState state) {
-        Vec3d eye = bot.getEyePos();
+        Vec3 eye = bot.getEyePosition();
         double best = Double.POSITIVE_INFINITY;
         for (PoiEvidenceWindow.Entry entry : state.poiWindow().structuralEntries()) {
             BlockPos pos = entry.pos();
@@ -106,7 +105,7 @@ final class PoiPayloadBuilder {
             if (entry.state() == PoiRegistry.State.CONSULTING || !entry.dimensionKey().equals(dim)) {
                 continue;
             }
-            double dist = Math.sqrt(entry.anchor().getSquaredDistance(anchor));
+            double dist = Math.sqrt(entry.anchor().distSqr(anchor));
             String decision = entry.state() == PoiRegistry.State.STOPPED ? "stop" : "decline";
             result.add(new PoiPrompt.PriorPoi(entry.label(), dist, decision));
         }

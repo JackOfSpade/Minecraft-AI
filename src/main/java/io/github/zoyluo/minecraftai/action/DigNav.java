@@ -2,11 +2,11 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.task.TerrainProbe;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.material.FluidState;
 
 /**
  * Dig-navigation: when pure pathfinding (A*) can't get through (blocked by walls / complex terrain /
@@ -31,8 +31,8 @@ public final class DigNav {
      * direction is blocked (e.g. adjacent lava), the caller should reroute or fail.
      */
     public static boolean digStep(AIPlayerEntity bot, BlockMiner miner, BlockPos target) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         BlockPos step = stepToward(feet, target);
         if (step == null) {
             return false;
@@ -40,14 +40,14 @@ public final class DigNav {
         if (adjacentHazardFluid(bot, step)) {
             return false; // The facing block is adjacent to an observed hazardous fluid (lava/water) -> don't dig, hand control back to the caller
         }
-        BlockPos solid = TerrainProbe.firstNonAir(world, step, step.up());
+        BlockPos solid = TerrainProbe.firstNonAir(world, step, step.above());
         if (solid == null) {
             // The facing block is already air -> step into it (descend if lower, walk if level/higher).
             miner.cancel(bot);
             if (step.getY() < feet.getY()) {
                 bot.getActionPack().descendInto(step);
             } else {
-                bot.getActionPack().startWalkTo(step.toCenterPos());
+                bot.getActionPack().startWalkTo(step.getCenter());
             }
             return true;
         }
@@ -77,19 +77,19 @@ public final class DigNav {
         int dx = target.getX() - from.getX();
         int dz = target.getZ() - from.getZ();
         if (dy < 0 && Math.abs(dx) <= 1 && Math.abs(dz) <= 1) {
-            return from.down();
+            return from.below();
         }
         if (Math.abs(dx) >= Math.abs(dz) && dx != 0) {
-            return from.offset(dx > 0 ? Direction.EAST : Direction.WEST);
+            return from.relative(dx > 0 ? Direction.EAST : Direction.WEST);
         }
         if (dz != 0) {
-            return from.offset(dz > 0 ? Direction.SOUTH : Direction.NORTH);
+            return from.relative(dz > 0 ? Direction.SOUTH : Direction.NORTH);
         }
         if (dy < 0) {
-            return from.down();
+            return from.below();
         }
         if (dy > 0) {
-            return from.up();
+            return from.above();
         }
         return null;
     }
@@ -102,12 +102,12 @@ public final class DigNav {
     // branch inside digStep) as a safety net, rather than reading neighbor fluid state ungated like the
     // old version did (which could "see" lava/water through rock that had never been dug).
     public static boolean adjacentHazardFluid(AIPlayerEntity bot, BlockPos pos) {
-        FluidState here = bot.getEntityWorld().getFluidState(pos);
-        if (here.isIn(FluidTags.LAVA) || here.isIn(FluidTags.WATER)) {
+        FluidState here = bot.level().getFluidState(pos);
+        if (here.is(FluidTags.LAVA) || here.is(FluidTags.WATER)) {
             return true;
         }
         for (Direction d : Direction.values()) {
-            if (isObservedHazardFluid(bot, pos.offset(d))) {
+            if (isObservedHazardFluid(bot, pos.relative(d))) {
                 return true;
             }
         }

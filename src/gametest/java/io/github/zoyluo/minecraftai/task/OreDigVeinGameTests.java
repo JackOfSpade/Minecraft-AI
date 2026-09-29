@@ -10,18 +10,17 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.stat.Stats;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -42,22 +41,22 @@ public final class OreDigVeinGameTests {
     private static final int MAX_Z = 3;
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_mine_whole_vein_behind_stone_stops_without_tunnelling", maxTicks = 1500)
-    public void mineWholeVeinBehindStoneStopsWithoutTunnelling(TestContext context) {
+    public void mineWholeVeinBehindStoneStopsWithoutTunnelling(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinBehindGT", true, true, 20);
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos start = fixture.start();
         // Three ores on the wall face, then three ores that are only reachable through the cells the
         // first ones leave behind (each has exactly one exposed face, into another ore).
         Set<BlockPos> vein = cells(start, new int[][]{
                 {0, 0, -3}, {1, 0, -3}, {1, 1, -3}, {1, 0, -4}, {1, 1, -4}, {1, 0, -5}});
         for (BlockPos pos : vein) {
-            world.setBlockState(pos, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         }
-        BlockPos hiddenDecoy = start.add(3, 1, -6);
-        BlockPos coalDecoy = start.add(0, 1, -3);
-        world.setBlockState(hiddenDecoy, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(coalDecoy, Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos hiddenDecoy = start.offset(3, 1, -6);
+        BlockPos coalDecoy = start.offset(0, 1, -3);
+        world.setBlock(hiddenDecoy, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(coalDecoy, Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
         Map<BlockPos, BlockState> before = snapshot(world, start);
         int deaths = deathCount(bot);
 
@@ -65,7 +64,7 @@ public final class OreDigVeinGameTests {
                 "{\"ore\":\"minecraft:iron_ore\",\"mode\":\"vein\",\"count\":1}").getAsJsonObject();
         OreDigTask task = invokeVeinTool(context, bot, args);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 fail(context, "vein task ended as " + task.state() + ":" + task.failureReason());
@@ -79,9 +78,9 @@ public final class OreDigVeinGameTests {
                     "raw iron collected " + InventoryAction.countItem(bot, Items.RAW_IRON)
                             + ", expected " + vein.size());
             requireOnlyChanged(context, world, before, vein, "vein mode changed a block outside the vein");
-            require(context, world.getBlockState(hiddenDecoy).isOf(Blocks.IRON_ORE),
+            require(context, world.getBlockState(hiddenDecoy).is(Blocks.IRON_ORE),
                     "an unconnected hidden iron ore was mined");
-            require(context, world.getBlockState(coalDecoy).isOf(Blocks.COAL_ORE),
+            require(context, world.getBlockState(coalDecoy).is(Blocks.COAL_ORE),
                     "a different ore type beside the vein was mined");
             require(context, bot.getBlockY() >= start.getY() - 1, "bot descended while mining a vein");
             finish(context, fixture);
@@ -89,10 +88,10 @@ public final class OreDigVeinGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_nearest_vein_only_leaves_second_vein_intact", maxTicks = 1500)
-    public void nearestVeinOnlyLeavesSecondVeinIntact(TestContext context) {
+    public void nearestVeinOnlyLeavesSecondVeinIntact(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinNearestGT", true, true, 20);
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos start = fixture.start();
         Set<BlockPos> near = cells(start, new int[][]{{0, 0, -3}, {1, 0, -3}, {1, 1, -3}, {1, 0, -4}});
         Set<BlockPos> far = cells(start, new int[][]{{-3, 0, -3}, {-3, 1, -3}, {-2, 1, -3}, {-3, 0, -4}});
@@ -105,7 +104,7 @@ public final class OreDigVeinGameTests {
                 "{\"ore\":\"minecraft:iron_ore\",\"mode\":\"vein\"}").getAsJsonObject();
         OreDigTask task = invokeVeinTool(context, bot, args);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 fail(context, "vein task ended as " + task.state() + ":" + task.failureReason());
@@ -117,7 +116,7 @@ public final class OreDigVeinGameTests {
                     "vein mode mined " + task.veinMined() + " ores, expected " + near.size());
             requireOnlyChanged(context, world, before, near, "the second vein (or stone) was disturbed");
             for (BlockPos pos : far) {
-                require(context, world.getBlockState(pos).isOf(Blocks.IRON_ORE),
+                require(context, world.getBlockState(pos).is(Blocks.IRON_ORE),
                         "the unchosen vein lost " + pos.toShortString());
             }
             require(context, InventoryAction.countItem(bot, Items.RAW_IRON) == near.size(),
@@ -127,10 +126,10 @@ public final class OreDigVeinGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_coordinate_hint_selects_the_other_vein", maxTicks = 1500)
-    public void coordinateHintSelectsTheOtherVein(TestContext context) {
+    public void coordinateHintSelectsTheOtherVein(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinHintGT", true, true, 20);
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos start = fixture.start();
         Set<BlockPos> near = cells(start, new int[][]{{0, 0, -3}, {1, 0, -3}, {1, 1, -3}, {1, 0, -4}});
         Set<BlockPos> far = cells(start, new int[][]{{-3, 0, -3}, {-3, 1, -3}, {-2, 1, -3}, {-3, 0, -4}});
@@ -138,13 +137,13 @@ public final class OreDigVeinGameTests {
         placeOre(world, far);
         Map<BlockPos, BlockState> before = snapshot(world, start);
         int deaths = deathCount(bot);
-        BlockPos hint = start.add(-3, 1, -3);
+        BlockPos hint = start.offset(-3, 1, -3);
 
         JsonObject args = JsonParser.parseString("{\"ore\":\"minecraft:iron_ore\",\"mode\":\"vein\",\"x\":"
                 + hint.getX() + ",\"y\":" + hint.getY() + ",\"z\":" + hint.getZ() + "}").getAsJsonObject();
         OreDigTask task = invokeVeinTool(context, bot, args);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 fail(context, "vein task ended as " + task.state() + ":" + task.failureReason());
@@ -156,7 +155,7 @@ public final class OreDigVeinGameTests {
                     "vein mode mined " + task.veinMined() + " ores, expected " + far.size());
             requireOnlyChanged(context, world, before, far, "the hinted vein run disturbed other blocks");
             for (BlockPos pos : near) {
-                require(context, world.getBlockState(pos).isOf(Blocks.IRON_ORE),
+                require(context, world.getBlockState(pos).is(Blocks.IRON_ORE),
                         "the nearer, unchosen vein lost " + pos.toShortString());
             }
             finish(context, fixture);
@@ -164,10 +163,10 @@ public final class OreDigVeinGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_member_beside_lava_is_sealed_before_it_is_mined", maxTicks = 1500)
-    public void memberBesideLavaIsSealedBeforeItIsMined(TestContext context) {
+    public void memberBesideLavaIsSealedBeforeItIsMined(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinLavaSealGT", true, true, 20);
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos start = fixture.start();
         LavaVein lava = lavaVein(world, start);
         Map<BlockPos, BlockState> before = snapshot(world, start);
@@ -178,7 +177,7 @@ public final class OreDigVeinGameTests {
                         + ",\"y\":" + (start.getY() + 1) + ",\"z\":" + (start.getZ() - 3) + "}").getAsJsonObject();
         OreDigTask task = invokeVeinTool(context, bot, args);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
             require(context, !bot.isInLava() && !bot.isOnFire(), "miner touched lava");
             require(context, world.getFluidState(lava.member()).isEmpty(),
@@ -194,7 +193,7 @@ public final class OreDigVeinGameTests {
             require(context, world.getBlockState(lava.member()).isAir(),
                     "the lava-adjacent member was not mined after sealing");
             require(context, world.getFluidState(lava.lava()).isEmpty()
-                            && !world.getBlockState(lava.lava()).isOf(Blocks.LAVA),
+                            && !world.getBlockState(lava.lava()).is(Blocks.LAVA),
                     "the adjacent lava source was not sealed");
             Set<BlockPos> allowed = new HashSet<>(lava.ores());
             allowed.add(lava.lava());
@@ -205,10 +204,10 @@ public final class OreDigVeinGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_member_beside_lava_is_skipped_when_nothing_can_seal", maxTicks = 1500)
-    public void memberBesideLavaIsSkippedWhenNothingCanSeal(TestContext context) {
+    public void memberBesideLavaIsSkippedWhenNothingCanSeal(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinLavaSkipGT", true, true, 0);
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos start = fixture.start();
         LavaVein lava = lavaVein(world, start);
         Map<BlockPos, BlockState> before = snapshot(world, start);
@@ -219,12 +218,12 @@ public final class OreDigVeinGameTests {
                         + ",\"y\":" + (start.getY() + 1) + ",\"z\":" + (start.getZ() - 3) + "}").getAsJsonObject();
         OreDigTask task = invokeVeinTool(context, bot, args);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.isAlive() && deathCount(bot) == deaths, "miner died");
             require(context, !bot.isInLava() && !bot.isOnFire(), "miner touched lava");
-            require(context, world.getBlockState(lava.member()).isOf(Blocks.IRON_ORE),
+            require(context, world.getBlockState(lava.member()).is(Blocks.IRON_ORE),
                     "the lava-adjacent member was mined although nothing could seal the lava");
-            require(context, world.getBlockState(lava.lava()).isOf(Blocks.LAVA),
+            require(context, world.getBlockState(lava.lava()).is(Blocks.LAVA),
                     "the lava source changed");
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
                 fail(context, "vein task ended as " + task.state() + ":" + task.failureReason());
@@ -244,20 +243,20 @@ public final class OreDigVeinGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_no_visible_ore_fails_instead_of_strip_mining", maxTicks = 600)
-    public void noVisibleOreFailsInsteadOfStripMining(TestContext context) {
+    public void noVisibleOreFailsInsteadOfStripMining(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinNoneGT", true, true, 0);
         AIPlayerEntity bot = fixture.bot();
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos start = fixture.start();
         // A completely enclosed ore is not observable and must not be scanned for.
-        world.setBlockState(start.add(2, 1, -6), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.offset(2, 1, -6), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         Map<BlockPos, BlockState> before = snapshot(world, start);
 
         JsonObject args = JsonParser.parseString(
                 "{\"ore\":\"minecraft:iron_ore\",\"mode\":\"vein\"}").getAsJsonObject();
         OreDigTask task = invokeVeinTool(context, bot, args);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.COMPLETED || task.state() == TaskState.CANCELLED) {
                 fail(context, "vein task ended as " + task.state() + " instead of failing typed");
             }
@@ -273,7 +272,7 @@ public final class OreDigVeinGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_vein_game_tests_tool_requires_suitable_pickaxe_up_front", maxTicks = 40)
-    public void toolRequiresSuitablePickaxeUpFront(TestContext context) {
+    public void toolRequiresSuitablePickaxeUpFront(GameTestHelper context) {
         Fixture fixture = spawn(context, "VeinToolGT", true, false, 0);
         AIPlayerEntity bot = fixture.bot();
         ToolDefinition definition = new ToolRegistry().get("mine_ore").orElse(null);
@@ -302,39 +301,39 @@ public final class OreDigVeinGameTests {
      * The wall-base ore {@code link} joins the floor ore to the rest of the vein; it sits at feet level,
      * so mining it needs a drop-support block (the second test deliberately has none).
      */
-    private static LavaVein lavaVein(net.minecraft.server.world.ServerWorld world, BlockPos start) {
+    private static LavaVein lavaVein(net.minecraft.server.level.ServerLevel world, BlockPos start) {
         Set<BlockPos> ores = cells(start, new int[][]{{0, 1, -3}, {1, 1, -3}, {1, 0, -3}, {2, -1, -2}});
         placeOre(world, ores);
-        BlockPos link = start.add(1, 0, -3);
-        BlockPos member = start.add(2, -1, -2);
-        BlockPos lava = start.add(2, -1, -1);
-        world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
-        return new LavaVein(ores, link.toImmutable(), member.toImmutable(), lava.toImmutable());
+        BlockPos link = start.offset(1, 0, -3);
+        BlockPos member = start.offset(2, -1, -2);
+        BlockPos lava = start.offset(2, -1, -1);
+        world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
+        return new LavaVein(ores, link.immutable(), member.immutable(), lava.immutable());
     }
 
-    private static Fixture spawn(TestContext context, String name, boolean wall, boolean pickaxe, int cobble) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 3, 9));
+    private static Fixture spawn(GameTestHelper context, String name, boolean wall, boolean pickaxe, int cobble) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(6, 3, 9));
         for (int dx = MIN_X; dx <= MAX_X; dx++) {
             for (int dz = MIN_Z; dz <= MAX_Z; dz++) {
-                world.setBlockState(start.add(dx, -2, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(start.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(start.offset(dx, -2, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 3; dy++) {
                     boolean solid = wall && dz <= -3;
-                    world.setBlockState(start.add(dx, dy, dz),
-                            (solid ? Blocks.STONE : Blocks.AIR).getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            (solid ? Blocks.STONE : Blocks.AIR).defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        180.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        180.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 180.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         if (cobble > 0) {
             InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, cobble));
         }
@@ -343,10 +342,10 @@ public final class OreDigVeinGameTests {
         }
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
-        return new Fixture(name, bot, start.toImmutable());
+        return new Fixture(name, bot, start.immutable());
     }
 
-    private static OreDigTask invokeVeinTool(TestContext context, AIPlayerEntity bot, JsonObject args) {
+    private static OreDigTask invokeVeinTool(GameTestHelper context, AIPlayerEntity bot, JsonObject args) {
         ToolDefinition definition = new ToolRegistry().get("mine_ore").orElse(null);
         require(context, definition != null, "mine_ore was not registered");
         ToolDefinition.ToolResult result = definition.handler().invoke(bot, args);
@@ -361,23 +360,23 @@ public final class OreDigVeinGameTests {
     private static Set<BlockPos> cells(BlockPos start, int[][] offsets) {
         Set<BlockPos> result = new HashSet<>();
         for (int[] o : offsets) {
-            result.add(start.add(o[0], o[1], o[2]).toImmutable());
+            result.add(start.offset(o[0], o[1], o[2]).immutable());
         }
         return result;
     }
 
-    private static void placeOre(net.minecraft.server.world.ServerWorld world, Set<BlockPos> ores) {
+    private static void placeOre(net.minecraft.server.level.ServerLevel world, Set<BlockPos> ores) {
         for (BlockPos pos : ores) {
-            world.setBlockState(pos, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         }
     }
 
-    private static Map<BlockPos, BlockState> snapshot(net.minecraft.server.world.ServerWorld world, BlockPos start) {
+    private static Map<BlockPos, BlockState> snapshot(net.minecraft.server.level.ServerLevel world, BlockPos start) {
         Map<BlockPos, BlockState> states = new HashMap<>();
         for (int dx = MIN_X; dx <= MAX_X; dx++) {
             for (int dz = MIN_Z; dz <= MAX_Z; dz++) {
                 for (int dy = -2; dy <= 3; dy++) {
-                    BlockPos pos = start.add(dx, dy, dz).toImmutable();
+                    BlockPos pos = start.offset(dx, dy, dz).immutable();
                     states.put(pos, world.getBlockState(pos));
                 }
             }
@@ -386,8 +385,8 @@ public final class OreDigVeinGameTests {
     }
 
     /** Every fixture cell outside {@code allowed} must be exactly as it was before the task ran. */
-    private static void requireOnlyChanged(TestContext context,
-                                           net.minecraft.server.world.ServerWorld world,
+    private static void requireOnlyChanged(GameTestHelper context,
+                                           net.minecraft.server.level.ServerLevel world,
                                            Map<BlockPos, BlockState> before,
                                            Set<BlockPos> allowed,
                                            String message) {
@@ -404,20 +403,20 @@ public final class OreDigVeinGameTests {
     }
 
     private static int deathCount(AIPlayerEntity bot) {
-        return bot.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.DEATHS));
+        return bot.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS));
     }
 
-    private static void finish(TestContext context, Fixture fixture) {
+    private static void finish(GameTestHelper context, Fixture fixture) {
         AIPlayerManager.INSTANCE.despawn(
-                fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+                fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
-    private static void fail(TestContext context, String message) {
-        context.throwGameTestException(Text.of(message));
+    private static void fail(GameTestHelper context, String message) {
+        context.fail(Component.nullToEmpty(message));
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
             fail(context, message);
         }

@@ -5,22 +5,21 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -47,11 +46,11 @@ public final class FollowSwimGameTests {
     private static final double SWIM_Y = -1.0D + 0.125D;
 
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_bot_on_shore_swims_after_target_across_pond_without_boat", maxTicks = 1200)
-    public void botOnShoreSwimsAfterTargetAcrossPondWithoutBoat(TestContext context) {
+    public void botOnShoreSwimsAfterTargetAcrossPondWithoutBoat(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 3, 26);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity bot = spawnBot(world, "SwimCrossBot", pond.feet().add(3, 0, LANE_Z));
-        AIPlayerEntity target = spawnBot(world, "SwimCrossTgt", pond.feet().add(9, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "SwimCrossBot", pond.feet().offset(3, 0, LANE_Z));
+        AIPlayerEntity target = spawnBot(world, "SwimCrossTgt", pond.feet().offset(9, 0, LANE_Z));
         holdStill(target);
         swimTo(world, pond, target, 9.5D, LANE_Z + 0.5D, SWIM_Y);
         FollowTask follow = new FollowTask("SwimCrossTgt");
@@ -60,14 +59,14 @@ public final class FollowSwimGameTests {
         double[] targetX = {9.5D};
         boolean[] sawWater = {false};
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                     "the safety net's water crisis took over a healthy swim follow at tick " + now);
             require(context, bot.getVehicle() == null && noBoats(world, pond),
                     "follow used a boat for a swimming target");
-            sawWater[0] |= bot.isTouchingWater();
+            sawWater[0] |= bot.isInWater();
             // Let the bot reach the shore first, then the player swims east across the pond.
             if (now > 40 && targetX[0] < 20.0D) {
                 targetX[0] += 0.12D;
@@ -79,7 +78,7 @@ public final class FollowSwimGameTests {
                 swimTo(world, pond, target, 9.5D, LANE_Z + 0.5D, SWIM_Y);
             }
             double distance = bot.distanceTo(target);
-            if (targetX[0] >= 20.0D && now > 120 && !bot.isTouchingWater()
+            if (targetX[0] >= 20.0D && now > 120 && !bot.isInWater()
                     && bot.getX() >= pond.feet().getX() + 19.5D && distance <= 5.0D) {
                 require(context, sawWater[0], "the bot reached the far shore without ever entering the water");
                 finish(context, pond, bot, target);
@@ -88,12 +87,12 @@ public final class FollowSwimGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_dives_after_target_resurfaces_before_drowning_then_goes_back_down", maxTicks = 1500)
-    public void divesAfterTargetResurfacesBeforeDrowningThenGoesBackDown(TestContext context) {
+    public void divesAfterTargetResurfacesBeforeDrowningThenGoesBackDown(GameTestHelper context) {
         runDive(context, false, "DiveBot", "DiveTgt");
     }
 
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_water_breathing_bot_stays_down_with_diving_target", maxTicks = 1200)
-    public void waterBreathingBotStaysDownWithDivingTarget(TestContext context) {
+    public void waterBreathingBotStaysDownWithDivingTarget(GameTestHelper context) {
         runDive(context, true, "DiveWbBot", "DiveWbTgt");
     }
 
@@ -102,15 +101,15 @@ public final class FollowSwimGameTests {
      * breathing the bot must go down, resurface before drowning and go back down; with it the bot
      * must simply stay near the target for the whole hold and never be forced up.
      */
-    private static void runDive(TestContext context, boolean waterBreathing, String botName, String targetName) {
+    private static void runDive(GameTestHelper context, boolean waterBreathing, String botName, String targetName) {
         Pond pond = buildPond(context, 8, 17, 12, 22);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity bot = spawnBot(world, botName, pond.feet().add(4, 0, LANE_Z));
-        AIPlayerEntity target = spawnBot(world, targetName, pond.feet().add(12, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, botName, pond.feet().offset(4, 0, LANE_Z));
+        AIPlayerEntity target = spawnBot(world, targetName, pond.feet().offset(12, 0, LANE_Z));
         holdStill(target);
         swimTo(world, pond, target, 12.5D, LANE_Z + 0.5D, SWIM_Y);
         if (waterBreathing) {
-            bot.addStatusEffect(new StatusEffectInstance(StatusEffects.WATER_BREATHING, 20 * 60 * 5, 0, false, false));
+            bot.addEffect(new MobEffectInstance(MobEffects.WATER_BREATHING, 20 * 60 * 5, 0, false, false));
         }
         FollowTask follow = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, follow,
@@ -123,20 +122,20 @@ public final class FollowSwimGameTests {
         int[] holdTicks = {0};
         int[] minAir = {Integer.MAX_VALUE};
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             double botDepthY = bot.getY() - pond.feet().getY();
-            minAir[0] = Math.min(minAir[0], bot.getAir());
-            require(context, bot.getAir() > 0 && bot.getHealth() >= bot.getMaxHealth(),
-                    "the bot was drowning while following a diver: air=" + bot.getAir()
+            minAir[0] = Math.min(minAir[0], bot.getAirSupply());
+            require(context, bot.getAirSupply() > 0 && bot.getHealth() >= bot.getMaxHealth(),
+                    "the bot was drowning while following a diver: air=" + bot.getAirSupply()
                             + " health=" + bot.getHealth() + " y=" + botDepthY + " tick=" + now);
             require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                     "the safety net had to rescue a healthy dive follow at tick " + now
-                            + " air=" + bot.getAir() + " y=" + botDepthY);
+                            + " air=" + bot.getAirSupply() + " y=" + botDepthY);
             if (stage[0] == 0) {
                 swimTo(world, pond, target, 12.5D, LANE_Z + 0.5D, SWIM_Y);
-                if (bot.isTouchingWater() && bot.distanceTo(target) <= 6.0D) {
+                if (bot.isInWater() && bot.distanceTo(target) <= 6.0D) {
                     stage[0] = 1;
                 }
                 return;
@@ -154,10 +153,10 @@ public final class FollowSwimGameTests {
                     holdTicks[0]++;
                     require(context, botDepthY <= -5.5D,
                             "a Water Breathing bot was forced up while following a diver: y=" + botDepthY
-                                    + " air=" + bot.getAir() + " held=" + holdTicks[0]);
+                                    + " air=" + bot.getAirSupply() + " held=" + holdTicks[0]);
                     if (holdTicks[0] >= 420) {
-                        require(context, bot.getAir() >= 250,
-                                "Water Breathing bot lost air anyway: " + bot.getAir());
+                        require(context, bot.getAirSupply() >= 250,
+                                "Water Breathing bot lost air anyway: " + bot.getAirSupply());
                         finish(context, pond, bot, target);
                     }
                 }
@@ -165,7 +164,7 @@ public final class FollowSwimGameTests {
             }
             if (stage[0] == 1 && deep) {
                 stage[0] = 2;
-            } else if (stage[0] == 2 && botDepthY >= -2.5D && !bot.isSubmergedInWater()) {
+            } else if (stage[0] == 2 && botDepthY >= -2.5D && !bot.isUnderWater()) {
                 stage[0] = 3;
             } else if (stage[0] == 3 && deep) {
                 require(context, minAir[0] > 0, "air hit zero during the dive");
@@ -175,11 +174,11 @@ public final class FollowSwimGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_shallow_water_swim_has_no_follow_and_safety_net_ping_pong", maxTicks = 700)
-    public void shallowWaterSwimHasNoFollowAndSafetyNetPingPong(TestContext context) {
+    public void shallowWaterSwimHasNoFollowAndSafetyNetPingPong(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 2, 26);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity bot = spawnBot(world, "ShallowBot", pond.feet().add(3, 0, LANE_Z));
-        AIPlayerEntity target = spawnBot(world, "ShallowTgt", pond.feet().add(9, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "ShallowBot", pond.feet().offset(3, 0, LANE_Z));
+        AIPlayerEntity target = spawnBot(world, "ShallowTgt", pond.feet().offset(9, 0, LANE_Z));
         holdStill(target);
         swimTo(world, pond, target, 9.5D, LANE_Z + 0.5D, SWIM_Y);
         FollowTask follow = new FollowTask("ShallowTgt");
@@ -190,15 +189,15 @@ public final class FollowSwimGameTests {
         int[] reversals = {0};
         int[] wetTicks = {0};
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                     "the safety net's water crisis fought the shallow swim follow at tick " + now);
-            if (bot.isTouchingWater()) {
+            if (bot.isInWater()) {
                 wetTicks[0]++;
             }
-            BlockPos here = bot.getBlockPos();
+            BlockPos here = bot.blockPosition();
             if (history[0] != null && history[1] != null
                     && here.equals(history[0]) && !here.equals(history[1])) {
                 reversals[0]++;
@@ -210,7 +209,7 @@ public final class FollowSwimGameTests {
                 targetX[0] = Math.min(19.5D, targetX[0] + 0.08D);
             }
             swimTo(world, pond, target, targetX[0], LANE_Z + 0.5D, SWIM_Y);
-            if (targetX[0] >= 19.5D && now > 200 && wetTicks[0] > 60 && bot.isTouchingWater()
+            if (targetX[0] >= 19.5D && now > 200 && wetTicks[0] > 60 && bot.isInWater()
                     && bot.distanceTo(target) <= 5.0D) {
                 finish(context, pond, bot, target);
             }
@@ -218,28 +217,28 @@ public final class FollowSwimGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_behind_natural_wall_digs_through_with_its_tools", maxTicks = 1500)
-    public void stuckBehindNaturalWallDigsThroughWithItsTools(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(0, 24, 0));
-        ServerWorld world = context.getWorld();
+    public void stuckBehindNaturalWallDigsThroughWithItsTools(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
+        ServerLevel world = context.getLevel();
         // Sealed island: floor only exists inside the platform, a 2-high, 2-thick natural stone
         // wall splits it completely, and the bot carries no placeable block, so no walking route
         // exists (the follow order alone must get it through, by the ordinary dig-through route or,
         // failing that, the recovery ladder's dig-out).
-        buildIsland(world, feet, z -> Blocks.STONE.getDefaultState());
-        AIPlayerEntity bot = spawnBot(world, "DigWallBot", feet.add(4, 0, 6));
+        buildIsland(world, feet, z -> Blocks.STONE.defaultBlockState());
+        AIPlayerEntity bot = spawnBot(world, "DigWallBot", feet.offset(4, 0, 6));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        AIPlayerEntity target = spawnBot(world, "DigWallTgt", feet.add(17, 0, 6));
+        AIPlayerEntity target = spawnBot(world, "DigWallTgt", feet.offset(17, 0, 6));
         holdStill(target);
         FollowTask follow = new FollowTask("DigWallTgt");
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_dig_wall"));
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             for (int x = 4; x <= 17; x++) {
                 for (int z = 5; z <= 7; z++) {
-                    require(context, !world.getBlockState(feet.add(x, -1, z)).isAir(),
+                    require(context, !world.getBlockState(feet.offset(x, -1, z)).isAir(),
                             "the follower dug out the floor under a wall-crossing route at " + x + "," + z);
                 }
             }
@@ -247,7 +246,7 @@ public final class FollowSwimGameTests {
                 require(context, now > 5, "impossible instant arrival");
                 forceChunks(world, feet, 26, false);
                 despawn(world, bot, target);
-                context.complete();
+                context.succeed();
             }
         });
     }
@@ -262,25 +261,25 @@ public final class FollowSwimGameTests {
      * ledger are refused -- see {@link FollowDigOut}.)
      */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_stuck_recovery_digs_plain_stone_only_with_tool_never_building_blocks", maxTicks = 700)
-    public void stuckRecoveryDigsPlainStoneOnlyWithToolNeverBuildingBlocks(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(0, 24, 0));
-        ServerWorld world = context.getWorld();
-        buildIsland(world, feet, z -> z >= 10 ? Blocks.OAK_PLANKS.getDefaultState()
-                : z >= 7 ? Blocks.COBBLESTONE.getDefaultState() : Blocks.STONE.getDefaultState());
+    public void stuckRecoveryDigsPlainStoneOnlyWithToolNeverBuildingBlocks(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
+        ServerLevel world = context.getLevel();
+        buildIsland(world, feet, z -> z >= 10 ? Blocks.OAK_PLANKS.defaultBlockState()
+                : z >= 7 ? Blocks.COBBLESTONE.defaultBlockState() : Blocks.STONE.defaultBlockState());
         // Lane z=2: pickaxe + stone.  Lane z=5: stone but no tool.  Lane z=8: pickaxe + cobblestone.
         // Lane z=11: pickaxe + planks.
-        AIPlayerEntity digger = spawnBot(world, "RecDigBot", feet.add(9, 0, 2));
+        AIPlayerEntity digger = spawnBot(world, "RecDigBot", feet.offset(9, 0, 2));
         InventoryAction.giveItem(digger, new ItemStack(Items.IRON_PICKAXE, 1));
-        AIPlayerEntity toolless = spawnBot(world, "RecNoToolBot", feet.add(9, 0, 5));
-        AIPlayerEntity cobbler = spawnBot(world, "RecCobbleBot", feet.add(9, 0, 8));
+        AIPlayerEntity toolless = spawnBot(world, "RecNoToolBot", feet.offset(9, 0, 5));
+        AIPlayerEntity cobbler = spawnBot(world, "RecCobbleBot", feet.offset(9, 0, 8));
         InventoryAction.giveItem(cobbler, new ItemStack(Items.IRON_PICKAXE, 1));
-        AIPlayerEntity builder = spawnBot(world, "RecPlanksBot", feet.add(9, 0, 11));
+        AIPlayerEntity builder = spawnBot(world, "RecPlanksBot", feet.offset(9, 0, 11));
         InventoryAction.giveItem(builder, new ItemStack(Items.IRON_PICKAXE, 1));
         // One target per lane, so no bot is ever "closer" by sidestepping into another lane.
-        AIPlayerEntity diggerTarget = spawnBot(world, "RecDigTgt", feet.add(20, 0, 2));
-        AIPlayerEntity toollessTarget = spawnBot(world, "RecNoToolTgt", feet.add(20, 0, 5));
-        AIPlayerEntity cobblerTarget = spawnBot(world, "RecCobbleTgt", feet.add(20, 0, 8));
-        AIPlayerEntity builderTarget = spawnBot(world, "RecPlanksTgt", feet.add(20, 0, 11));
+        AIPlayerEntity diggerTarget = spawnBot(world, "RecDigTgt", feet.offset(20, 0, 2));
+        AIPlayerEntity toollessTarget = spawnBot(world, "RecNoToolTgt", feet.offset(20, 0, 5));
+        AIPlayerEntity cobblerTarget = spawnBot(world, "RecCobbleTgt", feet.offset(20, 0, 8));
+        AIPlayerEntity builderTarget = spawnBot(world, "RecPlanksTgt", feet.offset(20, 0, 11));
         for (AIPlayerEntity bot : new AIPlayerEntity[]{digger, toolless, cobbler, builder, diggerTarget,
                 toollessTarget, cobblerTarget, builderTarget}) {
             holdStill(bot);
@@ -294,7 +293,7 @@ public final class FollowSwimGameTests {
         cobblerRecovery.reset(cobbler, 0);
         builderRecovery.reset(builder, 0);
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             diggerRecovery.tick(digger, diggerTarget, now, 3.0D);
             toollessRecovery.tick(toolless, toollessTarget, now, 3.0D);
@@ -314,7 +313,7 @@ public final class FollowSwimGameTests {
                             && builder.getX() < feet.getX() + 10.0D,
                     "a bot without a legal dig walked through the wall (tick " + now + ")");
             for (int x = 4; x <= 17; x++) {
-                require(context, !world.getBlockState(feet.add(x, -1, 2)).isAir(),
+                require(context, !world.getBlockState(feet.offset(x, -1, 2)).isAir(),
                         "dig-out removed the floor at x=" + x);
             }
             if (digger.getX() >= feet.getX() + 12.0D) {
@@ -323,7 +322,7 @@ public final class FollowSwimGameTests {
                         "the digger broke more than its own lane");
                 despawn(world, digger, toolless, cobbler, builder, diggerTarget, toollessTarget,
                         cobblerTarget, builderTarget);
-                context.complete();
+                context.succeed();
             }
         });
     }
@@ -334,26 +333,26 @@ public final class FollowSwimGameTests {
      * search.
      */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_wading_bot_next_to_shore_walks_out_with_land_follow_and_no_water_searches", maxTicks = 500)
-    public void wadingBotNextToShoreWalksOutWithLandFollowAndNoWaterSearches(TestContext context) {
+    public void wadingBotNextToShoreWalksOutWithLandFollowAndNoWaterSearches(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 1, 26);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity target = spawnBot(world, "WadeShoreTgt", pond.feet().add(2, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity target = spawnBot(world, "WadeShoreTgt", pond.feet().offset(2, 0, LANE_Z));
         holdStill(target);
-        AIPlayerEntity bot = spawnBot(world, "WadeShoreBot", pond.feet().add(8, -1, LANE_Z));
+        AIPlayerEntity bot = spawnBot(world, "WadeShoreBot", pond.feet().offset(8, -1, LANE_Z));
         FollowTask follow = new FollowTask("WadeShoreTgt");
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_wade_shore"));
         AtomicInteger tick = new AtomicInteger();
         boolean[] startedWet = {false};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
-            startedWet[0] |= bot.isTouchingWater();
+            startedWet[0] |= bot.isInWater();
             require(context, follow.swimRouteSearchCount() == 0,
                     "the swim exit ran a water search for a bot that was only wading (tick " + now + ")");
             require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                     "the safety net's water crisis took over a wading bot at tick " + now);
-            if (now > 10 && !bot.isTouchingWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
+            if (now > 10 && !bot.isInWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
                 require(context, startedWet[0], "the bot never stood in the shallow");
                 finish(context, pond, bot, target);
             }
@@ -365,24 +364,24 @@ public final class FollowSwimGameTests {
      * its snap only reaches a dry neighbour), so the swim exit wades the bot out along a water route.
      */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_bot_wading_mid_shallows_wades_out_to_land_target", maxTicks = 700)
-    public void botWadingMidShallowsWadesOutToLandTarget(TestContext context) {
+    public void botWadingMidShallowsWadesOutToLandTarget(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 1, 26);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity target = spawnBot(world, "WadeMidTgt", pond.feet().add(2, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity target = spawnBot(world, "WadeMidTgt", pond.feet().offset(2, 0, LANE_Z));
         holdStill(target);
-        AIPlayerEntity bot = spawnBot(world, "WadeMidBot", pond.feet().add(14, -1, LANE_Z));
+        AIPlayerEntity bot = spawnBot(world, "WadeMidBot", pond.feet().offset(14, -1, LANE_Z));
         FollowTask follow = new FollowTask("WadeMidTgt");
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_wade_mid"));
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                     "the safety net's water crisis took over a wading bot at tick " + now);
             require(context, follow.swimRouteSearchCount() <= 4,
                     "wading out ran a water search on every cooldown: " + follow.swimRouteSearchCount());
-            if (now > 10 && !bot.isTouchingWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
+            if (now > 10 && !bot.isInWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
                 finish(context, pond, bot, target);
             }
         });
@@ -394,26 +393,26 @@ public final class FollowSwimGameTests {
      * not dive on toward a distant landing.
      */
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_submerged_bot_heading_for_land_still_surfaces_for_air_first", maxTicks = 700)
-    public void submergedBotHeadingForLandStillSurfacesForAirFirst(TestContext context) {
+    public void submergedBotHeadingForLandStillSurfacesForAirFirst(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 8, 26);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity target = spawnBot(world, "ExitAirTgt", pond.feet().add(2, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity target = spawnBot(world, "ExitAirTgt", pond.feet().offset(2, 0, LANE_Z));
         holdStill(target);
-        AIPlayerEntity bot = spawnBot(world, "ExitAirBot", pond.feet().add(14, -7, LANE_Z));
-        bot.setAir(FollowOxygen.SURFACE_FLOOR_AIR + 2);
+        AIPlayerEntity bot = spawnBot(world, "ExitAirBot", pond.feet().offset(14, -7, LANE_Z));
+        bot.setAirSupply(FollowOxygen.SURFACE_FLOOR_AIR + 2);
         FollowTask follow = new FollowTask("ExitAirTgt");
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_exit_air"));
         AtomicInteger tick = new AtomicInteger();
         int[] minAir = {Integer.MAX_VALUE};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
-            minAir[0] = Math.min(minAir[0], bot.getAir());
-            require(context, bot.getAir() > FollowOxygen.RESCUE_AIR,
-                    "the bot let the drowning rescue take over while climbing out: air=" + bot.getAir()
+            minAir[0] = Math.min(minAir[0], bot.getAirSupply());
+            require(context, bot.getAirSupply() > FollowOxygen.RESCUE_AIR,
+                    "the bot let the drowning rescue take over while climbing out: air=" + bot.getAirSupply()
                             + " tick=" + now);
-            if (now > 10 && !bot.isTouchingWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
+            if (now > 10 && !bot.isInWater() && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
                 require(context, follow.swimAscendCount() >= 1,
                         "the bot never turned up for breath while heading for land (min air " + minAir[0] + ")");
                 finish(context, pond, bot, target);
@@ -421,11 +420,11 @@ public final class FollowSwimGameTests {
         });
     }
 
-    private static boolean wallIntact(ServerWorld world, BlockPos feet, int zMin, int zMax) {
+    private static boolean wallIntact(ServerLevel world, BlockPos feet, int zMin, int zMax) {
         for (int z = zMin; z <= zMax; z++) {
             for (int x = 10; x <= 11; x++) {
                 for (int y = 0; y <= 1; y++) {
-                    if (world.getBlockState(feet.add(x, y, z)).isAir()) {
+                    if (world.getBlockState(feet.offset(x, y, z)).isAir()) {
                         return false;
                     }
                 }
@@ -438,19 +437,19 @@ public final class FollowSwimGameTests {
      * A sealed island: floor only inside x 0..24, z 0..12, split completely by a 2-high, 2-thick
      * wall at x 10..11 made of {@code wallForZ(z)}.
      */
-    private static void buildIsland(ServerWorld world, BlockPos feet, java.util.function.IntFunction<BlockState> wallForZ) {
+    private static void buildIsland(ServerLevel world, BlockPos feet, java.util.function.IntFunction<BlockState> wallForZ) {
         forceChunks(world, feet, 26, true);
         for (int x = -2; x <= 26; x++) {
             for (int z = -2; z <= 14; z++) {
                 boolean floor = x >= 0 && x <= 24 && z >= 0 && z <= 12;
                 for (int y = -3; y <= 5; y++) {
-                    BlockState state = Blocks.AIR.getDefaultState();
+                    BlockState state = Blocks.AIR.defaultBlockState();
                     if (floor && y <= -1) {
-                        state = Blocks.STONE.getDefaultState();
+                        state = Blocks.STONE.defaultBlockState();
                     } else if (floor && (x == 10 || x == 11) && y >= 0 && y <= 1) {
                         state = wallForZ.apply(z);
                     }
-                    world.setBlockState(feet.add(x, y, z), state, Block.NOTIFY_ALL);
+                    world.setBlock(feet.offset(x, y, z), state, Block.UPDATE_ALL);
                 }
             }
         }
@@ -458,21 +457,21 @@ public final class FollowSwimGameTests {
 
     // ---- fixture ---------------------------------------------------------------------------
 
-    record Pond(BlockPos feet, int x0, int x1, int maxX, Box area) {
+    record Pond(BlockPos feet, int x0, int x1, int maxX, AABB area) {
     }
 
     /**
      * Land for the whole box except a pond of {@code depth} blocks spanning x in [x0, x1] and
      * z in [{@value #POND_Z0}, {@value #POND_Z1}]; the water surface block is flush with the bank.
      */
-    static Pond buildPond(TestContext context, int x0, int x1, int depth, int maxX) {
-        ServerWorld world = context.getWorld();
-        world.setTimeOfDay(1000L);
-        BlockPos feet = context.getAbsolutePos(new BlockPos(0, 24, 0));
+    static Pond buildPond(GameTestHelper context, int x0, int x1, int depth, int maxX) {
+        ServerLevel world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos feet = context.absolutePos(new BlockPos(0, 24, 0));
         forceChunks(world, feet, maxX, true);
-        BlockState stone = Blocks.STONE.getDefaultState();
-        BlockState air = Blocks.AIR.getDefaultState();
-        BlockState water = Blocks.WATER.getDefaultState();
+        BlockState stone = Blocks.STONE.defaultBlockState();
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockState water = Blocks.WATER.defaultBlockState();
         for (int x = -2; x <= maxX + 1; x++) {
             for (int z = -2; z <= MAX_Z + 1; z++) {
                 boolean inPond = x >= x0 && x <= x1 && z >= POND_Z0 && z <= POND_Z1;
@@ -483,20 +482,20 @@ public final class FollowSwimGameTests {
                     } else {
                         state = y <= -1 ? stone : air;
                     }
-                    world.setBlockState(feet.add(x, y, z), state, Block.NOTIFY_ALL);
+                    world.setBlock(feet.offset(x, y, z), state, Block.UPDATE_ALL);
                 }
             }
         }
-        Box area = Box.enclosing(feet.add(-40, -depth - 10, -40), feet.add(maxX + 40, 12, MAX_Z + 40));
+        AABB area = AABB.encapsulatingFullBlocks(feet.offset(-40, -depth - 10, -40), feet.offset(maxX + 40, 12, MAX_Z + 40));
         // The flat gametest world spawns slimes in slime chunks regardless of light; one slain bot
         // fails an otherwise correct test, so keep the fixture monster-free.
-        context.runAtEveryTick(() -> world.getEntitiesByClass(net.minecraft.entity.mob.MobEntity.class, area,
-                mob -> mob instanceof net.minecraft.entity.mob.Monster)
-                .forEach(net.minecraft.entity.Entity::discard));
+        context.failIfEver(() -> world.getEntitiesOfClass(net.minecraft.world.entity.Mob.class, area,
+                mob -> mob instanceof net.minecraft.world.entity.monster.Enemy)
+                .forEach(net.minecraft.world.entity.Entity::discard));
         return new Pond(feet, x0, x1, maxX, area);
     }
 
-    private static void forceChunks(ServerWorld world, BlockPos feet, int maxX, boolean forced) {
+    private static void forceChunks(ServerLevel world, BlockPos feet, int maxX, boolean forced) {
         for (int cx = (feet.getX() - 2) >> 4; cx <= (feet.getX() + maxX + 1) >> 4; cx++) {
             for (int cz = (feet.getZ() - 2) >> 4; cz <= (feet.getZ() + MAX_Z + 1) >> 4; cz++) {
                 world.setChunkForced(cx, cz, forced);
@@ -504,8 +503,8 @@ public final class FollowSwimGameTests {
         }
     }
 
-    static boolean noBoats(ServerWorld world, Pond pond) {
-        return world.getEntitiesByClass(AbstractBoatEntity.class, pond.area(), boat -> true).isEmpty();
+    static boolean noBoats(ServerLevel world, Pond pond) {
+        return world.getEntitiesOfClass(AbstractBoat.class, pond.area(), boat -> true).isEmpty();
     }
 
     // ---- entity helpers --------------------------------------------------------------------
@@ -516,43 +515,43 @@ public final class FollowSwimGameTests {
     }
 
     /** Puts {@code swimmer} at a water position, topped up on air, under the narrow follow lease. */
-    private static void swimTo(ServerWorld world, Pond pond, AIPlayerEntity swimmer, double x, double z, double y) {
-        swimmer.teleport(world, pond.feet().getX() + x, pond.feet().getY() + y, pond.feet().getZ() + z,
+    private static void swimTo(ServerLevel world, Pond pond, AIPlayerEntity swimmer, double x, double z, double y) {
+        swimmer.teleportTo(world, pond.feet().getX() + x, pond.feet().getY() + y, pond.feet().getZ() + z,
                 Set.of(), 0.0F, 0.0F, true);
-        swimmer.setVelocity(Vec3d.ZERO);
+        swimmer.setDeltaMovement(Vec3.ZERO);
         swimmer.fallDistance = 0.0F;
-        swimmer.setAir(swimmer.getMaxAir());
+        swimmer.setAirSupply(swimmer.getMaxAirSupply());
         NavSafetyNet.INSTANCE.renewFollowSwim(swimmer);
     }
 
-    private static void standOn(ServerWorld world, Pond pond, AIPlayerEntity player, double x, double z, double y) {
-        player.teleport(world, pond.feet().getX() + x, pond.feet().getY() + y, pond.feet().getZ() + z,
+    private static void standOn(ServerLevel world, Pond pond, AIPlayerEntity player, double x, double z, double y) {
+        player.teleportTo(world, pond.feet().getX() + x, pond.feet().getY() + y, pond.feet().getZ() + z,
                 Set.of(), 0.0F, 0.0F, true);
-        player.setVelocity(Vec3d.ZERO);
+        player.setDeltaMovement(Vec3.ZERO);
         player.fallDistance = 0.0F;
         player.setOnGround(true);
     }
 
-    static AIPlayerEntity spawnBot(ServerWorld world, String name, BlockPos feet) {
+    static AIPlayerEntity spawnBot(ServerLevel world, String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(feet),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
+        bot.getFoodData().setFoodLevel(20);
         return bot;
     }
 
-    static void finish(TestContext context, Pond pond, AIPlayerEntity bot, AIPlayerEntity target) {
-        forceChunks(context.getWorld(), pond.feet(), pond.maxX(), false);
+    static void finish(GameTestHelper context, Pond pond, AIPlayerEntity bot, AIPlayerEntity target) {
+        forceChunks(context.getLevel(), pond.feet(), pond.maxX(), false);
         TaskManager.INSTANCE.abort(bot);
-        despawn(context.getWorld(), bot, target);
-        context.complete();
+        despawn(context.getLevel(), bot, target);
+        context.succeed();
     }
 
-    private static void despawn(ServerWorld world, AIPlayerEntity... bots) {
+    private static void despawn(ServerLevel world, AIPlayerEntity... bots) {
         for (AIPlayerEntity bot : bots) {
             DangerWatcher.INSTANCE.clear(bot);
             NavSafetyNet.INSTANCE.clear(bot);
@@ -560,15 +559,15 @@ public final class FollowSwimGameTests {
         }
     }
 
-    static void requireRunning(TestContext context, FollowTask follow, AIPlayerEntity bot) {
+    static void requireRunning(GameTestHelper context, FollowTask follow, AIPlayerEntity bot) {
         require(context, follow.state() == TaskState.RUNNING || follow.state() == TaskState.PAUSED,
                 "follow ended early: state=" + follow.state() + " reason=" + follow.failureReason()
-                        + " botPos=" + bot.getEntityPos() + " air=" + bot.getAir());
+                        + " botPos=" + bot.position() + " air=" + bot.getAirSupply());
     }
 
-    static void require(TestContext context, boolean condition, String message) {
+    static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

@@ -1,14 +1,13 @@
 package io.github.zoyluo.minecraftai.goal;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Set;
 import java.util.stream.Collectors;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 public record GoalStep(Kind kind,
                        Item item,
@@ -45,7 +44,7 @@ public record GoalStep(Kind kind,
                 && tag.startsWith("rare_ore_batch:")
                 ? Math.max(0, count) : Math.max(1, count);
         ores = ores == null ? Set.of() : Set.copyOf(ores);
-        pos = pos == null ? null : pos.toImmutable();
+        pos = pos == null ? null : pos.immutable();
     }
 
     public static GoalStep gather(Item item, int count) {
@@ -357,12 +356,12 @@ public record GoalStep(Kind kind,
     }
 
     private static String itemName(Item item) {
-        Identifier id = item == null ? null : Registries.ITEM.getId(item);
+        Identifier id = item == null ? null : BuiltInRegistries.ITEM.getKey(item);
         return id == null ? "unknown item" : id.getPath().replace('_', ' ');
     }
 
     private static String blockName(Block block) {
-        Identifier id = block == null ? null : Registries.BLOCK.getId(block);
+        Identifier id = block == null ? null : BuiltInRegistries.BLOCK.getKey(block);
         return id == null ? "unknown block" : id.getPath().replace('_', ' ');
     }
 }

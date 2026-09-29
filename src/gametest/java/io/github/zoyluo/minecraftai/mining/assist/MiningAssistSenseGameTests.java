@@ -24,20 +24,20 @@ import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +79,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_visible_ore", maxTicks = 500)
-    public void visibleOreInsideACaveIsSighted(TestContext context) {
+    public void visibleOreInsideACaveIsSighted(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(20, -4, 4, -3, 3, 4);
         List<OreSpot> ores = List.of(
@@ -92,13 +92,13 @@ public final class MiningAssistSenseGameTests {
 
         AIPlayerEntity bot = h.spawn("AssistSightGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         Map<String, Integer> firstRay = new LinkedHashMap<>();
         boolean[] evaluated = {false};
         int[] logDeadline = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -176,7 +176,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_real_ore_dig", maxTicks = 700)
-    public void realOreDigMissionIsSensedWhileItMines(TestContext context) {
+    public void realOreDigMissionIsSensedWhileItMines(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -4, 4, -3, 3, 4);
         // Eye-level ore: the broken cell is then in plain view of the bot that broke it (a floor-level hole in a wall is not).
@@ -193,12 +193,12 @@ public final class MiningAssistSenseGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         // A sacrificial block for OreDig's drop-catch support (it refuses to mine without one to spend).
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = new OreDigTask[1];
         int[] brokeAt = {-1};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -261,7 +261,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_enclosed_ore", maxTicks = 500)
-    public void oreBehindOneStoneLayerIsNeverSighted(TestContext context) {
+    public void oreBehindOneStoneLayerIsNeverSighted(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(40, -4, 4, -3, 3, 3);
         BlockPos control = room.at(5, 0, 0);
@@ -277,9 +277,9 @@ public final class MiningAssistSenseGameTests {
         room.set(1, -2, 0, Blocks.DIAMOND_ORE);
         List<BlockPos> front = List.of(room.at(-5, 0, 0), room.at(0, 3, 0), room.at(1, -1, 0));
         for (BlockPos ore : hidden) {
-            for (net.minecraft.util.math.Direction direction : net.minecraft.util.math.Direction.values()) {
-                BlockState neighbour = room.world.getBlockState(ore.offset(direction));
-                h.require(!neighbour.isAir() && !neighbour.isOf(Blocks.CAVE_AIR),
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+                BlockState neighbour = room.world.getBlockState(ore.relative(direction));
+                h.require(!neighbour.isAir() && !neighbour.is(Blocks.CAVE_AIR),
                         "fixture error: hidden ore at " + ore.toShortString() + " touches air on its "
                                 + direction + " face");
             }
@@ -290,10 +290,10 @@ public final class MiningAssistSenseGameTests {
         h.replaceConfig(withRaysPerTick(256));
         AIPlayerEntity bot = h.spawn("AssistCanaryGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -350,7 +350,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_unforced_off", maxTicks = 700)
-    public void unforcedBotStaysOff(TestContext context) {
+    public void unforcedBotStaysOff(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(50, -4, 4, -3, 3, 4);
         BlockPos coal = room.at(5, 1, 0);
@@ -363,12 +363,12 @@ public final class MiningAssistSenseGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         // A sacrificial block for OreDig's drop-catch support (it refuses to mine without one to spend).
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         h.require(!MiningAssistRuntime.isForced(id), "fixture error: the bot is forced");
         Progress p = new Progress();
         int[] brokeAt = {-1};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -423,19 +423,19 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_verify_origin", maxTicks = 500)
-    public void verifyOriginNeverSenses(TestContext context) {
+    public void verifyOriginNeverSenses(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(60, -3, 3, -3, 3, 3);
         room.set(4, 0, 0, Blocks.DIAMOND_ORE);
         AIPlayerEntity bot = h.spawn("AssistVerifyGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         TaskOrigin.Kind[] closed = {TaskOrigin.Kind.VERIFY, TaskOrigin.Kind.SAFETY, TaskOrigin.Kind.SYSTEM_BACKGROUND};
         int[] phase = {0};
         int[] phaseStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -488,20 +488,20 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_audit_gate", maxTicks = 600)
-    public void auditSessionAndDegradedTpsCloseTheGate(TestContext context) {
+    public void auditSessionAndDegradedTpsCloseTheGate(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(55, -3, 3, -3, 3, 3);
         room.set(4, 0, 0, Blocks.DIAMOND_ORE);
         AIPlayerEntity bot = h.spawn("AssistAuditGT", room, 0, 0);
         h.enableAssist(bot);
         h.onCleanup(() -> MiningEvidenceAudit.clear(bot));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         int[] stage = {0};
         long[] mark = {0L};
         int[] markTick = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -592,7 +592,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_mineshaft_poi", maxTicks = 700)
-    public void minePoiPaletteScoresAsStructureInShadow(TestContext context) {
+    public void minePoiPaletteScoresAsStructureInShadow(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(70, -9, 9, -1, 1, 3);
         List<BlockPos> torches = List.of(room.at(2, 0, 1), room.at(-2, 0, -1));
@@ -616,23 +616,23 @@ public final class MiningAssistSenseGameTests {
         room.set(8, 1, -1, Blocks.COBWEB);
         // Torches placed by the TEST, not by the bot: they are evidence.
         for (BlockPos torch : torches) {
-            room.world.setBlockState(torch, Blocks.TORCH.getDefaultState(), Block.NOTIFY_ALL);
+            room.world.setBlock(torch, Blocks.TORCH.defaultBlockState(), Block.UPDATE_ALL);
         }
         room.set(-4, 0, 1, Blocks.CHEST);
-        var minecart = EntityType.CHEST_MINECART.create(room.world, SpawnReason.COMMAND);
+        var minecart = EntityType.CHEST_MINECART.create(room.world, EntitySpawnReason.COMMAND);
         h.require(minecart != null, "could not create a chest minecart");
         BlockPos cart = room.at(4, 0, 0);
-        minecart.refreshPositionAndAngles(cart.getX() + 0.5D, cart.getY() + 0.0625D, cart.getZ() + 0.5D, 0.0F, 0.0F);
-        room.world.spawnEntity(minecart);
+        minecart.snapTo(cart.getX() + 0.5D, cart.getY() + 0.0625D, cart.getZ() + 0.5D, 0.0F, 0.0F);
+        room.world.addFreshEntity(minecart);
 
         AIPlayerEntity bot = h.spawn("AssistShaftGT", room, 0, 0);
         h.enableAssist(bot);
         h.onCleanup(minecart::discard);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         int[] maxRank = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -682,12 +682,12 @@ public final class MiningAssistSenseGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_own_edits_poi", maxTicks = 800)
-    public void botOwnPlacementsNeverScoreAsStructure(TestContext context) {
+    public void botOwnPlacementsNeverScoreAsStructure(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(85, -5, 5, -4, 4, 4);
         AIPlayerEntity bot = h.spawn("AssistEditsGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         // Phase 1: the palette that WOULD score (planks + cobweb, beside torches and cobblestone), placed by the
         // bot itself through BuildAction.placeBlockAt, the path every real placement takes.
@@ -704,7 +704,7 @@ public final class MiningAssistSenseGameTests {
         int[] phaseStart = {0};
         int[] maxRank = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -765,10 +765,10 @@ public final class MiningAssistSenseGameTests {
                         quiet.band(), fmt(quiet.score().s()), seenPlanks, windowCounts(state), describe(state));
                 // Twin: same kinds of blocks, placed by the test.
                 for (BlockPos pos : testPlanks) {
-                    room.world.setBlockState(pos, Blocks.OAK_PLANKS.getDefaultState(), Block.NOTIFY_ALL);
+                    room.world.setBlock(pos, Blocks.OAK_PLANKS.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 for (BlockPos pos : testWebs) {
-                    room.world.setBlockState(pos, Blocks.COBWEB.getDefaultState(), Block.NOTIFY_ALL);
+                    room.world.setBlock(pos, Blocks.COBWEB.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 phase[0] = 1;
                 phaseStart[0] = p.tick;
@@ -809,7 +809,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_four_bot_cost", maxTicks = 800)
-    public void fourBotsSensingCostStaysBounded(TestContext context) {
+    public void fourBotsSensingCostStaysBounded(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(25, -9, 9, -9, 9, 6);
         // A busy cave: ores in the walls, a lava pool and a water pool (so hazard bookkeeping runs), a run of
@@ -843,16 +843,16 @@ public final class MiningAssistSenseGameTests {
         room.set(6, 0, -1, Blocks.TORCH);
         room.set(-6, 0, -1, Blocks.TORCH);
         room.set(-8, 0, 3, Blocks.CHEST);
-        var stand = EntityType.ARMOR_STAND.create(room.world, SpawnReason.COMMAND);
-        var cart = EntityType.CHEST_MINECART.create(room.world, SpawnReason.COMMAND);
+        var stand = EntityType.ARMOR_STAND.create(room.world, EntitySpawnReason.COMMAND);
+        var cart = EntityType.CHEST_MINECART.create(room.world, EntitySpawnReason.COMMAND);
         h.require(stand != null && cart != null, "could not create the POI entities");
         BlockPos standPos = room.at(1, 0, -4);
-        stand.refreshPositionAndAngles(standPos.getX() + 0.5D, standPos.getY(), standPos.getZ() + 0.5D, 0.0F, 0.0F);
-        room.world.spawnEntity(stand);
+        stand.snapTo(standPos.getX() + 0.5D, standPos.getY(), standPos.getZ() + 0.5D, 0.0F, 0.0F);
+        room.world.addFreshEntity(stand);
         BlockPos cartPos = room.at(4, 0, 0);
         room.set(4, 0, 0, Blocks.RAIL);
-        cart.refreshPositionAndAngles(cartPos.getX() + 0.5D, cartPos.getY() + 0.0625D, cartPos.getZ() + 0.5D, 0.0F, 0.0F);
-        room.world.spawnEntity(cart);
+        cart.snapTo(cartPos.getX() + 0.5D, cartPos.getY() + 0.0625D, cartPos.getZ() + 0.5D, 0.0F, 0.0F);
+        room.world.addFreshEntity(cart);
         h.onCleanup(stand::discard);
         h.onCleanup(cart::discard);
 
@@ -872,7 +872,7 @@ public final class MiningAssistSenseGameTests {
         boolean[] warmed = {false};
         Progress p = new Progress();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -899,13 +899,13 @@ public final class MiningAssistSenseGameTests {
                 // JIT-cold (tens of milliseconds, once). Record them as such, then measure the steady state the cost gate
                 // is about: the profiler is cleared and everything below is what a running server pays every tick.
                 for (int i = 0; i < bots.size(); i++) {
-                    MiningAssistState warm = MiningAssistRegistry.getIfPresent(bots.get(i).getUuid());
+                    MiningAssistState warm = MiningAssistRegistry.getIfPresent(bots.get(i).getUUID());
                     h.require(warm != null && warm.counters().poiEvaluations >= 2L, "bot " + i + " has not evaluated the POI twice after the warm-up");
                     coldStepMs[i] = warm.counters().maxStepNanos / 1_000_000.0D;
                     coldPoiMs[i] = warm.counters().maxPoiNanos / 1_000_000.0D;
                     h.require(coldStepMs[i] < 1000.0D && coldPoiMs[i] < 1000.0D,
                             "cold-start cost is pathological: step " + fmt(coldStepMs[i]) + " ms, poi " + fmt(coldPoiMs[i]) + " ms");
-                    BotProfiler.INSTANCE.clear(bots.get(i).getUuid());
+                    BotProfiler.INSTANCE.clear(bots.get(i).getUUID());
                 }
                 warmed[0] = true;
             }
@@ -916,11 +916,11 @@ public final class MiningAssistSenseGameTests {
             double worstMax = 0.0D;
             for (AIPlayerEntity bot : bots) {
                 String name = bot.getGameProfile().name();
-                MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
                 h.require(state != null, name + " has no assist state after the run");
                 h.require(state.lifetimeRays() >= (long) (runTicks - 20) * MiningAssistConfig.Sense.DEFAULT_RAYS_PER_TICK,
                         name + " cast too few rays (" + state.lifetimeRays() + "): sensing was interrupted or dropped");
-                Map<String, BotProfiler.Stat> profile = BotProfiler.INSTANCE.snapshot(bot.getUuid());
+                Map<String, BotProfiler.Stat> profile = BotProfiler.INSTANCE.snapshot(bot.getUUID());
                 BotProfiler.Stat sweep = profile.get(ViewSweeper.SECTION_SWEEP);
                 h.require(sweep != null && sweep.count() > 0, name + " recorded no assist_sweep samples");
                 h.require(profile.containsKey(PoiDetector.SECTION_POI), name + " recorded no assist_poi samples: " + profile.keySet());
@@ -961,7 +961,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_recall", maxTicks = 500)
-    public void recallWithinEightBlocksAfterTwoSweeps(TestContext context) {
+    public void recallWithinEightBlocksAfterTwoSweeps(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(35, -6, 6, -6, 6, 10);
         // Four 3x3 pillars, each carrying single-face ores in the middle of the two faces that look at the bot.
@@ -980,8 +980,8 @@ public final class MiningAssistSenseGameTests {
         Map<BlockPos, String> category = new LinkedHashMap<>();
         int[] next = {0};
         java.util.function.BiConsumer<BlockPos, String> put = (pos, group) -> {
-            room.world.setBlockState(pos, kinds[next[0]++ % kinds.length].getDefaultState(), Block.NOTIFY_ALL);
-            category.put(pos.toImmutable(), group);
+            room.world.setBlock(pos, kinds[next[0]++ % kinds.length].defaultBlockState(), Block.UPDATE_ALL);
+            category.put(pos.immutable(), group);
         };
         // Wall ores: four walls, three lateral offsets, two heights (all within 8 blocks of the eye).
         for (int lat : new int[] {-2, 0, 2}) {
@@ -1007,15 +1007,15 @@ public final class MiningAssistSenseGameTests {
         }
         AIPlayerEntity bot = h.spawn("AssistRecallGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
-        Vec3d eyeAtStart = bot.getEyePos();
+        UUID id = bot.getUUID();
+        Vec3 eyeAtStart = bot.getEyePosition();
         for (BlockPos ore : category.keySet()) {
-            double d = Math.sqrt(ore.toCenterPos().squaredDistanceTo(eyeAtStart));
+            double d = Math.sqrt(ore.getCenter().distanceToSqr(eyeAtStart));
             h.require(d <= 8.05D, "fixture error: ore at " + ore.toShortString() + " is " + fmt(d) + " blocks from the eye");
         }
         Progress p = new Progress();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1047,9 +1047,9 @@ public final class MiningAssistSenseGameTests {
                     found++;
                     counts[0]++;
                 } else {
-                    Vec3d eye = eyeAtStart;
+                    Vec3 eye = eyeAtStart;
                     misses.add(entry.getValue() + "@" + entry.getKey().toShortString() + " d="
-                            + fmt(Math.sqrt(entry.getKey().toCenterPos().squaredDistanceTo(eye))));
+                            + fmt(Math.sqrt(entry.getKey().getCenter().distanceToSqr(eye))));
                 }
             }
             double recall = found / (double) category.size();
@@ -1070,13 +1070,13 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_lifecycle", maxTicks = 500)
-    public void pauseAbortAndDespawnMidSenseLeaveNoLeakedState(TestContext context) {
+    public void pauseAbortAndDespawnMidSenseLeaveNoLeakedState(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(45, -3, 3, -3, 3, 3);
         room.set(4, 0, 0, Blocks.DIAMOND_ORE);
         AIPlayerEntity bot = h.spawn("AssistLifeGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String name = bot.getGameProfile().name();
         Progress p = new Progress();
         MineTask[] task = new MineTask[1];
@@ -1084,7 +1084,7 @@ public final class MiningAssistSenseGameTests {
         int[] stageStart = {0};
         long[] mark = {0L};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1197,14 +1197,14 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_task_classes", maxTicks = 600)
-    public void everyMiningClassSensesAndOtherTasksDoNot(TestContext context) {
+    public void everyMiningClassSensesAndOtherTasksDoNot(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(65, -3, 3, -3, 3, 3);
         room.set(4, 0, 0, Blocks.DIAMOND_ORE);
         AIPlayerEntity bot = h.spawn("AssistClassGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
-        BlockPos feet = bot.getBlockPos();
+        UUID id = bot.getUUID();
+        BlockPos feet = bot.blockPosition();
         List<Task> sensed = List.of(
                 new OreDigTask(Set.of(Blocks.COAL_ORE), 1),
                 new DigDownTask(Blocks.DIAMOND_ORE, 1),
@@ -1217,7 +1217,7 @@ public final class MiningAssistSenseGameTests {
         long[] mark = {0L};
         boolean[] started = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1274,7 +1274,7 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_strip_mine", maxTicks = 900)
-    public void realStripMineIsPeekedAndItsOwnTorchesNeverScore(TestContext context) {
+    public void realStripMineIsPeekedAndItsOwnTorchesNeverScore(GameTestHelper context) {
         Harness h = new Harness(context);
         // A small pocket inside a solid mass of stone, and a target ore that does not exist: OreDig strip-mines.
         Room room = h.newMass(90, -2, 2, -2, 2, 3, 22);
@@ -1284,15 +1284,15 @@ public final class MiningAssistSenseGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 16));
-        UUID id = bot.getUuid();
-        BlockPos start = bot.getBlockPos();
+        UUID id = bot.getUUID();
+        BlockPos start = bot.blockPosition();
         Progress p = new Progress();
         OreDigTask[] task = new OreDigTask[1];
         int[] maxRank = {0};
         int failuresBefore = MiningAssistRuntime.failures().size();
         double[] firstMs = {-1.0D, -1.0D};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1328,7 +1328,7 @@ public final class MiningAssistSenseGameTests {
             }
             SenseCounters c = state.counters();
             Map<String, BotProfiler.Stat> profile = BotProfiler.INSTANCE.snapshot(id);
-            double moved = Math.sqrt(bot.getBlockPos().getSquaredDistance(start));
+            double moved = Math.sqrt(bot.blockPosition().distSqr(start));
             int torches = 0;
             int torchesInLedger = 0;
             for (int x = -3; x <= 3; x++) {
@@ -1336,7 +1336,7 @@ public final class MiningAssistSenseGameTests {
                     for (int z = -26; z <= 3; z++) {
                         BlockPos pos = room.at(x, y, z);
                         BlockState cell = room.world.getBlockState(pos);
-                        if (cell.isOf(Blocks.TORCH) || cell.isOf(Blocks.WALL_TORCH)) {
+                        if (cell.is(Blocks.TORCH) || cell.is(Blocks.WALL_TORCH)) {
                             torches++;
                             if (BotEdits.wasPlaced(room.world, pos)) {
                                 torchesInLedger++;
@@ -1371,20 +1371,20 @@ public final class MiningAssistSenseGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:assist_sense_clocks", maxTicks = 4600)
-    public void summaryLineAndIdleReleaseFollowTheDocumentedClocks(TestContext context) {
+    public void summaryLineAndIdleReleaseFollowTheDocumentedClocks(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(75, -3, 3, -3, 3, 3);
         room.set(4, 0, 0, Blocks.DIAMOND_ORE);
         AIPlayerEntity bot = h.spawn("AssistClockGT", room, 0, 0);
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String name = bot.getGameProfile().name();
         Progress p = new Progress();
         int[] stage = {0};
         int[] stageStart = {0};
         int[] firstSense = {-1};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1495,7 +1495,7 @@ public final class MiningAssistSenseGameTests {
 
     /** Cleanup-on-failure, strict-capability and readiness plumbing shared by every test. */
     private static final class Harness {
-        final TestContext context;
+        final GameTestHelper context;
         final List<String> bots = new ArrayList<>();
         final List<Runnable> cleanups = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
@@ -1503,11 +1503,11 @@ public final class MiningAssistSenseGameTests {
         boolean tpsOverridden;
         boolean done;
 
-        Harness(TestContext context) {
+        Harness(GameTestHelper context) {
             this.context = context;
         }
 
-        ServerWorld world(Room room) {
+        ServerLevel world(Room room) {
             return room.world;
         }
 
@@ -1526,19 +1526,19 @@ public final class MiningAssistSenseGameTests {
         }
 
         AIPlayerEntity spawn(String name, Room room, int dx, int dz) {
-            ServerWorld world = room.world;
+            ServerLevel world = room.world;
             BlockPos feet = room.at(dx, 0, dz);
             bots.add(name);
             var spawned = AIPlayerManager.INSTANCE.spawn(
-                    world.getServer(), name, world, Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL);
+                    world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL);
             if (spawned.isEmpty()) {
                 fail("failed to spawn " + name + " (a bot of that name is still alive)");
             }
             AIPlayerEntity bot = spawned.get();
-            bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+            bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
             bot.setHealth(bot.getMaxHealth());
-            bot.getHungerManager().setFoodLevel(20);
-            bot.getHungerManager().setSaturationLevel(5.0F);
+            bot.getFoodData().setFoodLevel(20);
+            bot.getFoodData().setSaturation(5.0F);
             return bot;
         }
 
@@ -1546,7 +1546,7 @@ public final class MiningAssistSenseGameTests {
         void enableAssist(AIPlayerEntity bot) {
             MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
             tpsOverridden = true;
-            MiningAssistRuntime.forceEnable(bot.getUuid());
+            MiningAssistRuntime.forceEnable(bot.getUUID());
         }
 
         void replaceConfig(MiningAssistConfig config) {
@@ -1561,7 +1561,7 @@ public final class MiningAssistSenseGameTests {
         }
 
         void despawnNow(String name) {
-            AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+            AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             bots.remove(name);
         }
 
@@ -1571,9 +1571,9 @@ public final class MiningAssistSenseGameTests {
          * the sensor treats such rays as unknown, which is exactly what the run should then show.
          */
         boolean settle(AIPlayerEntity bot, Progress p) {
-            ServerWorld world = bot.getEntityWorld();
-            BlockPos feet = bot.getBlockPos();
-            if (world.isSkyVisible(feet)) {
+            ServerLevel world = bot.level();
+            BlockPos feet = bot.blockPosition();
+            if (world.canSeeSky(feet)) {
                 require(p.tick < 200, "the sealed fixture never became underground by the world's sky test");
                 return false;
             }
@@ -1581,7 +1581,7 @@ public final class MiningAssistSenseGameTests {
             boolean loaded = true;
             for (int dx = -ring; dx <= ring && loaded; dx++) {
                 for (int dz = -ring; dz <= ring && loaded; dz++) {
-                    loaded = world.getChunkManager().isChunkLoaded((feet.getX() >> 4) + dx, (feet.getZ() >> 4) + dz);
+                    loaded = world.getChunkSource().hasChunk((feet.getX() >> 4) + dx, (feet.getZ() >> 4) + dz);
                 }
             }
             if (loaded) {
@@ -1635,7 +1635,7 @@ public final class MiningAssistSenseGameTests {
 
         void fail(String message) {
             cleanup();
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
 
         /** Runs one tick of a test body; anything thrown cleans up first so a failure never leaves a bot behind. */
@@ -1659,7 +1659,7 @@ public final class MiningAssistSenseGameTests {
             }
             cleanups.clear();
             for (String name : new ArrayList<>(bots)) {
-                AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
             bots.clear();
             for (Room room : rooms) {
@@ -1682,7 +1682,7 @@ public final class MiningAssistSenseGameTests {
 
         void pass() {
             cleanup();
-            context.complete();
+            context.succeed();
         }
     }
 
@@ -1708,15 +1708,15 @@ public final class MiningAssistSenseGameTests {
     /** Places one block through the bot's real placement path (BuildAction.placeBlockAt) and checks it was recorded. */
     private static void botPlace(Harness h, AIPlayerEntity bot, Item item, BlockPos destination) {
         bot.getInventory().setSelectedSlot(0);
-        bot.getInventory().getMainStacks().set(0, new ItemStack(item, 8));
-        bot.getInventory().markDirty();
+        bot.getInventory().getNonEquipmentItems().set(0, new ItemStack(item, 8));
+        bot.getInventory().setChanged();
         ActionResult result = BuildAction.placeBlockAt(bot, destination);
-        BlockPos relative = destination.subtract(bot.getBlockPos());
+        BlockPos relative = destination.subtract(bot.blockPosition());
         h.require(result.isSuccess(), "the bot could not place " + item + " at " + destination.toShortString()
                 + " (" + relative.toShortString() + " from the bot, cell now "
-                + bot.getEntityWorld().getBlockState(destination) + ", below "
-                + bot.getEntityWorld().getBlockState(destination.down()) + "): " + result.reason());
-        ServerWorld world = bot.getEntityWorld();
+                + bot.level().getBlockState(destination) + ", below "
+                + bot.level().getBlockState(destination.below()) + "): " + result.reason());
+        ServerLevel world = bot.level();
         h.require(!world.getBlockState(destination).isAir(), "placement of " + item + " left air at " + destination.toShortString());
         h.require(BotEdits.wasPlaced(world, destination),
                 "BotEdits did not record the bot's own placement of " + item + " at " + destination.toShortString());

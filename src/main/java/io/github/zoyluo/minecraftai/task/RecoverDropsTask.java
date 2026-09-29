@@ -7,7 +7,7 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 /**
  * Corpse-run recovery: after respawning, rush back to the death point and pick up the
@@ -45,7 +45,7 @@ public final class RecoverDropsTask extends AbstractTask {
     private double bestDistance;
 
     public RecoverDropsTask(BlockPos deathPos, long deathTick) {
-        this.deathPos = deathPos.toImmutable();
+        this.deathPos = deathPos.immutable();
         this.deathTick = deathTick;
     }
 
@@ -81,7 +81,7 @@ public final class RecoverDropsTask extends AbstractTask {
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        if (bot.getEntityWorld().getServer().getTicks() - deathTick > DESPAWN_BUDGET) {
+        if (bot.level().getServer().getTickCount() - deathTick > DESPAWN_BUDGET) {
             fail("drops_expired");
             return;
         }
@@ -103,7 +103,7 @@ public final class RecoverDropsTask extends AbstractTask {
             routeFailures++;
             BotLog.action(bot, "recover_route_retry",
                     "attempt", routeFailures, "reason", walk.reason(),
-                    "from", bot.getBlockPos().toShortString(), "to", deathPos.toShortString());
+                    "from", bot.blockPosition().toShortString(), "to", deathPos.toShortString());
             if (routeFailures >= ROUTE_FAILURE_LIMIT) {
                 fail("recover_route_unreachable:" + walk.reason());
             }
@@ -129,19 +129,19 @@ public final class RecoverDropsTask extends AbstractTask {
             if (elapsed - arrivedTick >= PICKUP_WINDOW) {
                 // Drop radar: how many are still left uncollected when the window ends (=0 means truly clean; >0 means something blocked pickup)
                 CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "recover_drops_report");
-                var leftovers = bot.getEntityWorld().getEntitiesByClass(
-                        net.minecraft.entity.ItemEntity.class,
-                        bot.getBoundingBox().expand(32.0D, 16.0D, 32.0D),
+                var leftovers = bot.level().getEntitiesOfClass(
+                        net.minecraft.world.entity.item.ItemEntity.class,
+                        bot.getBoundingBox().inflate(32.0D, 16.0D, 32.0D),
                         e -> ObservableWorldQuery.canObserveEntity(bot, e));
                 BotLog.action(bot, "recover_drops_done", "at", deathPos.toShortString(),
                         "leftover", leftovers.size(),
-                        "nearest", leftovers.isEmpty() ? "-" : leftovers.get(0).getBlockPos().toShortString());
+                        "nearest", leftovers.isEmpty() ? "-" : leftovers.get(0).blockPosition().toShortString());
                 complete();
             }
             return;
         }
 
-        if (bot.getBlockPos().getSquaredDistance(deathPos) <= ARRIVE_SQUARED) {
+        if (bot.blockPosition().distSqr(deathPos) <= ARRIVE_SQUARED) {
             arrivedTick = elapsed;
             bot.getActionPack().stopMovement();
             BotLog.action(bot, "recover_drops_arrived", "at", deathPos.toShortString(),
@@ -156,7 +156,7 @@ public final class RecoverDropsTask extends AbstractTask {
             routeFailures = 0;
         }
 
-        if (bot.getEntityWorld().getServer().getTicks() - deathTick > DESPAWN_BUDGET) {
+        if (bot.level().getServer().getTickCount() - deathTick > DESPAWN_BUDGET) {
             fail("drops_expired_enroute"); // not going to make it in time, cut losses now
             return;
         }
@@ -180,6 +180,6 @@ public final class RecoverDropsTask extends AbstractTask {
     }
 
     private double distance(AIPlayerEntity bot) {
-        return Math.sqrt(bot.getBlockPos().getSquaredDistance(deathPos));
+        return Math.sqrt(bot.blockPosition().distSqr(deathPos));
     }
 }

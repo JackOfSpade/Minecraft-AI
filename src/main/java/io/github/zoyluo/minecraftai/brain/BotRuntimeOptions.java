@@ -17,24 +17,24 @@ public final class BotRuntimeOptions {
     }
 
     public boolean memoryToolsEnabled(AIPlayerEntity bot) {
-        return memoryTools.getOrDefault(bot.getUuid(), MinecraftAiConfig.get().brain().memoryToolsEnabled());
+        return memoryTools.getOrDefault(bot.getUUID(), MinecraftAiConfig.get().brain().memoryToolsEnabled());
     }
 
     public void setMemoryToolsEnabled(AIPlayerEntity bot, boolean enabled) {
-        memoryTools.put(bot.getUuid(), enabled);
+        memoryTools.put(bot.getUUID(), enabled);
     }
 
     public boolean verboseReportsEnabled(AIPlayerEntity bot) {
-        return verboseReports.getOrDefault(bot.getUuid(), MinecraftAiConfig.get().brain().verboseReportsEnabled());
+        return verboseReports.getOrDefault(bot.getUUID(), MinecraftAiConfig.get().brain().verboseReportsEnabled());
     }
 
     public void setVerboseReportsEnabled(AIPlayerEntity bot, boolean enabled) {
-        verboseReports.put(bot.getUuid(), enabled);
+        verboseReports.put(bot.getUUID(), enabled);
     }
 
     public void clear(AIPlayerEntity bot) {
-        memoryTools.remove(bot.getUuid());
-        verboseReports.remove(bot.getUuid());
+        memoryTools.remove(bot.getUUID());
+        verboseReports.remove(bot.getUUID());
     }
 
     public void clearAll() {

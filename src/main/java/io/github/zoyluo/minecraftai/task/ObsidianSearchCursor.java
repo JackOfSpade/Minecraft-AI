@@ -1,12 +1,11 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 /**
  * Durable square-spiral cursor for strict-survival lava prospecting.
@@ -39,8 +38,8 @@ record ObsidianSearchCursor(
 
     ObsidianSearchCursor {
         schema = schema <= 0 ? CURRENT_SCHEMA : schema;
-        origin = origin == null ? BlockPos.ORIGIN : origin.toImmutable();
-        face = face == null ? origin : face.toImmutable();
+        origin = origin == null ? BlockPos.ZERO : origin.immutable();
+        face = face == null ? origin : face.immutable();
         directionIndex = directionIndex == -1 ? -1 : Math.floorMod(directionIndex, DIRECTIONS.length);
         legIndex = Math.max(0, legIndex);
         stepsLeft = Math.max(0, stepsLeft);
@@ -53,7 +52,7 @@ record ObsidianSearchCursor(
     }
 
     static ObsidianSearchCursor initial(BlockPos origin, int baseLegLength) {
-        BlockPos safeOrigin = origin == null ? BlockPos.ORIGIN : origin.toImmutable();
+        BlockPos safeOrigin = origin == null ? BlockPos.ZERO : origin.immutable();
         int base = Math.max(1, baseLegLength);
         return new ObsidianSearchCursor(CURRENT_SCHEMA, safeOrigin, safeOrigin,
                 -1, 0, 0, base, base, 0, 0, 0, 0);
@@ -78,22 +77,22 @@ record ObsidianSearchCursor(
     }
 
     BlockPos nextFace() {
-        return face.offset(direction());
+        return face.relative(direction());
     }
 
     /** Advances only by physically measured motion along the active leg. */
     ObsidianSearchCursor advanceTo(BlockPos actualFace) {
-        BlockPos actual = actualFace == null ? face : actualFace.toImmutable();
+        BlockPos actual = actualFace == null ? face : actualFace.immutable();
         Direction direction = direction();
         int dx = actual.getX() - face.getX();
         int dy = actual.getY() - face.getY();
         int dz = actual.getZ() - face.getZ();
-        int forward = dx * direction.getOffsetX() + dz * direction.getOffsetZ();
+        int forward = dx * direction.getStepX() + dz * direction.getStepZ();
         if (dy != 0
                 || forward != 1
                 || stepsLeft < 1
-                || dx != direction.getOffsetX() * forward
-                || dz != direction.getOffsetZ() * forward) {
+                || dx != direction.getStepX() * forward
+                || dz != direction.getStepZ() * forward) {
             return this;
         }
         return new ObsidianSearchCursor(schema, origin, actual, directionIndex, legIndex,

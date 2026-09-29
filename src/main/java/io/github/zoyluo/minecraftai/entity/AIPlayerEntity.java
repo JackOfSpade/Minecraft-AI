@@ -6,23 +6,23 @@ import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
+import net.minecraft.server.level.ClientInformation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 
-public class AIPlayerEntity extends ServerPlayerEntity {
+public class AIPlayerEntity extends ServerPlayer {
     private final ActionPack actionPack = new ActionPack(this);
 
     public AIPlayerEntity(MinecraftServer server,
-                          ServerWorld world,
+                          ServerLevel world,
                           GameProfile profile,
-                          SyncedClientOptions clientOptions) {
+                          ClientInformation clientOptions) {
         super(server, world, profile, clientOptions);
     }
 
@@ -32,14 +32,14 @@ public class AIPlayerEntity extends ServerPlayerEntity {
         // send those, so do it every tick here instead of the old 10-tick throttle (0.5s), which was a
         // plausible source of visible movement choppiness with no real cost to justify it (cheap,
         // O(tracked entities) bookkeeping unrelated to pathfinding/mining).
-        if (this.networkHandler != null) {
-            this.networkHandler.syncWithPlayerPosition();
-            this.getEntityWorld().getChunkManager().updatePosition(this);
+        if (this.connection != null) {
+            this.connection.resetPosition();
+            this.level().getChunkSource().move(this);
         }
 
         try {
             super.tick();
-            this.playerTick();
+            this.doTick();
             this.actionPack.onUpdate();
         } catch (RuntimeException exception) {
             // Was NullPointerException-only; widened so any unexpected exception here (not just an
@@ -56,13 +56,13 @@ public class AIPlayerEntity extends ServerPlayerEntity {
      * hit is resolved, with the vanilla result (a blocked/shielded/cooldown hit reports {@code applied=false}).
      */
     @Override
-    public boolean damage(ServerWorld world, DamageSource source, float amount) {
+    public boolean hurtServer(ServerLevel world, DamageSource source, float amount) {
         float before = this.getHealth();
-        boolean applied = super.damage(world, source, amount);
+        boolean applied = super.hurtServer(world, source, amount);
         try {
-            Entity attacker = source == null ? null : source.getAttacker();
+            Entity attacker = source == null ? null : source.getEntity();
             BotLog.danger(this, "damage_taken",
-                    "source", source == null ? "unknown" : source.getName(),
+                    "source", source == null ? "unknown" : source.getMsgId(),
                     "attacker", attacker == null ? "-" : attacker.getType().toString(),
                     "attacker_id", attacker == null ? -1 : attacker.getId(),
                     "amount", amount,
@@ -76,22 +76,22 @@ public class AIPlayerEntity extends ServerPlayerEntity {
     }
 
     @Override
-    public void onDeath(DamageSource source) {
+    public void die(DamageSource source) {
         try {
-            Entity attacker = source == null ? null : source.getAttacker();
+            Entity attacker = source == null ? null : source.getEntity();
             BotLog.danger(this, "bot_death",
-                    "source", source == null ? "unknown" : source.getName(),
+                    "source", source == null ? "unknown" : source.getMsgId(),
                     "attacker", attacker == null ? "-" : attacker.getType().toString(),
                     "attacker_id", attacker == null ? -1 : attacker.getId(),
-                    "pos", this.getBlockPos().toShortString());
+                    "pos", this.blockPosition().toShortString());
         } catch (RuntimeException ignored) {
             // Logging must never affect death handling.
         }
-        super.onDeath(source);
+        super.die(source);
     }
 
     @Override
-    public String getIp() {
+    public String getIpAddress() {
         return "127.0.0.1";
     }
 
@@ -105,7 +105,7 @@ public class AIPlayerEntity extends ServerPlayerEntity {
 
     /** {@code Entity#getServer()} is gone in 1.21.11 and the base class keeps its server private. */
     public MinecraftServer getServer() {
-        return this.getEntityWorld().getServer();
+        return this.level().getServer();
     }
 
     /**
@@ -114,18 +114,18 @@ public class AIPlayerEntity extends ServerPlayerEntity {
      * not consume an LLM turn.
      */
     @Override
-    public ActionResult interact(PlayerEntity player, Hand hand) {
-        if (hand != Hand.MAIN_HAND) {
-            return ActionResult.PASS;
+    public InteractionResult interact(Player player, InteractionHand hand) {
+        if (hand != InteractionHand.MAIN_HAND) {
+            return InteractionResult.PASS;
         }
-        if (!(player instanceof ServerPlayerEntity viewer)) {
-            return ActionResult.SUCCESS;
+        if (!(player instanceof ServerPlayer viewer)) {
+            return InteractionResult.SUCCESS;
         }
         if (!BotAuthorizationGate.INSTANCE.authorize(viewer, this,
                 BotAuthorizationPolicy.Operation.INVENTORY, "entity_inventory_screen")) {
-            return ActionResult.FAIL;
+            return InteractionResult.FAIL;
         }
-        viewer.openHandledScreen(new BotInventoryScreenFactory(this, viewer));
-        return ActionResult.SUCCESS;
+        viewer.openMenu(new BotInventoryScreenFactory(this, viewer));
+        return InteractionResult.SUCCESS;
     }
 }

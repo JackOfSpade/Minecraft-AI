@@ -2,7 +2,6 @@ package io.github.zoyluo.minecraftai.mining.assist;
 
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger.Outcome;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger.Sighting;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -12,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -95,7 +95,7 @@ class SightingLedgerTest {
 
     @Test
     void sightingRecordCopiesPositionAndClampsNegativeValue() {
-        BlockPos.Mutable cursor = new BlockPos.Mutable(1, 2, 3);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos(1, 2, 3);
         SightingLedger ledger = new SightingLedger();
         ledger.observe(cursor, "gold_ore", -7, 5);
         cursor.set(8, 8, 8);

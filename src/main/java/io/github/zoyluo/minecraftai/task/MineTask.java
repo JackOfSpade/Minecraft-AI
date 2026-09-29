@@ -6,15 +6,14 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class MineTask extends AbstractTask {
     private enum Phase {
@@ -49,7 +48,7 @@ public final class MineTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Mining " + Registries.BLOCK.getId(targetBlock) + " " + countSoFar + "/" + countNeeded + " phase=" + phase;
+        return "Mining " + BuiltInRegistries.BLOCK.getKey(targetBlock) + " " + countSoFar + "/" + countNeeded + " phase=" + phase;
     }
 
     @Override
@@ -66,7 +65,7 @@ public final class MineTask extends AbstractTask {
     protected void onTick(AIPlayerEntity bot) {
         if (elapsed > 2400) {
             BotLog.action(bot, "mine_timeout_detail", "phase", phase, "count", countSoFar + "/" + countNeeded,
-                    "target", Registries.BLOCK.getId(targetBlock));
+                    "target", BuiltInRegistries.BLOCK.getKey(targetBlock));
             fail("mine_timeout");
             return;
         }
@@ -82,7 +81,7 @@ public final class MineTask extends AbstractTask {
         HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6);
         if (choice == null) {
             if (OreScan.isOreBlock(targetBlock)) {
-                fail("no_exposed_ore:use_strip_mine:" + Registries.BLOCK.getId(targetBlock));
+                fail("no_exposed_ore:use_strip_mine:" + BuiltInRegistries.BLOCK.getKey(targetBlock));
                 return;
             }
             fail("no_reachable_target_block_in_range");
@@ -99,7 +98,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void move(AIPlayerEntity bot) {
-        if (targetPos == null || !bot.getEntityWorld().getBlockState(targetPos).isOf(targetBlock)) {
+        if (targetPos == null || !bot.level().getBlockState(targetPos).is(targetBlock)) {
             phase = Phase.SEARCHING;
             return;
         }
@@ -114,7 +113,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void mine(AIPlayerEntity bot) {
-        if (targetPos == null || !bot.getEntityWorld().getBlockState(targetPos).isOf(targetBlock)) {
+        if (targetPos == null || !bot.level().getBlockState(targetPos).is(targetBlock)) {
             miner.cancel(bot);
             pickupTicks = 120;
             phase = Phase.PICKING_UP;
@@ -168,7 +167,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void startMiningTarget(AIPlayerEntity bot) {
-        BlockState state = bot.getEntityWorld().getBlockState(targetPos);
+        BlockState state = bot.level().getBlockState(targetPos);
         if (!ToolTier.canHarvestWithInventory(bot, state)) {
             fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(targetBlock));
             return;
@@ -194,7 +193,7 @@ public final class MineTask extends AbstractTask {
 
     private static boolean lavaAdjacent(AIPlayerEntity bot, BlockPos pos) {
         for (Direction direction : Direction.values()) {
-            if (bot.getEntityWorld().getFluidState(pos.offset(direction)).isIn(FluidTags.LAVA)) {
+            if (bot.level().getFluidState(pos.relative(direction)).is(FluidTags.LAVA)) {
                 return true;
             }
         }

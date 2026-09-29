@@ -2,12 +2,11 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.Comparator;
 import java.util.Optional;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 
 /**
  * A bot swarmed by three or more simultaneously aggro'd hostiles (see {@link CombatRegroupGuard})
@@ -52,13 +51,13 @@ public final class CombatRegroupTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         lastAggroCount = CombatRegroupGuard.countAggro(bot);
-        Optional<ServerPlayerEntity> owner = CombatRegroupGuard.resolveOwner(bot);
+        Optional<ServerPlayer> owner = CombatRegroupGuard.resolveOwner(bot);
         if (owner.isEmpty()) {
             BotLog.danger(bot, "combat_regroup_owner_missing");
             complete();
             return;
         }
-        ServerPlayerEntity player = owner.get();
+        ServerPlayer player = owner.get();
         strikeAnyAdjacentHostile(bot);
         double distance = bot.distanceTo(player);
         if (distance > CombatRegroupGuard.MAX_REGROUP_DISTANCE) {
@@ -85,14 +84,14 @@ public final class CombatRegroupTask extends AbstractTask {
     }
 
     private void strikeAnyAdjacentHostile(AIPlayerEntity bot) {
-        bot.getEntityWorld().getEntitiesByClass(LivingEntity.class,
-                        bot.getBoundingBox().expand(MELEE_STRIKE_RANGE + 1.0D),
-                        entity -> entity instanceof MobEntity mob
+        bot.level().getEntitiesOfClass(LivingEntity.class,
+                        bot.getBoundingBox().inflate(MELEE_STRIKE_RANGE + 1.0D),
+                        entity -> entity instanceof Mob mob
                                 && mob.isAlive()
                                 && mob.getTarget() == bot
                                 && CombatCore.hasLineOfSight(bot, mob))
                 .stream()
-                .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .filter(mob -> bot.distanceTo(mob) <= MELEE_STRIKE_RANGE)
                 .ifPresent(mob -> {
                     CombatCore.ensureMeleeWeapon(bot);

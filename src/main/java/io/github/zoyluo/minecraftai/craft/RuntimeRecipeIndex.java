@@ -1,14 +1,13 @@
 package io.github.zoyluo.minecraftai.craft;
 
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.recipe.CraftingRecipe;
-import net.minecraft.recipe.Ingredient;
-import net.minecraft.recipe.RecipeEntry;
-import net.minecraft.recipe.ShapedRecipe;
 import net.minecraft.server.MinecraftServer;
-
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.ShapedRecipe;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,7 +35,7 @@ public final class RuntimeRecipeIndex {
         Map<Item, RecipeRegistry.Recipe> fresh = new HashMap<>();
         int scanned = 0;
         int indexed = 0;
-        for (RecipeEntry<?> entry : server.getRecipeManager().values()) {
+        for (RecipeHolder<?> entry : server.getRecipeManager().getRecipes()) {
             scanned++;
             try {
                 if (!(entry.value() instanceof CraftingRecipe crafting)) {
@@ -46,8 +45,8 @@ public final class RuntimeRecipeIndex {
                 // craft() implementations just do result.copy() (ignoring the input), so calling it
                 // with an empty input still yields the product; special recipes (dyeing, etc.) may
                 // throw/return empty, which is skipped by the outer catch and the isEmpty check.
-                ItemStack result = crafting.craft(
-                        net.minecraft.recipe.input.CraftingRecipeInput.EMPTY, server.getRegistryManager());
+                ItemStack result = crafting.assemble(
+                        net.minecraft.world.item.crafting.CraftingInput.EMPTY, server.registryAccess());
                 if (result == null || result.isEmpty()) {
                     continue;
                 }
@@ -126,13 +125,13 @@ public final class RuntimeRecipeIndex {
     // API for shaped/shapeless); items are read via getMatchingItems() (a list of RegistryEntry);
     // hasNoPlacement = a dynamic special recipe, skipped by the caller.
     private static List<RecipeRegistry.Ingredient> convertIngredients(CraftingRecipe crafting) {
-        if (crafting.getIngredientPlacement().hasNoPlacement()) {
+        if (crafting.placementInfo().isImpossibleToPlace()) {
             return List.of();
         }
         Map<List<Item>, Integer> merged = new HashMap<>();
-        for (Ingredient ing : crafting.getIngredientPlacement().getIngredients()) {
+        for (Ingredient ing : crafting.placementInfo().ingredients()) {
             List<Item> anyOf = new ArrayList<>();
-            for (net.minecraft.registry.entry.RegistryEntry<Item> e : ing.getMatchingItems().toList()) {
+            for (net.minecraft.core.Holder<Item> e : ing.items().toList()) {
                 Item item = e.value();
                 if (!anyOf.contains(item)) {
                     anyOf.add(item);

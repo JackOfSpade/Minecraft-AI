@@ -6,9 +6,8 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask.ExitDebt;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask.ShelterCleanupDebt;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.BlockState;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -80,12 +79,12 @@ final class ShelterCleanupRegistry {
             FabricLoader.getInstance().isModLoaded("minecraftai-gametest");
 
     static Optional<ExitDebt> pendingExitDebt(AIPlayerEntity bot) {
-        return Optional.ofNullable(ABANDONED_EXIT_DEBTS.get(bot.getUuid()));
+        return Optional.ofNullable(ABANDONED_EXIT_DEBTS.get(bot.getUUID()));
     }
 
     static void clearExitDebt(AIPlayerEntity bot, ExitDebt debt) {
         if (debt != null) {
-            ABANDONED_EXIT_DEBTS.remove(bot.getUuid(), debt);
+            ABANDONED_EXIT_DEBTS.remove(bot.getUUID(), debt);
         }
     }
 
@@ -112,10 +111,10 @@ final class ShelterCleanupRegistry {
     static boolean hasPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
-            int now = bot.getEntityWorld().getServer().getTicks();
+            int now = bot.level().getServer().getTickCount();
             return PENDING_CLEANUPS.values().stream()
                     .anyMatch(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot)
-                            && debt.claimAvailableTo(bot.getUuid(), now));
+                            && debt.claimAvailableTo(bot.getUUID(), now));
         }
     }
 
@@ -127,17 +126,17 @@ final class ShelterCleanupRegistry {
     static Optional<ShelterCleanupDebt> claimPendingCleanup(AIPlayerEntity bot) {
         synchronized (PENDING_CLEANUPS) {
             pruneInvalidCleanupDebts(bot);
-            int now = bot.getEntityWorld().getServer().getTicks();
+            int now = bot.level().getServer().getTickCount();
             ShelterCleanupDebt selected = PENDING_CLEANUPS.values().stream()
                     .filter(debt -> debt.matchesDimension(bot) && debt.isWithinReasonableRange(bot))
-                    .filter(debt -> debt.claimAvailableTo(bot.getUuid(), now))
+                    .filter(debt -> debt.claimAvailableTo(bot.getUUID(), now))
                     .min(Comparator.comparingDouble(debt ->
-                            debt.anchor().getSquaredDistance(bot.getBlockPos())))
+                            debt.anchor().distSqr(bot.blockPosition())))
                     .orElse(null);
             if (selected == null) {
                 return Optional.empty();
             }
-            selected.claim(bot.getUuid(), now);
+            selected.claim(bot.getUUID(), now);
             return Optional.of(selected);
         }
     }
@@ -149,10 +148,10 @@ final class ShelterCleanupRegistry {
         synchronized (PENDING_CLEANUPS) {
             ShelterCleanupDebt current = PENDING_CLEANUPS.get(debt.id());
             if (current != debt || !debt.matchesDimension(bot)
-                    || !debt.claimedBy(bot.getUuid())) {
+                    || !debt.claimedBy(bot.getUUID())) {
                 return false;
             }
-            debt.claim(bot.getUuid(), bot.getEntityWorld().getServer().getTicks());
+            debt.claim(bot.getUUID(), bot.level().getServer().getTickCount());
             return true;
         }
     }
@@ -167,7 +166,7 @@ final class ShelterCleanupRegistry {
         synchronized (PENDING_CLEANUPS) {
             ShelterCleanupDebt current = PENDING_CLEANUPS.get(debt.id());
             if (current != debt || !debt.matchesDimension(bot)
-                    || !debt.claimedBy(bot.getUuid())) {
+                    || !debt.claimedBy(bot.getUUID())) {
                 return Optional.empty();
             }
             debt.discardChangedBlocks(bot);
@@ -178,8 +177,8 @@ final class ShelterCleanupRegistry {
             return debt.remaining.keySet().stream()
                     .filter(position -> excluded == null || !excluded.contains(position))
                     .min(Comparator.comparingDouble(position ->
-                            bot.getEyePos().squaredDistanceTo(position.toCenterPos())))
-                    .map(BlockPos::toImmutable);
+                            bot.getEyePosition().distanceToSqr(position.getCenter())))
+                    .map(BlockPos::immutable);
         }
     }
 
@@ -193,7 +192,7 @@ final class ShelterCleanupRegistry {
             return ObservableWorldQuery.canObserveBlock(bot, position)
                     && PENDING_CLEANUPS.get(debt.id()) == debt
                     && debt.matchesDimension(bot)
-                    && debt.claimedBy(bot.getUuid())
+                    && debt.claimedBy(bot.getUUID())
                     && debt.ownsCurrentPlacement(bot, position);
         }
     }
@@ -205,13 +204,13 @@ final class ShelterCleanupRegistry {
         }
         synchronized (PENDING_CLEANUPS) {
             ShelterCleanupDebt current = PENDING_CLEANUPS.get(debt.id());
-            if (current != debt || !debt.claimedBy(bot.getUuid())) {
+            if (current != debt || !debt.claimedBy(bot.getUUID())) {
                 return;
             }
             BlockState expected = debt.remaining.get(position);
             if (expected != null
                     && ObservableWorldQuery.canObserveBlock(bot, position)
-                    && !expected.equals(bot.getEntityWorld().getBlockState(position))) {
+                    && !expected.equals(bot.level().getBlockState(position))) {
                 debt.remaining.remove(position);
             }
             debt.discardChangedBlocks(bot);
@@ -226,8 +225,8 @@ final class ShelterCleanupRegistry {
             return;
         }
         synchronized (PENDING_CLEANUPS) {
-            if (PENDING_CLEANUPS.get(debt.id()) == debt && debt.claimedBy(bot.getUuid())) {
-                debt.release(bot.getUuid());
+            if (PENDING_CLEANUPS.get(debt.id()) == debt && debt.claimedBy(bot.getUUID())) {
+                debt.release(bot.getUUID());
             }
         }
     }
@@ -248,14 +247,14 @@ final class ShelterCleanupRegistry {
         if (!AGE_PRUNING_ENABLED) {
             return;
         }
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         synchronized (PENDING_CLEANUPS) {
             PENDING_CLEANUPS.values().removeIf(debt -> debt.owner.equals(uuid));
         }
     }
 
     private static void pruneInvalidCleanupDebts(AIPlayerEntity bot) {
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         for (Map.Entry<UUID, ShelterCleanupDebt> entry : PENDING_CLEANUPS.entrySet()) {
             ShelterCleanupDebt debt = entry.getValue();
             if (debt.isStale(now)) {
@@ -282,7 +281,7 @@ final class ShelterCleanupRegistry {
      * method.
      */
     static void recordExitDebt(AIPlayerEntity bot, ExitDebt debt) {
-        ABANDONED_EXIT_DEBTS.put(bot.getUuid(), debt);
+        ABANDONED_EXIT_DEBTS.put(bot.getUUID(), debt);
     }
 
     static void registerCleanupDebt(AIPlayerEntity bot,
@@ -296,8 +295,8 @@ final class ShelterCleanupRegistry {
             BlockPos position = entry.getKey();
             BlockState expected = entry.getValue();
             if (position != null && expected != null
-                    && expected.equals(bot.getEntityWorld().getBlockState(position))) {
-                exactOwned.put(position.toImmutable(), expected);
+                    && expected.equals(bot.level().getBlockState(position))) {
+                exactOwned.put(position.immutable(), expected);
             }
         }
         if (exactOwned.isEmpty()) {
@@ -305,11 +304,11 @@ final class ShelterCleanupRegistry {
         }
         ShelterCleanupDebt debt = new ShelterCleanupDebt(
                 UUID.randomUUID(),
-                bot.getUuid(),
-                bot.getEntityWorld().getRegistryKey().getValue().toString(),
+                bot.getUUID(),
+                bot.level().dimension().identifier().toString(),
                 anchor,
                 exactOwned,
-                bot.getEntityWorld().getServer().getTicks());
+                bot.level().getServer().getTickCount());
         PENDING_CLEANUPS.put(debt.id(), debt);
         BotLog.action(bot, "shelter_cleanup_registered",
                 "anchor", anchor,

@@ -13,20 +13,19 @@ import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class CraftTask extends AbstractTask {
     private enum Phase {
@@ -84,7 +83,7 @@ public final class CraftTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Crafting " + Registries.ITEM.getId(target) + " x" + targetCount + " phase=" + phase;
+        return "Crafting " + BuiltInRegistries.ITEM.getKey(target) + " x" + targetCount + " phase=" + phase;
     }
 
     @Override
@@ -129,7 +128,7 @@ public final class CraftTask extends AbstractTask {
         // one is already available nearby (within reach) or already in inventory, complete
         // immediately instead of wasting materials crafting a duplicate.
         if (utilityAlreadyAvailable(bot)) {
-            BotLog.action(bot, "craft_skipped_already_available", "item", Registries.ITEM.getId(target).toString());
+            BotLog.action(bot, "craft_skipped_already_available", "item", BuiltInRegistries.ITEM.getKey(target).toString());
             complete();
             return;
         }
@@ -183,7 +182,7 @@ public final class CraftTask extends AbstractTask {
         // Publish that fact before this precise placement; never do this for a genuinely
         // unsupported pose.
         Standability.clearCache();
-        if (!bot.isOnGround() && Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())) {
+        if (!bot.onGround() && Standability.isStandable(bot.level(), bot.blockPosition())) {
             bot.setOnGround(true);
         }
         ActionResult result = BuildAction.placeBlockAt(bot, placePos);
@@ -220,7 +219,7 @@ public final class CraftTask extends AbstractTask {
         while (tablePlacementRelocationIndex < tablePlacementRelocationCandidates.size()) {
             BlockPos candidate = tablePlacementRelocationCandidates.get(tablePlacementRelocationIndex++);
             tablePlacementRelocationAttempts++;
-            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            if (!Standability.isStandable(bot.level(), candidate)) {
                 tablePlacementRelocationLastFailure = "candidate_became_unavailable";
                 continue;
             }
@@ -253,7 +252,7 @@ public final class CraftTask extends AbstractTask {
             fail("place_crafting_table_failed:no_reachable_placement");
             return;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         if (current.equals(tablePlacementRelocationTarget)) {
             bot.getActionPack().stopAll();
             tablePlacementRelocationTarget = null;
@@ -280,7 +279,7 @@ public final class CraftTask extends AbstractTask {
 
     /** Every standable cell within {@link #TABLE_PLACEMENT_RELOCATION_RADIUS} blocks, nearest first. */
     private static List<BlockPos> nearbyStandableStances(AIPlayerEntity bot) {
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         int radius = TABLE_PLACEMENT_RELOCATION_RADIUS;
         long radiusSquared = (long) radius * radius;
         List<BlockPos> candidates = new ArrayList<>();
@@ -294,14 +293,14 @@ public final class CraftTask extends AbstractTask {
                     if (distSq > radiusSquared) {
                         continue;
                     }
-                    BlockPos candidate = origin.add(dx, dy, dz).toImmutable();
-                    if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
+                    BlockPos candidate = origin.offset(dx, dy, dz).immutable();
+                    if (Standability.isStandable(bot.level(), candidate)) {
                         candidates.add(candidate);
                     }
                 }
             }
         }
-        candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));
+        candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.distSqr(origin)));
         return candidates;
     }
 
@@ -327,7 +326,7 @@ public final class CraftTask extends AbstractTask {
             return;
         }
         if (prepared.availableOutput() < step.outputCount()) {
-            fail("craft_output_capacity:item=" + Registries.ITEM.getId(recipe.output())
+            fail("craft_output_capacity:item=" + BuiltInRegistries.ITEM.getKey(recipe.output())
                     + ":count=" + step.outputCount()
                     + ":available=" + prepared.availableOutput());
             return;
@@ -341,7 +340,7 @@ public final class CraftTask extends AbstractTask {
         }
         commitPreparedCraft(bot, prepared);
         BotLog.action(bot, "craft_atomic",
-                "item", Registries.ITEM.getId(recipe.output()).toString(),
+                "item", BuiltInRegistries.ITEM.getKey(recipe.output()).toString(),
                 "count", step.outputCount());
         if (recipe.output() == target) {
             craftedCount += step.outputCount();
@@ -370,8 +369,8 @@ public final class CraftTask extends AbstractTask {
             finishReclaim(bot);
             return;
         }
-        BlockState state = bot.getEntityWorld().getBlockState(selfPlacedTablePos);
-        if (state.isOf(Blocks.CRAFTING_TABLE)) {
+        BlockState state = bot.level().getBlockState(selfPlacedTablePos);
+        if (state.is(Blocks.CRAFTING_TABLE)) {
             if (tableReclaimMiner.target() == null) {
                 // The table only has somewhere to land if a slot is free; the craft that just
                 // finished can leave zero free slots (its output filled the slot the table
@@ -426,7 +425,7 @@ public final class CraftTask extends AbstractTask {
      */
     private void finishReclaim(AIPlayerEntity bot) {
         bot.getActionPack().stopAll();
-        FakePlayerMotion.returnToBlockCenter(bot, bot.getBlockPos(), "craft_table_reclaim_settle");
+        FakePlayerMotion.returnToBlockCenter(bot, bot.blockPosition(), "craft_table_reclaim_settle");
         complete();
     }
 
@@ -436,8 +435,8 @@ public final class CraftTask extends AbstractTask {
      */
     private static PreparedCraft prepareCraft(
             AIPlayerEntity bot, CraftingHelper.CraftStep step) {
-        List<ItemStack> main = copyStacks(bot.getInventory().getMainStacks());
-        List<ItemStack> offHand = copyStacks(List.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)));
+        List<ItemStack> main = copyStacks(bot.getInventory().getNonEquipmentItems());
+        List<ItemStack> offHand = copyStacks(List.of(bot.getItemBySlot(EquipmentSlot.OFFHAND)));
         for (RecipeRegistry.Ingredient ingredient : step.recipe().ingredients()) {
             int required = ingredient.count() * step.crafts();
             if (!removeIngredient(main, offHand, ingredient, required)) {
@@ -479,11 +478,11 @@ public final class CraftTask extends AbstractTask {
                     if (remaining <= 0) {
                         return true;
                     }
-                    if (!stack.isOf(item)) {
+                    if (!stack.is(item)) {
                         continue;
                     }
                     int take = Math.min(remaining, stack.getCount());
-                    stack.decrement(take);
+                    stack.shrink(take);
                     remaining -= take;
                 }
             }
@@ -495,7 +494,7 @@ public final class CraftTask extends AbstractTask {
         int count = 0;
         for (List<ItemStack> region : List.of(main, offHand)) {
             for (ItemStack stack : region) {
-                if (stack.isOf(item)) {
+                if (stack.is(item)) {
                     count += stack.getCount();
                 }
             }
@@ -507,9 +506,9 @@ public final class CraftTask extends AbstractTask {
         long available = 0L;
         for (ItemStack stack : main) {
             if (stack.isEmpty()) {
-                available += output.getMaxCount();
-            } else if (ItemStack.areItemsAndComponentsEqual(stack, output)) {
-                available += Math.max(0, stack.getMaxCount() - stack.getCount());
+                available += output.getMaxStackSize();
+            } else if (ItemStack.isSameItemSameComponents(stack, output)) {
+                available += Math.max(0, stack.getMaxStackSize() - stack.getCount());
             }
         }
         return (int) Math.min(Integer.MAX_VALUE, available);
@@ -520,11 +519,11 @@ public final class CraftTask extends AbstractTask {
             if (output.isEmpty()) {
                 return;
             }
-            if (!stack.isEmpty() && ItemStack.areItemsAndComponentsEqual(stack, output)) {
-                int moved = Math.min(output.getCount(), stack.getMaxCount() - stack.getCount());
+            if (!stack.isEmpty() && ItemStack.isSameItemSameComponents(stack, output)) {
+                int moved = Math.min(output.getCount(), stack.getMaxStackSize() - stack.getCount());
                 if (moved > 0) {
-                    stack.increment(moved);
-                    output.decrement(moved);
+                    stack.grow(moved);
+                    output.shrink(moved);
                 }
             }
         }
@@ -532,9 +531,9 @@ public final class CraftTask extends AbstractTask {
             if (!main.get(slot).isEmpty()) {
                 continue;
             }
-            int moved = Math.min(output.getCount(), output.getMaxCount());
+            int moved = Math.min(output.getCount(), output.getMaxStackSize());
             main.set(slot, output.copyWithCount(moved));
-            output.decrement(moved);
+            output.shrink(moved);
         }
         if (!output.isEmpty()) {
             throw new IllegalStateException("craft output preflight capacity mismatch");
@@ -543,12 +542,12 @@ public final class CraftTask extends AbstractTask {
 
     private static void commitPreparedCraft(AIPlayerEntity bot, PreparedCraft prepared) {
         var inventory = bot.getInventory();
-        List<ItemStack> mainStacks = inventory.getMainStacks();
+        List<ItemStack> mainStacks = inventory.getNonEquipmentItems();
         for (int slot = 0; slot < mainStacks.size(); slot++) {
             mainStacks.set(slot, prepared.main().get(slot));
         }
-        bot.equipStack(EquipmentSlot.OFFHAND, prepared.offHand().get(0));
-        inventory.markDirty();
+        bot.setItemSlot(EquipmentSlot.OFFHAND, prepared.offHand().get(0));
+        inventory.setChanged();
     }
 
     private record PreparedCraft(
@@ -560,19 +559,19 @@ public final class CraftTask extends AbstractTask {
     }
 
     private static BlockPos adjacentAir(AIPlayerEntity bot) {
-        BlockPos origin = bot.getBlockPos();
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = origin.offset(direction);
+        BlockPos origin = bot.blockPosition();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = origin.relative(direction);
             if (isOpenPlacementCell(bot, candidate)) {
-                return candidate.toImmutable();
+                return candidate.immutable();
             }
         }
         // origin.up() is the bot's own head cell -- always intersects its own hitbox, so vanilla
         // placement there is never actually admissible (World/CollisionView#canPlace rejects any
         // destination whose collision shape intersects a live entity, the placer included, with
         // no self-exemption). The one block above that is genuinely external, open headroom.
-        BlockPos above = origin.up().up();
-        return isOpenPlacementCell(bot, above) ? above.toImmutable() : null;
+        BlockPos above = origin.above().above();
+        return isOpenPlacementCell(bot, above) ? above.immutable() : null;
     }
 
     /**
@@ -600,17 +599,17 @@ public final class CraftTask extends AbstractTask {
      * exactly the live bug this guards against.
      */
     private static boolean isOpenPlacementCell(AIPlayerEntity bot, BlockPos candidate) {
-        var candidateBox = new net.minecraft.util.math.Box(candidate);
+        var candidateBox = new net.minecraft.world.phys.AABB(candidate);
         return ObservableWorldQuery.canObserveCell(bot, candidate)
-                && bot.getEntityWorld().getBlockState(candidate).isAir()
-                && bot.getEntityWorld().isSpaceEmpty(bot, candidateBox)
+                && bot.level().getBlockState(candidate).isAir()
+                && bot.level().noCollision(bot, candidateBox)
                 && !bot.getBoundingBox().intersects(candidateBox)
                 && BuildAction.canAcceptPlacementAt(bot, candidate);
     }
 
     private static String describeIngredient(RecipeRegistry.Ingredient ingredient, int count) {
         List<String> ids = ingredient.anyOf().stream()
-                .map(item -> Registries.ITEM.getId(item).toString())
+                .map(item -> BuiltInRegistries.ITEM.getKey(item).toString())
                 .toList();
         return String.join("|", ids) + " x" + count;
     }

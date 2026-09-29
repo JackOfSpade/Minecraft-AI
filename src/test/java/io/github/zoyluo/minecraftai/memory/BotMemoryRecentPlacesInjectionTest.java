@@ -1,10 +1,10 @@
 package io.github.zoyluo.minecraftai.memory;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

@@ -1,6 +1,6 @@
 package io.github.zoyluo.minecraftai.action;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 /**
  * Allows at most one physical start re-snap per origin cell per {@link #WINDOW_TICKS}.
@@ -25,7 +25,7 @@ final class SnapRepeatGuard {
     }
 
     void record(BlockPos from, int nowTick) {
-        lastFrom = from.toImmutable();
+        lastFrom = from.immutable();
         lastTick = nowTick;
     }
 }

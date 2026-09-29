@@ -2,19 +2,18 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.task.WorkshopLocator;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.registry.tag.ItemTags;
-
 import java.util.Locale;
 import java.util.Set;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Optimal-tool-CATEGORY policy for player-requested gather/harvest/break actions (used by
@@ -50,22 +49,22 @@ public final class GatherToolPolicy {
     /** Derives the optimal tool category for {@code state} from vanilla's own block tags. */
     public static Category categoryFor(BlockState state) {
         Block block = state.getBlock();
-        if (SHEARS_SPECIAL.contains(block) || state.isIn(BlockTags.WOOL) || state.isIn(BlockTags.LEAVES)) {
+        if (SHEARS_SPECIAL.contains(block) || state.is(BlockTags.WOOL) || state.is(BlockTags.LEAVES)) {
             return Category.SHEARS;
         }
-        if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+        if (state.is(BlockTags.MINEABLE_WITH_PICKAXE)) {
             return Category.PICKAXE;
         }
-        if (state.isIn(BlockTags.SHOVEL_MINEABLE)) {
+        if (state.is(BlockTags.MINEABLE_WITH_SHOVEL)) {
             return Category.SHOVEL;
         }
-        if (state.isIn(BlockTags.AXE_MINEABLE)) {
+        if (state.is(BlockTags.MINEABLE_WITH_AXE)) {
             return Category.AXE;
         }
-        if (state.isIn(BlockTags.HOE_MINEABLE)) {
+        if (state.is(BlockTags.MINEABLE_WITH_HOE)) {
             return Category.HOE;
         }
-        if (state.isIn(BlockTags.SWORD_EFFICIENT)) {
+        if (state.is(BlockTags.SWORD_EFFICIENT)) {
             return Category.SWORD;
         }
         return Category.NONE;
@@ -79,12 +78,12 @@ public final class GatherToolPolicy {
         }
         return switch (category) {
             case NONE -> true;
-            case PICKAXE -> stack.isIn(ItemTags.PICKAXES);
-            case AXE -> stack.isIn(ItemTags.AXES);
-            case SHOVEL -> stack.isIn(ItemTags.SHOVELS);
-            case HOE -> stack.isIn(ItemTags.HOES);
+            case PICKAXE -> stack.is(ItemTags.PICKAXES);
+            case AXE -> stack.is(ItemTags.AXES);
+            case SHOVEL -> stack.is(ItemTags.SHOVELS);
+            case HOE -> stack.is(ItemTags.HOES);
             case SHEARS -> stack.getItem() == Items.SHEARS;
-            case SWORD -> stack.isIn(ItemTags.SWORDS);
+            case SWORD -> stack.is(ItemTags.SWORDS);
         };
     }
 
@@ -93,13 +92,13 @@ public final class GatherToolPolicy {
         if (category == Category.NONE) {
             return true;
         }
-        PlayerInventory inventory = bot.getInventory();
-        for (ItemStack stack : inventory.getMainStacks()) {
+        Inventory inventory = bot.getInventory();
+        for (ItemStack stack : inventory.getNonEquipmentItems()) {
             if (matches(stack, category)) {
                 return true;
             }
         }
-        return matches(bot.getEquippedStack(EquipmentSlot.OFFHAND), category);
+        return matches(bot.getItemBySlot(EquipmentSlot.OFFHAND), category);
     }
 
     /**
@@ -134,7 +133,7 @@ public final class GatherToolPolicy {
 
     /** True when {@code state} is a log/stem, i.e. a block that can be hand-bootstrapped. */
     public static boolean isLogBootstrapTarget(BlockState state) {
-        return state.isIn(BlockTags.LOGS);
+        return state.is(BlockTags.LOGS);
     }
 
     /**
@@ -147,20 +146,20 @@ public final class GatherToolPolicy {
         int sticks = 0;
         int stoneMaterial = 0;
         boolean tableCarried = false;
-        PlayerInventory inventory = bot.getInventory();
-        for (ItemStack stack : inventory.getMainStacks()) {
+        Inventory inventory = bot.getInventory();
+        for (ItemStack stack : inventory.getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 continue;
             }
-            if (stack.isIn(ItemTags.LOGS)) {
+            if (stack.is(ItemTags.LOGS)) {
                 logs += stack.getCount();
-            } else if (stack.isIn(ItemTags.PLANKS)) {
+            } else if (stack.is(ItemTags.PLANKS)) {
                 planks += stack.getCount();
-            } else if (stack.isOf(Items.STICK)) {
+            } else if (stack.is(Items.STICK)) {
                 sticks += stack.getCount();
-            } else if (stack.isOf(Items.CRAFTING_TABLE)) {
+            } else if (stack.is(Items.CRAFTING_TABLE)) {
                 tableCarried = true;
-            } else if (stack.isIn(ItemTags.STONE_TOOL_MATERIALS)) {
+            } else if (stack.is(ItemTags.STONE_TOOL_MATERIALS)) {
                 stoneMaterial += stack.getCount();
             }
         }

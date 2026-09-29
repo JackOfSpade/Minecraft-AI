@@ -2,7 +2,6 @@ package io.github.zoyluo.minecraftai.mining.assist;
 
 import io.github.zoyluo.minecraftai.mining.assist.HazardField.Cell;
 import io.github.zoyluo.minecraftai.mining.assist.HazardField.Kind;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -12,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -475,8 +475,8 @@ class HazardFieldTest {
         BlockPos far = at(29_999_999, -60, -29_999_999);
         field.observe(far, Kind.LAVA, 0);
         assertTrue(field.anyLavaWithin(far, 0));
-        assertTrue(field.anyLavaWithin(far.add(-3, 0, 3), 3));
-        assertFalse(field.anyLavaWithin(far.add(-4, 0, 4), 3));
+        assertTrue(field.anyLavaWithin(far.offset(-3, 0, 3), 3));
+        assertFalse(field.anyLavaWithin(far.offset(-4, 0, 4), 3));
         assertFalse(field.anyLavaWithin(ORIGIN, 4));
         assertTrue(field.anyLavaWithin(ORIGIN, Integer.MAX_VALUE), "an enormous radius must not overflow");
         assertEquals(List.of(far), field.lavaCellsWithin(ORIGIN, Integer.MAX_VALUE));
@@ -520,12 +520,12 @@ class HazardFieldTest {
                         continue;
                     }
                     expected.add(p);
-                    long d = (long) p.getSquaredDistance(centre);
+                    long d = (long) p.distSqr(centre);
                     if (nearest == HazardField.NONE || d < nearest) {
                         nearest = d;
                     }
                 }
-                expected.sort(Comparator.comparingLong((BlockPos p) -> (long) p.getSquaredDistance(centre))
+                expected.sort(Comparator.comparingLong((BlockPos p) -> (long) p.distSqr(centre))
                         .thenComparingInt(BlockPos::getY).thenComparingInt(BlockPos::getZ)
                         .thenComparingInt(BlockPos::getX));
                 String label = kind + " " + centre + " r" + radius;
@@ -608,7 +608,7 @@ class HazardFieldTest {
     @Test
     void mutableBlockPosIsCopiedNotRetained() {
         HazardField field = new HazardField();
-        BlockPos.Mutable cursor = new BlockPos.Mutable(1, 2, 3);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos(1, 2, 3);
         field.observe(cursor, Kind.LAVA, 0);
         cursor.set(9, 9, 9);
         assertTrue(field.isLava(at(1, 2, 3)));

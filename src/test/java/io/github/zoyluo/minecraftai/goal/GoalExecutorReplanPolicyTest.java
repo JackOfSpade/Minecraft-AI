@@ -40,7 +40,7 @@ class GoalExecutorReplanPolicyTest {
         assertFalse(GoalExecutor.isUnsettledHuntPhysicalDebt(
                 GoalStep.Kind.MOVE, "hunt_surface_return_timeout anchor=1,64,1"));
         assertTrue(GoalExecutor.shouldSkipFailedStep(
-                food, GoalStep.move(net.minecraft.util.math.BlockPos.ORIGIN),
+                food, GoalStep.move(net.minecraft.core.BlockPos.ZERO),
                 "hunt_surface_return_timeout anchor=1,64,1"));
         assertFalse(GoalExecutor.shouldSkipFailedStep(
                 food, GoalStep.cookFood(4), "no_raw_food"));

@@ -2,16 +2,15 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Items;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.FallingBlock;
-
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class MaterialPalette {
     public static final Map<String, List<Item>> GROUPS = Map.of(
@@ -97,8 +96,8 @@ public final class MaterialPalette {
     }
 
     public static OptionalInt pickAnyBlockSlot(AIPlayerEntity bot) {
-        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-            if (bot.getInventory().getMainStacks().get(slot).getItem() instanceof BlockItem) {
+        for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+            if (bot.getInventory().getNonEquipmentItems().get(slot).getItem() instanceof BlockItem) {
                 return OptionalInt.of(slot);
             }
         }
@@ -307,10 +306,10 @@ public final class MaterialPalette {
         if (!(blockItem instanceof BlockItem item)) {
             return false;
         }
-        BlockState state = item.getBlock().getDefaultState();
-        for (var stack : bot.getInventory().getMainStacks()) {
-            if (!stack.isEmpty() && stack.isSuitableFor(state)
-                    && (!stack.isDamageable() || stack.getDamage() < stack.getMaxDamage() - 1)) {
+        BlockState state = item.getBlock().defaultBlockState();
+        for (var stack : bot.getInventory().getNonEquipmentItems()) {
+            if (!stack.isEmpty() && stack.isCorrectToolForDrops(state)
+                    && (!stack.isDamageableItem() || stack.getDamageValue() < stack.getMaxDamage() - 1)) {
                 return true;
             }
         }
@@ -327,7 +326,7 @@ public final class MaterialPalette {
             return false;
         }
         for (Item item : items) {
-            if (item instanceof BlockItem blockItem && state.isOf(blockItem.getBlock())) {
+            if (item instanceof BlockItem blockItem && state.is(blockItem.getBlock())) {
                 return true;
             }
         }

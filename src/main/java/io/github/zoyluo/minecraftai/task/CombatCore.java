@@ -6,24 +6,23 @@ import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.ai.RangedAttackMob;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.entity.mob.EndermanEntity;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
-
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 public final class CombatCore {
     public static final float ATTACK_RANGE = 3.0F;
@@ -65,8 +64,8 @@ public final class CombatCore {
     /** Observable, reachable ranged attackers around the bot -- used to decide when cover/peekaboo
      *  tactics are warranted instead of plain kiting. */
     public static List<LivingEntity> rangedThreatsAround(AIPlayerEntity bot, double range) {
-        return bot.getEntityWorld()
-                .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(range),
+        return bot.level()
+                .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(range),
                         entity -> entity != bot
                                 && entity.isAlive()
                                 && isRangedThreat(entity)
@@ -77,8 +76,8 @@ public final class CombatCore {
     /** Counts live hostiles whose current AI target is this bot -- the "aggro count" used to decide
      *  when a swarmed bot should fall back toward its owning player. */
     public static int countAggroedHostiles(AIPlayerEntity bot, double range) {
-        return bot.getEntityWorld()
-                .getEntitiesByClass(MobEntity.class, bot.getBoundingBox().expand(range),
+        return bot.level()
+                .getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(range),
                         mob -> mob.isAlive() && mob.getTarget() == bot)
                 .size();
     }
@@ -107,12 +106,12 @@ public final class CombatCore {
      * the bot is eating or settling another combat target.
      */
     static boolean isWithinHostilePressureEnvelope(AIPlayerEntity bot, LivingEntity entity) {
-        double distanceSquared = bot.squaredDistanceTo(entity);
+        double distanceSquared = bot.distanceToSqr(entity);
         if (distanceSquared
                 <= CLOSE_HOSTILE_PRESSURE_RANGE * CLOSE_HOSTILE_PRESSURE_RANGE) {
             return true;
         }
-        if (entity instanceof CreeperEntity
+        if (entity instanceof Creeper
                 && distanceSquared <= CREEPER_PRESSURE_RANGE * CREEPER_PRESSURE_RANGE) {
             return true;
         }
@@ -129,12 +128,12 @@ public final class CombatCore {
      * safety must create distance rather than turn an interrupted mining mission into a duel.
      */
     static boolean isMeleeForbiddenThreat(LivingEntity entity) {
-        return entity instanceof CreeperEntity || entity instanceof EndermanEntity;
+        return entity instanceof Creeper || entity instanceof EnderMan;
     }
 
     public static Optional<LivingEntity> nearestTarget(AIPlayerEntity bot, EntityType<?> targetType, double range) {
-        return bot.getEntityWorld()
-                .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(range),
+        return bot.level()
+                .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(range),
                         entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot)
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
@@ -142,10 +141,10 @@ public final class CombatCore {
     }
 
     public static Optional<LivingEntity> nearestHostileAround(AIPlayerEntity bot, BlockPos center, double range) {
-        Box box = new Box(center).expand(range);
-        return bot.getEntityWorld()
-                .getEntitiesByClass(LivingEntity.class, box,
-                        entity -> entity instanceof HostileEntity && entity.isAlive() && entity != bot)
+        AABB box = new AABB(center).inflate(range);
+        return bot.level()
+                .getEntitiesOfClass(LivingEntity.class, box,
+                        entity -> entity instanceof Monster && entity.isAlive() && entity != bot)
                 .stream()
                 .filter(entity -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .min(Comparator.comparingDouble(bot::distanceTo));
@@ -163,16 +162,16 @@ public final class CombatCore {
     // trigger/sustain combat (observed bug: a mob blocked by blocks left the bot stuck "in combat"
     // forever).
     public static boolean hasLineOfSight(AIPlayerEntity bot, LivingEntity mob) {
-        HitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
-                bot.getEyePos(), mob.getEyePos(),
-                RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE,
+        HitResult hit = bot.level().clip(new ClipContext(
+                bot.getEyePosition(), mob.getEyePosition(),
+                ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE,
                 bot));
         return hit.getType() == HitResult.Type.MISS;
     }
 
     public static void lookAt(AIPlayerEntity bot, LivingEntity target) {
-        Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
+        Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
         LookAction.lookAt(bot, targetCenter);
     }
 
@@ -185,22 +184,22 @@ public final class CombatCore {
      * clear miss-low at the far end of ranged engagement.
      */
     public static void lookAtForBowShot(AIPlayerEntity bot, LivingEntity target) {
-        Vec3d eye = bot.getEyePos();
-        Vec3d targetCenter = target.getEntityPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
+        Vec3 eye = bot.getEyePosition();
+        Vec3 targetCenter = target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D);
         double dx = targetCenter.x - eye.x;
         double dz = targetCenter.z - eye.z;
         double dy = targetCenter.y - eye.y;
         double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-        float yaw = MathHelper.wrapDegrees((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D));
+        float yaw = Mth.wrapDegrees((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0D));
         double pitch = ProjectileBallistics.pitchForShot(
                 horizontalDistance, dy, ProjectileBallistics.FULL_DRAW_ARROW_SPEED);
         LookAction.setYawPitch(bot, yaw, (float) pitch);
     }
 
     public static void startApproach(AIPlayerEntity bot, LivingEntity target) {
-        ActionResult result = bot.getActionPack().startPathTo(target.getBlockPos());
+        ActionResult result = bot.getActionPack().startPathTo(target.blockPosition());
         if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(target.getEntityPos());
+            bot.getActionPack().startWalkTo(target.position());
         }
     }
 
@@ -209,7 +208,7 @@ public final class CombatCore {
         if (!inMeleeRange(bot, target)) {
             return false;
         }
-        if (bot.getAttackCooldownProgress(0.5F) < 0.95F) {
+        if (bot.getAttackStrengthScale(0.5F) < 0.95F) {
             return false;
         }
         InteractAction.attackEntity(bot, target);

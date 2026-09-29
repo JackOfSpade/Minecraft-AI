@@ -2,42 +2,41 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.inventory.LootableInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.collection.DefaultedList;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Optional;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.Container;
+import net.minecraft.world.RandomizableContainer;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class ContainerAction {
     private ContainerAction() {
     }
 
-    public static Optional<Inventory> resolve(AIPlayerEntity bot, BlockPos pos) {
-        BlockState state = bot.getEntityWorld().getBlockState(pos);
+    public static Optional<Container> resolve(AIPlayerEntity bot, BlockPos pos) {
+        BlockState state = bot.level().getBlockState(pos);
         Block block = state.getBlock();
         if (block instanceof ChestBlock chestBlock) {
-            Inventory inventory = ChestBlock.getInventory(chestBlock, state, bot.getEntityWorld(), pos, true);
+            Container inventory = ChestBlock.getContainer(chestBlock, state, bot.level(), pos, true);
             if (inventory != null) {
                 generateLoot(bot, inventory);
                 return Optional.of(inventory);
             }
         }
-        if (bot.getEntityWorld().getBlockEntity(pos) instanceof Inventory inventory) {
+        if (bot.level().getBlockEntity(pos) instanceof Container inventory) {
             generateLoot(bot, inventory);
             return Optional.of(inventory);
         }
         return Optional.empty();
     }
 
-    public static TransferResult depositOne(Inventory container,
+    public static TransferResult depositOne(Container container,
                                             AIPlayerEntity bot,
                                             Predicate<ItemStack> filter,
                                             int maxItems) {
@@ -55,23 +54,23 @@ public final class ContainerAction {
         if (inserted <= 0) {
             return TransferResult.failed("container_full");
         }
-        source.stack().decrement(inserted);
-        bot.getInventory().markDirty();
-        container.markDirty();
+        source.stack().shrink(inserted);
+        bot.getInventory().setChanged();
+        container.setChanged();
         BotLog.action(bot, "container_deposit", "item", item, "count", inserted);
         return TransferResult.moved(inserted);
     }
 
-    public static TransferResult withdrawOne(Inventory container,
+    public static TransferResult withdrawOne(Container container,
                                              AIPlayerEntity bot,
                                              Item item,
                                              int maxItems) {
         if (maxItems <= 0) {
             return TransferResult.done();
         }
-        for (int slot = 0; slot < container.size(); slot++) {
-            ItemStack stack = container.getStack(slot);
-            if (!stack.isOf(item)) {
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (!stack.is(item)) {
                 continue;
             }
             int requested = Math.min(stack.getCount(), maxItems);
@@ -80,9 +79,9 @@ public final class ContainerAction {
             if (inserted <= 0) {
                 return TransferResult.failed("inventory_full");
             }
-            stack.decrement(inserted);
-            container.markDirty();
-            bot.getInventory().markDirty();
+            stack.shrink(inserted);
+            container.setChanged();
+            bot.getInventory().setChanged();
             BotLog.action(bot, "container_withdraw", "item", item, "count", inserted);
             return TransferResult.moved(inserted);
         }
@@ -90,18 +89,18 @@ public final class ContainerAction {
     }
 
     public static boolean isReservedTool(ItemStack stack) {
-        return !stack.isEmpty() && stack.isDamageable();
+        return !stack.isEmpty() && stack.isDamageableItem();
     }
 
     private static PlayerTransfer findPlayerStack(AIPlayerEntity bot, Predicate<ItemStack> filter) {
-        DefaultedList<ItemStack> main = bot.getInventory().getMainStacks();
+        NonNullList<ItemStack> main = bot.getInventory().getNonEquipmentItems();
         for (int slot = 0; slot < main.size(); slot++) {
             ItemStack stack = main.get(slot);
             if (!stack.isEmpty() && filter.test(stack)) {
                 return new PlayerTransfer(stack);
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (!offHandStack.isEmpty() && filter.test(offHandStack)) {
             return new PlayerTransfer(offHandStack);
         }
@@ -110,49 +109,49 @@ public final class ContainerAction {
 
     private static int insertPlayer(AIPlayerEntity bot, ItemStack moving) {
         int original = moving.getCount();
-        boolean inserted = bot.getInventory().insertStack(moving);
+        boolean inserted = bot.getInventory().add(moving);
         if (!inserted && moving.getCount() == original) {
             return 0;
         }
         return original - moving.getCount();
     }
 
-    private static int insert(Inventory inventory, ItemStack moving) {
+    private static int insert(Container inventory, ItemStack moving) {
         int original = moving.getCount();
-        for (int slot = 0; slot < inventory.size() && !moving.isEmpty(); slot++) {
-            ItemStack target = inventory.getStack(slot);
-            if (target.isEmpty() || !ItemStack.areItemsAndComponentsEqual(target, moving)) {
+        for (int slot = 0; slot < inventory.getContainerSize() && !moving.isEmpty(); slot++) {
+            ItemStack target = inventory.getItem(slot);
+            if (target.isEmpty() || !ItemStack.isSameItemSameComponents(target, moving)) {
                 continue;
             }
-            if (!inventory.isValid(slot, moving)) {
+            if (!inventory.canPlaceItem(slot, moving)) {
                 continue;
             }
-            int room = Math.min(target.getMaxCount(), inventory.getMaxCount(target)) - target.getCount();
+            int room = Math.min(target.getMaxStackSize(), inventory.getMaxStackSize(target)) - target.getCount();
             if (room <= 0) {
                 continue;
             }
             int moved = Math.min(room, moving.getCount());
-            target.increment(moved);
-            moving.decrement(moved);
+            target.grow(moved);
+            moving.shrink(moved);
         }
-        for (int slot = 0; slot < inventory.size() && !moving.isEmpty(); slot++) {
-            ItemStack target = inventory.getStack(slot);
+        for (int slot = 0; slot < inventory.getContainerSize() && !moving.isEmpty(); slot++) {
+            ItemStack target = inventory.getItem(slot);
             if (!target.isEmpty()) {
                 continue;
             }
-            if (!inventory.isValid(slot, moving)) {
+            if (!inventory.canPlaceItem(slot, moving)) {
                 continue;
             }
-            int moved = Math.min(Math.min(moving.getMaxCount(), inventory.getMaxCount(moving)), moving.getCount());
-            inventory.setStack(slot, moving.copyWithCount(moved));
-            moving.decrement(moved);
+            int moved = Math.min(Math.min(moving.getMaxStackSize(), inventory.getMaxStackSize(moving)), moving.getCount());
+            inventory.setItem(slot, moving.copyWithCount(moved));
+            moving.shrink(moved);
         }
         return original - moving.getCount();
     }
 
-    private static void generateLoot(AIPlayerEntity bot, Inventory inventory) {
-        if (inventory instanceof LootableInventory lootableInventory) {
-            lootableInventory.generateLoot(bot);
+    private static void generateLoot(AIPlayerEntity bot, Container inventory) {
+        if (inventory instanceof RandomizableContainer lootableInventory) {
+            lootableInventory.unpackLootTable(bot);
         }
     }
 

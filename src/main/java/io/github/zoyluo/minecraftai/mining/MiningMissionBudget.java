@@ -2,7 +2,7 @@ package io.github.zoyluo.minecraftai.mining;
 
 import io.github.zoyluo.minecraftai.goal.GoalPlanner;
 import io.github.zoyluo.minecraftai.goal.GoalStep;
-import net.minecraft.block.Blocks;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Outer timeout contracts for long strict-survival mining missions.

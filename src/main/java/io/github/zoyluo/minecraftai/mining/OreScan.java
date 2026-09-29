@@ -2,16 +2,6 @@ package io.github.zoyluo.minecraftai.mining;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -19,6 +9,15 @@ import java.util.List;
 import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 
 public final class OreScan {
     /**
@@ -59,7 +58,7 @@ public final class OreScan {
      * intentional: production callers cannot accidentally invoke a raw server-world ore flood.
      */
     public static List<BlockPos> veinFrom(AIPlayerEntity bot, BlockPos seed, Set<Block> ores, int cap) {
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         if (!ObservableWorldQuery.canObserveBlock(bot, seed)) {
             return List.of();
         }
@@ -71,14 +70,14 @@ public final class OreScan {
         ArrayDeque<BlockPos> open = new ArrayDeque<>();
         Set<BlockPos> seen = new HashSet<>();
         List<BlockPos> result = new ArrayList<>();
-        open.add(seed.toImmutable());
-        seen.add(seed.toImmutable());
+        open.add(seed.immutable());
+        seen.add(seed.immutable());
         while (!open.isEmpty() && result.size() < cap) {
             BlockPos current = open.removeFirst();
             if (!ObservableWorldQuery.canObserveBlock(bot, current)) {
                 continue;
             }
-            if (!world.getBlockState(current).isOf(seedBlock)) {
+            if (!world.getBlockState(current).is(seedBlock)) {
                 continue;
             }
             result.add(current);
@@ -89,14 +88,14 @@ public final class OreScan {
                         if (dx == 0 && dy == 0 && dz == 0) {
                             continue;
                         }
-                        BlockPos next = current.add(dx, dy, dz).toImmutable();
+                        BlockPos next = current.offset(dx, dy, dz).immutable();
                         if (!seen.add(next)) {
                             continue;
                         }
                         if (!ObservableWorldQuery.canObserveBlock(bot, next)) {
                             continue;
                         }
-                        if (world.getBlockState(next).isOf(seedBlock)) {
+                        if (world.getBlockState(next).is(seedBlock)) {
                             open.addLast(next);
                         }
                     }
@@ -123,7 +122,7 @@ public final class OreScan {
                 && !ObservableWorldQuery.canObserveBlock(bot, pos)) {
             return Observation.UNKNOWN;
         }
-        return predicate.test(bot.getEntityWorld().getBlockState(pos))
+        return predicate.test(bot.level().getBlockState(pos))
                 ? Observation.OBSERVED_PRESENT
                 : Observation.OBSERVED_GONE;
     }
@@ -149,14 +148,14 @@ public final class OreScan {
                 && !ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
             return Observation.UNKNOWN;
         }
-        FluidState fluid = bot.getEntityWorld().getBlockState(pos).getFluidState();
-        return fluid.isIn(FluidTags.LAVA) || fluid.isIn(FluidTags.WATER)
+        FluidState fluid = bot.level().getBlockState(pos).getFluidState();
+        return fluid.is(FluidTags.LAVA) || fluid.is(FluidTags.WATER)
                 ? Observation.OBSERVED_PRESENT
                 : Observation.OBSERVED_GONE;
     }
 
     public static boolean isOreBlock(Block block) {
-        return COMMON_ORES.contains(block) || Registries.BLOCK.getId(block).getPath().endsWith("_ore");
+        return COMMON_ORES.contains(block) || BuiltInRegistries.BLOCK.getKey(block).getPath().endsWith("_ore");
     }
 
     public static Set<Block> oreFamily(Block block) {
@@ -234,11 +233,11 @@ public final class OreScan {
     }
 
     /** Legacy OPERATOR-profile probe; strict-survival callers must use the bot-aware overload. */
-    public static boolean adjacentHazard(World world, BlockPos pos) {
+    public static boolean adjacentHazard(Level world, BlockPos pos) {
         for (Direction direction : Direction.values()) {
-            BlockPos adjacent = pos.offset(direction);
+            BlockPos adjacent = pos.relative(direction);
             FluidState fluid = world.getFluidState(adjacent);
-            if (fluid.isIn(FluidTags.LAVA) || fluid.isIn(FluidTags.WATER)) {
+            if (fluid.is(FluidTags.LAVA) || fluid.is(FluidTags.WATER)) {
                 return true;
             }
         }
@@ -253,7 +252,7 @@ public final class OreScan {
     public static Observation adjacentHazard(AIPlayerEntity bot, BlockPos pos) {
         boolean unknown = false;
         for (Direction direction : Direction.values()) {
-            Observation observation = observeDangerFluid(bot, pos.offset(direction));
+            Observation observation = observeDangerFluid(bot, pos.relative(direction));
             if (observation == Observation.OBSERVED_PRESENT) {
                 return Observation.OBSERVED_PRESENT;
             }

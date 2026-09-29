@@ -1,14 +1,13 @@
 package io.github.zoyluo.minecraftai.mining;
 
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 /**
  * Conservative food units for long mining expeditions. Raw or harmful foods remain available to
@@ -28,17 +27,17 @@ public final class MiningFoodReserve {
         return normalizedUnits(oneUnitItems, counts.getOrDefault(Items.SWEET_BERRIES, 0));
     }
 
-    public static int units(Inventory inventory) {
+    public static int units(Container inventory) {
         int units = 0;
         int berries = 0;
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            ItemStack stack = inventory.getStack(slot);
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
                 continue;
             }
             if (ReserveItems.ONE_UNIT_ITEMS.contains(stack.getItem())) {
                 units += stack.getCount();
-            } else if (stack.isOf(Items.SWEET_BERRIES)) {
+            } else if (stack.is(Items.SWEET_BERRIES)) {
                 berries += stack.getCount();
             }
         }
@@ -46,7 +45,7 @@ public final class MiningFoodReserve {
     }
 
     /** Returns the safest available reserve item, using berries only after full-unit foods. */
-    public static Optional<Item> firstReserveItem(Inventory inventory) {
+    public static Optional<Item> firstReserveItem(Container inventory) {
         for (Item item : ReserveItems.ONE_UNIT_PRIORITY) {
             if (contains(inventory, item)) {
                 return Optional.of(item);
@@ -76,9 +75,9 @@ public final class MiningFoodReserve {
         return berries ? Math.multiplyExact(units, 2) : units;
     }
 
-    private static boolean contains(Inventory inventory, Item item) {
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(item)) {
+    private static boolean contains(Container inventory, Item item) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (inventory.getItem(slot).is(item)) {
                 return true;
             }
         }

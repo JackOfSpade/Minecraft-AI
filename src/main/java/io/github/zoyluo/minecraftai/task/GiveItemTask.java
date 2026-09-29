@@ -4,9 +4,9 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 
 /**
  * Live bug (session 20260928-230626, bot Moss): the player asked the bot to make and keep tool
@@ -38,7 +38,7 @@ public final class GiveItemTask extends AbstractTask {
     private final String requestedPlayerName;
 
     private Phase phase = Phase.FIND_PLAYER;
-    private PlayerEntity target;
+    private Player target;
     private int phaseTicks;
 
     public GiveItemTask(Item item, int count, String playerName) {
@@ -54,7 +54,7 @@ public final class GiveItemTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Giving " + Registries.ITEM.getId(item) + " x" + count
+        return "Giving " + BuiltInRegistries.ITEM.getKey(item) + " x" + count
                 + (requestedPlayerName.isBlank() ? " to owner" : " to " + requestedPlayerName)
                 + " phase=" + phase;
     }
@@ -92,7 +92,7 @@ public final class GiveItemTask extends AbstractTask {
 
     private void findPlayer(AIPlayerEntity bot) {
         if (InventoryAction.countItem(bot, item) < count) {
-            fail("need: " + Registries.ITEM.getId(item) + " x" + count);
+            fail("need: " + BuiltInRegistries.ITEM.getKey(item) + " x" + count);
             return;
         }
         target = FollowTargetResolver.resolve(bot, requestedPlayerName).orElse(null);
@@ -119,7 +119,7 @@ public final class GiveItemTask extends AbstractTask {
             fail("give_item_unreachable");
             return;
         }
-        LookAction.lookAt(bot, target.getEntityPos().add(0.0D, target.getStandingEyeHeight(), 0.0D));
+        LookAction.lookAt(bot, target.position().add(0.0D, target.getEyeHeight(), 0.0D));
         if (bot.distanceTo(target) <= GIVE_RANGE) {
             bot.getActionPack().stopAll();
             transition(Phase.GIVE);
@@ -132,9 +132,9 @@ public final class GiveItemTask extends AbstractTask {
     }
 
     private void approach(AIPlayerEntity bot) {
-        ActionResult result = bot.getActionPack().startPathTo(target.getBlockPos());
+        ActionResult result = bot.getActionPack().startPathTo(target.blockPosition());
         if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(target.getEntityPos());
+            bot.getActionPack().startWalkTo(target.position());
         }
     }
 
@@ -148,10 +148,10 @@ public final class GiveItemTask extends AbstractTask {
             return;
         }
         if (InventoryAction.countItem(bot, item) < count) {
-            fail("need: " + Registries.ITEM.getId(item) + " x" + count);
+            fail("need: " + BuiltInRegistries.ITEM.getKey(item) + " x" + count);
             return;
         }
-        LookAction.lookAt(bot, target.getEntityPos().add(0.0D, target.getStandingEyeHeight(), 0.0D));
+        LookAction.lookAt(bot, target.position().add(0.0D, target.getEyeHeight(), 0.0D));
         int before = InventoryAction.countItem(bot, item);
         if (!InventoryAction.dropItems(bot, item, count)) {
             fail("give_item_drop_failed");

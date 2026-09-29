@@ -1,12 +1,11 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Pure admission and ranking policy of the opportunistic valuables detour (mining-assist design 4.2), plus the
@@ -168,7 +167,7 @@ public final class DetourPolicy {
      * @param value       the raw {@link ValueTable} value of the block (never the cluster-scaled one)
      * @param clusterSize see {@link #cluster}
      */
-    public static Admission admit(int value, int clusterSize, BlockPos ore, BlockPos feet, Vec3d eye,
+    public static Admission admit(int value, int clusterSize, BlockPos ore, BlockPos feet, Vec3 eye,
                                   BlockPos anchorFace, TargetLock lock, MiningAssistConfig.Detour cfg) {
         if (value < cfg.minValue()) {
             return Admission.VALUE;
@@ -176,7 +175,7 @@ public final class DetourPolicy {
         if (lock == TargetLock.NEAR) {
             return Admission.TARGET_NEAR;
         }
-        double eyeDistance = eye.distanceTo(new Vec3d(ore.getX() + 0.5D, ore.getY() + 0.5D, ore.getZ() + 0.5D));
+        double eyeDistance = eye.distanceTo(new Vec3(ore.getX() + 0.5D, ore.getY() + 0.5D, ore.getZ() + 0.5D));
         if (eyeDistance > MAX_EYE_DISTANCE) {
             return Admission.RANGE;
         }
@@ -212,7 +211,7 @@ public final class DetourPolicy {
      * A candidate whose id is {@link #neverDetour} or fails {@link #naturalContext} is dropped before admission.
      * Deterministic for equal input. Does not touch exclusions, claims or the world: the caller filters those.
      */
-    public static List<Ranked> rank(List<SightingLedger.Sighting> sightings, BlockPos feet, Vec3d eye,
+    public static List<Ranked> rank(List<SightingLedger.Sighting> sightings, BlockPos feet, Vec3 eye,
                                     BlockPos anchorFace, TargetLock lock, MiningAssistConfig.Detour cfg) {
         List<Ranked> out = new ArrayList<>();
         for (SightingLedger.Sighting s : sightings) {

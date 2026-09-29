@@ -10,28 +10,27 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import io.github.zoyluo.minecraftai.observe.ReplayRecorder;
 import io.github.zoyluo.minecraftai.observe.TpsGuard;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiObserveSubcommand {
     private MinecraftAiObserveSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> profile() {
+    public static LiteralArgumentBuilder<CommandSourceStack> profile() {
         return literal("profile")
                 .then(botName().executes(context -> profile(
                         context.getSource(),
                         StringArgumentType.getString(context, "name"))));
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> replay() {
+    public static LiteralArgumentBuilder<CommandSourceStack> replay() {
         return literal("replay")
                 .then(botName()
                         .executes(context -> replay(
@@ -45,23 +44,23 @@ public final class MinecraftAiObserveSubcommand {
                                         IntegerArgumentType.getInteger(context, "count")))));
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> tps() {
+    public static LiteralArgumentBuilder<CommandSourceStack> tps() {
         return literal("tps")
                 .executes(context -> tps(context.getSource()));
     }
 
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<ServerCommandSource, String> botName() {
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> botName() {
         return argument("name", StringArgumentType.word());
     }
 
-    private static int profile(ServerCommandSource source, String name) {
+    private static int profile(CommandSourceStack source, String name) {
         Optional<AIPlayerEntity> bot = getBot(source, name);
         if (bot.isEmpty()) {
             return 0;
         }
-        Map<String, BotProfiler.Stat> stats = BotProfiler.INSTANCE.snapshot(bot.get().getUuid());
+        Map<String, BotProfiler.Stat> stats = BotProfiler.INSTANCE.snapshot(bot.get().getUUID());
         if (stats.isEmpty()) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] profile " + name + ": <empty>"), false);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] profile " + name + ": <empty>"), false);
             return 1;
         }
         StringBuilder builder = new StringBuilder("[Minecraft-AI] profile ").append(name).append(":");
@@ -73,34 +72,34 @@ public final class MinecraftAiObserveSubcommand {
                     .append(" p95=").append(format(stat.p95Ms())).append("ms")
                     .append(" max=").append(format(stat.maxMs())).append("ms");
         }
-        source.sendFeedback(() -> Text.literal(builder.toString()), false);
+        source.sendSuccess(() -> Component.literal(builder.toString()), false);
         return 1;
     }
 
-    private static int replay(ServerCommandSource source, String name, int count) {
+    private static int replay(CommandSourceStack source, String name, int count) {
         Optional<AIPlayerEntity> bot = getBot(source, name);
         if (bot.isEmpty()) {
             return 0;
         }
-        List<ReplayRecorder.ReplayEvent> events = ReplayRecorder.INSTANCE.tail(bot.get().getUuid(), count);
+        List<ReplayRecorder.ReplayEvent> events = ReplayRecorder.INSTANCE.tail(bot.get().getUUID(), count);
         if (events.isEmpty()) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] replay " + name + ": <empty>"), false);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] replay " + name + ": <empty>"), false);
             return 1;
         }
         StringBuilder builder = new StringBuilder("[Minecraft-AI] replay ").append(name).append(" last ").append(events.size()).append(":");
         for (ReplayRecorder.ReplayEvent event : events) {
             builder.append("\n- ").append(event.summary());
         }
-        source.sendFeedback(() -> Text.literal(builder.toString()), false);
+        source.sendSuccess(() -> Component.literal(builder.toString()), false);
         return 1;
     }
 
-    private static int tps(ServerCommandSource source) {
+    private static int tps(CommandSourceStack source) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:tps")) {
             return 0;
         }
         TpsGuard.Snapshot snapshot = TpsGuard.INSTANCE.snapshot(source.getServer());
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] tps estimated="
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] tps estimated="
                 + format(snapshot.estimatedTps())
                 + " avg_tick_ms=" + format(snapshot.averageTickMs())
                 + " degraded=" + snapshot.degraded()
@@ -109,7 +108,7 @@ public final class MinecraftAiObserveSubcommand {
         return 1;
     }
 
-    private static Optional<AIPlayerEntity> getBot(ServerCommandSource source, String name) {
+    private static Optional<AIPlayerEntity> getBot(CommandSourceStack source, String name) {
         return BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 source, name, BotAuthorizationPolicy.Operation.VIEW, "command:observe");
     }

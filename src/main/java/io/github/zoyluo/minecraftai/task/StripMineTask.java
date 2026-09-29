@@ -17,17 +17,6 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.Deque;
@@ -36,6 +25,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
 
 public final class StripMineTask extends AbstractTask {
     public static final String STRICT_SURVIVAL_REJECTION =
@@ -144,7 +142,7 @@ public final class StripMineTask extends AbstractTask {
         this.direction = direction.getAxis() == Direction.Axis.Y ? Direction.NORTH : direction;
         this.length = Math.max(0, length);
         this.branchSpacing = Math.max(0, branchSpacing);
-        this.depotChest = depotChest == null ? null : depotChest.toImmutable();
+        this.depotChest = depotChest == null ? null : depotChest.immutable();
         this.targetOres = targetOres == null || targetOres.isEmpty() ? OreScan.COMMON_ORES : OreScan.expandOreFamilies(targetOres);
         this.veinOnly = veinOnly;
         this.autoDescend = autoDescend;
@@ -158,7 +156,7 @@ public final class StripMineTask extends AbstractTask {
     @Override
     public String describe() {
         String ores = targetOres.stream()
-                .map(Registries.BLOCK::getId)
+                .map(BuiltInRegistries.BLOCK::getKey)
                 .map(Object::toString)
                 .sorted()
                 .collect(Collectors.joining(","));
@@ -215,7 +213,7 @@ public final class StripMineTask extends AbstractTask {
             return;
         }
         phase = Phase.PREP;
-        origin = bot.getBlockPos().toImmutable();
+        origin = bot.blockPosition().immutable();
         activeDepotChest = resolveDepotChest(bot);
         steps.clear();
         blocksToMine.clear();
@@ -267,7 +265,7 @@ public final class StripMineTask extends AbstractTask {
 
     private void prep(AIPlayerEntity bot) {
         if (veinOnly) {
-            scanNearbyVeins(bot, bot.getBlockPos(), 6);
+            scanNearbyVeins(bot, bot.blockPosition(), 6);
             if (veinBlocks.isEmpty()) {
                 fail("no_ore_vein_in_range");
                 return;
@@ -284,7 +282,7 @@ public final class StripMineTask extends AbstractTask {
         descentStepsPlanned = 0;
         BlockPos miningOrigin = origin;
         if (shouldDescendToOreLayer(bot)) {
-            int targetY = Math.max(bot.getEntityWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
+            int targetY = Math.max(bot.level().getMinY() + 6, OreScan.preferredMiningY(targetOres));
             descentStepsPlanned = Math.max(0, origin.getY() - targetY);
             // FLOW-1: staircase descent-mining -- each step moves 1 block horizontally + drops
             // 1 block (1:1 ratio), forming stairs the bot can walk back up, rather than falling
@@ -292,17 +290,17 @@ public final class StripMineTask extends AbstractTask {
             // blocks above it (body clearance), with solid ground beneath it.
             BlockPos cursor = origin;
             for (int step = 1; step <= descentStepsPlanned; step++) {
-                cursor = cursor.offset(direction).down().toImmutable();
+                cursor = cursor.relative(direction).below().immutable();
                 steps.addLast(new Step(cursor, StepKind.DESCEND, 0));
             }
             miningOrigin = cursor;
             note = "descending_stairs_to_y:" + targetY;
         }
-        Direction left = direction.rotateYCounterclockwise();
-        Direction right = direction.rotateYClockwise();
+        Direction left = direction.getCounterClockWise();
+        Direction right = direction.getClockWise();
         int branchDepth = branchSpacing <= 0 ? 0 : Math.min(branchSpacing, 8);
         for (int distance = 1; distance <= length; distance++) {
-            BlockPos main = miningOrigin.offset(direction, distance);
+            BlockPos main = miningOrigin.relative(direction, distance);
             steps.addLast(new Step(main, StepKind.TUNNEL, distance));
             if (branchDepth > 0 && distance % branchSpacing == 0) {
                 addBranch(main, left, branchDepth);
@@ -315,7 +313,7 @@ public final class StripMineTask extends AbstractTask {
         if (!autoDescend || veinOnly || targetOres.stream().noneMatch(OreScan::isOreBlock)) {
             return false;
         }
-        int targetY = Math.max(bot.getEntityWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
+        int targetY = Math.max(bot.level().getMinY() + 6, OreScan.preferredMiningY(targetOres));
         if (origin.getY() <= targetY + 2) {
             return false;
         }
@@ -323,14 +321,14 @@ public final class StripMineTask extends AbstractTask {
     }
 
     private boolean hasExposedOreNearby(AIPlayerEntity bot, BlockPos center, int horizontalRadius, int verticalRadius) {
-        BlockPos min = center.add(-horizontalRadius, -verticalRadius, -horizontalRadius);
-        BlockPos max = center.add(horizontalRadius, verticalRadius, horizontalRadius);
-        for (BlockPos pos : BlockPos.iterate(min, max)) {
+        BlockPos min = center.offset(-horizontalRadius, -verticalRadius, -horizontalRadius);
+        BlockPos max = center.offset(horizontalRadius, verticalRadius, horizontalRadius);
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             if (Math.abs(pos.getY() - center.getY()) > 3) {
                 continue;
             }
-            if (OreScan.isOre(bot.getEntityWorld().getBlockState(pos), targetOres)
-                    && isExposed(bot.getEntityWorld(), pos)
+            if (OreScan.isOre(bot.level().getBlockState(pos), targetOres)
+                    && isExposed(bot.level(), pos)
                     && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)) {
                 return true;
             }
@@ -338,9 +336,9 @@ public final class StripMineTask extends AbstractTask {
         return false;
     }
 
-    private static boolean isExposed(ServerWorld world, BlockPos pos) {
+    private static boolean isExposed(ServerLevel world, BlockPos pos) {
         for (Direction direction : Direction.values()) {
-            if (world.getBlockState(pos.offset(direction)).isAir()) {
+            if (world.getBlockState(pos.relative(direction)).isAir()) {
                 return true;
             }
         }
@@ -349,10 +347,10 @@ public final class StripMineTask extends AbstractTask {
 
     private void addBranch(BlockPos base, Direction side, int depth) {
         for (int branch = 1; branch <= depth; branch++) {
-            steps.addLast(new Step(base.offset(side, branch), StepKind.TUNNEL, base.getManhattanDistance(origin)));
+            steps.addLast(new Step(base.relative(side, branch), StepKind.TUNNEL, base.distManhattan(origin)));
         }
         for (int branch = depth - 1; branch >= 0; branch--) {
-            steps.addLast(new Step(base.offset(side, branch), StepKind.MOVE_ONLY, base.getManhattanDistance(origin)));
+            steps.addLast(new Step(base.relative(side, branch), StepKind.MOVE_ONLY, base.distManhattan(origin)));
         }
     }
 
@@ -378,15 +376,15 @@ public final class StripMineTask extends AbstractTask {
             move(bot);
             return;
         }
-        if (!safeStandTarget(bot.getEntityWorld(), currentStep.stand())) {
+        if (!safeStandTarget(bot.level(), currentStep.stand())) {
             fail("unsafe_tunnel_target: " + shortPos(currentStep.stand()));
             return;
         }
         blocksToMine.clear();
-        addIfSolid(bot.getEntityWorld(), currentStep.stand());
-        addIfSolid(bot.getEntityWorld(), currentStep.stand().up());
+        addIfSolid(bot.level(), currentStep.stand());
+        addIfSolid(bot.level(), currentStep.stand().above());
         if (currentStep.kind() == StepKind.DESCEND) {
-            addIfSolid(bot.getEntityWorld(), currentStep.stand().up(2));
+            addIfSolid(bot.level(), currentStep.stand().above(2));
         }
         if (blocksToMine.isEmpty()) {
             phase = Phase.SCAN_VEIN;
@@ -404,13 +402,13 @@ public final class StripMineTask extends AbstractTask {
                 return;
             }
         }
-        if (bot.getEntityWorld().getBlockState(currentMiningBlock).isAir()) {
+        if (bot.level().getBlockState(currentMiningBlock).isAir()) {
             Standability.clearCache();
             currentMiningBlock = null;
             tunnelBlocksMined++;
             return;
         }
-        if (OreScan.adjacentHazard(bot.getEntityWorld(), currentMiningBlock)) {
+        if (OreScan.adjacentHazard(bot.level(), currentMiningBlock)) {
             fail("hazard_near: " + shortPos(currentMiningBlock));
             return;
         }
@@ -429,7 +427,7 @@ public final class StripMineTask extends AbstractTask {
     }
 
     private void scanVein(AIPlayerEntity bot) {
-        scanNearbyVeins(bot, currentStep == null ? bot.getBlockPos() : currentStep.stand(), 3);
+        scanNearbyVeins(bot, currentStep == null ? bot.blockPosition() : currentStep.stand(), 3);
         if (!veinBlocks.isEmpty()) {
             phase = Phase.MINE_VEIN;
             return;
@@ -450,17 +448,17 @@ public final class StripMineTask extends AbstractTask {
                 return;
             }
         }
-        if (bot.getEntityWorld().getBlockState(currentVeinBlock).isAir()) {
+        if (bot.level().getBlockState(currentVeinBlock).isAir()) {
             Standability.clearCache();
             currentVeinBlock = null;
             veinBlocksMined++;
             return;
         }
-        if (!OreScan.isOre(bot.getEntityWorld().getBlockState(currentVeinBlock), targetOres)) {
+        if (!OreScan.isOre(bot.level().getBlockState(currentVeinBlock), targetOres)) {
             currentVeinBlock = null;
             return;
         }
-        if (OreScan.adjacentHazard(bot.getEntityWorld(), currentVeinBlock)) {
+        if (OreScan.adjacentHazard(bot.level(), currentVeinBlock)) {
             note = "skip_hazard_ore:" + shortPos(currentVeinBlock);
             currentVeinBlock = null;
             return;
@@ -498,7 +496,7 @@ public final class StripMineTask extends AbstractTask {
         if (!MinecraftAiConfig.get().mining().placeTorches()
                 || distanceCompleted == 0
                 || distanceCompleted % 8 != 0
-                || bot.getEntityWorld().getLightLevel(net.minecraft.world.LightType.BLOCK, bot.getBlockPos()) >= 8) {
+                || bot.level().getBrightness(net.minecraft.world.level.LightLayer.BLOCK, bot.blockPosition()) >= 8) {
             phase = Phase.MOVE;
             return;
         }
@@ -524,7 +522,7 @@ public final class StripMineTask extends AbstractTask {
         Step upcoming = steps.peekFirst();
         BlockPos toolTarget = upcoming != null ? upcoming.stand() : currentStep != null ? currentStep.stand() : null;
         if (toolTarget != null) {
-            ToolSelector.equipBestTool(bot, bot.getEntityWorld().getBlockState(toolTarget));
+            ToolSelector.equipBestTool(bot, bot.level().getBlockState(toolTarget));
         }
         phase = Phase.MOVE;
     }
@@ -536,9 +534,9 @@ public final class StripMineTask extends AbstractTask {
             return;
         }
         if ((currentStep.kind() == StepKind.TUNNEL || currentStep.kind() == StepKind.DESCEND)
-                && currentStep.stand().getManhattanDistance(bot.getBlockPos()) <= 4) {
+                && currentStep.stand().distManhattan(bot.blockPosition()) <= 4) {
             if (bot.getActionPack().isWalkToIdle()) {
-                bot.getActionPack().startWalkTo(currentStep.stand().toCenterPos());
+                bot.getActionPack().startWalkTo(currentStep.stand().getCenter());
             }
             return;
         }
@@ -556,10 +554,10 @@ public final class StripMineTask extends AbstractTask {
             note = "inventory_near_full";
             return true;
         }
-        ItemStack selected = bot.getMainHandStack();
-        if (selected.isDamageable()
+        ItemStack selected = bot.getMainHandItem();
+        if (selected.isDamageableItem()
                 && selected.getMaxDamage() > 0
-                && selected.getMaxDamage() - selected.getDamage() <= selected.getMaxDamage() * mining.toolDurabilityFloor()) {
+                && selected.getMaxDamage() - selected.getDamageValue() <= selected.getMaxDamage() * mining.toolDurabilityFloor()) {
             note = "tool_durability_low";
             return true;
         }
@@ -572,7 +570,7 @@ public final class StripMineTask extends AbstractTask {
         // dying tool) would otherwise leave no trace behind the generic path-failure reason.
         BotLog.action(bot, "strip_mine_return", "reason", note, "distance", distanceCompleted,
                 "tunnel_blocks", tunnelBlocksMined, "vein_blocks", veinBlocksMined);
-        returnStand = bot.getBlockPos().toImmutable();
+        returnStand = bot.blockPosition().immutable();
         returningForFinalStop = "tool_durability_low".equals(note);
         if (activeDepotChest == null) {
             phase = Phase.DONE;
@@ -602,12 +600,12 @@ public final class StripMineTask extends AbstractTask {
 
     private void deposit(AIPlayerEntity bot) {
         if (activeDepotChest == null
-                || bot.getEyePos().squaredDistanceTo(activeDepotChest.toCenterPos()) > REACH_SQUARED
+                || bot.getEyePosition().distanceToSqr(activeDepotChest.getCenter()) > REACH_SQUARED
                 || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, activeDepotChest)) {
             phase = Phase.RETURN;
             return;
         }
-        Inventory container = ContainerAction.resolve(bot, activeDepotChest).orElse(null);
+        Container container = ContainerAction.resolve(bot, activeDepotChest).orElse(null);
         if (container == null) {
             fail("depot_missing");
             return;
@@ -639,34 +637,34 @@ public final class StripMineTask extends AbstractTask {
 
     private Predicate<ItemStack> depositFilter() {
         return stack -> !ContainerAction.isReservedTool(stack)
-                && !stack.isOf(Items.TORCH)
-                && !stack.contains(DataComponentTypes.FOOD);
+                && !stack.is(Items.TORCH)
+                && !stack.has(DataComponents.FOOD);
     }
 
     private BlockPos resolveDepotChest(AIPlayerEntity bot) {
         if (depotChest != null) {
             return depotChest;
         }
-        return BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "depot", "home", "base", "chest")
+        return BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "depot", "home", "base", "chest")
                 .flatMap(pos -> ContainerAction.resolve(bot, pos).isPresent()
-                        ? Optional.of(pos.toImmutable())
+                        ? Optional.of(pos.immutable())
                         : ContainerTask.nearestContainerNear(bot, pos, 4))
                 .orElse(null);
     }
 
-    private void addIfSolid(ServerWorld world, BlockPos pos) {
+    private void addIfSolid(ServerLevel world, BlockPos pos) {
         if (!world.getBlockState(pos).isAir()) {
-            blocksToMine.addLast(pos.toImmutable());
+            blocksToMine.addLast(pos.immutable());
         }
     }
 
     private void scanNearbyVeins(AIPlayerEntity bot, BlockPos center, int radius) {
-        BlockPos.stream(center.add(-radius, -radius, -radius), center.add(radius, radius, radius))
-                .map(BlockPos::toImmutable)
+        BlockPos.betweenClosedStream(center.offset(-radius, -radius, -radius), center.offset(radius, radius, radius))
+                .map(BlockPos::immutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> OreScan.isOre(bot.getEntityWorld().getBlockState(pos), targetOres))
-                .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())))
+                .filter(pos -> OreScan.isOre(bot.level().getBlockState(pos), targetOres))
+                .sorted(Comparator.comparingDouble(pos -> pos.distSqr(bot.blockPosition())))
                 .findFirst()
                 .ifPresent(seed -> OreScan.veinFrom(bot, seed, targetOres, MAX_VEIN_BLOCKS)
                         .stream()
@@ -679,42 +677,42 @@ public final class StripMineTask extends AbstractTask {
     }
 
     private Optional<BlockPos> torchPosition(AIPlayerEntity bot) {
-        BlockPos base = bot.getBlockPos();
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos pos = base.offset(direction);
-            if (bot.getEntityWorld().getBlockState(pos).isAir()
-                    && !bot.getEntityWorld().getBlockState(pos.down()).isAir()) {
-                return Optional.of(pos.toImmutable());
+        BlockPos base = bot.blockPosition();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos pos = base.relative(direction);
+            if (bot.level().getBlockState(pos).isAir()
+                    && !bot.level().getBlockState(pos.below()).isAir()) {
+                return Optional.of(pos.immutable());
             }
         }
         return Optional.empty();
     }
 
-    private static boolean safeStandTarget(ServerWorld world, BlockPos stand) {
+    private static boolean safeStandTarget(ServerLevel world, BlockPos stand) {
         if (OreScan.adjacentHazard(world, stand)) {
             return false;
         }
-        if (!world.getFluidState(stand).isEmpty() || !world.getFluidState(stand.up()).isEmpty()) {
+        if (!world.getFluidState(stand).isEmpty() || !world.getFluidState(stand.above()).isEmpty()) {
             return false;
         }
-        return !world.getBlockState(stand.down()).isAir()
-                && world.getFluidState(stand.down()).isEmpty();
+        return !world.getBlockState(stand.below()).isAir()
+                && world.getFluidState(stand.below()).isEmpty();
     }
 
     private static boolean canReach(AIPlayerEntity bot, BlockPos target) {
-        return bot.getEyePos().squaredDistanceTo(target.toCenterPos()) <= REACH_SQUARED;
+        return bot.getEyePosition().distanceToSqr(target.getCenter()) <= REACH_SQUARED;
     }
 
     private static boolean near(AIPlayerEntity bot, BlockPos target) {
-        return bot.getBlockPos().getSquaredDistance(target) <= 1.0D;
+        return bot.blockPosition().distSqr(target) <= 1.0D;
     }
 
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos target) {
         Standability.clearCache();
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = target.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate.toImmutable();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = target.relative(direction);
+            if (Standability.isStandable(bot.level(), candidate)) {
+                return candidate.immutable();
             }
         }
         return null;
@@ -722,7 +720,7 @@ public final class StripMineTask extends AbstractTask {
 
     private static int freeMainSlots(AIPlayerEntity bot) {
         int free = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 free++;
             }

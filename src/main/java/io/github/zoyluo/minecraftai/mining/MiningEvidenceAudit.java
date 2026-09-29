@@ -2,14 +2,6 @@ package io.github.zoyluo.minecraftai.mining;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.stat.Stats;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.GameMode;
-
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -19,6 +11,13 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Runtime-backed provenance ledger for the two strict Mining First acceptance scenarios.
@@ -58,18 +57,18 @@ public final class MiningEvidenceAudit {
     public static void begin(AIPlayerEntity bot, Target target, int requiredCount) {
         Session session = new Session(
                 UUID.randomUUID(), target, Math.max(1, requiredCount), StatsSnapshot.read(bot));
-        SESSIONS.put(bot.getUuid(), session);
+        SESSIONS.put(bot.getUUID(), session);
         observeTick(bot);
     }
 
     /** Records the actual mode and refreshes all vanilla-stat deltas for this server tick. */
     public static void observeTick(AIPlayerEntity bot) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         if (session == null) {
             return;
         }
         session.observedTicks++;
-        if (bot.interactionManager.getGameMode() != GameMode.SURVIVAL) {
+        if (bot.gameMode.getGameModeForPlayer() != GameType.SURVIVAL) {
             session.gameModeViolations++;
         }
         session.latest = StatsSnapshot.read(bot);
@@ -77,7 +76,7 @@ public final class MiningEvidenceAudit {
 
     /** Called at the single capability decision boundary, before any privileged operation. */
     public static void recordCapabilityDecision(AIPlayerEntity bot, boolean allowed) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         if (session != null && allowed) {
             session.privilegedAllowed++;
         }
@@ -151,7 +150,7 @@ public final class MiningEvidenceAudit {
         }
         for (BlockPos candidate : session.obsidianTransactions.openWaterPlacementCandidates()) {
             if (ObservableWorldQuery.canObserveCell(bot, candidate)
-                    && bot.getEntityWorld().getBlockState(candidate).isOf(Blocks.OBSIDIAN)) {
+                    && bot.level().getBlockState(candidate).is(Blocks.OBSIDIAN)) {
                 session.obsidianTransactions.recordConversion(candidate);
             }
         }
@@ -192,7 +191,7 @@ public final class MiningEvidenceAudit {
 
     public static Optional<String> failFastReason(AIPlayerEntity bot) {
         observeTick(bot);
-        return snapshot(bot.getUuid()).flatMap(snapshot -> {
+        return snapshot(bot.getUUID()).flatMap(snapshot -> {
             if (snapshot.gameModeViolations() > 0) {
                 return Optional.of("mining_provenance_non_survival_mode");
             }
@@ -204,7 +203,7 @@ public final class MiningEvidenceAudit {
     }
 
     public static Optional<Snapshot> snapshot(AIPlayerEntity bot) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         if (session == null) {
             return Optional.empty();
         }
@@ -218,7 +217,7 @@ public final class MiningEvidenceAudit {
     }
 
     public static void clear(AIPlayerEntity bot) {
-        clear(bot.getUuid());
+        clear(bot.getUUID());
     }
 
     public static void clear(UUID botId) {
@@ -235,25 +234,25 @@ public final class MiningEvidenceAudit {
 
     /** Returns the opaque identity of the active strict session for checkpoint binding. */
     public static Optional<UUID> sessionToken(AIPlayerEntity bot, Target target) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         return session != null && session.target == target
                 ? Optional.of(session.token) : Optional.empty();
     }
 
     /** A strict checkpoint may resume only inside the exact audit session that created it. */
     public static boolean sessionMatches(AIPlayerEntity bot, Target target, UUID token) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         return token != null && session != null
                 && session.target == target && session.token.equals(token);
     }
 
     private static Session diamondSession(AIPlayerEntity bot) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         return session != null && session.target == Target.DIAMOND ? session : null;
     }
 
     private static Session obsidianSession(AIPlayerEntity bot) {
-        Session session = SESSIONS.get(bot.getUuid());
+        Session session = SESSIONS.get(bot.getUUID());
         return session != null && session.target == Target.OBSIDIAN ? session : null;
     }
 
@@ -358,13 +357,13 @@ public final class MiningEvidenceAudit {
 
         void observeBeforeBreak(BlockPos pos) {
             if (pos != null) {
-                observedBeforeBreak.add(pos.toImmutable());
+                observedBeforeBreak.add(pos.immutable());
             }
         }
 
         boolean recordExactBreak(BlockPos pos) {
             if (pos == null || !observedBeforeBreak.remove(pos)
-                    || !awaitingNativePickup.add(pos.toImmutable())) {
+                    || !awaitingNativePickup.add(pos.immutable())) {
                 return false;
             }
             auditedBreaks++;
@@ -413,7 +412,7 @@ public final class MiningEvidenceAudit {
             Set<BlockPos> candidates = new LinkedHashSet<>();
             for (BlockPos pos : observableLava) {
                 if (pos != null && !convertedObsidian.contains(pos) && !brokenObsidian.contains(pos)) {
-                    candidates.add(pos.toImmutable());
+                    candidates.add(pos.immutable());
                 }
             }
             if (candidates.isEmpty()) {
@@ -432,7 +431,7 @@ public final class MiningEvidenceAudit {
             for (Set<BlockPos> candidates : openWaterPlacements.values()) {
                 armed |= candidates.remove(pos);
             }
-            if (!armed || !convertedObsidian.add(pos.toImmutable())) {
+            if (!armed || !convertedObsidian.add(pos.immutable())) {
                 return false;
             }
             conversionCredits++;
@@ -455,7 +454,7 @@ public final class MiningEvidenceAudit {
 
         boolean recordExactBreak(BlockPos pos) {
             if (pos == null || !convertedObsidian.remove(pos)
-                    || !brokenObsidian.add(pos.toImmutable())) {
+                    || !brokenObsidian.add(pos.immutable())) {
                 return false;
             }
             breakCredits++;
@@ -492,13 +491,13 @@ public final class MiningEvidenceAudit {
                                  int deaths) {
         private static StatsSnapshot read(AIPlayerEntity bot) {
             return new StatsSnapshot(
-                    bot.getStatHandler().getStat(Stats.MINED, Blocks.DIAMOND_ORE),
-                    bot.getStatHandler().getStat(Stats.MINED, Blocks.DEEPSLATE_DIAMOND_ORE),
-                    bot.getStatHandler().getStat(Stats.PICKED_UP, Items.DIAMOND),
-                    bot.getStatHandler().getStat(Stats.USED, Items.WATER_BUCKET),
-                    bot.getStatHandler().getStat(Stats.MINED, Blocks.OBSIDIAN),
-                    bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OBSIDIAN),
-                    bot.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.DEATHS)));
+                    bot.getStats().getValue(Stats.BLOCK_MINED, Blocks.DIAMOND_ORE),
+                    bot.getStats().getValue(Stats.BLOCK_MINED, Blocks.DEEPSLATE_DIAMOND_ORE),
+                    bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.DIAMOND),
+                    bot.getStats().getValue(Stats.ITEM_USED, Items.WATER_BUCKET),
+                    bot.getStats().getValue(Stats.BLOCK_MINED, Blocks.OBSIDIAN),
+                    bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.OBSIDIAN),
+                    bot.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS)));
         }
     }
 }

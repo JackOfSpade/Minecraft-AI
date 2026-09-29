@@ -7,8 +7,8 @@ import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
 import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * Stateless surface-route proving/pathing primitives shared by HuntTask's roam, prey-approach and
@@ -43,30 +43,30 @@ final class HuntSurfaceRoutes {
         return new BlockPos(x, origin.getY(), z);
     }
 
-    static boolean hasWalkableReturnRoute(ServerWorld world, BlockPos waypoint, BlockPos origin) {
+    static boolean hasWalkableReturnRoute(ServerLevel world, BlockPos waypoint, BlockPos origin) {
         return hasExactSurfaceRoute(world, waypoint, origin, Integer.MIN_VALUE);
     }
 
     static boolean hasRoundTripSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
+            ServerLevel world, BlockPos origin, BlockPos destination, int minimumY) {
         return proveRoundTripSurfaceRoute(
                 world, origin, destination, minimumY) == HuntTask.SurfaceRouteProof.SAFE;
     }
 
     static boolean hasExactSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
+            ServerLevel world, BlockPos origin, BlockPos destination, int minimumY) {
         return proveExactSurfaceRoute(
                 world, origin, destination, minimumY) == HuntTask.SurfaceRouteProof.SAFE;
     }
 
     static HuntTask.SurfaceRouteProof proveRoundTripSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
+            ServerLevel world, BlockPos origin, BlockPos destination, int minimumY) {
         return proveSurfaceRouteContract(
                 world, origin, destination, minimumY, origin);
     }
 
     private static HuntTask.SurfaceRouteProof proveSurfaceRouteContract(
-            ServerWorld world, BlockPos origin, BlockPos destination,
+            ServerLevel world, BlockPos origin, BlockPos destination,
             int minimumY, BlockPos returnAnchor) {
         HuntTask.SurfaceRouteProof outbound =
                 proveExactSurfaceRoute(world, origin, destination, minimumY);
@@ -89,7 +89,7 @@ final class HuntSurfaceRoutes {
      * Every other route (surface returns, roams, pickup sweeps) stays strict.
      */
     static HuntTask.SurfaceRouteProof provePreyApproachRoute(
-            AIPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos destination,
+            AIPlayerEntity bot, ServerLevel world, BlockPos origin, BlockPos destination,
             int minimumY, BlockPos returnAnchor) {
         HuntTask.SurfaceRouteProof outbound =
                 proveExactDigFallbackRoute(bot, world, origin, destination, minimumY);
@@ -112,7 +112,7 @@ final class HuntSurfaceRoutes {
     // proof run with no live bot handy), which safely degrades to allow-unknown at plan time --
     // PathExecutor.tickDigThrough()'s reactive check is what actually keeps that safe at runtime.
     private static HuntTask.SurfaceRouteProof proveExactDigFallbackRoute(
-            AIPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
+            AIPlayerEntity bot, ServerLevel world, BlockPos origin, BlockPos destination, int minimumY) {
         HuntTask.SurfaceRouteProof walk = proveExactSurfaceRoute(world, origin, destination, minimumY);
         if (walk == HuntTask.SurfaceRouteProof.SAFE) {
             return walk;
@@ -143,7 +143,7 @@ final class HuntSurfaceRoutes {
     }
 
     private static HuntTask.SurfaceRouteProof proveExactSurfaceRoute(
-            ServerWorld world, BlockPos origin, BlockPos destination, int minimumY) {
+            ServerLevel world, BlockPos origin, BlockPos destination, int minimumY) {
         Standability.clearCache();
         if (origin.equals(destination)) {
             return origin.getY() >= minimumY && Standability.isStandable(world, origin)
@@ -174,8 +174,8 @@ final class HuntSurfaceRoutes {
     static HuntTask.SurfacePathStart startExactSurfacePath(
             AIPlayerEntity bot, BlockPos destination, int minimumY,
             BlockPos returnAnchor, boolean digFallbackOutbound) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         HuntTask.SurfaceRouteProof proof = digFallbackOutbound
                 ? provePreyApproachRoute(bot, world, origin, destination, minimumY, returnAnchor)
                 : proveSurfaceRouteContract(

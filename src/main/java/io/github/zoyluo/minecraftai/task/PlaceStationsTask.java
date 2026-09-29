@@ -6,18 +6,17 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * PLACE_STATIONS (Phase 2 infrastructure goal): places the crafting table / furnace / chest from
@@ -93,7 +92,7 @@ public final class PlaceStationsTask extends AbstractTask {
         Item station = pending.get(0);
         int slot = findSlot(bot, station);
         if (slot < 0) {
-            BotLog.action(bot, "place_stations_missing_item", "item", Registries.ITEM.getId(station));
+            BotLog.action(bot, "place_stations_missing_item", "item", BuiltInRegistries.ITEM.getKey(station));
             pending.remove(0); // This item is no longer in the inventory -> skip it
             return;
         }
@@ -103,7 +102,7 @@ public final class PlaceStationsTask extends AbstractTask {
             return;
         }
         if (InventoryAction.equipFromSlot(bot, slot) < 0) {
-            BotLog.action(bot, "place_stations_equip_failed", "item", Registries.ITEM.getId(station));
+            BotLog.action(bot, "place_stations_equip_failed", "item", BuiltInRegistries.ITEM.getKey(station));
             pending.remove(0);
             return;
         }
@@ -112,27 +111,27 @@ public final class PlaceStationsTask extends AbstractTask {
         if (result.isSuccess()) {
             placed++;
             ready++;
-            placedPositions.add(spot.toImmutable());
+            placedPositions.add(spot.immutable());
             pending.remove(0);
         } else {
-            BotLog.action(bot, "place_stations_place_failed", "item", Registries.ITEM.getId(station),
+            BotLog.action(bot, "place_stations_place_failed", "item", BuiltInRegistries.ITEM.getKey(station),
                     "pos", spot.toShortString(), "reason", result.reason());
         }
     }
 
     // A placeable empty spot 1-2 blocks around the bot that hasn't been used yet, with clear space above and a solid block underneath.
     private BlockPos findFreeSpot(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         for (int r = 1; r <= 2; r++) {
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos p = feet.offset(direction, r);
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos p = feet.relative(direction, r);
                 if (used.contains(p)) {
                     continue;
                 }
                 if (world.getBlockState(p).isAir()
-                        && world.getBlockState(p.up()).isAir()
-                        && !world.getBlockState(p.down()).getCollisionShape(world, p.down()).isEmpty()) {
+                        && world.getBlockState(p.above()).isAir()
+                        && !world.getBlockState(p.below()).getCollisionShape(world, p.below()).isEmpty()) {
                     return p;
                 }
             }
@@ -142,8 +141,8 @@ public final class PlaceStationsTask extends AbstractTask {
 
     private static int findSlot(AIPlayerEntity bot, Item item) {
         var inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            if (inventory.getMainStacks().get(slot).isOf(item)) {
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(item)) {
                 return slot;
             }
         }
@@ -165,12 +164,12 @@ public final class PlaceStationsTask extends AbstractTask {
         if (station != Items.CHEST) {
             return false;
         }
-        BlockPos origin = bot.getBlockPos();
-        return BlockPos.stream(origin.add(-STATION_RADIUS, -3, -STATION_RADIUS),
-                        origin.add(STATION_RADIUS, 4, STATION_RADIUS))
+        BlockPos origin = bot.blockPosition();
+        return BlockPos.betweenClosedStream(origin.offset(-STATION_RADIUS, -3, -STATION_RADIUS),
+                        origin.offset(STATION_RADIUS, 4, STATION_RADIUS))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .anyMatch(pos -> bot.getEntityWorld().getBlockState(pos).isOf(Blocks.CHEST)
-                        || bot.getEntityWorld().getBlockState(pos).isOf(Blocks.TRAPPED_CHEST));
+                .anyMatch(pos -> bot.level().getBlockState(pos).is(Blocks.CHEST)
+                        || bot.level().getBlockState(pos).is(Blocks.TRAPPED_CHEST));
     }
 
     public Set<BlockPos> placedPositions() {

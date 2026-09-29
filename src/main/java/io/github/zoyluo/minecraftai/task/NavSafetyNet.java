@@ -4,14 +4,13 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.level.block.state.BlockState;
 import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.HashMap;
@@ -120,7 +119,7 @@ public final class NavSafetyNet {
     }
 
     public void clear(AIPlayerEntity bot) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         nextLogTick.remove(id);
         waterRescueShore.remove(id);
         waterRescueSince.remove(id);
@@ -144,11 +143,11 @@ public final class NavSafetyNet {
      * inventory mutation is performed here.
      */
     public void requestWaterRescue(AIPlayerEntity bot) {
-        waterRescueShore.putIfAbsent(bot.getUuid(), bot.getBlockPos().toImmutable());
+        waterRescueShore.putIfAbsent(bot.getUUID(), bot.blockPosition().immutable());
     }
 
     public boolean isWaterRescueActive(AIPlayerEntity bot) {
-        return waterRescueShore.containsKey(bot.getUuid());
+        return waterRescueShore.containsKey(bot.getUUID());
     }
 
     /**
@@ -156,26 +155,26 @@ public final class NavSafetyNet {
      * Package-private on purpose: no arbitrary task may opt out of the drowning safety net.
      */
     void renewFollowSwim(AIPlayerEntity bot) {
-        if (bot.getAir() <= AIR_SURFACE_THRESHOLD) {
+        if (bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
             clearFollowSwim(bot);
             return;
         }
-        followSwimLeaseUntil.put(bot.getUuid(), bot.getEntityWorld().getServer().getTicks() + FOLLOW_SWIM_LEASE_TICKS);
+        followSwimLeaseUntil.put(bot.getUUID(), bot.level().getServer().getTickCount() + FOLLOW_SWIM_LEASE_TICKS);
         // A prior rescue is for an accidental water entry.  An actively renewed, high-air swim
         // follow is a different, short-lived intent and must not inherit that old controller.
-        waterRescueShore.remove(bot.getUuid());
-        waterRescueSince.remove(bot.getUuid());
+        waterRescueShore.remove(bot.getUUID());
+        waterRescueSince.remove(bot.getUUID());
     }
 
     /** Clears the narrow FollowTask swim lease on cancellation or any non-swim transition. */
     void clearFollowSwim(AIPlayerEntity bot) {
-        followSwimLeaseUntil.remove(bot.getUuid());
+        followSwimLeaseUntil.remove(bot.getUUID());
     }
 
     private boolean hasFollowSwimLease(AIPlayerEntity bot, int currentTick) {
-        Integer until = followSwimLeaseUntil.get(bot.getUuid());
-        if (until == null || until < currentTick || bot.getAir() <= AIR_SURFACE_THRESHOLD) {
-            followSwimLeaseUntil.remove(bot.getUuid());
+        Integer until = followSwimLeaseUntil.get(bot.getUUID());
+        if (until == null || until < currentTick || bot.getAirSupply() <= AIR_SURFACE_THRESHOLD) {
+            followSwimLeaseUntil.remove(bot.getUUID());
             return false;
         }
         return true;
@@ -185,8 +184,8 @@ public final class NavSafetyNet {
         if (!bot.isAlive()) {
             return false;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
 
         // 0) Suffocation/stuck-in-block: when the player's body hitbox is actually intersecting a
         // solid collision shape, prefer climbing **upward** out to the surface first.
@@ -197,7 +196,7 @@ public final class NavSafetyNet {
         // bank seats its passenger a little below the hull, i.e. inside the ground.  Snapping the
         // bot out of the seat every tick (then re-boarding, forever) is what made a beached boat
         // impossible to use.  Other vehicles (minecart, horse, ...) keep the normal snap.
-        if (!(bot.getVehicle() instanceof AbstractBoatEntity)
+        if (!(bot.getVehicle() instanceof AbstractBoat)
                 && !FakePlayerMotion.isBlockCollisionFree(bot)
                 && escapeSuffocation(bot, world, feet)) {
             throttledLog(server, bot, "navsafe_suffocation_snap", feet);
@@ -205,20 +204,20 @@ public final class NavSafetyNet {
         }
 
         // 1) Lava: standing in lava / lava underfoot -> escape immediately (highest priority)
-        if (inLava(world, feet) || inLava(world, feet.down())) {
+        if (inLava(world, feet) || inLava(world, feet.below())) {
             escapeLava(bot, world, feet);
             throttledLog(server, bot, "navsafe_lava_escape", feet);
             return true;
         }
 
         // 2) Drowning/water crisis: once triggered, keep taking over until ashore (see the waterRescueShore comment).
-        if (hasFollowSwimLease(bot, server.getTicks())) {
+        if (hasFollowSwimLease(bot, server.getTickCount())) {
             // The lease is renewed only by an active FollowTask and only above the safety oxygen
             // threshold.  Once air falls, the normal branch below immediately resumes rescue.
             return false;
         }
-        boolean inCrisis = waterRescueShore.containsKey(bot.getUuid());
-        if (!inCrisis && bot.isSubmergedInWater()) {
+        boolean inCrisis = waterRescueShore.containsKey(bot.getUUID());
+        if (!inCrisis && bot.isUnderWater()) {
             inCrisis = true; // newly triggered
         }
         if (inCrisis) {
@@ -234,25 +233,25 @@ public final class NavSafetyNet {
             // isOnGround() can still be false even after it is already standing on solid ground;
             // continuing to rely on it would shuttle the bot back and forth between two dry cells.
             if (isDryStandable(bot, world, feet)) {
-                waterRescueShore.remove(bot.getUuid());
-                waterRescueSince.remove(bot.getUuid());
+                waterRescueShore.remove(bot.getUUID());
+                waterRescueSince.remove(bot.getUUID());
                 // The old navigator may still contain the DROP_DOWN edge that caused the rescue.
                 // Cancel the complete action stack before returning control or it will execute the
                 // same wet edge again on the next tick.
                 bot.getActionPack().stopAll();
                 return false;
             }
-            int now = server.getTicks();
-            Integer since = waterRescueSince.putIfAbsent(bot.getUuid(), now);
+            int now = server.getTickCount();
+            Integer since = waterRescueSince.putIfAbsent(bot.getUUID(), now);
             // SAFE-DROWN: Air is critical and there's no air above to surface into (a water pocket
             // capped by stone) -> emergency-teleport to the nearest breathable landing spot.
             // SAFE-DROWN3: Or the crisis has dragged on too long (can't reach the shore point: tall
             // shore wall / current pushing back) -> likewise force a teleport to survive.
             boolean rescueTimedOut = since != null && now - since > WATER_RESCUE_TELEPORT_AFTER;
-            if (rescueTimedOut || (bot.getAir() <= EMERGENCY_AIR && !breathableAbove(world, feet))) {
+            if (rescueTimedOut || (bot.getAirSupply() <= EMERGENCY_AIR && !breathableAbove(world, feet))) {
                 if (emergencyTeleportToAir(bot, world, feet, now)) {
-                    waterRescueShore.remove(bot.getUuid());
-                    waterRescueSince.remove(bot.getUuid());
+                    waterRescueShore.remove(bot.getUUID());
+                    waterRescueSince.remove(bot.getUUID());
                     throttledLog(server, bot, "navsafe_drown_teleport", feet);
                     return true;
                 }
@@ -263,7 +262,7 @@ public final class NavSafetyNet {
             // that left the bot motionless until strict-survival denied the teleport fallback.
             WaterEscapeStep escape = cachedFindPhysicalWaterEscape(bot, world, feet, now);
             if (escape != null) {
-                waterRescueShore.put(bot.getUuid(), escape.shore().toImmutable());
+                waterRescueShore.put(bot.getUUID(), escape.shore().immutable());
                 boolean dryLanding = isDryStandableCell(world, escape.next());
                 boolean moved = dryLanding
                         ? FakePlayerMotion.stepToStandable(
@@ -279,19 +278,19 @@ public final class NavSafetyNet {
             // stepped back down from the top cell on the next tick. The two correct local actions
             // therefore formed an endless Y/Y+1 policy oscillation. Connected shore movement
             // remains the first choice; emergency breathing is a bounded fallback.
-            if (bot.getAir() <= AIR_SURFACE_THRESHOLD
+            if (bot.getAirSupply() <= AIR_SURFACE_THRESHOLD
                     && physicalStepTowardAir(bot, world, feet)) {
                 throttledLog(server, bot, "navsafe_surface_for_air", feet);
                 return true;
             }
             // Legacy local fallback: use the cached shore if it is still valid, otherwise search
             // again (the nearest landing spot that is both standable and has air at feet and head).
-            BlockPos shore = waterRescueShore.get(bot.getUuid());
+            BlockPos shore = waterRescueShore.get(bot.getUUID());
             if (shore == null || shore.equals(feet) || !Standability.isStandable(world, shore)) {
                 shore = cachedFindNearestBreathableStandable(bot, world, feet, now).orElse(null);
             }
             if (shore != null) {
-                waterRescueShore.put(bot.getUuid(), shore.toImmutable());
+                waterRescueShore.put(bot.getUUID(), shore.immutable());
                 // Server-side fake players do not execute client-authored travel, so merely setting
                 // forward/jump leaves them motionless. Advance one validated adjacent swim/shore
                 // cell per tick; this is ordinary local movement, not privileged teleportation.
@@ -301,12 +300,12 @@ public final class NavSafetyNet {
                 }
                 double yaw = Math.toDegrees(Math.atan2(
                         -(shore.getX() + 0.5D - bot.getX()), shore.getZ() + 0.5D - bot.getZ()));
-                bot.setYaw((float) yaw);
-                bot.setHeadYaw((float) yaw);
-                bot.setBodyYaw((float) yaw);
+                bot.setYRot((float) yaw);
+                bot.setYHeadRot((float) yaw);
+                bot.setYBodyRot((float) yaw);
                 bot.getActionPack().setForward(1.0F); // swim toward shore
             } else {
-                waterRescueShore.put(bot.getUuid(), feet.toImmutable()); // no shore point (open deep water): placeholder to hold crisis state, surface for air first
+                waterRescueShore.put(bot.getUUID(), feet.immutable()); // no shore point (open deep water): placeholder to hold crisis state, surface for air first
                 bot.getActionPack().setForward(0.0F);
             }
             bot.getActionPack().setSprinting(false);
@@ -319,36 +318,36 @@ public final class NavSafetyNet {
     }
 
     /** Memoized front for {@link #findPhysicalWaterEscape} -- see WATER_SEARCH_CACHE_TICKS above. */
-    private WaterEscapeStep cachedFindPhysicalWaterEscape(AIPlayerEntity bot, ServerWorld world,
+    private WaterEscapeStep cachedFindPhysicalWaterEscape(AIPlayerEntity bot, ServerLevel world,
                                                            BlockPos feet, int now) {
-        WaterSearchCache<WaterEscapeStep> cached = waterEscapeCache.get(bot.getUuid());
+        WaterSearchCache<WaterEscapeStep> cached = waterEscapeCache.get(bot.getUUID());
         if (cached != null && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
             return cached.result();
         }
         WaterEscapeStep escape = findPhysicalWaterEscape(world, feet);
-        waterEscapeCache.put(bot.getUuid(), new WaterSearchCache<>(feet.toImmutable(), now, escape));
+        waterEscapeCache.put(bot.getUUID(), new WaterSearchCache<>(feet.immutable(), now, escape));
         return escape;
     }
 
     /** Memoized front for {@link #findNearestBreathableStandable} -- see WATER_SEARCH_CACHE_TICKS above. */
-    private Optional<BlockPos> cachedFindNearestBreathableStandable(AIPlayerEntity bot, ServerWorld world,
+    private Optional<BlockPos> cachedFindNearestBreathableStandable(AIPlayerEntity bot, ServerLevel world,
                                                                      BlockPos feet, int now) {
-        WaterSearchCache<BlockPos> cached = breathableStandableCache.get(bot.getUuid());
+        WaterSearchCache<BlockPos> cached = breathableStandableCache.get(bot.getUUID());
         if (cached != null && waterSearchCacheValid(cached.feet(), cached.computedTick(), feet, now)) {
             return Optional.ofNullable(cached.result());
         }
         Optional<BlockPos> found = findNearestBreathableStandable(world, feet);
-        breathableStandableCache.put(bot.getUuid(),
-                new WaterSearchCache<>(feet.toImmutable(), now, found.orElse(null)));
+        breathableStandableCache.put(bot.getUUID(),
+                new WaterSearchCache<>(feet.immutable(), now, found.orElse(null)));
         return found;
     }
 
-    private static WaterEscapeStep findPhysicalWaterEscape(ServerWorld world, BlockPos start) {
+    private static WaterEscapeStep findPhysicalWaterEscape(ServerLevel world, BlockPos start) {
         Standability.clearCache();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
         Map<BlockPos, BlockPos> previous = new HashMap<>();
         HashSet<BlockPos> visited = new HashSet<>();
-        BlockPos origin = start.toImmutable();
+        BlockPos origin = start.immutable();
         queue.add(origin);
         visited.add(origin);
 
@@ -371,7 +370,7 @@ public final class NavSafetyNet {
                             && !previous.get(first).equals(origin)) {
                         first = previous.get(first);
                     }
-                    return new WaterEscapeStep(first.toImmutable(), candidate.toImmutable());
+                    return new WaterEscapeStep(first.immutable(), candidate.immutable());
                 }
                 if (isWaterSwimCell(world, candidate)) {
                     queue.addLast(candidate);
@@ -383,46 +382,46 @@ public final class NavSafetyNet {
 
     static List<BlockPos> waterEscapeNeighbors(BlockPos current) {
         java.util.ArrayList<BlockPos> result = new java.util.ArrayList<>(14);
-        result.add(current.up());
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            result.add(current.offset(direction));
-            result.add(current.offset(direction).up());
-            result.add(current.offset(direction).down());
+        result.add(current.above());
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            result.add(current.relative(direction));
+            result.add(current.relative(direction).above());
+            result.add(current.relative(direction).below());
         }
-        result.add(current.down());
+        result.add(current.below());
         return result;
     }
 
-    static boolean passableWaterColumn(ServerWorld world, BlockPos candidate) {
+    static boolean passableWaterColumn(ServerLevel world, BlockPos candidate) {
         BlockState feet = world.getBlockState(candidate);
-        BlockState head = world.getBlockState(candidate.up());
+        BlockState head = world.getBlockState(candidate.above());
         return feet.getCollisionShape(world, candidate).isEmpty()
-                && head.getCollisionShape(world, candidate.up()).isEmpty()
+                && head.getCollisionShape(world, candidate.above()).isEmpty()
                 && !Standability.isDangerous(feet)
                 && !Standability.isDangerous(head)
                 && (isWaterSwimCell(world, candidate) || isDryStandableCell(world, candidate));
     }
 
-    static boolean isWaterSwimCell(ServerWorld world, BlockPos candidate) {
-        return world.getFluidState(candidate).isIn(FluidTags.WATER)
-                || world.getFluidState(candidate.up()).isIn(FluidTags.WATER);
+    static boolean isWaterSwimCell(ServerLevel world, BlockPos candidate) {
+        return world.getFluidState(candidate).is(FluidTags.WATER)
+                || world.getFluidState(candidate.above()).is(FluidTags.WATER);
     }
 
-    static boolean isDryStandableCell(ServerWorld world, BlockPos candidate) {
+    static boolean isDryStandableCell(ServerLevel world, BlockPos candidate) {
         return world.getFluidState(candidate).isEmpty()
-                && world.getFluidState(candidate.up()).isEmpty()
+                && world.getFluidState(candidate.above()).isEmpty()
                 && Standability.isStandable(world, candidate);
     }
 
     private static boolean physicalStepTowardAir(AIPlayerEntity bot,
-                                                  ServerWorld world,
+                                                  ServerLevel world,
                                                   BlockPos feet) {
         if (!isWaterSwimCell(world, feet)) {
             return false;
         }
-        BlockPos above = feet.up();
+        BlockPos above = feet.above();
         if (!world.getBlockState(above).getCollisionShape(world, above).isEmpty()
-                || !world.getBlockState(above.up()).getCollisionShape(world, above.up()).isEmpty()) {
+                || !world.getBlockState(above.above()).getCollisionShape(world, above.above()).isEmpty()) {
             return false;
         }
         if (!isWaterSwimCell(world, above)) {
@@ -447,7 +446,7 @@ public final class NavSafetyNet {
      * standable cell -- at least escaping the current suffocating cell -- if nothing works within
      * SUFFOCATION_CLIMB_UP cells upward (buried deep, capped overhead).
      */
-    private boolean escapeSuffocation(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean escapeSuffocation(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         // The cache must be invalidated: reaching this "buried" branch means a block just changed
         // (a cave-in / live-burial scenario calling setBlockState), so the Standability cache still
         // reflects the world before the change -- judging "no standable cell upward" from stale
@@ -456,16 +455,16 @@ public final class NavSafetyNet {
         // was still snapped into a y20 black hole and then triggered a life-saving teleport,
         // aborting the scenario).
         Standability.clearCache();
-        int top = world.getBottomY() + world.getHeight();
+        int top = world.getMinY() + world.getHeight();
         for (int dy = 1; dy <= SUFFOCATION_CLIMB_UP && feet.getY() + dy < top - 1; dy++) {
-            BlockPos candidate = feet.up(dy);
+            BlockPos candidate = feet.above(dy);
             if (Standability.isStandable(world, candidate)) {
                 boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
                         bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                         "navsafe_suffocation", () -> {
                             bot.getActionPack().stopAll();
-                            bot.teleport(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
-                                    Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+                            bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
+                                    Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
                         });
                 if (moved) {
                     Standability.clearCache();
@@ -493,11 +492,11 @@ public final class NavSafetyNet {
     }
 
     // Whether the bot can surface and breathe within BREATHE_SCAN_UP cells above its head (a non-water passable cell = can breathe; hitting a solid block ceiling = sealed off)
-    private static boolean breathableAbove(ServerWorld world, BlockPos feet) {
+    private static boolean breathableAbove(ServerLevel world, BlockPos feet) {
         for (int dy = 1; dy <= BREATHE_SCAN_UP; dy++) {
-            BlockPos p = feet.up(dy);
+            BlockPos p = feet.above(dy);
             BlockState s = world.getBlockState(p);
-            boolean water = s.getFluidState().isIn(FluidTags.WATER);
+            boolean water = s.getFluidState().is(FluidTags.WATER);
             boolean solid = !s.getCollisionShape(world, p).isEmpty();
             if (!water && !solid) {
                 return true;   // a non-water air cell -> can surface and breathe
@@ -509,7 +508,7 @@ public final class NavSafetyNet {
         return false;
     }
 
-    private boolean emergencyTeleportToAir(AIPlayerEntity bot, ServerWorld world, BlockPos feet, int now) {
+    private boolean emergencyTeleportToAir(AIPlayerEntity bot, ServerLevel world, BlockPos feet, int now) {
         Optional<BlockPos> safe = cachedFindNearestBreathableStandable(bot, world, feet, now);
         if (safe.isEmpty()) {
             return false;
@@ -519,8 +518,8 @@ public final class NavSafetyNet {
                 bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                 "navsafe_drowning", () -> {
                     bot.getActionPack().stopAll();
-                    bot.teleport(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
-                            Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+                    bot.teleportTo(world, to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D,
+                            Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
                 });
         if (moved) {
             Standability.clearCache();
@@ -529,8 +528,8 @@ public final class NavSafetyNet {
     }
 
     // The nearest landing spot that is both standable and has air at feet and head (breathable, not water)
-    private static Optional<BlockPos> findNearestBreathableStandable(ServerWorld world, BlockPos origin) {
-        BlockPos.Mutable cursor = new BlockPos.Mutable();
+    private static Optional<BlockPos> findNearestBreathableStandable(ServerLevel world, BlockPos origin) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (int dx = -RESCUE_RADIUS_H; dx <= RESCUE_RADIUS_H; dx++) {
@@ -543,13 +542,13 @@ public final class NavSafetyNet {
                     if (!Standability.isStandable(world, cursor)) {
                         continue;
                     }
-                    if (!world.getBlockState(cursor).isAir() || !world.getBlockState(cursor.up()).isAir()) {
+                    if (!world.getBlockState(cursor).isAir() || !world.getBlockState(cursor.above()).isAir()) {
                         continue;   // feet or head cell is water/solid block -> not breathable
                     }
-                    double distance = cursor.getSquaredDistance(origin);
+                    double distance = cursor.distSqr(origin);
                     if (distance < bestDistance) {
                         bestDistance = distance;
-                        best = cursor.toImmutable();
+                        best = cursor.immutable();
                     }
                 }
             }
@@ -558,10 +557,10 @@ public final class NavSafetyNet {
     }
 
     private static boolean physicalStepTowardShore(AIPlayerEntity bot,
-                                                   ServerWorld world,
+                                                   ServerLevel world,
                                                    BlockPos feet,
                                                    BlockPos shore) {
-        double currentDistance = feet.getSquaredDistance(shore);
+        double currentDistance = feet.distSqr(shore);
         java.util.List<BlockPos> candidates = new java.util.ArrayList<>();
         for (int dy : new int[]{1, 0, -1}) {
             for (int dx = -1; dx <= 1; dx++) {
@@ -570,19 +569,19 @@ public final class NavSafetyNet {
                     if (changedAxes == 0 || changedAxes > 2) {
                         continue;
                     }
-                    BlockPos candidate = feet.add(dx, dy, dz);
-                    if (candidate.getSquaredDistance(shore) >= currentDistance) {
+                    BlockPos candidate = feet.offset(dx, dy, dz);
+                    if (candidate.distSqr(shore) >= currentDistance) {
                         continue;
                     }
                     BlockState at = world.getBlockState(candidate);
-                    BlockState head = world.getBlockState(candidate.up());
+                    BlockState head = world.getBlockState(candidate.above());
                     if (!at.getCollisionShape(world, candidate).isEmpty()
-                            || !head.getCollisionShape(world, candidate.up()).isEmpty()
+                            || !head.getCollisionShape(world, candidate.above()).isEmpty()
                             || Standability.isDangerous(at)
                             || Standability.isDangerous(head)) {
                         continue;
                     }
-                    boolean waterCell = world.getFluidState(candidate).isIn(FluidTags.WATER);
+                    boolean waterCell = world.getFluidState(candidate).is(FluidTags.WATER);
                     // Air immediately above water is breathable but not a landing. Treating it as
                     // a swim cell made the fake player step out of the water for one tick, fall
                     // back, and repeat forever between the same two Y levels. Water cells may be
@@ -590,14 +589,14 @@ public final class NavSafetyNet {
                     if (!waterCell && !Standability.isStandable(world, candidate)) {
                         continue;
                     }
-                    candidates.add(candidate.toImmutable());
+                    candidates.add(candidate.immutable());
                 }
             }
         }
-        candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.getSquaredDistance(shore)));
+        candidates.sort(java.util.Comparator.comparingDouble(pos -> pos.distSqr(shore)));
         for (BlockPos candidate : candidates) {
-            boolean waterCell = world.getFluidState(candidate).isIn(FluidTags.WATER)
-                    || world.getFluidState(candidate.up()).isIn(FluidTags.WATER);
+            boolean waterCell = world.getFluidState(candidate).is(FluidTags.WATER)
+                    || world.getFluidState(candidate.above()).is(FluidTags.WATER);
             boolean moved = waterCell
                     ? FakePlayerMotion.swimStepTo(bot, candidate, "navsafe_water_rescue")
                     : FakePlayerMotion.stepToStandable(bot, candidate, "navsafe_water_rescue");
@@ -608,29 +607,29 @@ public final class NavSafetyNet {
         return false;
     }
 
-    private static boolean isDryStandable(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
-        return !bot.isTouchingWater()
-                && !world.getFluidState(feet).isIn(FluidTags.WATER)
-                && !world.getFluidState(feet.up()).isIn(FluidTags.WATER)
+    private static boolean isDryStandable(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        return !bot.isInWater()
+                && !world.getFluidState(feet).is(FluidTags.WATER)
+                && !world.getFluidState(feet.above()).is(FluidTags.WATER)
                 && Standability.isStandable(world, feet);
     }
 
-    private static void escapeLava(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private static void escapeLava(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         // Rush out toward the nearest horizontal direction that is "safe and standable" + jump
         Direction best = null;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos side = feet.offset(dir);
-            if (!inLava(world, side) && !inLava(world, side.down())
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos side = feet.relative(dir);
+            if (!inLava(world, side) && !inLava(world, side.below())
                     && io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, side)) {
                 best = dir;
                 break;
             }
         }
         if (best != null) {
-            double yaw = Math.toDegrees(Math.atan2(-best.getOffsetX(), best.getOffsetZ()));
-            bot.setYaw((float) yaw);
-            bot.setHeadYaw((float) yaw);
-            bot.setBodyYaw((float) yaw);
+            double yaw = Math.toDegrees(Math.atan2(-best.getStepX(), best.getStepZ()));
+            bot.setYRot((float) yaw);
+            bot.setYHeadRot((float) yaw);
+            bot.setYBodyRot((float) yaw);
             bot.getActionPack().setForward(1.0F);
         }
         // Jump to get out of the lava regardless of whether a direction was found
@@ -638,20 +637,20 @@ public final class NavSafetyNet {
         bot.getActionPack().jumpOnce();
     }
 
-    private static boolean inLava(ServerWorld world, BlockPos pos) {
+    private static boolean inLava(ServerLevel world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
-        return state.getFluidState().isIn(FluidTags.LAVA);
+        return state.getFluidState().is(FluidTags.LAVA);
     }
 
     private void throttledLog(MinecraftServer server, AIPlayerEntity bot, String event, BlockPos pos) {
-        int now = server.getTicks();
-        if (now < nextLogTick.getOrDefault(bot.getUuid(), 0)) {
+        int now = server.getTickCount();
+        if (now < nextLogTick.getOrDefault(bot.getUUID(), 0)) {
             return;
         }
-        nextLogTick.put(bot.getUuid(), now + 40);
+        nextLogTick.put(bot.getUUID(), now + 40);
         BotLog.danger(bot, event,
                 "pos", pos.getX() + "," + pos.getY() + "," + pos.getZ(),
-                "air", bot.getAir(),
+                "air", bot.getAirSupply(),
                 "hp", String.format(java.util.Locale.ROOT, "%.1f", bot.getHealth()));
     }
 }

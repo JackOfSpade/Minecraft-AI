@@ -12,20 +12,19 @@ import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mining.ValuableScan;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.LightType;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * "mine all valuables you can see within N blocks" -- a single deterministic, self-contained
@@ -157,7 +156,7 @@ public final class MineValuablesTask extends AbstractTask {
         // The frozen vantage point: captured once, here, synchronously with tool dispatch
         // (TaskManager.assign -> task.start runs in the same call as the LLM tool call), and never
         // updated again regardless of where the bot later walks.
-        origin = bot.getBlockPos().toImmutable();
+        origin = bot.blockPosition().immutable();
         scanSide = 2 * radius + 1;
         scanRadiusSq = (long) radius * radius;
         scanIndex = 0;
@@ -200,7 +199,7 @@ public final class MineValuablesTask extends AbstractTask {
     // ticks via the flat scanIndex cursor so a single tick's raycast cost stays bounded regardless
     // of the requested radius.
     private void scanStep(AIPlayerEntity bot) {
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         int side = scanSide;
         long total = (long) side * side * side;
         int budget = SCAN_BUDGET_PER_TICK;
@@ -216,7 +215,7 @@ public final class MineValuablesTask extends AbstractTask {
             if (distSq > scanRadiusSq) {
                 continue; // outside the true sphere: pure arithmetic, never touches the world
             }
-            BlockPos pos = origin.add(ddx, ddy, ddz);
+            BlockPos pos = origin.offset(ddx, ddy, ddz);
             budget--;
             if (!ObservableWorldQuery.canObserveBlockWithin(bot, pos, radius)) {
                 continue; // not actually visible from the frozen vantage point -- never read
@@ -225,7 +224,7 @@ public final class MineValuablesTask extends AbstractTask {
             if (!ValuableScan.isValuable(state.getBlock())) {
                 continue;
             }
-            scanBuffer.add(new Sighting(pos.toImmutable(), state));
+            scanBuffer.add(new Sighting(pos.immutable(), state));
             if (scanBuffer.size() >= MAX_TARGETS) {
                 scanIndex = (int) total;
                 break;
@@ -241,7 +240,7 @@ public final class MineValuablesTask extends AbstractTask {
             fail("no_valuables_in_radius");
             return;
         }
-        scanBuffer.sort(Comparator.comparingDouble(s -> s.pos().getSquaredDistance(origin)));
+        scanBuffer.sort(Comparator.comparingDouble(s -> s.pos().distSqr(origin)));
         queue = new ArrayDeque<>(scanBuffer);
         totalTargets = queue.size();
         scanBuffer = null;
@@ -332,7 +331,7 @@ public final class MineValuablesTask extends AbstractTask {
             phase = Phase.SELECTING;
             return;
         }
-        BlockState state = bot.getEntityWorld().getBlockState(targetPos);
+        BlockState state = bot.level().getBlockState(targetPos);
         Block block = state.getBlock();
         if (!ToolTier.canHarvestWithInventory(bot, state)) {
             BotLog.action(bot, "mine_valuables_tool_skip", "pos", targetPos.toShortString(),
@@ -430,12 +429,12 @@ public final class MineValuablesTask extends AbstractTask {
             return;
         }
         lastTorchCheckTick = elapsed;
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        if (world.isSkyVisible(feet)) {
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        if (world.canSeeSky(feet)) {
             return; // "when not on the surface" -- open sky is left to natural light
         }
-        if (world.getLightLevel(LightType.BLOCK, feet) >= 8) {
+        if (world.getBrightness(LightLayer.BLOCK, feet) >= 8) {
             return;
         }
         var torchSlot = InventoryAction.findItem(bot, Items.TORCH);

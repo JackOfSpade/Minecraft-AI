@@ -9,20 +9,19 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.entity.projectile.FishingBobberEntity;
-import net.minecraft.item.Items;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.projectile.FishingHook;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 public final class FishTask extends AbstractTask {
     private enum Phase {
@@ -125,20 +124,20 @@ public final class FishTask extends AbstractTask {
         }
         waterPos = choice.water();
         standPos = choice.stand();
-        if (bot.getBlockPos().getSquaredDistance(standPos) <= 2.25D) {
+        if (bot.blockPosition().distSqr(standPos) <= 2.25D) {
             bot.getActionPack().stopMovement();
             transition(Phase.CAST);
             return;
         }
         ActionResult result = bot.getActionPack().startPathTo(standPos);
         if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(Vec3d.ofCenter(standPos));
+            bot.getActionPack().startWalkTo(Vec3.atCenterOf(standPos));
         }
         transition(Phase.MOVE_TO_WATER);
     }
 
     private void moveToWater(AIPlayerEntity bot) {
-        if (bot.getBlockPos().getSquaredDistance(standPos) <= 2.25D) {
+        if (bot.blockPosition().distSqr(standPos) <= 2.25D) {
             bot.getActionPack().stopAll();
             transition(Phase.CAST);
             return;
@@ -146,7 +145,7 @@ public final class FishTask extends AbstractTask {
         if (bot.getActionPack().isPathExecutorIdle() && phaseTicks > 20) {
             ActionResult result = bot.getActionPack().startPathTo(standPos);
             if (result.isFailed()) {
-                bot.getActionPack().startWalkTo(Vec3d.ofCenter(standPos));
+                bot.getActionPack().startWalkTo(Vec3.atCenterOf(standPos));
             }
         }
         phaseTicks++;
@@ -158,12 +157,12 @@ public final class FishTask extends AbstractTask {
             return;
         }
         bot.getActionPack().stopMovement();
-        LookAction.lookAt(bot, waterPos.toCenterPos().add(0.0D, 0.15D, 0.0D));
+        LookAction.lookAt(bot, waterPos.getCenter().add(0.0D, 0.15D, 0.0D));
         if (currentHook(bot).isPresent()) {
             transition(Phase.WAIT_BITE);
             return;
         }
-        ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+        ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
         if (result.isFailed()) {
             fail("cast_failed:" + result.reason());
             return;
@@ -174,9 +173,9 @@ public final class FishTask extends AbstractTask {
     private void waitBite(AIPlayerEntity bot) {
         phaseTicks++;
         currentHook(bot).ifPresentOrElse(
-                hook -> LookAction.lookAt(bot, hook.getEntityPos()),
-                () -> LookAction.lookAt(bot, waterPos.toCenterPos().add(0.0D, 0.15D, 0.0D)));
-        Optional<FishingBobberEntity> hook = currentHook(bot);
+                hook -> LookAction.lookAt(bot, hook.position()),
+                () -> LookAction.lookAt(bot, waterPos.getCenter().add(0.0D, 0.15D, 0.0D)));
+        Optional<FishingHook> hook = currentHook(bot);
         if (hook.isEmpty()) {
             if (phaseTicks > 30) {
                 transition(Phase.CAST);
@@ -193,10 +192,10 @@ public final class FishTask extends AbstractTask {
             fail("need_fishing_rod");
             return;
         }
-        currentHook(bot).ifPresent(hook -> LookAction.lookAt(bot, hook.getEntityPos()));
+        currentHook(bot).ifPresent(hook -> LookAction.lookAt(bot, hook.position()));
         inventoryBeforeReel = HarvestCore.totalInventoryCount(bot);
         collectSweepAttempted = false;
-        ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+        ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
         if (result.isFailed()) {
             fail("reel_failed:" + result.reason());
             return;
@@ -238,35 +237,35 @@ public final class FishTask extends AbstractTask {
     }
 
     private Optional<WaterChoice> nearestWater(AIPlayerEntity bot) {
-        BlockPos origin = bot.getBlockPos();
-        return BlockPos.stream(
-                        origin.add(-SEARCH_RADIUS, -2, -SEARCH_RADIUS),
-                        origin.add(SEARCH_RADIUS, 3, SEARCH_RADIUS))
+        BlockPos origin = bot.blockPosition();
+        return BlockPos.betweenClosedStream(
+                        origin.offset(-SEARCH_RADIUS, -2, -SEARCH_RADIUS),
+                        origin.offset(SEARCH_RADIUS, 3, SEARCH_RADIUS))
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> bot.getEntityWorld().getFluidState(pos).isIn(FluidTags.WATER))
-                .map(BlockPos::toImmutable)
+                .filter(pos -> bot.level().getFluidState(pos).is(FluidTags.WATER))
+                .map(BlockPos::immutable)
                 .map(pos -> waterChoice(bot, pos))
                 .filter(choice -> choice != null)
-                .min(Comparator.comparingDouble(choice -> choice.water().getSquaredDistance(origin)));
+                .min(Comparator.comparingDouble(choice -> choice.water().distSqr(origin)));
     }
 
     private WaterChoice waterChoice(AIPlayerEntity bot, BlockPos water) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos stand = water.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), stand)) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos stand = water.relative(direction);
+            if (Standability.isStandable(bot.level(), stand)) {
                 return new WaterChoice(water, stand);
             }
         }
         return null;
     }
 
-    private Optional<FishingBobberEntity> currentHook(AIPlayerEntity bot) {
-        if (bot.fishHook != null && bot.fishHook.isAlive()) {
-            return Optional.of(bot.fishHook);
+    private Optional<FishingHook> currentHook(AIPlayerEntity bot) {
+        if (bot.fishing != null && bot.fishing.isAlive()) {
+            return Optional.of(bot.fishing);
         }
-        Box box = bot.getBoundingBox().expand(32.0D);
-        return bot.getEntityWorld()
-                .getEntitiesByClass(FishingBobberEntity.class, box,
+        AABB box = bot.getBoundingBox().inflate(32.0D);
+        return bot.level()
+                .getEntitiesOfClass(FishingHook.class, box,
                         hook -> hook.isAlive() && hook.getPlayerOwner() == bot)
                 .stream()
                 .min(Comparator.comparingDouble(bot::distanceTo));
@@ -276,8 +275,8 @@ public final class FishTask extends AbstractTask {
     // run -- guards the one-time warning below so a mapping break is logged once, not every tick.
     private static final Set<String> UNRESOLVED_FISH_BOBBER_FIELDS = ConcurrentHashMap.newKeySet();
 
-    private boolean hasBite(AIPlayerEntity bot, FishingBobberEntity hook) {
-        if (hook.getHookedEntity() != null) {
+    private boolean hasBite(AIPlayerEntity bot, FishingHook hook) {
+        if (hook.getHookedIn() != null) {
             return true;
         }
         return booleanField(bot, hook, "caughtFish", "field_23232")

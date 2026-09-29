@@ -30,17 +30,16 @@ import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.WardenEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.monster.warden.Warden;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -124,7 +123,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_mineshaft_palette_triggers_certain_stop_and_notify",
             maxTicks = 900)
-    public void mineshaftPaletteTriggersCertainStopAndNotify(TestContext context) {
+    public void mineshaftPaletteTriggersCertainStopAndNotify(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(10, -9, 9, -1, 1, 3);
         for (int x : new int[] {-8, -6, -4, -2, 2, 4, 6, 8}) {
@@ -144,19 +143,19 @@ public final class OreDigPoiGameTests {
         room.set(-8, 1, 1, Blocks.COBWEB);
         room.set(8, 1, -1, Blocks.COBWEB);
         room.set(-4, 0, 1, Blocks.CHEST);
-        var minecart = EntityType.CHEST_MINECART.create(room.world, SpawnReason.COMMAND);
+        var minecart = EntityType.CHEST_MINECART.create(room.world, EntitySpawnReason.COMMAND);
         h.require(minecart != null, "could not create a chest minecart");
         BlockPos cart = room.at(4, 0, 0);
-        minecart.refreshPositionAndAngles(cart.getX() + 0.5D, cart.getY() + 0.0625D, cart.getZ() + 0.5D, 0.0F, 0.0F);
-        room.world.spawnEntity(minecart);
+        minecart.snapTo(cart.getX() + 0.5D, cart.getY() + 0.0625D, cart.getZ() + 0.5D, 0.0F, 0.0F);
+        room.world.addFreshEntity(minecart);
         h.onCleanup(minecart::discard);
 
         AIPlayerEntity bot = h.spawn("PoiMineshaftGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -208,7 +207,7 @@ public final class OreDigPoiGameTests {
      * had put the warden too close).</p>
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_risk_always_stops", maxTicks = 900)
-    public void wardenRiskAlwaysStops(TestContext context) {
+    public void wardenRiskAlwaysStops(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(20, -9, WARDEN_STANDOFF_BLOCKS + 1, -1, 1, 3);
         for (int x : new int[] {-8, -6, -4, -2, 2, 4, 6, 8}) {
@@ -240,16 +239,16 @@ public final class OreDigPoiGameTests {
 
         AIPlayerEntity bot = h.spawn("PoiWardenGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
 
         BlockPos wardenFeet = room.at(WARDEN_STANDOFF_BLOCKS, 0, 0);
-        WardenEntity warden = EntityType.WARDEN.create(room.world, SpawnReason.COMMAND);
+        Warden warden = EntityType.WARDEN.create(room.world, EntitySpawnReason.COMMAND);
         h.require(warden != null, "could not create a warden fixture");
-        warden.setPersistent();
-        warden.setAiDisabled(true);
-        warden.refreshPositionAndAngles(wardenFeet.getX() + 0.5D, wardenFeet.getY(), wardenFeet.getZ() + 0.5D,
+        warden.setPersistenceRequired();
+        warden.setNoAi(true);
+        warden.snapTo(wardenFeet.getX() + 0.5D, wardenFeet.getY(), wardenFeet.getZ() + 0.5D,
                 180.0F, 0.0F);
-        room.world.spawnEntity(warden);
+        room.world.addFreshEntity(warden);
         h.onCleanup(warden::discard);
 
         // A STOPPED registry entry at the warden's own centroid: this must never suppress the mandatory stop
@@ -258,7 +257,7 @@ public final class OreDigPoiGameTests {
                 PoiRegistry.State.STOPPED, 0.9D, 0);
 
         Progress p = new Progress();
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -297,7 +296,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_player_base_downgrades_to_consult_not_stop",
             maxTicks = 900)
-    public void playerBaseDowngradesToConsultNotStop(TestContext context) {
+    public void playerBaseDowngradesToConsultNotStop(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -9, 9, -1, 1, 3);
         // Wood floor/walls (WOOD_BUILD) and a stone-brick wall (STONE_BUILD): neither is RAIL/WEB/SPAWNER/
@@ -314,11 +313,11 @@ public final class OreDigPoiGameTests {
 
         AIPlayerEntity bot = h.spawn("PoiPlayerBaseGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         int[] settledSince = {-1};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -361,16 +360,16 @@ public final class OreDigPoiGameTests {
      * suppresses it: mandatory is decided before {@code PoiRegistry.suppressed} is ever consulted. */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_declined_cavern",
             maxTicks = 200)
-    public void wardenStopNotSuppressedAfterDeclinedCavern(TestContext context) {
+    public void wardenStopNotSuppressedAfterDeclinedCavern(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(40, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiDeclinedCavernGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -405,17 +404,17 @@ public final class OreDigPoiGameTests {
      * blunt an unrelated later mandatory stop. */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_warden_stop_not_suppressed_after_player_continue",
             maxTicks = 200)
-    public void wardenStopNotSuppressedAfterPlayerContinue(TestContext context) {
+    public void wardenStopNotSuppressedAfterPlayerContinue(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(50, -6, 6, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiResumeThenWardenGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos earlierAnchor = room.at(-4, 0, 0);
         BlockPos mandatoryAnchor = room.at(4, 0, 0);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -473,19 +472,19 @@ public final class OreDigPoiGameTests {
      * restart itself.</p>
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_restart_during_stop_rebuilds_case", maxTicks = 300)
-    public void restartDuringStopRebuildsCase(TestContext context) {
+    public void restartDuringStopRebuildsCase(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(60, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiRestartGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -566,12 +565,12 @@ public final class OreDigPoiGameTests {
      * {@code IntentController.routePlayerControlPhrase -> resume}; no {@code PoiCoordinator} code is involved in
      * the resume decision itself, only in tending the bookkeeping afterward. */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_continue_phrase_resumes_to_anchor", maxTicks = 200)
-    public void continuePhraseResumesToAnchor(TestContext context) {
+    public void continuePhraseResumesToAnchor(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(70, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiContinuePhraseGT", room, 0, 0);
         h.enablePoi(bot, null);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
         Progress p = new Progress();
@@ -579,7 +578,7 @@ public final class OreDigPoiGameTests {
         int[] stageStart = {0};
         Task[] frozen = new Task[1];
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -638,7 +637,7 @@ public final class OreDigPoiGameTests {
      * untouched. */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_possible_fallback_never_pauses_below_threshold",
             maxTicks = 200)
-    public void digDownPossibleFallbackNeverPausesBelowThreshold(TestContext context) {
+    public void digDownPossibleFallbackNeverPausesBelowThreshold(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(80, -3, 3, -3, 3, 4);
         AIPlayerEntity bot = h.spawn("PoiDigDownFallbackGT", room, 0, 0);
@@ -646,7 +645,7 @@ public final class OreDigPoiGameTests {
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -699,7 +698,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_stop_uses_descent_climb_notice",
             maxTicks = 200)
-    public void digDownStopUsesDescentClimbNotice(TestContext context) {
+    public void digDownStopUsesDescentClimbNotice(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(90, -3, 3, -3, 3, 4);
         AIPlayerEntity bot = h.spawn("PoiDigDownStopGT", room, 0, 0);
@@ -707,7 +706,7 @@ public final class OreDigPoiGameTests {
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -738,7 +737,7 @@ public final class OreDigPoiGameTests {
             h.require(paused == task, "peekPaused did not return the paused DigDownTask: " + paused);
             h.require(!task.isDescending(),
                     "onPause should have converted the paused DigDownTask's phase from DESCEND to RETURN by now");
-            PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUuid());
+            PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUUID());
             h.require(open != null && "CERTAIN".equals(open.source()), "the open case after the stop was " + open);
             List<String> lines = botLog(bot.getGameProfile().name());
             h.require(lines != null && hasEvent(lines, "poi_stop"), "no poi_stop log line was written");
@@ -752,7 +751,7 @@ public final class OreDigPoiGameTests {
      * source uses the climb-out template while DigDown is descending. */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_dig_down_mandatory_uses_descent_variant_too",
             maxTicks = 200)
-    public void digDownMandatoryUsesDescentVariantToo(TestContext context) {
+    public void digDownMandatoryUsesDescentVariantToo(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(100, -3, 3, -3, 3, 4);
         AIPlayerEntity bot = h.spawn("PoiDigDownMandatoryGT", room, 0, 0);
@@ -763,7 +762,7 @@ public final class OreDigPoiGameTests {
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -790,7 +789,7 @@ public final class OreDigPoiGameTests {
                     h.require(paused == task, "peekPaused did not return the paused DigDownTask: " + paused);
                     h.require(!task.isDescending(),
                             "onPause should have converted the paused DigDownTask's phase from DESCEND to RETURN by now");
-                    PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUuid());
+                    PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUUID());
                     h.require(open != null && "MANDATORY".equals(open.source()), "the open case after the mandatory stop was " + open);
                     stage[0] = 1;
                     stageStart[0] = p.tick;
@@ -833,7 +832,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_notice_reaches_only_authorized_players",
             maxTicks = 250)
-    public void noticeReachesOnlyAuthorizedPlayers(TestContext context) {
+    public void noticeReachesOnlyAuthorizedPlayers(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(110, -6, 6, -3, 3, 3);
         String dim = BotEdits.dimensionKey(room.world);
@@ -843,7 +842,7 @@ public final class OreDigPoiGameTests {
         AIPlayerEntity[] stranger = new AIPlayerEntity[1];
         AIPlayerEntity[] subject = new AIPlayerEntity[1];
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -852,7 +851,7 @@ public final class OreDigPoiGameTests {
                 case 0 -> {
                     owner[0] = h.spawn("PoiNoticeOwnerGT", room, -4, 0);
                     stranger[0] = h.spawn("PoiNoticeStrangerGT", room, 4, 0);
-                    subject[0] = h.spawnOwned("PoiNoticeSubjectGT", room, 0, 0, owner[0].getUuid());
+                    subject[0] = h.spawnOwned("PoiNoticeSubjectGT", room, 0, 0, owner[0].getUUID());
                     h.enablePoi(subject[0], null);
                     stage[0] = 1;
                 }
@@ -889,7 +888,7 @@ public final class OreDigPoiGameTests {
                     // orthogonal to what this stage actually tests (recipient routing under BROADCAST vs
                     // AUTHORIZED, not dedupe, which PoiRegistryTest already covers). Clear it so Stage B is a
                     // clean, independent candidate.
-                    PoiRegistry.clear(subject[0].getUuid());
+                    PoiRegistry.clear(subject[0].getUUID());
 
                     // Stage B: the BROADCAST policy -- must reach the same internal outcome regardless of who is
                     // "authorized" (BROADCAST never consults BotAuthorizationGate at all).
@@ -918,13 +917,13 @@ public final class OreDigPoiGameTests {
      * the real-server regression guard for the double-bump fix (contract §0 correction #4/§3.1). */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_user_pause_epoch_bumps_on_every_transition",
             maxTicks = 100)
-    public void userPauseEpochBumpsOnEveryTransition(TestContext context) {
+    public void userPauseEpochBumpsOnEveryTransition(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(120, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiEpochGT", room, 0, 0);
         String name = bot.getGameProfile().name();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -955,7 +954,7 @@ public final class OreDigPoiGameTests {
             int beforeDespawn = TaskManager.INSTANCE.userPauseEpoch(bot);
 
             h.bots.remove(name); // despawn ourselves below; do not let Harness.cleanup double-despawn
-            boolean despawned = AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+            boolean despawned = AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             h.require(despawned, "fixture error: could not despawn the epoch-test bot");
             h.require(TaskManager.INSTANCE.userPauseEpoch(bot) == beforeDespawn + 1,
                     "a despawn during an active pause bumped the epoch by "
@@ -977,7 +976,7 @@ public final class OreDigPoiGameTests {
      * {@code IntentController.pause} -- with the dedupe registry recording it STOPPED.
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_stop", maxTicks = 300)
-    public void possibleCandidateHoldsThenStop(TestContext context) {
+    public void possibleCandidateHoldsThenStop(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(130, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiHoldStopGT", room, 0, 0);
@@ -999,7 +998,7 @@ public final class OreDigPoiGameTests {
         Progress p = new Progress();
         int[] phase = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1031,7 +1030,7 @@ public final class OreDigPoiGameTests {
                     return;
                 }
                 h.require(TaskManager.INSTANCE.isUserPaused(bot), "a STOP verdict must leave the bot paused");
-                PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUuid());
+                PoiRegistry.OpenCase open = PoiRegistry.openCase(bot.getUUID());
                 h.require(open != null && "FALLBACK".equals(open.source()) && "mineshaft".equals(open.label()),
                         "the open case after a verdict-driven stop was " + open);
                 h.assertStrict(bot, "poi_hold_stop_end");
@@ -1046,7 +1045,7 @@ public final class OreDigPoiGameTests {
      * records the candidate DECLINED, never STOPPED.
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_possible_candidate_holds_then_continue", maxTicks = 300)
-    public void possibleCandidateHoldsThenContinue(TestContext context) {
+    public void possibleCandidateHoldsThenContinue(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(140, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiHoldContinueGT", room, 0, 0);
@@ -1069,7 +1068,7 @@ public final class OreDigPoiGameTests {
         int[] phase = {0};
         Task[] taskHolder = new Task[1];
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1098,7 +1097,7 @@ public final class OreDigPoiGameTests {
                 h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a CONTINUE verdict must resume the bot");
                 h.require(TaskManager.INSTANCE.getActive(bot).orElse(null) == taskHolder[0],
                         "the frozen task must be active again after resumeUserIntent");
-                h.require(PoiRegistry.openCase(bot.getUuid()) == null, "a CONTINUE must never open a case");
+                h.require(PoiRegistry.openCase(bot.getUUID()) == null, "a CONTINUE must never open a case");
                 List<String> stopLines = botLog(botName);
                 h.require(stopLines == null || !hasEvent(stopLines, "poi_stop"), "a poi_stop line was written for a CONTINUE verdict");
                 h.assertStrict(bot, "poi_hold_continue_end");
@@ -1116,7 +1115,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_player_pause_during_hold_is_never_overridden",
             maxTicks = 300)
-    public void playerPauseDuringHoldIsNeverOverridden(TestContext context) {
+    public void playerPauseDuringHoldIsNeverOverridden(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(150, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiHoldStaleGT", room, 0, 0);
@@ -1138,7 +1137,7 @@ public final class OreDigPoiGameTests {
         Progress p = new Progress();
         int[] phase = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1176,8 +1175,8 @@ public final class OreDigPoiGameTests {
                 }
                 h.require(!TaskManager.INSTANCE.isUserPaused(bot), "a late STOP must never claim the pause back");
                 h.require(!hasEvent(lines, "poi_stop"), "a late STOP must never log a real poi_stop");
-                h.require(PoiRegistry.openCase(bot.getUuid()) == null, "a late verdict must never open a case");
-                boolean recordedStopped = PoiRegistry.snapshot(bot.getUuid()).stream()
+                h.require(PoiRegistry.openCase(bot.getUUID()) == null, "a late verdict must never open a case");
+                boolean recordedStopped = PoiRegistry.snapshot(bot.getUUID()).stream()
                         .anyMatch(e -> e.label().equals("dungeon") && e.state() == PoiRegistry.State.STOPPED);
                 h.require(recordedStopped, "the registry must still record the late STOP for future dedupe");
                 h.assertStrict(bot, "poi_hold_stale_end");
@@ -1196,7 +1195,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_consult_deadline_applies_fallback_when_advisor_is_slow",
             maxTicks = 700)
-    public void consultDeadlineAppliesFallbackWhenAdvisorIsSlow(TestContext context) {
+    public void consultDeadlineAppliesFallbackWhenAdvisorIsSlow(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(160, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiDeadlineGT", room, 0, 0);
@@ -1220,7 +1219,7 @@ public final class OreDigPoiGameTests {
         Progress p = new Progress();
         int[] phase = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1276,7 +1275,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_degraded_tps_skips_consult_and_uses_fallback",
             maxTicks = 200)
-    public void degradedTpsSkipsConsultAndUsesFallback(TestContext context) {
+    public void degradedTpsSkipsConsultAndUsesFallback(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(170, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiDegradedTpsGT", room, 0, 0);
@@ -1297,7 +1296,7 @@ public final class OreDigPoiGameTests {
         String dim = BotEdits.dimensionKey(room.world);
         BlockPos anchor = room.at(2, 0, 0);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1340,7 +1339,7 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_hold_does_not_clear_planner_wake_state",
             maxTicks = 300)
-    public void holdDoesNotClearPlannerWakeState(TestContext context) {
+    public void holdDoesNotClearPlannerWakeState(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(180, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiWakeStateGT", room, 0, 0);
@@ -1363,7 +1362,7 @@ public final class OreDigPoiGameTests {
         Progress p = new Progress();
         int[] phase = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1426,7 +1425,7 @@ public final class OreDigPoiGameTests {
      * real verdict so a later candidate in the same coarse cell benefits from it.
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_late_verdict_is_notify_only", maxTicks = 3800)
-    public void lateVerdictIsNotifyOnly(TestContext context) {
+    public void lateVerdictIsNotifyOnly(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(190, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiLateVerdictGT", room, 0, 0);
@@ -1451,7 +1450,7 @@ public final class OreDigPoiGameTests {
         Progress p = new Progress();
         int[] phase = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1534,11 +1533,11 @@ public final class OreDigPoiGameTests {
      */
     @GameTest(environment = "minecraftai-gametest:ore_dig_poi_game_tests_restart_during_consulting_hold_fails_closed",
             maxTicks = 300)
-    public void restartDuringConsultingHoldFailsClosed(TestContext context) {
+    public void restartDuringConsultingHoldFailsClosed(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(200, -3, 3, -3, 3, 3);
         AIPlayerEntity bot = h.spawn("PoiRestartHoldGT", room, 0, 0);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         h.enablePoi(bot, null);
         h.onCleanup(() -> {
             PoiAdvisor.setTestTransport(null);
@@ -1562,7 +1561,7 @@ public final class OreDigPoiGameTests {
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1660,7 +1659,7 @@ public final class OreDigPoiGameTests {
         PoiScorer.PoiScore score = new PoiScorer.PoiScore(
                 8.0D, structureScore, 0.0D, 0.0D, Math.max(structureScore, 0.5D),
                 8, 3, true, band, false, mandatoryTrigger == null ? "" : mandatoryTrigger,
-                Vec3d.ofCenter(anchor), false, true, false, true, 3, habitationLike);
+                Vec3.atCenterOf(anchor), false, true, false, true, 3, habitationLike);
         return new PoiDetector.Result(true, band, score, label, true, true, anchor, 8, 0, 8,
                 "minecraft:the_overworld", false);
     }
@@ -1720,7 +1719,7 @@ public final class OreDigPoiGameTests {
 
     /** Cleanup-on-failure, strict-capability and POI-mode config plumbing shared by every test. */
     private static final class Harness {
-        final TestContext context;
+        final GameTestHelper context;
         final List<String> bots = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
         final List<UUID> forced = new ArrayList<>();
@@ -1729,7 +1728,7 @@ public final class OreDigPoiGameTests {
         boolean tpsOverridden;
         boolean done;
 
-        Harness(TestContext context) {
+        Harness(GameTestHelper context) {
             this.context = context;
         }
 
@@ -1744,19 +1743,19 @@ public final class OreDigPoiGameTests {
         }
 
         AIPlayerEntity spawnOwned(String name, Room room, int dx, int dz, UUID ownerUuid) {
-            ServerWorld world = room.world;
+            ServerLevel world = room.world;
             BlockPos feet = room.at(dx, 0, dz);
             bots.add(name);
             var spawned = AIPlayerManager.INSTANCE.spawn(
-                    world.getServer(), name, world, Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL, ownerUuid);
+                    world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL, ownerUuid);
             if (spawned.isEmpty()) {
                 fail("failed to spawn " + name + " (a bot of that name is still alive)");
             }
             AIPlayerEntity bot = spawned.get();
-            bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+            bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
             bot.setHealth(bot.getMaxHealth());
-            bot.getHungerManager().setFoodLevel(20);
-            bot.getHungerManager().setSaturationLevel(5.0F);
+            bot.getFoodData().setFoodLevel(20);
+            bot.getFoodData().setSaturation(5.0F);
             return bot;
         }
 
@@ -1768,9 +1767,9 @@ public final class OreDigPoiGameTests {
             MiningAssistRuntime.install(poiConfig(poiOverrides));
             MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
             tpsOverridden = true;
-            MiningAssistRuntime.forceEnable(bot.getUuid());
-            if (!forced.contains(bot.getUuid())) {
-                forced.add(bot.getUuid());
+            MiningAssistRuntime.forceEnable(bot.getUUID());
+            if (!forced.contains(bot.getUUID())) {
+                forced.add(bot.getUUID());
             }
         }
 
@@ -1781,14 +1780,14 @@ public final class OreDigPoiGameTests {
         /** True once the bot is underground by the world's own sky test and the chunk ring around it is loaded
          * (waived after 60 ticks, matching the sibling files). */
         boolean settle(AIPlayerEntity bot, Progress p) {
-            ServerWorld world = bot.getEntityWorld();
-            BlockPos feet = bot.getBlockPos();
+            ServerLevel world = bot.level();
+            BlockPos feet = bot.blockPosition();
             p.tick++;
-            if (world.isSkyVisible(feet)) {
+            if (world.canSeeSky(feet)) {
                 require(p.tick < 200, "the sealed fixture never became underground by the world's sky test");
                 return false;
             }
-            boolean loaded = world.getChunkManager().isChunkLoaded(feet.getX() >> 4, feet.getZ() >> 4);
+            boolean loaded = world.getChunkSource().hasChunk(feet.getX() >> 4, feet.getZ() >> 4);
             if (loaded) {
                 return true;
             }
@@ -1806,7 +1805,7 @@ public final class OreDigPoiGameTests {
 
         void fail(String message) {
             cleanup();
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
 
         /** Runs one tick of a test body; anything thrown cleans up first so a failure never leaves a bot behind. */
@@ -1831,7 +1830,7 @@ public final class OreDigPoiGameTests {
             cleanups.clear();
             for (String name : new ArrayList<>(bots)) {
                 try {
-                    AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+                    AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
                 } catch (RuntimeException ignored) {
                     // best effort: a test that already despawned this bot itself must not fail cleanup
                 }
@@ -1861,7 +1860,7 @@ public final class OreDigPoiGameTests {
 
         void pass() {
             cleanup();
-            context.complete();
+            context.succeed();
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {

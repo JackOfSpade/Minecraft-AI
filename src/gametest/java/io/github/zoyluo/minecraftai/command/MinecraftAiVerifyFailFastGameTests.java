@@ -11,25 +11,24 @@ import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.TaskManager;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Items;
-import net.minecraft.stat.Stats;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.List;
-import net.minecraft.text.Text;
 
 /** World-backed contract for strict from-zero acceptance fail-fast boundaries. */
 public final class MinecraftAiVerifyFailFastGameTests {
     private static final String ZERO_DEATH_VIOLATION = "zero_death_violation";
 
     @GameTest(maxTicks = 5)
-    public void verifyAllExpandsLegacyStripMineByOperatingProfile(TestContext context) {
+    public void verifyAllExpandsLegacyStripMineByOperatingProfile(GameTestHelper context) {
         List<String> strictAll = MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
                 List.of("all"), OperatingProfile.STRICT_SURVIVAL);
         List<String> operatorAll = MinecraftAiVerifySubcommand.expandFeaturesForGameTest(
@@ -58,117 +57,117 @@ public final class MinecraftAiVerifyFailFastGameTests {
                         List.of("all+strip_mine"), OperatingProfile.STRICT_SURVIVAL),
                         MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE) == 1,
                 "composed strict suites duplicated the typed rejection scenario");
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void strictStripMineScenarioRequiresExactTypedRejection(TestContext context) {
+    public void strictStripMineScenarioRequiresExactTypedRejection(GameTestHelper context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyStripGateGT");
         String feature = MinecraftAiVerifySubcommand.STRICT_STRIP_MINE_REJECTION_FEATURE;
         try {
             require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                     "typed rejection fixture is not running under strict_survival");
             require(context, MinecraftAiVerifySubcommand.startForGameTest(
-                            bot.getEntityWorld().getServer().getCommandSource(), bot, feature),
+                            bot.level().getServer().createCommandSourceStack(), bot, feature),
                     "strict strip_mine rejection verifier did not start");
 
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
             require(context, StripMineTask.STRICT_SURVIVAL_REJECTION.equals(
                             TaskManager.INSTANCE.status(bot).failureReason()),
                     "real StripMineTask did not emit the exact typed rejection");
 
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
-            require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
+            require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUUID(), feature)
                             .filter(detail -> detail.endsWith(StripMineTask.STRICT_SURVIVAL_REJECTION))
                             .isPresent(),
                     "verifier did not accept the exact typed rejection as coverage PASS");
 
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
-            require(context, !MinecraftAiVerifySubcommand.hasRunForGameTest(bot.getUuid()),
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
+            require(context, !MinecraftAiVerifySubcommand.hasRunForGameTest(bot.getUUID()),
                     "typed rejection verifier remained registered after summary");
         } finally {
             cleanupBot(context, bot, "VerifyStripGateGT");
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void fromZeroMiningDeathFailsInOneVerifierPollAndCancelsAllIntent(TestContext context) {
-        var world = context.getWorld();
+    public void fromZeroMiningDeathFailsInOneVerifierPollAndCancelsAllIntent(GameTestHelper context) {
+        var world = context.getLevel();
         var server = world.getServer();
         String botName = "VerifyDeathFastGT";
         // EMPTY_STRUCTURE is placed near the world's bottom. The from-zero planner correctly
         // treats that as an underground resume and refuses to invent surface supplies, so build a
         // small sky-visible platform at ordinary overworld height for this acceptance-entry test.
-        BlockPos spawn = context.getAbsolutePos(new BlockPos(1, 126, 1));
+        BlockPos spawn = context.absolutePos(new BlockPos(1, 126, 1));
         prepareCell(world, spawn);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        server, botName, world, Vec3d.ofBottomCenter(spawn),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        server, botName, world, Vec3.atBottomCenterOf(spawn),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + botName));
 
         try {
             verifyFeature(context, bot, "diamond_stack_64_from_zero");
             verifyFeature(context, bot, "obsidian_half_stack_32_from_zero");
         } finally {
-            MinecraftAiVerifySubcommand.discardRunForGameTest(bot.getUuid());
+            MinecraftAiVerifySubcommand.discardRunForGameTest(bot.getUUID());
             IntentController.INSTANCE.cancelAll(
                     bot, IntentController.ControlOrigin.SYSTEM, "verify_fail_fast_gametest_cleanup");
             AIPlayerManager.INSTANCE.despawn(server, botName);
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void fromZeroMiningNonSurvivalModeFailsInOneVerifierPollAndClearsAudit(TestContext context) {
+    public void fromZeroMiningNonSurvivalModeFailsInOneVerifierPollAndClearsAudit(GameTestHelper context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyModeFastGT");
         try {
             String feature = "diamond_stack_64_from_zero";
             require(context, MinecraftAiVerifySubcommand.startForGameTest(
-                    bot.getEntityWorld().getServer().getCommandSource(), bot, feature), "verifier run did not start");
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
-            require(context, MiningEvidenceAudit.hasSession(bot.getUuid()),
+                    bot.level().getServer().createCommandSourceStack(), bot, feature), "verifier run did not start");
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
+            require(context, MiningEvidenceAudit.hasSession(bot.getUUID()),
                     "from-zero verifier did not open provenance audit");
 
-            bot.interactionManager.changeGameMode(GameMode.CREATIVE);
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
-            require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
+            bot.gameMode.changeGameModeForPlayer(GameType.CREATIVE);
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
+            require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUUID(), feature)
                             .filter("mining_provenance_non_survival_mode"::equals).isPresent(),
                     "non-survival tick did not fail with typed provenance reason");
-            require(context, !MiningEvidenceAudit.hasSession(bot.getUuid()),
+            require(context, !MiningEvidenceAudit.hasSession(bot.getUUID()),
                     "terminal mode violation leaked provenance audit state");
         } finally {
-            bot.interactionManager.changeGameMode(GameMode.SURVIVAL);
+            bot.gameMode.changeGameModeForPlayer(GameType.SURVIVAL);
             cleanupBot(context, bot, "VerifyModeFastGT");
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void fromZeroMiningAllowedPrivilegeFailsInOneVerifierPollAndClearsAudit(TestContext context) {
+    public void fromZeroMiningAllowedPrivilegeFailsInOneVerifierPollAndClearsAudit(GameTestHelper context) {
         AIPlayerEntity bot = spawnBot(context, "VerifyPrivilegeFastGT");
         try {
             String feature = "obsidian_half_stack_32_from_zero";
             require(context, MinecraftAiVerifySubcommand.startForGameTest(
-                    bot.getEntityWorld().getServer().getCommandSource(), bot, feature), "verifier run did not start");
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
+                    bot.level().getServer().createCommandSourceStack(), bot, feature), "verifier run did not start");
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
             MiningEvidenceAudit.recordCapabilityDecision(bot, true);
-            MinecraftAiVerifySubcommand.tick(bot.getEntityWorld().getServer());
-            require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
+            MinecraftAiVerifySubcommand.tick(bot.level().getServer());
+            require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUUID(), feature)
                             .filter("mining_provenance_privileged_allowed"::equals).isPresent(),
                     "allowed privilege did not fail with typed provenance reason");
-            require(context, !MiningEvidenceAudit.hasSession(bot.getUuid()),
+            require(context, !MiningEvidenceAudit.hasSession(bot.getUUID()),
                     "terminal privilege violation leaked provenance audit state");
         } finally {
             cleanupBot(context, bot, "VerifyPrivilegeFastGT");
         }
-        context.complete();
+        context.succeed();
     }
 
-    private static void verifyFeature(TestContext context, AIPlayerEntity bot, String feature) {
-        var server = bot.getEntityWorld().getServer();
+    private static void verifyFeature(GameTestHelper context, AIPlayerEntity bot, String feature) {
+        var server = bot.level().getServer();
         require(context, MinecraftAiVerifySubcommand.startForGameTest(
-                server.getCommandSource(), bot, feature), feature + " verifier run did not start");
+                server.createCommandSourceStack(), bot, feature), feature + " verifier run did not start");
 
         // First poll starts the real from-zero scenario and installs its Result fail-fast hook.
         MinecraftAiVerifySubcommand.tick(server);
@@ -180,7 +179,7 @@ public final class MinecraftAiVerifyFailFastGameTests {
 
         // Mirror the runtime ordering: the death counter advances and the ordinary Mission is
         // suspended for recovery before the verifier sees the next server tick.
-        bot.increaseStat(Stats.CUSTOM.getOrCreateStat(Stats.DEATHS), 1);
+        bot.awardStat(Stats.CUSTOM.get(Stats.DEATHS), 1);
         RuntimeLifecycleCoordinator.INSTANCE.onBotDeath(bot);
         require(context, GoalExecutor.INSTANCE.hasActivePlan(bot),
                 feature + " ordinary death suspension disappeared before verifier polling");
@@ -188,7 +187,7 @@ public final class MinecraftAiVerifyFailFastGameTests {
         // One poll must terminate acceptance immediately; it must not wait for recovery/replanning
         // or for either scenario's long outer timeout (diamond is derived from its live plan).
         MinecraftAiVerifySubcommand.tick(server);
-        require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUuid(), feature)
+        require(context, MinecraftAiVerifySubcommand.resultDetailForGameTest(bot.getUUID(), feature)
                         .filter(ZERO_DEATH_VIOLATION::equals).isPresent(),
                 feature + " did not record typed zero_death_violation");
         require(context, !GoalExecutor.INSTANCE.hasActivePlan(bot),
@@ -202,40 +201,40 @@ public final class MinecraftAiVerifyFailFastGameTests {
 
         // The following poll only emits the summary and removes the completed verifier run.
         MinecraftAiVerifySubcommand.tick(server);
-        require(context, !MinecraftAiVerifySubcommand.hasRunForGameTest(bot.getUuid()),
+        require(context, !MinecraftAiVerifySubcommand.hasRunForGameTest(bot.getUUID()),
                 feature + " verifier run remained registered after failure");
     }
 
-    private static AIPlayerEntity spawnBot(TestContext context, String botName) {
-        var world = context.getWorld();
-        BlockPos spawn = context.getAbsolutePos(new BlockPos(1, 126, 1));
+    private static AIPlayerEntity spawnBot(GameTestHelper context, String botName) {
+        var world = context.getLevel();
+        BlockPos spawn = context.absolutePos(new BlockPos(1, 126, 1));
         prepareCell(world, spawn);
         return AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), botName, world, Vec3d.ofBottomCenter(spawn),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), botName, world, Vec3.atBottomCenterOf(spawn),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + botName));
     }
 
-    private static void cleanupBot(TestContext context, AIPlayerEntity bot, String botName) {
-        MinecraftAiVerifySubcommand.discardRunForGameTest(bot.getUuid());
+    private static void cleanupBot(GameTestHelper context, AIPlayerEntity bot, String botName) {
+        MinecraftAiVerifySubcommand.discardRunForGameTest(bot.getUUID());
         IntentController.INSTANCE.cancelAll(
                 bot, IntentController.ControlOrigin.SYSTEM, "verify_fail_fast_gametest_cleanup");
-        AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), botName);
+        AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), botName);
     }
 
-    private static void prepareCell(net.minecraft.server.world.ServerWorld world, BlockPos center) {
+    private static void prepareCell(net.minecraft.server.level.ServerLevel world, BlockPos center) {
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
-                world.setBlockState(center.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
-                world.setBlockState(center.add(dx, 0, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-                world.setBlockState(center.add(dx, 1, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+                world.setBlock(center.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
+                world.setBlock(center.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
+                world.setBlock(center.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
             }
         }
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

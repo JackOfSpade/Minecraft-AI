@@ -1,12 +1,13 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 class CoverageGridTest {
     private static BlockPos at(int x, int y, int z) {
@@ -99,7 +100,7 @@ class CoverageGridTest {
         for (int along = 0; along < length; along += CoverageGrid.VOXEL_SIZE) {
             for (int side = -halfWidth; side <= halfWidth; side += CoverageGrid.VOXEL_SIZE) {
                 for (int up = -yBand; up <= yBand; up++) {
-                    grid.mark(origin.add(side, up, -along));
+                    grid.mark(origin.offset(side, up, -along));
                 }
             }
         }
@@ -113,7 +114,7 @@ class CoverageGridTest {
         // Mark only the near half of a NORTH-facing corridor.
         for (int side = -6; side <= 6; side += CoverageGrid.VOXEL_SIZE) {
             for (int up = -2; up <= 2; up++) {
-                grid.mark(origin.add(side, up, 0));
+                grid.mark(origin.offset(side, up, 0));
             }
         }
         double fraction = grid.freshFraction(origin, Direction.NORTH, 32, 2, 6);

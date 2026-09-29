@@ -20,27 +20,25 @@ import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 /**
  * Service checkpoint between mining batches: remember the work face, unload by-products, replenish
@@ -115,7 +113,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         DONE
     }
 
-    private final Set<net.minecraft.block.Block> targetOres;
+    private final Set<net.minecraft.world.level.block.Block> targetOres;
     private final Set<Item> targetDrops;
     private final Item requiredPickaxe;
     private final ServiceCheckpoint restoredCheckpoint;
@@ -166,28 +164,28 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     private boolean missionDepotPlacementCommitted;
     private boolean missionDepotRetirementCompleted;
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres) {
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres) {
         this(targetOres, Map.of(), ServicePolicy.defaultOre(false), 0);
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint) {
         this(targetOres, checkpoint, ServicePolicy.defaultOre(false), 0);
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint,
                              boolean maintainTunnelingTools) {
         this(targetOres, checkpoint, ServicePolicy.defaultOre(maintainTunnelingTools), 0);
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint,
                              ServicePolicy expectedPolicy) {
         this(targetOres, checkpoint, expectedPolicy, 0);
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint,
                              ServicePolicy expectedPolicy,
                              int expectedServiceBoundary) {
@@ -196,7 +194,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 inferredServiceTarget(expectedPolicy, expectedServiceBoundary));
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint,
                              ServicePolicy expectedPolicy,
                              int expectedServiceBoundary,
@@ -206,7 +204,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 expectedMissionId, expectedTargetCount, null);
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint,
                              ServicePolicy expectedPolicy,
                              int expectedServiceBoundary,
@@ -217,7 +215,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 expectedMissionId, expectedTargetCount, expectedMiningCursor, java.util.List.of());
     }
 
-    public MiningServiceTask(Set<net.minecraft.block.Block> targetOres,
+    public MiningServiceTask(Set<net.minecraft.world.level.block.Block> targetOres,
                              Map<String, String> checkpoint,
                              ServicePolicy expectedPolicy,
                              int expectedServiceBoundary,
@@ -269,9 +267,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     || firstEntry == null || secondEntry == null) {
                 throw new IllegalArgumentException("invalid_disposal_geometry");
             }
-            workFace = workFace.toImmutable();
-            firstEntry = firstEntry.toImmutable();
-            secondEntry = secondEntry.toImmutable();
+            workFace = workFace.immutable();
+            firstEntry = firstEntry.immutable();
+            secondEntry = secondEntry.immutable();
             BlockPos expectedFirst = pocketAxis == Direction.Axis.X
                     ? workFace.west() : workFace.north();
             BlockPos expectedSecond = pocketAxis == Direction.Axis.X
@@ -418,8 +416,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         workFace = restoredCheckpoint != null
                 ? restoredCheckpoint.workFace()
                 : miningCursor != null
-                ? miningCursor.face().toImmutable()
-                : bot.getBlockPos().toImmutable();
+                ? miningCursor.face().immutable()
+                : bot.blockPosition().immutable();
         terminalFailureReceipt = restoredCheckpoint == null
                 ? "" : restoredCheckpoint.terminalFailure();
         // A settled receipt is result authority, not resumable service work. Restore only the
@@ -436,7 +434,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     restoredCheckpoint.missionDepotRetirementCompleted();
             phase = Phase.PREPARE;
             child = null;
-            lastProgressPos = bot.getBlockPos().toImmutable();
+            lastProgressPos = bot.blockPosition().immutable();
             lastProgressPhase = phase;
             pocketPhaseStartedBudget = restoredCheckpoint.pocketPhaseStartedBudget();
             note = "restored_terminal_failure";
@@ -456,7 +454,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             fail("mining_service_rare_descent_kit_cursor_missing_or_stale");
             return;
         }
-        BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace("mine_face", bot.getEntityWorld(), workFace);
+        BotMemoryStore.INSTANCE.of(bot.getUUID()).markPlace("mine_face", bot.level(), workFace);
         depot = restoredCheckpoint == null ? null : restoredCheckpoint.depot();
         if (depot == null) {
             depot = resolveDepot(bot);
@@ -527,7 +525,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         child = null;
         depotApproachIndex = 0;
-        lastProgressPos = bot.getBlockPos().toImmutable();
+        lastProgressPos = bot.blockPosition().immutable();
         lastProgressPhase = phase;
         pocketPhaseStartedBudget = restoredCheckpoint == null
                 ? totalBudget() : restoredCheckpoint.pocketPhaseStartedBudget();
@@ -597,10 +595,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private void observeProgress(AIPlayerEntity bot) {
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         if (lastProgressPos == null || !lastProgressPos.equals(current)
                 || lastProgressPhase != phase) {
-            lastProgressPos = current.toImmutable();
+            lastProgressPos = current.immutable();
             lastProgressPhase = phase;
             noteProgress();
         }
@@ -679,23 +677,23 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         Direction forward = cursorForward(miningCursor);
         Direction[] candidates = {
-                forward.rotateYClockwise(), forward.rotateYCounterclockwise()};
+                forward.getClockWise(), forward.getCounterClockWise()};
         String lastFailure = "no_observable_side";
         for (Direction direction : candidates) {
-            BlockPos candidate = workFace.offset(direction);
+            BlockPos candidate = workFace.relative(direction);
             String failure = missionDepotCandidateFailure(bot, candidate);
             if (failure != null) {
                 lastFailure = failure;
                 continue;
             }
             missionDepotDirection = direction;
-            depot = candidate.toImmutable();
+            depot = candidate.immutable();
             missionDepotDimension = currentDimension(bot);
             missionDepotClearIndex = 0;
             missionDepotPlacementCommitted = false;
             missionDepotRetirementCompleted = false;
             phase = Phase.OPEN_MISSION_DEPOT_ALCOVE;
-            note = "mission_depot_alcove_selected:" + direction.asString();
+            note = "mission_depot_alcove_selected:" + direction.getSerializedName();
             noteProgress();
             return true;
         }
@@ -704,8 +702,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private String missionDepotCandidateFailure(AIPlayerEntity bot, BlockPos candidate) {
-        var world = bot.getEntityWorld();
-        BlockPos support = candidate.down();
+        var world = bot.level();
+        BlockPos support = candidate.below();
         if (!ObservableWorldQuery.canObserveBlock(bot, support)) {
             return "support_unobservable";
         }
@@ -714,7 +712,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 || supportState.getCollisionShape(world, support).isEmpty()) {
             return "support_unsafe";
         }
-        for (BlockPos cell : new BlockPos[]{candidate, candidate.up()}) {
+        for (BlockPos cell : new BlockPos[]{candidate, candidate.above()}) {
             if (!ObservableWorldQuery.canObserveCell(bot, cell)
                     && !ObservableWorldQuery.canObserveBlock(bot, cell)) {
                 return "cell_unobservable";
@@ -724,9 +722,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 return "fluid_blocked";
             }
             if (OreScan.isOreBlock(cellState.getBlock())) {
-                return "ore_preserved:" + Registries.BLOCK.getId(cellState.getBlock());
+                return "ore_preserved:" + BuiltInRegistries.BLOCK.getKey(cellState.getBlock());
             }
-            if (!cellState.isAir() && cellState.getHardness(world, cell) < 0.0F) {
+            if (!cellState.isAir() && cellState.getDestroySpeed(world, cell) < 0.0F) {
                 return "unbreakable:" + cell.toShortString();
             }
             if (world.getBlockEntity(cell) != null) {
@@ -767,7 +765,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         if (missionDepotClearIndex > 0
-                && !bot.getEntityWorld().getBlockState(depot).isAir()) {
+                && !bot.level().getBlockState(depot).isAir()) {
             fail("mining_service_mission_depot_geometry_changed:lower");
             return;
         }
@@ -781,14 +779,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             noteProgress();
             return;
         }
-        BlockPos target = missionDepotClearIndex == 0 ? depot : depot.up();
+        BlockPos target = missionDepotClearIndex == 0 ? depot : depot.above();
         if (!ObservableWorldQuery.canObserveCell(bot, target)
                 && !ObservableWorldQuery.canObserveBlock(bot, target)) {
             fail("mining_service_mission_depot_target_unobservable:"
                     + target.toShortString());
             return;
         }
-        BlockState targetState = bot.getEntityWorld().getBlockState(target);
+        BlockState targetState = bot.level().getBlockState(target);
         if (targetState.isAir()) {
             missionDepotClearIndex++;
             noteProgress();
@@ -796,7 +794,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         if (OreScan.isOreBlock(targetState.getBlock())) {
             fail("mining_service_mission_depot_ore_preserved:"
-                    + Registries.BLOCK.getId(targetState.getBlock()));
+                    + BuiltInRegistries.BLOCK.getKey(targetState.getBlock()));
             return;
         }
         if (!targetState.getFluidState().isEmpty()) {
@@ -804,8 +802,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     + target.toShortString());
             return;
         }
-        if (targetState.getHardness(bot.getEntityWorld(), target) < 0.0F
-                || bot.getEntityWorld().getBlockEntity(target) != null) {
+        if (targetState.getDestroySpeed(bot.level(), target) < 0.0F
+                || bot.level().getBlockEntity(target) != null) {
             fail("mining_service_mission_depot_target_unmineable:"
                     + target.toShortString());
             return;
@@ -877,8 +875,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             fail("mining_service_mission_depot_committed_chest_missing");
             return;
         }
-        var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
-        Optional<BlockPos> remembered = memory.placeIn(bot.getEntityWorld(), "mining_depot");
+        var memory = BotMemoryStore.INSTANCE.of(bot.getUUID());
+        Optional<BlockPos> remembered = memory.placeIn(bot.level(), "mining_depot");
         Optional<String> owner = memory.recall("mining_depot_owner");
         // A same-mission owner fact is a position binding, not a reusable label. Accept an
         // owner-less remembered position as the legitimate markPlace->remember crash window, and
@@ -892,7 +890,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             fail("mining_service_mission_depot_owner_mismatch");
             return;
         }
-        memory.markPlace("mining_depot", bot.getEntityWorld(), depot);
+        memory.markPlace("mining_depot", bot.level(), depot);
         memory.remember("mining_depot_owner", serviceMissionId);
         if (!liveExactMissionDepot(bot)) {
             fail("mining_service_mission_depot_verify_failed");
@@ -904,29 +902,29 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         BotLog.action(bot, "mining_service_mission_depot_verified",
                 "mission", serviceMissionId,
                 "depot", depot.toShortString(),
-                "direction", missionDepotDirection.asString());
+                "direction", missionDepotDirection.getSerializedName());
     }
 
     private boolean validateOpenMissionDepotAlcove(AIPlayerEntity bot) {
         if (!validMissionDepotIdentity()) {
             return false;
         }
-        var world = bot.getEntityWorld();
-        for (BlockPos cell : new BlockPos[]{depot, depot.up()}) {
+        var world = bot.level();
+        for (BlockPos cell : new BlockPos[]{depot, depot.above()}) {
             if (!ObservableWorldQuery.canObserveCell(bot, cell)
                     || !world.getBlockState(cell).isAir()
                     || !world.getBlockState(cell).getFluidState().isEmpty()) {
                 return false;
             }
         }
-        BlockPos support = depot.down();
+        BlockPos support = depot.below();
         return ObservableWorldQuery.canObserveBlock(bot, support)
                 && world.getBlockState(support).getFluidState().isEmpty()
                 && !world.getBlockState(support).getCollisionShape(world, support).isEmpty();
     }
 
     private boolean ensureAtMissionDepotWorkFace(AIPlayerEntity bot) {
-        if (workFace != null && bot.getBlockPos().equals(workFace)) {
+        if (workFace != null && bot.blockPosition().equals(workFace)) {
             bot.getActionPack().stopAll();
             return true;
         }
@@ -952,9 +950,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return false;
         }
         Direction forward = cursorForward(miningCursor);
-        return (missionDepotDirection == forward.rotateYClockwise()
-                || missionDepotDirection == forward.rotateYCounterclockwise())
-                && depot.equals(workFace.offset(missionDepotDirection));
+        return (missionDepotDirection == forward.getClockWise()
+                || missionDepotDirection == forward.getCounterClockWise())
+                && depot.equals(workFace.relative(missionDepotDirection));
     }
 
     private static boolean isMissionDepotPhase(Phase candidate) {
@@ -981,9 +979,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             fail("mining_service_disposal_cursor_missing_or_stale");
             return;
         }
-        if (!bot.getBlockPos().equals(workFace)) {
+        if (!bot.blockPosition().equals(workFace)) {
             fail("mining_service_disposal_not_at_cursor_face:at="
-                    + bot.getBlockPos().toShortString() + ":face=" + workFace.toShortString());
+                    + bot.blockPosition().toShortString() + ":face=" + workFace.toShortString());
             return;
         }
         DisposalGeometry candidateGeometry = DisposalGeometry.fromCursor(miningCursor)
@@ -1005,7 +1003,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         // correctly remains fail-closed and must be sealed as unresolved geometry debt.
         if (!ensureCenteredAtWorkFace(bot)) {
             fail("mining_service_disposal_center_failed:at="
-                    + bot.getBlockPos().toShortString() + ":face=" + workFace.toShortString());
+                    + bot.blockPosition().toShortString() + ":face=" + workFace.toShortString());
             return;
         }
         int sealable = availableDisposableSealBlocks(bot);
@@ -1015,17 +1013,17 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         Direction forward = cursorForward(miningCursor);
-        Direction[] candidates = {forward.rotateYClockwise(), forward.rotateYCounterclockwise()};
+        Direction[] candidates = {forward.getClockWise(), forward.getCounterClockWise()};
         Direction selected = null;
         for (Direction candidate : candidates) {
             if (candidate == rejectedDirection) {
                 continue;
             }
-            BlockPos entry = workFace.offset(candidate);
-            BlockPos sink = workFace.offset(candidate, 2);
+            BlockPos entry = workFace.relative(candidate);
+            BlockPos sink = workFace.relative(candidate, 2);
             if (candidate == missionDepotDirection
-                    || depot != null && (entry.equals(depot) || entry.up().equals(depot)
-                    || sink.equals(depot) || sink.up().equals(depot))) {
+                    || depot != null && (entry.equals(depot) || entry.above().equals(depot)
+                    || sink.equals(depot) || sink.above().equals(depot))) {
                 continue;
             }
             if (observablePocketMouth(bot, entry)) {
@@ -1036,15 +1034,15 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (selected == null) {
             fail(rejectedDirection != null
                     ? "mining_service_disposal_no_alternate_after_ore:"
-                    + rejectedDirection.asString()
+                    + rejectedDirection.getSerializedName()
                     : isRareDescentKit()
                     ? "mining_service_rare_descent_kit_disposal_conflicts_with_depot"
                     : "mining_service_disposal_pocket_unobservable");
             return;
         }
         pocketDirection = selected;
-        pocketEntry = workFace.offset(selected);
-        pocketSink = workFace.offset(selected, 2);
+        pocketEntry = workFace.relative(selected);
+        pocketSink = workFace.relative(selected, 2);
         pocketEntityIds.clear();
         pocketLineage.clear();
         pocketDropLedger.clear();
@@ -1053,7 +1051,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         pocketClearIndex = 0;
         pocketLedgerVerified = false;
         enterPocketPhase(Phase.OPEN_DISPOSAL_POCKET);
-        note = "opening_disposal_pocket:" + pocketDirection.asString();
+        note = "opening_disposal_pocket:" + pocketDirection.getSerializedName();
     }
 
     private void openDisposalPocket(AIPlayerEntity bot) {
@@ -1079,10 +1077,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         if (target != null) {
-            BlockState state = bot.getEntityWorld().getBlockState(target);
+            BlockState state = bot.level().getBlockState(target);
             if (OreScan.isOreBlock(state.getBlock())) {
                 String reason = POCKET_ORE_FAILURE_PREFIX
-                        + Registries.BLOCK.getId(state.getBlock());
+                        + BuiltInRegistries.BLOCK.getKey(state.getBlock());
                 if (isPocketOreRetryMarker()) {
                     sealPocketThenFail(reason);
                 } else {
@@ -1090,8 +1088,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 }
                 return;
             }
-            if (!state.getFluidState().isEmpty() || state.getHardness(
-                    bot.getEntityWorld(), target) < 0.0F) {
+            if (!state.getFluidState().isEmpty() || state.getDestroySpeed(
+                    bot.level(), target) < 0.0F) {
                 sealPocketThenFail("mining_service_disposal_target_unmineable:"
                         + target.toShortString());
                 return;
@@ -1120,7 +1118,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         if (isPocketOreRetryMarker()) {
             BotLog.action(bot, "mining_service_disposal_alternate_open",
-                    "direction", pocketDirection.asString(),
+                    "direction", pocketDirection.getSerializedName(),
                     "entry", pocketEntry.toShortString(),
                     "sink", pocketSink.toShortString());
             pocketTerminalFailure = "";
@@ -1143,12 +1141,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (openingSpoil.isPresent()) {
             ItemEntity entity = openingSpoil.orElseThrow();
             pocketBaselineStableTicks = 0;
-            if (canAcceptEntireStack(bot, entity.getStack())) {
+            if (canAcceptEntireStack(bot, entity.getItem())) {
                 collectOpeningSpoil(bot, entity);
                 return;
             }
             DisposalCandidate candidate = disposableCandidate(
-                    bot, 2, entity.getStack().getItem());
+                    bot, 2, entity.getItem().getItem());
             if (candidate == null) {
                 candidate = disposableCandidate(bot, 2);
             }
@@ -1196,9 +1194,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 sealPocketThenFail("mining_service_disposal_baseline_identity_limit_exceeded");
                 return;
             }
-            pocketEntityIds.add(entity.getUuid());
-            pocketLineage.put(entity.getUuid(), new PocketLineage(
-                    entity.getStack().getItem(), entity.getStack().getCount(), false));
+            pocketEntityIds.add(entity.getUUID());
+            pocketLineage.put(entity.getUUID(), new PocketLineage(
+                    entity.getItem().getItem(), entity.getItem().getCount(), false));
         }
         pocketPresealStableTicks = 0;
         enterPocketPhase(Phase.DROP_DISPOSABLE);
@@ -1215,7 +1213,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         Optional<ItemEntity> openingSpoil = nearestUntrackedOpeningSpoil(bot);
         if (openingSpoil.isPresent()
-                && canAcceptEntireStack(bot, openingSpoil.orElseThrow().getStack())) {
+                && canAcceptEntireStack(bot, openingSpoil.orElseThrow().getItem())) {
             collectOpeningSpoil(bot, openingSpoil.orElseThrow());
             return;
         }
@@ -1241,7 +1239,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             }
             return;
         }
-        LookAction.lookAt(bot, pocketSink.toCenterPos().add(0.0D, 0.25D, 0.0D));
+        LookAction.lookAt(bot, pocketSink.getCenter().add(0.0D, 0.25D, 0.0D));
         Optional<ItemEntity> dropped = InventoryAction.dropSlotEntity(
                 bot, candidate.slot(), candidate.count());
         if (dropped.isEmpty()) {
@@ -1249,17 +1247,17 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return;
         }
         ItemEntity entity = dropped.orElseThrow();
-        ItemStack stack = entity.getStack();
-        if (!recordPocketLedgerDrop(stack, entity.getUuid())) {
+        ItemStack stack = entity.getItem();
+        if (!recordPocketLedgerDrop(stack, entity.getUUID())) {
             sealPocketThenFail("mining_service_disposal_ledger_limit_exceeded");
             return;
         }
         enterPocketPhase(Phase.SETTLE_DISPOSABLE);
-        note = "disposal_drop_in_flight:" + Registries.ITEM.getId(stack.getItem())
+        note = "disposal_drop_in_flight:" + BuiltInRegistries.ITEM.getKey(stack.getItem())
                 + ":" + stack.getCount();
         BotLog.action(bot, "mining_service_disposal_drop",
-                "entity", entity.getUuid(),
-                "item", Registries.ITEM.getId(stack.getItem()),
+                "entity", entity.getUUID(),
+                "item", BuiltInRegistries.ITEM.getKey(stack.getItem()),
                 "count", stack.getCount(),
                 "sink", pocketSink.toShortString());
     }
@@ -1286,7 +1284,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         if (openingSpoil.isPresent()) {
             pocketPresealStableTicks = 0;
-            if (canAcceptEntireStack(bot, openingSpoil.orElseThrow().getStack())) {
+            if (canAcceptEntireStack(bot, openingSpoil.orElseThrow().getItem())) {
                 collectOpeningSpoil(bot, openingSpoil.orElseThrow());
             } else {
                 enterPocketPhase(Phase.DROP_DISPOSABLE);
@@ -1353,7 +1351,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             }
         }
         boolean lowerSealed = isSolidSeal(bot, pocketEntry);
-        boolean upperSealed = isSolidSeal(bot, pocketEntry.up());
+        boolean upperSealed = isSolidSeal(bot, pocketEntry.above());
         // A second preserved ore cell is a routing exhaustion, not an unresolved disposal ledger.
         // It may yield back to GoalExecutor only if the still-open mouth is observably empty before
         // both seals are placed atomically in this server tick.  A partial seal cannot re-attest the
@@ -1395,9 +1393,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         // can admit or return an item between the two physical placements.
         for (int placements = 0; placements < 2; placements++) {
             lowerSealed = isSolidSeal(bot, pocketEntry);
-            upperSealed = isSolidSeal(bot, pocketEntry.up());
+            upperSealed = isSolidSeal(bot, pocketEntry.above());
             BlockPos target = !lowerSealed ? pocketEntry
-                    : !upperSealed ? pocketEntry.up() : null;
+                    : !upperSealed ? pocketEntry.above() : null;
             if (target == null) {
                 break;
             }
@@ -1423,13 +1421,13 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             noteProgress();
         }
         lowerSealed = isSolidSeal(bot, pocketEntry);
-        upperSealed = isSolidSeal(bot, pocketEntry.up());
+        upperSealed = isSolidSeal(bot, pocketEntry.above());
         if (!lowerSealed || !upperSealed) {
             note = "waiting_for_disposal_double_seal";
             return;
         }
         disposalMiner.cancel(bot);
-        if (!bot.getBlockPos().equals(workFace)) {
+        if (!bot.blockPosition().equals(workFace)) {
             fail("mining_service_disposal_return_anchor_lost");
             return;
         }
@@ -1450,9 +1448,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             startDisposalPocket(bot, requiredWorkingFreeSlots(bot), rejected, marker);
             if (state == TaskState.RUNNING) {
                 BotLog.action(bot, "mining_service_disposal_ore_reroute",
-                        "rejected", rejected == null ? "unknown" : rejected.asString(),
+                        "rejected", rejected == null ? "unknown" : rejected.getSerializedName(),
                         "selected", pocketDirection == null
-                                ? "none" : pocketDirection.asString());
+                                ? "none" : pocketDirection.getSerializedName());
             }
             return;
         }
@@ -1500,7 +1498,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             note = "waiting_for_disposal_identity";
             return;
         }
-        if (bot.getBlockPos().equals(workFace)) {
+        if (bot.blockPosition().equals(workFace)) {
             bot.getActionPack().stopAll();
             Phase next = !pocketTerminalFailure.isBlank() || pocketLedgerVerified
                     ? Phase.SEAL_DISPOSAL_POCKET : Phase.SETTLE_DISPOSABLE;
@@ -1691,8 +1689,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return false;
         }
         Direction forward = cursorForward(cursor);
-        Direction clockwise = forward.rotateYClockwise();
-        Direction counterclockwise = forward.rotateYCounterclockwise();
+        Direction clockwise = forward.getClockWise();
+        Direction counterclockwise = forward.getCounterClockWise();
         if (phase == Phase.SEAL_DISPOSAL_POCKET
                 || phase == Phase.RETURN_TO_DISPOSAL_FACE) {
             return committed && rejected == direction;
@@ -1742,14 +1740,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 || pocketClearIndex < 0 || pocketClearIndex > 1) {
             return false;
         }
-        BlockPos barrier = pocketClearIndex == 0 ? pocketEntry : pocketEntry.up();
+        BlockPos barrier = pocketClearIndex == 0 ? pocketEntry : pocketEntry.above();
         if (!ObservableWorldQuery.canObserveBlock(bot, barrier)) {
             return false;
         }
-        net.minecraft.block.Block block = bot.getEntityWorld().getBlockState(barrier).getBlock();
+        net.minecraft.world.level.block.Block block = bot.level().getBlockState(barrier).getBlock();
         return OreScan.isOreBlock(block)
                 && pocketTerminalFailure.equals(
-                POCKET_ORE_FAILURE_PREFIX + Registries.BLOCK.getId(block));
+                POCKET_ORE_FAILURE_PREFIX + BuiltInRegistries.BLOCK.getKey(block));
     }
 
     private void rememberPocketTerminalFailure(String reason) {
@@ -1785,7 +1783,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         promotePocketTerminalFailure(reason);
         pocketDropCommitted = true;
         disposalMiner.cancel(bot);
-        if (bot.getBlockPos().equals(workFace)) {
+        if (bot.blockPosition().equals(workFace)) {
             if (phase != Phase.SEAL_DISPOSAL_POCKET) {
                 enterPocketPhase(Phase.SEAL_DISPOSAL_POCKET);
             }
@@ -1820,7 +1818,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private BlockPos nextPocketSolid(AIPlayerEntity bot) {
-        BlockPos[] cells = {pocketEntry, pocketEntry.up(), pocketSink, pocketSink.up()};
+        BlockPos[] cells = {pocketEntry, pocketEntry.above(), pocketSink, pocketSink.above()};
         if (pocketClearIndex >= cells.length) {
             return null;
         }
@@ -1830,7 +1828,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             fail("mining_service_disposal_target_unobservable:" + cell.toShortString());
             return null;
         }
-        BlockState state = bot.getEntityWorld().getBlockState(cell);
+        BlockState state = bot.level().getBlockState(cell);
         if (state.isAir()) {
             pocketClearIndex++;
             noteProgress();
@@ -1843,8 +1841,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (!validPocketIdentity()) {
             return false;
         }
-        var world = bot.getEntityWorld();
-        BlockPos[] open = {pocketEntry, pocketEntry.up(), pocketSink, pocketSink.up()};
+        var world = bot.level();
+        BlockPos[] open = {pocketEntry, pocketEntry.above(), pocketSink, pocketSink.above()};
         for (BlockPos cell : open) {
             if (!ObservableWorldQuery.canObserveCell(bot, cell)) {
                 return false;
@@ -1855,8 +1853,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 return false;
             }
         }
-        BlockPos[] supports = {pocketEntry.down(), pocketSink.down(),
-                pocketSink.offset(pocketDirection), pocketSink.offset(pocketDirection).up()};
+        BlockPos[] supports = {pocketEntry.below(), pocketSink.below(),
+                pocketSink.relative(pocketDirection), pocketSink.relative(pocketDirection).above()};
         for (BlockPos support : supports) {
             if (!ObservableWorldQuery.canObserveBlock(bot, support)) {
                 return false;
@@ -1874,12 +1872,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private static boolean hasObservedPlacementSupport(AIPlayerEntity bot, BlockPos target) {
         for (Direction direction : Direction.values()) {
-            BlockPos support = target.offset(direction);
+            BlockPos support = target.relative(direction);
             if (!ObservableWorldQuery.canObserveBlock(bot, support)) {
                 continue;
             }
-            BlockState state = bot.getEntityWorld().getBlockState(support);
-            if (!state.getCollisionShape(bot.getEntityWorld(), support).isEmpty()) {
+            BlockState state = bot.level().getBlockState(support);
+            if (!state.getCollisionShape(bot.level(), support).isEmpty()) {
                 return true;
             }
         }
@@ -1887,7 +1885,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private boolean ensureAtWorkFace(AIPlayerEntity bot) {
-        if (bot.getBlockPos().equals(workFace)) {
+        if (bot.blockPosition().equals(workFace)) {
             return true;
         }
         if (isPrebaselineCaptureDebt()) {
@@ -1907,7 +1905,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 }
             }
             note = "returning_prebaseline_capture_to_face:at="
-                    + bot.getBlockPos().toShortString();
+                    + bot.blockPosition().toShortString();
             return false;
         }
         if (hasCommittedDisposalDebt()) {
@@ -1915,16 +1913,16 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             if (pocketDropLedger.isEmpty()) {
                 promotePocketTerminalFailure(
                         "mining_service_disposal_geometry_anchor_changed:phase=" + phase
-                                + ":at=" + bot.getBlockPos().toShortString());
+                                + ":at=" + bot.blockPosition().toShortString());
                 pocketDropCommitted = true;
             }
             if (phase != Phase.RETURN_TO_DISPOSAL_FACE) {
                 enterPocketPhase(Phase.RETURN_TO_DISPOSAL_FACE);
             }
-            note = "returning_to_disposal_face:at=" + bot.getBlockPos().toShortString();
+            note = "returning_to_disposal_face:at=" + bot.blockPosition().toShortString();
             return false;
         }
-        fail("mining_service_disposal_anchor_changed:at=" + bot.getBlockPos().toShortString());
+        fail("mining_service_disposal_anchor_changed:at=" + bot.blockPosition().toShortString());
         return false;
     }
 
@@ -1941,11 +1939,11 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         Direction forward = cursorForward(miningCursor);
         return miningCursor.face().equals(workFace)
-                && (pocketDirection == forward.rotateYClockwise()
-                || pocketDirection == forward.rotateYCounterclockwise())
+                && (pocketDirection == forward.getClockWise()
+                || pocketDirection == forward.getCounterClockWise())
                 && pocketEntry != null && pocketSink != null
-                && pocketEntry.equals(workFace.offset(pocketDirection))
-                && pocketSink.equals(workFace.offset(pocketDirection, 2));
+                && pocketEntry.equals(workFace.relative(pocketDirection))
+                && pocketSink.equals(workFace.relative(pocketDirection, 2));
     }
 
     private static Direction cursorForward(MiningCursor cursor) {
@@ -1968,8 +1966,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     private static boolean observablePocketMouth(AIPlayerEntity bot, BlockPos entry) {
         return (ObservableWorldQuery.canObserveCell(bot, entry)
                 || ObservableWorldQuery.canObserveBlock(bot, entry))
-                && (ObservableWorldQuery.canObserveCell(bot, entry.up())
-                || ObservableWorldQuery.canObserveBlock(bot, entry.up()));
+                && (ObservableWorldQuery.canObserveCell(bot, entry.above())
+                || ObservableWorldQuery.canObserveBlock(bot, entry.above()));
     }
 
     private boolean recordPocketLedgerDrop(ItemStack stack, UUID entityId) {
@@ -2050,7 +2048,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     private Map<Item, Long> sinkItemCounts(AIPlayerEntity bot) {
         Map<Item, Long> counts = new java.util.LinkedHashMap<>();
         for (ItemEntity entity : observableSinkItems(bot)) {
-            ItemStack stack = entity.getStack();
+            ItemStack stack = entity.getItem();
             if (!stack.isEmpty()) {
                 counts.merge(stack.getItem(), (long) stack.getCount(),
                         MiningServiceTask::saturatedPositiveAdd);
@@ -2063,14 +2061,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (pocketSink == null) {
             return java.util.List.of();
         }
-        Box sink = pocketSinkBox();
+        AABB sink = pocketSinkBox();
         // Keep a small query margin so entities touching the cell boundary are still considered by
         // the spatial index, but never let that observational tolerance redefine physical custody.
-        Box query = sink.expand(0.01D);
-        return bot.getEntityWorld().getEntitiesByClass(
+        AABB query = sink.inflate(0.01D);
+        return bot.level().getEntitiesOfClass(
                 ItemEntity.class, query,
                 entity -> entity.isAlive()
-                        && !entity.getStack().isEmpty()
+                        && !entity.getItem().isEmpty()
                         && fullyContains(sink, entity.getBoundingBox())
                         && ObservableWorldQuery.canObserveEntity(bot, entity));
     }
@@ -2087,7 +2085,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
      */
     private Optional<ItemEntity> nearestUntrackedOpeningSpoil(AIPlayerEntity bot) {
         return observableOpeningSpoil(bot).stream()
-                .filter(entity -> !pocketEntityIds.contains(entity.getUuid()))
+                .filter(entity -> !pocketEntityIds.contains(entity.getUUID()))
                 .min(java.util.Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
     }
 
@@ -2103,19 +2101,19 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         int minZ = Math.min(workFace.getZ(), pocketEntry.getZ());
         int maxX = Math.max(workFace.getX(), pocketEntry.getX()) + 1;
         int maxZ = Math.max(workFace.getZ(), pocketEntry.getZ()) + 1;
-        var corridor = new Box(
+        var corridor = new AABB(
                 minX, workFace.getY(), minZ,
-                maxX, workFace.getY() + 2.0D, maxZ).expand(0.35D);
+                maxX, workFace.getY() + 2.0D, maxZ).inflate(0.35D);
         // Server-side vanilla pickup checks extend beyond the exact block corridor.  Union that
         // factual envelope so an opening drop just behind or beside the centered player cannot be
         // invisible to the pre-seal capacity transaction and then occupy a promised slot later.
-        var pickup = bot.getBoundingBox().expand(1.0D, 0.5D, 1.0D);
-        var mouth = corridor.union(pickup);
+        var pickup = bot.getBoundingBox().inflate(1.0D, 0.5D, 1.0D);
+        var mouth = corridor.minmax(pickup);
         var sink = pocketSink == null ? null : pocketSinkBox();
-        return bot.getEntityWorld().getEntitiesByClass(
+        return bot.level().getEntitiesOfClass(
                 ItemEntity.class, mouth,
                 entity -> entity.isAlive()
-                        && !entity.getStack().isEmpty()
+                        && !entity.getItem().isEmpty()
                         && (sink == null || !fullyContains(sink, entity.getBoundingBox()))
                         && ObservableWorldQuery.canObserveEntity(bot, entity));
     }
@@ -2127,7 +2125,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (phase != Phase.SEAL_DISPOSAL_POCKET || !pocketLedgerVerified
                 || pocketDropLedger.isEmpty() || pocketEntityIds.isEmpty()
                 || observableOpeningSpoil(bot).stream()
-                .noneMatch(entity -> pocketEntityIds.contains(entity.getUuid()))) {
+                .noneMatch(entity -> pocketEntityIds.contains(entity.getUUID()))) {
             return false;
         }
         String reason = "mining_service_disposal_tracked_entity_escaped";
@@ -2150,9 +2148,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (!pocketDropLedger.isEmpty() || pocketEntityIds.isEmpty() || pocketSink == null) {
             return true;
         }
-        Box sink = pocketSinkBox();
+        AABB sink = pocketSinkBox();
         for (UUID uuid : pocketEntityIds) {
-            var entity = bot.getEntityWorld().getEntity(uuid);
+            var entity = bot.level().getEntity(uuid);
             if (entity instanceof ItemEntity item && item.isAlive()
                     && !fullyContains(sink, item.getBoundingBox())) {
                 return false;
@@ -2161,14 +2159,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         return true;
     }
 
-    private Box pocketSinkBox() {
-        return new Box(
+    private AABB pocketSinkBox() {
+        return new AABB(
                 pocketSink.getX(), pocketSink.getY(), pocketSink.getZ(),
                 pocketSink.getX() + 1.0D, pocketSink.getY() + 2.0D,
                 pocketSink.getZ() + 1.0D);
     }
 
-    private static boolean fullyContains(Box outer, Box inner) {
+    private static boolean fullyContains(AABB outer, AABB inner) {
         return inner.minX >= outer.minX && inner.maxX <= outer.maxX
                 && inner.minY >= outer.minY && inner.maxY <= outer.maxY
                 && inner.minZ >= outer.minZ && inner.maxZ <= outer.maxZ;
@@ -2176,9 +2174,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private void collectOpeningSpoil(AIPlayerEntity bot, ItemEntity entity) {
         FakePlayerMotion.nudgeWithinBlockToward(
-                bot, workFace, entity.getEntityPos(), 0.45D, "disposal_opening_spoil");
+                bot, workFace, entity.position(), 0.45D, "disposal_opening_spoil");
         note = "collecting_disposal_opening_spoil:"
-                + Registries.ITEM.getId(entity.getStack().getItem());
+                + BuiltInRegistries.ITEM.getKey(entity.getItem().getItem());
         if (pocketPhaseAge() > POCKET_SETTLE_LIMIT) {
             sealPocketThenFail("mining_service_disposal_opening_spoil_timeout");
         }
@@ -2190,8 +2188,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         double dx = bot.getX() - centerX;
         double dz = bot.getZ() - centerZ;
         if (dx * dx + dz * dz <= 1.0E-6D
-                && bot.getVelocity().lengthSquared() <= 1.0E-8D
-                && bot.isOnGround()) {
+                && bot.getDeltaMovement().lengthSqr() <= 1.0E-8D
+                && bot.onGround()) {
             return true;
         }
         return FakePlayerMotion.returnToBlockCenter(
@@ -2206,23 +2204,23 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
      * entity while baseline capture is still in progress.
      */
     private boolean dropPrebaselineDisposable(AIPlayerEntity bot, DisposalCandidate candidate) {
-        LookAction.lookAt(bot, pocketSink.toCenterPos().add(0.0D, 0.25D, 0.0D));
+        LookAction.lookAt(bot, pocketSink.getCenter().add(0.0D, 0.25D, 0.0D));
         Optional<ItemEntity> dropped = InventoryAction.dropSlotEntity(
                 bot, candidate.slot(), candidate.count());
         if (dropped.isEmpty()) {
             return false;
         }
         ItemEntity entity = dropped.orElseThrow();
-        pocketEntityIds.add(entity.getUuid());
+        pocketEntityIds.add(entity.getUUID());
         pocketDropCommitted = true;
         noteProgress();
         note = "disposal_prebaseline_drop_in_flight:"
-                + Registries.ITEM.getId(entity.getStack().getItem())
-                + ":" + entity.getStack().getCount();
+                + BuiltInRegistries.ITEM.getKey(entity.getItem().getItem())
+                + ":" + entity.getItem().getCount();
         BotLog.action(bot, "mining_service_disposal_prebaseline_drop",
-                "entity", entity.getUuid(),
-                "item", Registries.ITEM.getId(entity.getStack().getItem()),
-                "count", entity.getStack().getCount(),
+                "entity", entity.getUUID(),
+                "item", BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()),
+                "count", entity.getItem().getCount(),
                 "sink", pocketSink.toShortString());
         return true;
     }
@@ -2232,11 +2230,11 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return true;
         }
         int capacity = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
-                capacity += incoming.getMaxCount();
-            } else if (ItemStack.areItemsAndComponentsEqual(stack, incoming)) {
-                capacity += Math.max(0, stack.getMaxCount() - stack.getCount());
+                capacity += incoming.getMaxStackSize();
+            } else if (ItemStack.isSameItemSameComponents(stack, incoming)) {
+                capacity += Math.max(0, stack.getMaxStackSize() - stack.getCount());
             }
             if (capacity >= incoming.getCount()) {
                 return true;
@@ -2280,21 +2278,21 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (pocketSink == null || pocketEntityIds.isEmpty()) {
             return false;
         }
-        Box sink = pocketSinkBox();
+        AABB sink = pocketSinkBox();
         if (pocketLineage.isEmpty()) {
             // Legacy schema-6 checkpoints did not persist item/count roles. Keep their original
             // stricter rule: every UUID must remain live; only new lineage checkpoints can prove a
             // consumed vanilla-merge root safely.
             for (UUID uuid : pocketEntityIds) {
-                var entity = bot.getEntityWorld().getEntity(uuid);
+                var entity = bot.level().getEntity(uuid);
                 if (!(entity instanceof ItemEntity item) || !item.isAlive()
                         || !fullyContains(sink, item.getBoundingBox())
                         || !ObservableWorldQuery.canObserveEntity(bot, item)
-                        || item.getStack().isEmpty()) {
+                        || item.getItem().isEmpty()) {
                     tracked.clear();
                     return false;
                 }
-                tracked.merge(item.getStack().getItem(), (long) item.getStack().getCount(),
+                tracked.merge(item.getItem().getItem(), (long) item.getItem().getCount(),
                         MiningServiceTask::saturatedPositiveAdd);
             }
             for (Map.Entry<Item, Integer> entry : pocketDropLedger.entrySet()) {
@@ -2318,19 +2316,19 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             }
             committed.merge(lineage.item(), (long) lineage.count(),
                     MiningServiceTask::saturatedPositiveAdd);
-            var entity = bot.getEntityWorld().getEntity(uuid);
+            var entity = bot.level().getEntity(uuid);
             if (!(entity instanceof ItemEntity item) || !item.isAlive()
                     || !fullyContains(sink, item.getBoundingBox())
                     || !ObservableWorldQuery.canObserveEntity(bot, item)
-                    || item.getStack().isEmpty()
-                    || item.getStack().getItem() != lineage.item()) {
+                    || item.getItem().isEmpty()
+                    || item.getItem().getItem() != lineage.item()) {
                 if (!lineage.ledger()) {
                     missingBaseline.merge(lineage.item(), (long) lineage.count(),
                             MiningServiceTask::saturatedPositiveAdd);
                 }
                 continue;
             }
-            int currentCount = item.getStack().getCount();
+            int currentCount = item.getItem().getCount();
             tracked.merge(lineage.item(), (long) currentCount,
                     MiningServiceTask::saturatedPositiveAdd);
             if (lineage.ledger()) {
@@ -2395,7 +2393,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 pocketBaseline.put(item, rebased);
             }
             BotLog.action(bot, "mining_service_disposal_baseline_rebased",
-                    "item", Registries.ITEM.getId(item),
+                    "item", BuiltInRegistries.ITEM.getKey(item),
                     "from", recorded,
                     "to", rebased,
                     "observed", observed.getOrDefault(item, 0L),
@@ -2490,7 +2488,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             fail("mining_service_mission_depot_owner_mismatch");
             return;
         }
-        Inventory container = ContainerAction.resolve(bot, depot).orElse(null);
+        Container container = ContainerAction.resolve(bot, depot).orElse(null);
         if (container == null) {
             if (isRareDescentKit()) {
                 fail("mining_service_mission_depot_missing");
@@ -2514,9 +2512,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     emergencyBlocks - protectedStoneLikeForPendingCrafts(bot));
             if (surplus > 0) {
                 result = ContainerAction.depositOne(container, bot,
-                        stack -> stack.isOf(Items.COBBLESTONE)
-                                || stack.isOf(Items.COBBLED_DEEPSLATE)
-                                || stack.isOf(Items.BLACKSTONE),
+                        stack -> stack.is(Items.COBBLESTONE)
+                                || stack.is(Items.COBBLED_DEEPSLATE)
+                                || stack.is(Items.BLACKSTONE),
                         surplus);
                 if (isRareDescentKit() && result.movedAny()
                         && pendingChannelPickaxes(bot) > pendingBefore) {
@@ -2653,7 +2651,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                             + ":cause=" + childFailure);
                 } else {
                     fail("mining_service_target_tool_durability_depleted:item="
-                            + Registries.ITEM.getId(requiredPickaxe)
+                            + BuiltInRegistries.ITEM.getKey(requiredPickaxe)
                             + ":have=" + targetToolUsableDurability(bot)
                             + ":required=" + policy.targetToolUsableDurability()
                             + ":cause=" + childFailure);
@@ -2838,7 +2836,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private boolean withdrawFoodReserve(AIPlayerEntity bot, int missingUnits) {
-        Inventory container = accessibleDepot(bot);
+        Container container = accessibleDepot(bot);
         if (container == null || missingUnits <= 0) {
             return false;
         }
@@ -2882,7 +2880,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         if (targetToolUsableDurability(bot) < policy.targetToolUsableDurability()) {
             fail("mining_service_target_tool_durability_depleted:item="
-                    + Registries.ITEM.getId(requiredPickaxe));
+                    + BuiltInRegistries.ITEM.getKey(requiredPickaxe));
             return false;
         }
         int torches = InventoryAction.countItem(bot, Items.TORCH);
@@ -2962,7 +2960,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private boolean withdrawFromDepot(AIPlayerEntity bot, Item item, int count) {
-        Inventory container = accessibleDepot(bot);
+        Container container = accessibleDepot(bot);
         if (container == null) {
             return false;
         }
@@ -2970,7 +2968,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private int withdrawStoneLikeFromDepot(AIPlayerEntity bot, int count) {
-        Inventory container = accessibleDepot(bot);
+        Container container = accessibleDepot(bot);
         if (container == null || count <= 0) {
             return 0;
         }
@@ -2987,7 +2985,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         return moved;
     }
 
-    private Inventory accessibleDepot(AIPlayerEntity bot) {
+    private Container accessibleDepot(AIPlayerEntity bot) {
         if (depot == null || !canInteractWithDepot(bot, depot)) {
             return null;
         }
@@ -3051,7 +3049,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 || (isRareDescentKit() && miningCursor == null)) {
             return Map.of();
         }
-        BlockPos face = workFace == null ? BlockPos.ORIGIN : workFace;
+        BlockPos face = workFace == null ? BlockPos.ZERO : workFace;
         // Phase can transition to DONE one tick before AbstractTask publishes COMPLETED. Persist
         // that state as an already committed service boundary so the checkpoint decodes itself and
         // a restart cannot replay a zero-work completion with a non-zero hard budget.
@@ -3127,7 +3125,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         values.put("last_progress_budget", String.valueOf(
                 committed ? 0 : Math.min(lastProgressBudget, durableBudget)));
         values.put("ores", targetOres.stream()
-                .map(Registries.BLOCK::getId)
+                .map(BuiltInRegistries.BLOCK::getKey)
                 .map(Identifier::toString)
                 .sorted()
                 .collect(java.util.stream.Collectors.joining(",")));
@@ -3151,12 +3149,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return false;
         }
         int targetUsable = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (ToolTier.pickaxeTier(stack) >= ToolTier.IRON) {
                 targetUsable += usableDurability(stack);
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (ToolTier.pickaxeTier(offHandStack) >= ToolTier.IRON) {
             targetUsable += usableDurability(offHandStack);
         }
@@ -3168,12 +3166,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (bot == null || missionId == null || missionId.isBlank()) {
             return false;
         }
-        var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
+        var memory = BotMemoryStore.INSTANCE.of(bot.getUUID());
         if (!memory.recall("mining_depot_owner")
                 .filter(missionId::equals).isPresent()) {
             return false;
         }
-        Optional<BlockPos> place = memory.placeIn(bot.getEntityWorld(), "mining_depot");
+        Optional<BlockPos> place = memory.placeIn(bot.level(), "mining_depot");
         if (place.isEmpty()) {
             return false;
         }
@@ -3194,7 +3192,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                         checkpoint.miningCursor()));
     }
 
-    public record RestoreMetadata(Set<net.minecraft.block.Block> ores,
+    public record RestoreMetadata(Set<net.minecraft.world.level.block.Block> ores,
                                   boolean done,
                                   ServicePolicy policy,
                                   String serviceMissionId,
@@ -3211,11 +3209,11 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     ? STANDALONE_MISSION_ID : serviceMissionId;
             serviceDimension = serviceDimension == null ? "" : serviceDimension;
             terminalFailure = terminalFailure == null ? "" : terminalFailure;
-            workFace = workFace == null ? null : workFace.toImmutable();
+            workFace = workFace == null ? null : workFace.immutable();
         }
     }
 
-    private static Optional<Set<net.minecraft.block.Block>> decodeTargetOres(Map<String, String> values) {
+    private static Optional<Set<net.minecraft.world.level.block.Block>> decodeTargetOres(Map<String, String> values) {
         if (values == null) {
             return Optional.empty();
         }
@@ -3223,11 +3221,11 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (encoded == null || encoded.isBlank()) {
             return Optional.empty();
         }
-        Set<net.minecraft.block.Block> ores = new java.util.LinkedHashSet<>();
+        Set<net.minecraft.world.level.block.Block> ores = new java.util.LinkedHashSet<>();
         for (String id : encoded.split(",")) {
             try {
-                net.minecraft.block.Block block = Registries.BLOCK
-                        .getOptionalValue(Identifier.of(id)).orElse(null);
+                net.minecraft.world.level.block.Block block = BuiltInRegistries.BLOCK
+                        .getOptional(Identifier.parse(id)).orElse(null);
                 if (block == null) {
                     return Optional.empty();
                 }
@@ -3245,36 +3243,36 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 || (isRareDescentKit()
                 ? isSafelyRetirableKitPickaxe(bot, stack)
                 : isUnusableCheapPickaxe(stack)))
-                && !stack.isOf(Items.TORCH)
-                && !stack.isOf(Items.STICK)
-                && !stack.isOf(Items.IRON_INGOT)
-                && !stack.isOf(Items.DIAMOND)
-                && !stack.isOf(Items.CRAFTING_TABLE)
-                && !stack.isOf(Items.BUCKET)
-                && !stack.isOf(Items.WATER_BUCKET)
-                && !stack.isOf(Items.COBBLESTONE)
-                && !stack.isOf(Items.COBBLED_DEEPSLATE)
-                && !stack.isOf(Items.BLACKSTONE)
-                && !stack.contains(DataComponentTypes.FOOD);
+                && !stack.is(Items.TORCH)
+                && !stack.is(Items.STICK)
+                && !stack.is(Items.IRON_INGOT)
+                && !stack.is(Items.DIAMOND)
+                && !stack.is(Items.CRAFTING_TABLE)
+                && !stack.is(Items.BUCKET)
+                && !stack.is(Items.WATER_BUCKET)
+                && !stack.is(Items.COBBLESTONE)
+                && !stack.is(Items.COBBLED_DEEPSLATE)
+                && !stack.is(Items.BLACKSTONE)
+                && !stack.has(DataComponents.FOOD);
     }
 
     private boolean hasSafelyRetirableKitPickaxe(AIPlayerEntity bot) {
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (isSafelyRetirableKitPickaxe(bot, stack)) {
                 return true;
             }
         }
-        return isSafelyRetirableKitPickaxe(bot, bot.getEquippedStack(EquipmentSlot.OFFHAND));
+        return isSafelyRetirableKitPickaxe(bot, bot.getItemBySlot(EquipmentSlot.OFFHAND));
     }
 
     private boolean isSafelyRetirableKitPickaxe(AIPlayerEntity bot, ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return false;
         }
-        if (stack.isOf(Items.WOODEN_PICKAXE)) {
+        if (stack.is(Items.WOODEN_PICKAXE)) {
             return true;
         }
-        if (!stack.isOf(Items.STONE_PICKAXE)) {
+        if (!stack.is(Items.STONE_PICKAXE)) {
             return false;
         }
         int pendingBefore = pendingChannelPickaxes(bot);
@@ -3289,7 +3287,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private static int freeMainSlots(AIPlayerEntity bot) {
         int free = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 free++;
             }
@@ -3339,7 +3337,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         int missingStoneLike = Math.max(0,
                 stoneLikeRefillTarget(bot) - stoneLikeCount(bot));
         supplySlots += divideRoundUp(missingStoneLike,
-                new ItemStack(Items.COBBLESTONE).getMaxCount());
+                new ItemStack(Items.COBBLESTONE).getMaxStackSize());
         if (policy.craftingTableRequired() && !hasCraftingTableAccess(bot)) {
             supplySlots++;
         }
@@ -3347,7 +3345,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 && InventoryAction.countItem(bot, Items.WATER_BUCKET) < 1) {
             supplySlots++;
         }
-        return Math.min(bot.getInventory().getMainStacks().size(),
+        return Math.min(bot.getInventory().getNonEquipmentItems().size(),
                 policy.freeSlotsMin() + outputSlots + supplySlots);
     }
 
@@ -3357,10 +3355,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return 0;
         }
         int mergeCapacity = 0;
-        int maxCount = Math.max(1, new ItemStack(item).getMaxCount());
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
-            if (stack.isOf(item)) {
-                mergeCapacity += Math.max(0, stack.getMaxCount() - stack.getCount());
+        int maxCount = Math.max(1, new ItemStack(item).getMaxStackSize());
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (stack.is(item)) {
+                mergeCapacity += Math.max(0, stack.getMaxStackSize() - stack.getCount());
             }
         }
         return divideRoundUp(Math.max(0, missing - mergeCapacity), maxCount);
@@ -3375,7 +3373,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         // The depot may contain only berries (two physical items per normalized unit). Reserve
         // the conservative peak without reading a remote container through unloaded geometry.
         return divideRoundUp(missingUnits * 2,
-                new ItemStack(Items.SWEET_BERRIES).getMaxCount());
+                new ItemStack(Items.SWEET_BERRIES).getMaxStackSize());
     }
 
     private static int divideRoundUp(int value, int divisor) {
@@ -3448,8 +3446,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                                                    boolean requireProjectedCapacityGain) {
         int requiredSeals = Math.max(0, sealsStillRequired);
         int projectedBefore = projectedFreeSlotsAfterSealing(bot);
-        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
+        for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = bot.getInventory().getNonEquipmentItems().get(slot);
             boolean disposablePick = isRareDescentKit()
                     ? isSafelyRetirableKitPickaxe(bot, stack)
                     : isUnusableCheapPickaxe(stack);
@@ -3463,8 +3461,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         int protectedStone = protectedStoneLikeForPendingCrafts(bot);
         int stoneLike = stoneLikeCount(bot);
         DisposalCandidate partialFallback = null;
-        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
+        for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = bot.getInventory().getNonEquipmentItems().get(slot);
             if (stack.isEmpty() || targetDrops.contains(stack.getItem())
                     || excludedItems.contains(stack.getItem())
                     || !isDisposableJunk(stack.getItem())) {
@@ -3514,7 +3512,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private int availableDisposableSealBlocks(AIPlayerEntity bot) {
         int nonStone = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty() && isDisposalSealItem(stack.getItem())
                     && !isStoneLikeItem(stack.getItem())) {
                 nonStone += stack.getCount();
@@ -3524,7 +3522,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         // reservation and the post-seal projection must therefore use that same physical domain;
         // otherwise a valid offhand seal is ignored and a whole disposable main stack is reduced
         // to a non-slot-releasing partial drop.
-        ItemStack offHandSealStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandSealStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (!offHandSealStack.isEmpty() && isDisposalSealItem(offHandSealStack.getItem())
                 && !isStoneLikeItem(offHandSealStack.getItem())) {
             nonStone += offHandSealStack.getCount();
@@ -3535,8 +3533,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
     private int sealBlockSlot(AIPlayerEntity bot) {
         SealSource source = selectSealSource(
-                bot.getInventory().getMainStacks(),
-                java.util.List.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)),
+                bot.getInventory().getNonEquipmentItems(),
+                java.util.List.of(bot.getItemBySlot(EquipmentSlot.OFFHAND)),
                 protectedStoneLikeForPendingCrafts(bot));
         if (source == null) {
             return -1;
@@ -3555,10 +3553,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         int originalFreeSlots = freeMainSlots(bot);
         java.util.List<ItemStack> projectedMain = new java.util.ArrayList<>();
         java.util.List<ItemStack> projectedOffhand = new java.util.ArrayList<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             projectedMain.add(stack.copy());
         }
-        projectedOffhand.add(bot.getEquippedStack(EquipmentSlot.OFFHAND).copy());
+        projectedOffhand.add(bot.getItemBySlot(EquipmentSlot.OFFHAND).copy());
         if (hypotheticalDrop != null) {
             int slot = hypotheticalDrop.slot();
             if (slot < 0 || slot >= projectedMain.size()
@@ -3566,7 +3564,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     || hypotheticalDrop.count() > projectedMain.get(slot).getCount()) {
                 return originalFreeSlots;
             }
-            projectedMain.get(slot).decrement(hypotheticalDrop.count());
+            projectedMain.get(slot).shrink(hypotheticalDrop.count());
         }
 
         int selectedSlot = bot.getInventory().getSelectedSlot();
@@ -3607,7 +3605,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 projectedMain.set(sourceSlot, displaced);
                 selectedSlot = hotbarSlot;
             }
-            projectedMain.get(selectedSlot).decrement(1);
+            projectedMain.get(selectedSlot).shrink(1);
         }
         return (int) projectedMain.stream().filter(ItemStack::isEmpty).count();
     }
@@ -3626,12 +3624,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 continue;
             }
             for (int slot = 0; slot < main.size(); slot++) {
-                if (main.get(slot).isOf(candidate)) {
+                if (main.get(slot).is(candidate)) {
                     return new SealSource(false, slot);
                 }
             }
             for (int slot = 0; slot < offhand.size(); slot++) {
-                if (offhand.get(slot).isOf(candidate)) {
+                if (offhand.get(slot).is(candidate)) {
                     return new SealSource(true, slot);
                 }
             }
@@ -3717,14 +3715,14 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (pos == null || !ObservableWorldQuery.canObserveBlock(bot, pos)) {
             return false;
         }
-        BlockState state = bot.getEntityWorld().getBlockState(pos);
-        return !state.isReplaceable()
-                && !state.getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
+        BlockState state = bot.level().getBlockState(pos);
+        return !state.canBeReplaced()
+                && !state.getCollisionShape(bot.level(), pos).isEmpty();
     }
 
     private static boolean isUnusableCheapPickaxe(ItemStack stack) {
-        return (stack.isOf(Items.WOODEN_PICKAXE)
-                || stack.isOf(Items.STONE_PICKAXE))
+        return (stack.is(Items.WOODEN_PICKAXE)
+                || stack.is(Items.STONE_PICKAXE))
                 && usableDurability(stack) == 0;
     }
 
@@ -3732,20 +3730,20 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (stack == null || stack.isEmpty()) {
             return 0;
         }
-        return stack.isDamageable()
-                ? Math.max(0, stack.getMaxDamage() - stack.getDamage() - 1)
+        return stack.isDamageableItem()
+                ? Math.max(0, stack.getMaxDamage() - stack.getDamageValue() - 1)
                 : Math.max(0, stack.getCount());
     }
 
     private static int usableDurability(AIPlayerEntity bot, Item item) {
         int remaining = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
-            if (stack.isOf(item)) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (stack.is(item)) {
                 remaining += usableDurability(stack);
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
-        if (offHandStack.isOf(item)) {
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
+        if (offHandStack.is(item)) {
             remaining += usableDurability(offHandStack);
         }
         return remaining;
@@ -3757,12 +3755,12 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             return Integer.MAX_VALUE;
         }
         int usable = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (ToolTier.pickaxeTier(stack) >= requiredTier) {
                 usable += usableDurability(stack);
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (ToolTier.pickaxeTier(offHandStack) >= requiredTier) {
             usable += usableDurability(offHandStack);
         }
@@ -3783,9 +3781,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (policy.profile() == ServiceProfile.RARE_ORE_BATCH && owned != null) {
             return owned;
         }
-        return BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "depot", "home", "base", "chest")
-                .map(BlockPos::toImmutable)
+        return BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "depot", "home", "base", "chest")
+                .map(BlockPos::immutable)
                 .orElse(null);
     }
 
@@ -3794,13 +3792,13 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (bot == null || missionId == null || missionId.isBlank()) {
             return null;
         }
-        var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
+        var memory = BotMemoryStore.INSTANCE.of(bot.getUUID());
         if (memory.recall("mining_depot_owner")
                 .filter(missionId::equals).isEmpty()) {
             return null;
         }
-        return memory.placeIn(bot.getEntityWorld(), "mining_depot")
-                .map(BlockPos::toImmutable)
+        return memory.placeIn(bot.level(), "mining_depot")
+                .map(BlockPos::immutable)
                 .orElse(null);
     }
 
@@ -3811,8 +3809,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         Direction forward = cursorForward(miningCursor);
         for (Direction candidate : new Direction[]{
-                forward.rotateYClockwise(), forward.rotateYCounterclockwise()}) {
-            if (pos.equals(workFace.offset(candidate))) {
+                forward.getClockWise(), forward.getCounterClockWise()}) {
+            if (pos.equals(workFace.relative(candidate))) {
                 return candidate;
             }
         }
@@ -3824,9 +3822,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (bot == null || missionId == null || missionId.isBlank() || pos == null) {
             return false;
         }
-        var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
+        var memory = BotMemoryStore.INSTANCE.of(bot.getUUID());
         return memory.recall("mining_depot_owner").filter(missionId::equals).isPresent()
-                && memory.placeIn(bot.getEntityWorld(), "mining_depot")
+                && memory.placeIn(bot.level(), "mining_depot")
                 .filter(pos::equals).isPresent();
     }
 
@@ -3835,8 +3833,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         if (bot == null || missionId == null || pos == null) {
             return false;
         }
-        var memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
-        Optional<BlockPos> remembered = memory.placeIn(bot.getEntityWorld(), "mining_depot");
+        var memory = BotMemoryStore.INSTANCE.of(bot.getUUID());
+        Optional<BlockPos> remembered = memory.placeIn(bot.level(), "mining_depot");
         Optional<String> owner = memory.recall("mining_depot_owner");
         return remembered.filter(pos::equals).isPresent()
                 && owner.isPresent() && !missionId.equals(owner.orElseThrow());
@@ -3851,7 +3849,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         ActionResult lastFailure = ActionResult.failed("depot_unreachable");
         for (int offset = 0; offset < DEPOT_APPROACH_DIRECTIONS.length; offset++) {
             int index = (depotApproachIndex + offset) % DEPOT_APPROACH_DIRECTIONS.length;
-            BlockPos candidate = pos.offset(DEPOT_APPROACH_DIRECTIONS[index]);
+            BlockPos candidate = pos.relative(DEPOT_APPROACH_DIRECTIONS[index]);
             // A depot trip is inventory service, not terrain construction. Allowing the generic
             // path's pillar/dig fallback can choose a vertical shortcut beside an otherwise open
             // chest, consume the protected stone pool and oscillate above/below the interaction
@@ -3869,22 +3867,22 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
     }
 
     private static boolean canInteractWithDepot(AIPlayerEntity bot, BlockPos pos) {
-        return bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) <= REACH_SQUARED
+        return bot.getEyePosition().distanceToSqr(pos.getCenter()) <= REACH_SQUARED
                 && ObservableWorldQuery.canObserveCell(bot, pos);
     }
 
     private static boolean atWorkFace(AIPlayerEntity bot, BlockPos pos) {
-        return bot.getBlockPos().equals(pos);
+        return bot.blockPosition().equals(pos);
     }
 
     private static String currentDimension(AIPlayerEntity bot) {
-        return bot.getEntityWorld().getRegistryKey().getValue().toString();
+        return bot.level().dimension().identifier().toString();
     }
 
     private record ServiceCheckpoint(BlockPos workFace,
                                      BlockPos depot,
                                      Phase phase,
-                                     Set<net.minecraft.block.Block> ores,
+                                     Set<net.minecraft.world.level.block.Block> ores,
                                      ServicePolicy policy,
                                      String serviceMissionId,
                                      int serviceTargetCount,
@@ -3912,8 +3910,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                                      int pocketClearIndex,
                                      String terminalFailure) {
         private ServiceCheckpoint {
-            workFace = workFace.toImmutable();
-            depot = depot == null ? null : depot.toImmutable();
+            workFace = workFace.immutable();
+            depot = depot == null ? null : depot.immutable();
             phase = phase == null ? Phase.PREPARE : phase;
             ores = ores == null ? Set.of() : Set.copyOf(ores);
             policy = policy == null ? ServicePolicy.defaultOre(false) : policy;
@@ -3922,8 +3920,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
             serviceDimension = serviceDimension == null ? "" : serviceDimension;
             missionDepotDimension = missionDepotDimension == null
                     ? "" : missionDepotDimension;
-            pocketEntry = pocketEntry == null ? null : pocketEntry.toImmutable();
-            pocketSink = pocketSink == null ? null : pocketSink.toImmutable();
+            pocketEntry = pocketEntry == null ? null : pocketEntry.immutable();
+            pocketSink = pocketSink == null ? null : pocketSink.immutable();
             pocketEntityIds = pocketEntityIds == null ? Set.of() : Set.copyOf(pocketEntityIds);
             pocketLineage = pocketLineage == null ? Map.of() : Map.copyOf(pocketLineage);
             pocketBaseline = pocketBaseline == null ? Map.of() : Map.copyOf(pocketBaseline);
@@ -3934,7 +3932,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
 
         private static Optional<ServiceCheckpoint> decode(
                 Map<String, String> values,
-                Set<net.minecraft.block.Block> expectedOres,
+                Set<net.minecraft.world.level.block.Block> expectedOres,
                 ServicePolicy expectedPolicy,
                 Integer expectedServiceBoundary,
                 String expectedMissionId,
@@ -4026,7 +4024,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     }
                 }
                 Phase phase = Phase.valueOf(values.get("phase"));
-                Set<net.minecraft.block.Block> ores = decodeTargetOres(values).orElse(null);
+                Set<net.minecraft.world.level.block.Block> ores = decodeTargetOres(values).orElse(null);
                 if (ores == null) {
                     return Optional.empty();
                 }
@@ -4188,9 +4186,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                         Direction forward = cursorForward(cursor);
                         depotIdentity = depotIdentity && missionDepotDirection != null
                                 && missionDepotDirection.getAxis().isHorizontal()
-                                && (missionDepotDirection == forward.rotateYClockwise()
-                                || missionDepotDirection == forward.rotateYCounterclockwise())
-                                && depot.equals(face.offset(missionDepotDirection));
+                                && (missionDepotDirection == forward.getClockWise()
+                                || missionDepotDirection == forward.getCounterClockWise())
+                                && depot.equals(face.relative(missionDepotDirection));
                     } else {
                         depotIdentity = depotIdentity && missionDepotDirection == null
                                 && missionDepotClearIndex == 0
@@ -4261,10 +4259,10 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     boolean identity = cursor != null && pocketEntry != null && pocketSink != null
                             && pocketDirection != null && pocketDirection.getAxis().isHorizontal()
                             && cursor.face().equals(face)
-                            && (pocketDirection == cursorForward(cursor).rotateYClockwise()
-                            || pocketDirection == cursorForward(cursor).rotateYCounterclockwise())
-                            && pocketEntry.equals(face.offset(pocketDirection))
-                            && pocketSink.equals(face.offset(pocketDirection, 2))
+                            && (pocketDirection == cursorForward(cursor).getClockWise()
+                            || pocketDirection == cursorForward(cursor).getCounterClockWise())
+                            && pocketEntry.equals(face.relative(pocketDirection))
+                            && pocketSink.equals(face.relative(pocketDirection, 2))
                             && pocketEntities != null && pocketBaseline != null
                             && pocketLineage != null && pocketLedger != null
                             && pocketFailure != null
@@ -4329,9 +4327,9 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         String encodedBlock = failure.substring(POCKET_ORE_FAILURE_PREFIX.length());
         try {
-            Identifier id = Identifier.of(encodedBlock);
-            net.minecraft.block.Block block = Registries.BLOCK
-                    .getOptionalValue(id).orElse(null);
+            Identifier id = Identifier.parse(encodedBlock);
+            net.minecraft.world.level.block.Block block = BuiltInRegistries.BLOCK
+                    .getOptional(id).orElse(null);
             return block != null && id.toString().equals(encodedBlock)
                     && OreScan.isOreBlock(block);
         } catch (RuntimeException invalidIdentifier) {
@@ -4383,8 +4381,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         }
         return ledger.entrySet().stream()
                 .sorted(java.util.Comparator.comparing(
-                        entry -> Registries.ITEM.getId(entry.getKey()).toString()))
-                .map(entry -> Registries.ITEM.getId(entry.getKey()) + "=" + entry.getValue())
+                        entry -> BuiltInRegistries.ITEM.getKey(entry.getKey()).toString()))
+                .map(entry -> BuiltInRegistries.ITEM.getKey(entry.getKey()) + "=" + entry.getValue())
                 .collect(java.util.stream.Collectors.joining(";"));
     }
 
@@ -4396,7 +4394,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
         return lineage.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "@"
-                        + Registries.ITEM.getId(entry.getValue().item()) + "@"
+                        + BuiltInRegistries.ITEM.getKey(entry.getValue().item()) + "@"
                         + entry.getValue().count() + "@"
                         + (entry.getValue().ledger() ? "L" : "B"))
                 .collect(java.util.stream.Collectors.joining(";"));
@@ -4415,8 +4413,8 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                     return Optional.empty();
                 }
                 UUID uuid = UUID.fromString(parts[0]);
-                Item item = Registries.ITEM.getOptionalValue(
-                        Identifier.of(parts[1])).orElse(null);
+                Item item = BuiltInRegistries.ITEM.getOptional(
+                        Identifier.parse(parts[1])).orElse(null);
                 PocketLineage root = new PocketLineage(
                         item, Integer.parseInt(parts[2]), "L".equals(parts[3]));
                 if (decoded.putIfAbsent(uuid, root) != null
@@ -4482,7 +4480,7 @@ public final class MiningServiceTask extends AbstractTask implements Checkpointa
                 if (parts.length != 2 || parts[0].isBlank()) {
                     return Optional.empty();
                 }
-                Item item = Registries.ITEM.getOptionalValue(Identifier.of(parts[0])).orElse(null);
+                Item item = BuiltInRegistries.ITEM.getOptional(Identifier.parse(parts[0])).orElse(null);
                 int count = Integer.parseInt(parts[1]);
                 if (item == null || item == Items.AIR || count <= 0 || count > maxTotal
                         || decoded.putIfAbsent(item, count) != null) {

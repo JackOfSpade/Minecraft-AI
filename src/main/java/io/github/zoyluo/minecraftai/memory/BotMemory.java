@@ -1,11 +1,5 @@
 package io.github.zoyluo.minecraftai.memory;
 
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtString;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -13,6 +7,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
+import net.minecraft.server.level.ServerLevel;
 
 public final class BotMemory {
     private static final int FACT_INJECT_LIMIT = 8;
@@ -36,16 +35,16 @@ public final class BotMemory {
         return facts.remove(cleanKey(key)) != null;
     }
 
-    public void markPlace(String name, ServerWorld world, BlockPos pos) {
-        places.put(cleanKey(name), new Place(world.getRegistryKey().getValue().toString(), pos.toImmutable()));
+    public void markPlace(String name, ServerLevel world, BlockPos pos) {
+        places.put(cleanKey(name), new Place(world.dimension().identifier().toString(), pos.immutable()));
     }
 
     public Optional<Place> place(String name) {
         return Optional.ofNullable(places.get(cleanKey(name)));
     }
 
-    public Optional<BlockPos> placeIn(ServerWorld world, String... names) {
-        String dimension = world.getRegistryKey().getValue().toString();
+    public Optional<BlockPos> placeIn(ServerLevel world, String... names) {
+        String dimension = world.dimension().identifier().toString();
         for (String name : names) {
             Place place = places.get(cleanKey(name));
             if (place != null && dimension.equals(place.dimension())) {
@@ -201,14 +200,14 @@ public final class BotMemory {
         return builder.toString().trim();
     }
 
-    public NbtCompound toNbt() {
-        NbtCompound root = new NbtCompound();
-        NbtCompound factNbt = new NbtCompound();
+    public CompoundTag toNbt() {
+        CompoundTag root = new CompoundTag();
+        CompoundTag factNbt = new CompoundTag();
         facts.forEach(factNbt::putString);
         root.put("facts", factNbt);
-        NbtCompound placeNbt = new NbtCompound();
+        CompoundTag placeNbt = new CompoundTag();
         for (Map.Entry<String, Place> entry : places.entrySet()) {
-            NbtCompound place = new NbtCompound();
+            CompoundTag place = new CompoundTag();
             place.putString("dimension", entry.getValue().dimension());
             place.putInt("x", entry.getValue().pos().getX());
             place.putInt("y", entry.getValue().pos().getY());
@@ -218,34 +217,34 @@ public final class BotMemory {
         root.put("places", placeNbt);
         root.putString("goalTitle", goalTitle);
         root.putInt("goalCursor", goalCursor);
-        NbtList steps = new NbtList();
-        goalSteps.forEach(step -> steps.add(NbtString.of(step)));
+        ListTag steps = new ListTag();
+        goalSteps.forEach(step -> steps.add(StringTag.valueOf(step)));
         root.put("goalSteps", steps);
         return root;
     }
 
-    public void load(NbtCompound root) {
+    public void load(CompoundTag root) {
         facts.clear();
         places.clear();
         goalSteps.clear();
         goalCursor = 0;
         goalTitle = "";
-        NbtCompound factNbt = root.getCompoundOrEmpty("facts");
-        for (String key : factNbt.getKeys()) {
-            facts.put(key, factNbt.getString(key, ""));
+        CompoundTag factNbt = root.getCompoundOrEmpty("facts");
+        for (String key : factNbt.keySet()) {
+            facts.put(key, factNbt.getStringOr(key, ""));
         }
-        NbtCompound placeNbt = root.getCompoundOrEmpty("places");
-        for (String key : placeNbt.getKeys()) {
-            NbtCompound place = placeNbt.getCompoundOrEmpty(key);
+        CompoundTag placeNbt = root.getCompoundOrEmpty("places");
+        for (String key : placeNbt.keySet()) {
+            CompoundTag place = placeNbt.getCompoundOrEmpty(key);
             places.put(key, new Place(
-                    place.getString("dimension", ""),
-                    new BlockPos(place.getInt("x", 0), place.getInt("y", 0), place.getInt("z", 0))));
+                    place.getStringOr("dimension", ""),
+                    new BlockPos(place.getIntOr("x", 0), place.getIntOr("y", 0), place.getIntOr("z", 0))));
         }
-        goalTitle = root.getString("goalTitle", "");
-        goalCursor = Math.max(0, root.getInt("goalCursor", 0));
-        NbtList steps = root.getListOrEmpty("goalSteps");
+        goalTitle = root.getStringOr("goalTitle", "");
+        goalCursor = Math.max(0, root.getIntOr("goalCursor", 0));
+        ListTag steps = root.getListOrEmpty("goalSteps");
         for (int index = 0; index < steps.size(); index++) {
-            goalSteps.addLast(steps.getString(index, ""));
+            goalSteps.addLast(steps.getStringOr(index, ""));
         }
         goalCursor = Math.min(goalCursor, goalSteps.size());
     }

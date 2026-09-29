@@ -157,7 +157,7 @@ public final class PoiAdvisor {
             return;
         }
 
-        MinecraftServer server = bot.getEntityWorld().getServer();
+        MinecraftServer server = bot.level().getServer();
         AtomicBoolean settled = new AtomicBoolean(false);
         Future<?> future;
         try {

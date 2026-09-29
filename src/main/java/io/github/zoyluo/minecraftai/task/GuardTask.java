@@ -5,11 +5,10 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
 
 public final class GuardTask extends AbstractTask {
     private static final double GUARD_RADIUS = 10.0D;
@@ -32,7 +31,7 @@ public final class GuardTask extends AbstractTask {
     private boolean waiting;
 
     public GuardTask(BlockPos point, String targetPlayerName) {
-        this.fixedPoint = point == null ? null : point.toImmutable();
+        this.fixedPoint = point == null ? null : point.immutable();
         this.targetPlayerName = targetPlayerName == null ? "" : targetPlayerName.trim();
     }
 
@@ -66,7 +65,7 @@ public final class GuardTask extends AbstractTask {
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        guardPoint = fixedPoint == null ? bot.getBlockPos().toImmutable() : fixedPoint;
+        guardPoint = fixedPoint == null ? bot.blockPosition().immutable() : fixedPoint;
         CombatCore.equipMelee(bot);
         phase = Phase.WATCH;
     }
@@ -100,13 +99,13 @@ public final class GuardTask extends AbstractTask {
             // otherwise leave zero trace -- no way to tell, after the fact, whether/when/against
             // what the guard actually fought.
             BotLog.danger(bot, "guard_engage", "target", target.getType().toString(),
-                    "pos", target.getBlockPos().toShortString());
+                    "pos", target.blockPosition().toShortString());
             CombatCore.equipMelee(bot);
             phase = Phase.APPROACH;
             CombatCore.startApproach(bot, target);
             return;
         }
-        if (bot.getBlockPos().getSquaredDistance(guardPoint) > RETURN_DISTANCE * RETURN_DISTANCE) {
+        if (bot.blockPosition().distSqr(guardPoint) > RETURN_DISTANCE * RETURN_DISTANCE) {
             phase = Phase.RETURN;
             bot.getActionPack().startPathTo(guardPoint);
             return;
@@ -172,7 +171,7 @@ public final class GuardTask extends AbstractTask {
     }
 
     private void returnToGuardPoint(AIPlayerEntity bot) {
-        if (bot.getBlockPos().getSquaredDistance(guardPoint) <= 4.0D) {
+        if (bot.blockPosition().distSqr(guardPoint) <= 4.0D) {
             bot.getActionPack().stopAll();
             phase = Phase.WATCH;
             return;
@@ -184,16 +183,16 @@ public final class GuardTask extends AbstractTask {
 
     private BlockPos resolveGuardPoint(AIPlayerEntity bot) {
         if (!targetPlayerName.isBlank()) {
-            ServerPlayerEntity player = bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetPlayerName);
-            return player != null && player.getEntityWorld() == bot.getEntityWorld() ? player.getBlockPos().toImmutable() : null;
+            ServerPlayer player = bot.level().getServer().getPlayerList().getPlayerByName(targetPlayerName);
+            return player != null && player.level() == bot.level() ? player.blockPosition().immutable() : null;
         }
         if (fixedPoint != null) {
             return fixedPoint;
         }
-        Optional<ServerPlayerEntity> owner = AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
-        return owner.filter(player -> player.getEntityWorld() == bot.getEntityWorld())
-                .map(player -> player.getBlockPos().toImmutable())
+        Optional<ServerPlayer> owner = AIPlayerManager.INSTANCE.ownerOf(bot)
+                .map(uuid -> bot.level().getServer().getPlayerList().getPlayer(uuid));
+        return owner.filter(player -> player.level() == bot.level())
+                .map(player -> player.blockPosition().immutable())
                 .orElse(guardPoint);
     }
 

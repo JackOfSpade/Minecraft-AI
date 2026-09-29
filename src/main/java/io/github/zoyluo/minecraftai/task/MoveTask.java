@@ -7,9 +7,9 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.Heightmap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 public final class MoveTask extends AbstractTask {
     private static final int DIG_NO_PROGRESS_LIMIT = 200; // Digging straight-line: give up if no block broken / no step taken for 10s
@@ -40,12 +40,12 @@ public final class MoveTask extends AbstractTask {
     private int waypointHops;                              // Number of waypoints already used (capped at WAYPOINT_MAX_HOPS)
 
     public MoveTask(BlockPos start, BlockPos goal) {
-        this.goal = goal.toImmutable();
-        this.startDistance = Math.sqrt(start.getSquaredDistance(goal));
+        this.goal = goal.immutable();
+        this.startDistance = Math.sqrt(start.distSqr(goal));
     }
 
     public MoveTask(AIPlayerEntity bot, BlockPos goal) {
-        this(bot.getBlockPos(), goal);
+        this(bot.blockPosition(), goal);
     }
 
     @Override
@@ -79,8 +79,8 @@ public final class MoveTask extends AbstractTask {
         // is physically unreachable, and any walking/digging just spins its wheels (observed in testing: digging
         // toward a y330 target "dug at the sky" for the full 2400 ticks without giving up — spinning wheels is one
         // of the most insidious failure modes in practice).
-        ServerWorld world = bot.getEntityWorld();
-        int bottom = world.getBottomY();
+        ServerLevel world = bot.level();
+        int bottom = world.getMinY();
         int top = bottom + world.getHeight();
         if (goal.getY() < bottom || goal.getY() >= top) {
             fail("goal_out_of_world y=" + goal.getY());
@@ -121,8 +121,8 @@ public final class MoveTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (bot.getBlockPos().getSquaredDistance(currentGoal()) <= 2.25D
-                || (digging && bot.getBlockPos().getSquaredDistance(goal) <= ARRIVE_SQUARED)) {
+        if (bot.blockPosition().distSqr(currentGoal()) <= 2.25D
+                || (digging && bot.blockPosition().distSqr(goal) <= ARRIVE_SQUARED)) {
             miner.cancel(bot);
             complete();
             return;
@@ -173,7 +173,7 @@ public final class MoveTask extends AbstractTask {
         // long time to drag it ashore; observed in real_nav_far testing: digging to the lake edge floods with water
         // at 73 ticks). When touchingWater fires, the water hasn't reached the head yet — stop digging immediately
         // and hand off to the safety net to get to shore.
-        if (bot.isTouchingWater()) {
+        if (bot.isInWater()) {
             miner.cancel(bot);
             // Division of labor between the safety circuit-breaker and waypoint relay: the circuit-breaker is only
             // responsible for "don't drown," not for "finish the route" — touching water means digging straight-line
@@ -221,7 +221,7 @@ public final class MoveTask extends AbstractTask {
             fail("move_timeout"); // Same master timeout gate as pure pathfinding mode — waypoint detours aren't allowed to run indefinitely either
             return;
         }
-        boolean arrived = bot.getBlockPos().getSquaredDistance(waypoint) <= WAYPOINT_ARRIVE_SQUARED;
+        boolean arrived = bot.blockPosition().distSqr(waypoint) <= WAYPOINT_ARRIVE_SQUARED;
         if (!arrived && !bot.getActionPack().isPathExecutorIdle()) {
             return; // Still en route to the waypoint
         }
@@ -277,7 +277,7 @@ public final class MoveTask extends AbstractTask {
      * whole point of segmenting.
      */
     private BlockPos pickWaypoint(AIPlayerEntity bot, BlockPos target) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         double bx = bot.getX();
         double bz = bot.getZ();
         double dxGoal = target.getX() + 0.5D - bx;
@@ -298,7 +298,7 @@ public final class MoveTask extends AbstractTask {
             for (double dist : distances) {
                 int x = (int) Math.floor(bx + dist * cos);
                 int z = (int) Math.floor(bz + dist * sin);
-                int y = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+                int y = world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 BlockPos candidate = new BlockPos(x, y, z);
                 if (!Standability.isStandable(world, candidate)) {
                     continue;
@@ -306,7 +306,7 @@ public final class MoveTask extends AbstractTask {
                 if (!isDryColumn(world, candidate)) {
                     continue; // Excludes airborne cells picked up above a lake surface / water-covered feet on a shallow shore — the waypoint itself must not stand in water
                 }
-                if (candidate.getSquaredDistance(target) > maxGoalDistSq) {
+                if (candidate.distSqr(target) > maxGoalDistSq) {
                     continue;
                 }
                 if (pathAttempts >= WAYPOINT_PATH_ATTEMPTS) {
@@ -327,9 +327,9 @@ public final class MoveTask extends AbstractTask {
      * shallow shore the feet cell itself is water — both cases must be excluded, otherwise the waypoint would lead
      * the bot straight into the water, turning the detour into a death trap.
      */
-    private static boolean isDryColumn(ServerWorld world, BlockPos feet) {
+    private static boolean isDryColumn(ServerLevel world, BlockPos feet) {
         for (int i = 0; i <= 4; i++) {
-            if (!world.getFluidState(feet.down(i)).isEmpty()) {
+            if (!world.getFluidState(feet.below(i)).isEmpty()) {
                 return false;
             }
         }

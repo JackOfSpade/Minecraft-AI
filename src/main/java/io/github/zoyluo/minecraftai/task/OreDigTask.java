@@ -51,22 +51,6 @@ import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.FallingBlock;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,6 +61,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * OREDIG (field-tested #10): reliable ore mining, replacing the OreSeekTask that GoalExecutor's
@@ -129,7 +128,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private record AdjacentFluidObservation(OreScan.Observation state,
                                             BlockPos position) {
         AdjacentFluidObservation {
-            position = position == null ? null : position.toImmutable();
+            position = position == null ? null : position.immutable();
         }
     }
 
@@ -299,8 +298,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                        BlockPos destination,
                                        Direction direction) {
         PendingBlindAdvance {
-            rear = rear.toImmutable();
-            destination = destination.toImmutable();
+            rear = rear.immutable();
+            destination = destination.immutable();
         }
     }
 
@@ -314,7 +313,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private record PendingBlindAdvanceInspection(PendingBlindAdvancePhase phase,
                                                  BlockPos rear) {
         PendingBlindAdvanceInspection {
-            rear = rear == null ? null : rear.toImmutable();
+            rear = rear == null ? null : rear.immutable();
         }
     }
 
@@ -324,8 +323,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                int startedBudget,
                                long startingDistanceSquared) {
         LavaReroute {
-            source = source.toImmutable();
-            origin = origin.toImmutable();
+            source = source.immutable();
+            origin = origin.immutable();
         }
     }
 
@@ -343,7 +342,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     public static OreDigTask untilVeinExhausted(Set<Block> targetOres, BlockPos seedHint) {
         OreDigTask task = new OreDigTask(targetOres, VEIN_CAP);
         task.veinMode = true;
-        task.veinSeedHint = seedHint == null ? null : seedHint.toImmutable();
+        task.veinSeedHint = seedHint == null ? null : seedHint.immutable();
         return task;
     }
 
@@ -487,12 +486,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     // Thin wrapper over EpisodeMemory: excludes ore that is "unreachable/mined out" (TTL 30s auto-revival), goal-scoped lifecycle survives across replans.
     private void excludeOre(AIPlayerEntity bot, BlockPos pos) {
-        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), pos, bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_SHORT);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), pos, bot.level().getServer().getTickCount(), EpisodeMemory.TTL_SHORT);
         forgetRememberedHighWorkPose(pos);
     }
 
     private boolean oreExcluded(AIPlayerEntity bot, BlockPos pos) {
-        return EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), pos, bot.getEntityWorld().getServer().getTicks());
+        return EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), pos, bot.level().getServer().getTickCount());
     }
 
     /**
@@ -512,7 +511,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || hasImmediateLava(bot)) {
             return false;
         }
-        BlockPos here = bot.getBlockPos();
+        BlockPos here = bot.blockPosition();
         if (stripDirIndex < 0 || stripDirIndex >= STRIP_DIRS.length || targetOre != null) {
             return false;
         }
@@ -541,7 +540,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         int rejectedDirection = stripDirIndex;
         int remainingSteps = stripStepsLeft;
         if (!rerouteBlindBranchAtObservedBoundary(
-                bot, bot.getEntityWorld(), "lava", lavaPos)) {
+                bot, bot.level(), "lava", lavaPos)) {
             // The branch cannot leave this observed boundary without walking old territory or
             // opening an unproven body column. Keep ownership here and let the typed task failure
             // drive the normal mission replan instead of assigning an underground EvadeTask.
@@ -553,8 +552,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BotLog.danger(bot, "ore_dig_lava_direction_rejected",
                 "at", here.toShortString(),
                 "lava", lavaPos.toShortString(),
-                "direction", STRIP_DIRS[rejectedDirection].asString(),
-                "reroute", STRIP_DIRS[stripDirIndex].asString(),
+                "direction", STRIP_DIRS[rejectedDirection].getSerializedName(),
+                "reroute", STRIP_DIRS[stripDirIndex].getSerializedName(),
                 "steps_left", remainingSteps,
                 "escape_window", 40);
         return true;
@@ -581,7 +580,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "break_debt", activeTargetBreakPos != null);
             return Optional.empty();
         }
-        BlockPos here = bot.getBlockPos();
+        BlockPos here = bot.blockPosition();
         // Once an ore approach has carried the bot away from the controlled strip face, direction
         // alone no longer proves which cells are the rear tunnel. Fall back to the general shelter.
         if (stripProgressPos == null || squaredBlockDistance(here, stripProgressPos) > 16L) {
@@ -603,10 +602,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 BotLog.danger(bot, "ore_dig_hostile_barricade_rejected",
                         "reason", "boundary_rear_unowned",
                         "at", here.toShortString(),
-                        "direction", forward.asString());
+                        "direction", forward.getSerializedName());
                 return Optional.empty();
             }
-            rear = forward.rotateYClockwise();
+            rear = forward.getClockWise();
         }
         Direction gateFacing = rear.getOpposite();
         // Retreat only when the observed hostile is beyond the planned gate, never when it is in
@@ -617,15 +616,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "reason", "hostile_not_beyond_gate",
                     "at", here.toShortString(),
                     "hostile", hostilePos == null ? "unknown" : hostilePos.toShortString(),
-                    "gate_facing", gateFacing.asString());
+                    "gate_facing", gateFacing.getSerializedName());
             return Optional.empty();
         }
         BlockPos retreat = null;
         BlockPos gate = null;
         Standability.clearCache();
         for (int distance = HOSTILE_BARRICADE_RETREAT; distance >= 1; distance--) {
-            BlockPos candidateRetreat = here.offset(rear, distance);
-            BlockPos candidateGate = candidateRetreat.offset(gateFacing);
+            BlockPos candidateRetreat = here.relative(rear, distance);
+            BlockPos candidateGate = candidateRetreat.relative(gateFacing);
             // The durable corner pair proves only the crossed adjacent cell. Re-observe every
             // deeper body/floor and every gate face before reading its survival geometry; if the
             // longest plan is occluded, the loop naturally tries a shorter observable retreat.
@@ -635,8 +634,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (observableCornerPlan
                     && isControlledRearCorridor(bot, here, rear, distance)
                     && isNarrowMiningGate(bot, candidateGate, gateFacing)) {
-                retreat = candidateRetreat.toImmutable();
-                gate = candidateGate.toImmutable();
+                retreat = candidateRetreat.immutable();
+                gate = candidateGate.immutable();
                 break;
             }
         }
@@ -644,7 +643,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             BotLog.danger(bot, "ore_dig_hostile_barricade_rejected",
                     "reason", "no_narrow_rear_gate",
                     "at", here.toShortString(),
-                    "direction", forward.asString());
+                    "direction", forward.getSerializedName());
             return Optional.empty();
         }
         // isNarrowMiningGate proved that both the feet and head gate cells are open. Reject the
@@ -684,7 +683,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "hostile", hostilePos == null ? "unknown" : hostilePos.toShortString(),
                 "retreat", retreat.toShortString(),
                 "gate", gate.toShortString(),
-                "direction", forward.asString());
+                "direction", forward.getSerializedName());
         return Optional.of(new MiningBarricadeTask(retreat, gate));
     }
 
@@ -693,8 +692,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                                      Direction rear,
                                                      int distance) {
         for (int step = 1; step <= distance; step++) {
-            BlockPos candidate = origin.offset(rear, step);
-            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            BlockPos candidate = origin.relative(rear, step);
+            if (!Standability.isStandable(bot.level(), candidate)) {
                 return false;
             }
         }
@@ -706,10 +705,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                                      Direction rear,
                                                      int distance) {
         for (int step = 1; step <= distance; step++) {
-            BlockPos candidate = origin.offset(rear, step);
+            BlockPos candidate = origin.relative(rear, step);
             if (!ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())) {
+                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
                 return false;
             }
         }
@@ -720,15 +719,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                                          BlockPos gate,
                                                          Direction forward) {
         if (!ObservableWorldQuery.canObserveCell(bot, gate)
-                || !ObservableWorldQuery.canObserveCell(bot, gate.up())
-                || !ObservableWorldQuery.canObserveBlock(bot, gate.down())
-                || !ObservableWorldQuery.canObserveBlock(bot, gate.up(2))) {
+                || !ObservableWorldQuery.canObserveCell(bot, gate.above())
+                || !ObservableWorldQuery.canObserveBlock(bot, gate.below())
+                || !ObservableWorldQuery.canObserveBlock(bot, gate.above(2))) {
             return false;
         }
-        Direction side = forward.rotateYClockwise();
+        Direction side = forward.getClockWise();
         for (Direction wall : new Direction[]{side, side.getOpposite()}) {
-            if (!ObservableWorldQuery.canObserveBlock(bot, gate.offset(wall))
-                    || !ObservableWorldQuery.canObserveBlock(bot, gate.up().offset(wall))) {
+            if (!ObservableWorldQuery.canObserveBlock(bot, gate.relative(wall))
+                    || !ObservableWorldQuery.canObserveBlock(bot, gate.above().relative(wall))) {
                 return false;
             }
         }
@@ -738,29 +737,29 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static boolean isNarrowMiningGate(AIPlayerEntity bot,
                                                BlockPos gate,
                                                Direction forward) {
-        ServerWorld world = bot.getEntityWorld();
-        if (!isDryOpen(world, gate) || !isDryOpen(world, gate.up())
-                || !isSolidSafe(world, gate.down()) || !isSolidSafe(world, gate.up(2))) {
+        ServerLevel world = bot.level();
+        if (!isDryOpen(world, gate) || !isDryOpen(world, gate.above())
+                || !isSolidSafe(world, gate.below()) || !isSolidSafe(world, gate.above(2))) {
             return false;
         }
-        Direction side = forward.rotateYClockwise();
+        Direction side = forward.getClockWise();
         for (Direction wall : new Direction[]{side, side.getOpposite()}) {
-            if (!isSolidSafe(world, gate.offset(wall))
-                    || !isSolidSafe(world, gate.up().offset(wall))) {
+            if (!isSolidSafe(world, gate.relative(wall))
+                    || !isSolidSafe(world, gate.above().relative(wall))) {
                 return false;
             }
         }
         return true;
     }
 
-    private static boolean isDryOpen(ServerWorld world, BlockPos pos) {
+    private static boolean isDryOpen(ServerLevel world, BlockPos pos) {
         var state = world.getBlockState(pos);
         return state.getFluidState().isEmpty()
                 && state.getCollisionShape(world, pos).isEmpty()
                 && !Standability.isDangerous(state);
     }
 
-    private static boolean isSolidSafe(ServerWorld world, BlockPos pos) {
+    private static boolean isSolidSafe(ServerLevel world, BlockPos pos) {
         var state = world.getBlockState(pos);
         return state.getFluidState().isEmpty()
                 && !state.getCollisionShape(world, pos).isEmpty()
@@ -781,29 +780,29 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static boolean isAheadOfDirection(BlockPos origin, BlockPos target, Direction direction) {
         int dx = target.getX() - origin.getX();
         int dz = target.getZ() - origin.getZ();
-        return dx * direction.getOffsetX() + dz * direction.getOffsetZ() > 0;
+        return dx * direction.getStepX() + dz * direction.getStepZ() > 0;
     }
 
     private static boolean hasImmediateLava(AIPlayerEntity bot) {
-        BlockPos feet = bot.getBlockPos();
-        for (BlockPos center : new BlockPos[]{feet, feet.up()}) {
+        BlockPos feet = bot.blockPosition();
+        for (BlockPos center : new BlockPos[]{feet, feet.above()}) {
             if (OreScan.observeDangerFluid(bot, center)
                     == OreScan.Observation.OBSERVED_PRESENT
-                    && bot.getEntityWorld().getFluidState(center).isIn(FluidTags.LAVA)) {
+                    && bot.level().getFluidState(center).is(FluidTags.LAVA)) {
                 return true;
             }
             for (Direction direction : Direction.values()) {
-                BlockPos adjacent = center.offset(direction);
+                BlockPos adjacent = center.relative(direction);
                 if (OreScan.observeDangerFluid(bot, adjacent)
                         == OreScan.Observation.OBSERVED_PRESENT
-                        && bot.getEntityWorld().getFluidState(adjacent).isIn(FluidTags.LAVA)) {
+                        && bot.level().getFluidState(adjacent).is(FluidTags.LAVA)) {
                     return true;
                 }
             }
         }
-        return OreScan.observeDangerFluid(bot, feet.down())
+        return OreScan.observeDangerFluid(bot, feet.below())
                 == OreScan.Observation.OBSERVED_PRESENT
-                && bot.getEntityWorld().getFluidState(feet.down()).isIn(FluidTags.LAVA);
+                && bot.level().getFluidState(feet.below()).is(FluidTags.LAVA);
     }
 
     @Override
@@ -827,18 +826,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             rememberedHighWorkPoses.putAll(restoredCheckpoint.rememberedHighWorkPoses());
         }
         MiningCursor cursor = restoredCursor == null
-                ? MiningCursor.initial(bot.getBlockPos(), STRIP_SEGMENT)
+                ? MiningCursor.initial(bot.blockPosition(), STRIP_SEGMENT)
                 : restoredCursor;
         boolean rebaseCommittedCursor = restoredCheckpoint != null
                 && !restoredCheckpoint.batchOpen()
-                && squaredBlockDistance(bot.getBlockPos(), cursor.face())
+                && squaredBlockDistance(bot.blockPosition(), cursor.face())
                 > MAX_COMMITTED_CURSOR_HANDOFF_DISTANCE_SQUARED;
         if (rebaseCommittedCursor) {
             BlockPos abandonedFace = cursor.face();
             cursor = new MiningCursor(
                     MiningCursor.CURRENT_SCHEMA,
-                    bot.getBlockPos(),
-                    bot.getBlockPos(),
+                    bot.blockPosition(),
+                    bot.blockPosition(),
                     -1,
                     0,
                     0,
@@ -888,7 +887,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             stripLegIndex = cursor.legIndex();
             stripStepsLeft = cursor.stepsLeft();
             stripLegLength = cursor.legLength();
-            restoringFace = !bot.getBlockPos().equals(cursor.face());
+            restoringFace = !bot.blockPosition().equals(cursor.face());
             restoreFaceStarted = elapsed;
             BotLog.task(bot, "ore_dig_cursor_restored",
                     "face", cursor.face().toShortString(),
@@ -897,8 +896,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "batches", completedBatches);
         }
         // R6 entry landmark: auto-mark the dig site (goto_place mine_entry walks back in one step; can also answer when a player asks "where's the mine?").
-        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .markPlace("mine_entry", bot.getEntityWorld(), bot.getBlockPos());
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .markPlace("mine_entry", bot.level(), bot.blockPosition());
     }
 
     @Override
@@ -919,7 +918,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // exact recoverable rear of an unpublished branch step or the last physical work cell
         // published at pause time.  Rejoin it before any scan can reinterpret the safety task's
         // destination as a new mining cursor.
-        restoringFace = !bot.getBlockPos().equals(lastFace);
+        restoringFace = !bot.blockPosition().equals(lastFace);
         restoreFaceStarted = elapsed;
         detourResumed(restoringFace);
         if (restoringFace) {
@@ -948,13 +947,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      */
     private void publishInterruptionCursor(AIPlayerEntity bot,
                                            boolean preserveExistingFace) {
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         PendingBlindAdvanceInspection pending = inspectPendingBlindAdvance(bot, feet);
         BlockPos exactRear = pending.phase() == PendingBlindAdvancePhase.ARRIVED
                 ? pending.rear() : null;
         if (!restoringFace && exactRear != null) {
             if (!canRetainUnpublishedBlindAdvance(
-                    bot, bot.getEntityWorld(), feet, exactRear)) {
+                    bot, bot.level(), feet, exactRear)) {
                 Direction direction = STRIP_DIRS[stripDirIndex];
                 BlockPos factualRear = publishStripProgress(bot, direction);
                 if (stripStepsLeft <= 0) {
@@ -968,7 +967,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // conservative owner when an arbitrary action advances between task ticks. Preserve it
         // across live pause; abort/cancel still publishes the current physical face as before.
         if (!restoringFace && (!preserveExistingFace || lastFace == null)) {
-            lastFace = feet.toImmutable();
+            lastFace = feet.immutable();
             if (boundaryRerouteOrigin != null
                     && !feet.equals(boundaryRerouteOrigin)) {
                 boundaryRerouteOrigin = null;
@@ -978,10 +977,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     // R6/R7 work-face landmark: where the task ends = the starting point for next time it resumes digging. The ore type is remembered alongside it, so resume_mining doesn't need to ask.
     private void markMineFace(AIPlayerEntity bot) {
-        var mem = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
-        mem.markPlace("mine_face", bot.getEntityWorld(), bot.getBlockPos());
+        var mem = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID());
+        mem.markPlace("mine_face", bot.level(), bot.blockPosition());
         String ores = targetOres.stream()
-                .map(b -> net.minecraft.registry.Registries.BLOCK.getId(b).toString())
+                .map(b -> net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(b).toString())
                 .sorted()
                 .collect(java.util.stream.Collectors.joining(","));
         mem.remember("mine_face_ores", ores);
@@ -989,8 +988,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         // Falling sand/gravel is updated after the task tick that opened a tunnel cell.  The cell
         // can therefore look clear long enough for the fake player to enter, then become occupied
         // before the next mining decision.  Resolve the current body collision before restoring a
@@ -1047,7 +1046,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // arbitrary target/path displacement as planar branch progress and can consume an
             // entire leg without a factual rear (seed 3000: north target path became an east
             // marker-free open-drop boundary). This is bookkeeping only, not task progress.
-            BlockPos factualFace = bot.getBlockPos().toImmutable();
+            BlockPos factualFace = bot.blockPosition().immutable();
             if (stripProgressPos == null || !stripProgressPos.equals(factualFace)) {
                 stripProgressPos = factualFace;
                 clearStripMovementOwnership();
@@ -1063,7 +1062,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // replanning. Let the shared safety net physically return to a dry work face first, while
         // preserving the current OreDig/branch cursor; otherwise a replan would generate surface
         // prerequisites like "chop trees" based on the ore-floor position.
-        if (bot.isSubmergedInWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
+        if (bot.isUnderWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
             clearStripMovementOwnership();
             miner.cancel(bot);
             bot.getActionPack().stopAll();
@@ -1088,7 +1087,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             BotLog.action(bot, "ore_dig_collected", "total", collected + "/" + targetCount);
             if (!veinMode) {
                 io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
-                        "Collected " + Registries.ITEM.getId(targetDrops.iterator().next())
+                        "Collected " + BuiltInRegistries.ITEM.getKey(targetDrops.iterator().next())
                                 .getPath().replace('_', ' ') + ": " + collected + "/" + targetCount + ".");
             }
         }
@@ -1131,10 +1130,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "target", targetOre == null ? "none"
                             : targetOre.getX() + "," + targetOre.getY() + "," + targetOre.getZ(),
                     "dist", targetOre == null ? "-"
-                            : String.format("%.1f", Math.sqrt(bot.getEyePos().squaredDistanceTo(targetOre.toCenterPos()))),
+                            : String.format("%.1f", Math.sqrt(bot.getEyePosition().distanceToSqr(targetOre.getCenter()))),
                     "miner", miner.target() == null ? "idle"
                             : miner.target().getX() + "," + miner.target().getY() + "," + miner.target().getZ(),
-                    "ignored", EpisodeMemory.INSTANCE.excludedCount(bot.getUuid()),
+                    "ignored", EpisodeMemory.INSTANCE.excludedCount(bot.getUUID()),
                     "vein_queue", veinQueue.size(),
                     "strip_left", stripStepsLeft);
             // Automatic terrain snapshot (the key to diagnosing real_diamond seed777's deep-approach
@@ -1198,9 +1197,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // a deterministic starvation case in seed 3000.
         boolean minerBusy = miner.target() != null || hasStagedBlindFootWork(bot);
         if (!veinMode && bonusOre == null && !minerBusy && bonusMined < BONUS_CAP
-                && bot.getEntityWorld().getServer().getTicks() - lastBonusScanTick >= SCAN_INTERVAL
+                && bot.level().getServer().getTickCount() - lastBonusScanTick >= SCAN_INTERVAL
                 && !HarvestCore.isInventoryFull(bot)) {
-            lastBonusScanTick = bot.getEntityWorld().getServer().getTicks();
+            lastBonusScanTick = bot.level().getServer().getTickCount();
             bonusOre = scanBonusOre(bot, world);
             if (bonusOre != null) {
                 clearStripMovementOwnership();
@@ -1355,16 +1354,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // mined (miningNow); the 0.6 threshold prevents flip-flopping between ore at similar
             // distances.
             boolean miningNow = miningTarget;
-            int nowRe = bot.getEntityWorld().getServer().getTicks();
+            int nowRe = bot.level().getServer().getTickCount();
             if (!veinMode && !miningNow && nowRe - lastReLockTick >= SCAN_INTERVAL) {
                 lastReLockTick = nowRe;
                 BlockPos nearer = nearestOre(bot, world);
                 if (nearer != null && !nearer.equals(targetOre)
-                        && bot.getEyePos().squaredDistanceTo(nearer.toCenterPos())
-                           < bot.getEyePos().squaredDistanceTo(targetOre.toCenterPos()) * 0.36D) {
+                        && bot.getEyePosition().distanceToSqr(nearer.getCenter())
+                           < bot.getEyePosition().distanceToSqr(targetOre.getCenter()) * 0.36D) {
                     BotLog.action(bot, "ore_dig_relock_nearer",
                             "from", targetOre.toShortString(), "to", nearer.toShortString());
-                    targetOre = nearer.toImmutable();
+                    targetOre = nearer.immutable();
                     lastTargetDist = Double.MAX_VALUE;
                     targetApproachTick = elapsed;
                     return;
@@ -1374,7 +1373,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // closer (e.g. unreachable diagonally-below position) -> abandon that ore instead of
             // spinning in place (testing found this was the root cause of a bot at Y=48 repeatedly
             // locking onto a diagonally-below diamond, dist stuck, no_progress after 11 minutes).
-            double dist2 = bot.getEyePos().squaredDistanceTo(targetOre.toCenterPos());
+            double dist2 = bot.getEyePosition().distanceToSqr(targetOre.getCenter());
             if (dist2 < lastTargetDist - 0.25D) {
                 lastTargetDist = dist2;
                 targetApproachTick = elapsed;
@@ -1401,9 +1400,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // 106s). So under a large quota, only an actual change of territory (bot moved)
                 // counts as progress; a small quota (sparse diamond, targetCount<16) keeps the old
                 // unconditional feed, zero regression.
-                if (targetCount < 16 || !bot.getBlockPos().equals(lastSkipPos)) {
+                if (targetCount < 16 || !bot.blockPosition().equals(lastSkipPos)) {
                     noteProgress();
-                    lastSkipPos = bot.getBlockPos().toImmutable();
+                    lastSkipPos = bot.blockPosition().immutable();
                 }
                 return;
             }
@@ -1516,7 +1515,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
 
         // 3) No locked ore: scan for the nearest target ore (rate-limited).
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         if (now - lastScanTick < SCAN_INTERVAL) {
             return;
         }
@@ -1544,10 +1543,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // knowledge base first instead of digging blind.
             io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
                     io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, found,
-                    net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(found).getBlock()).toString());
+                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(world.getBlockState(found).getBlock()).toString());
             BotLog.action(bot, "ore_dig_found",
                     "pos", found.getX() + "," + found.getY() + "," + found.getZ(),
-                    "dist", (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(found)),
+                    "dist", (int) Math.sqrt(bot.blockPosition().distSqr(found)),
                     "collected", collected + "/" + targetCount);
             return;
         }
@@ -1563,7 +1562,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             targetApproachTick = elapsed;
             BotLog.action(bot, "ore_dig_prospected",
                     "pos", prospected.getX() + "," + prospected.getY() + "," + prospected.getZ(),
-                    "dist", (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(prospected)));
+                    "dist", (int) Math.sqrt(bot.blockPosition().distSqr(prospected)));
             return;
         }
         // No prospecting hit either -> first ask the knowledge base for a rich zone (a place we've
@@ -1575,14 +1574,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // if there's still no ore once there, the memory is stale, so invalidate that resource point
         // and move to the next strategy.
         for (Block oreBlock : targetOres) {
-            String oreId = net.minecraft.registry.Registries.BLOCK.getId(oreBlock).toString();
+            String oreId = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(oreBlock).toString();
             var rich = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
-                    .richZoneNear(bot.getUuid(), oreId, bot.getBlockPos(), 128, 3, 24);
+                    .richZoneNear(bot.getUUID(), oreId, bot.blockPosition(), 128, 3, 24);
             if (rich.isPresent() && !oreExcluded(bot, rich.get())) {
                 BlockPos zone = rich.get();
-                if (bot.getBlockPos().isWithinDistance(zone, 16)) {
+                if (bot.blockPosition().closerThan(zone, 16)) {
                     io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
-                            .invalidateResource(bot.getUuid(), zone);
+                            .invalidateResource(bot.getUUID(), zone);
                     BotLog.action(bot, "ore_dig_rich_zone_stale", "at", zone.toShortString());
                 } else if (bot.getActionPack().isPathExecutorIdle()) {
                     clearStripMovementOwnership();
@@ -1617,11 +1616,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!MiningAssistRuntime.senseConfigured() || !MiningAssistRuntime.config().explore().legChooser()) {
             return;
         }
-        stripCoverage.mark(bot.getBlockPos());
+        stripCoverage.mark(bot.blockPosition());
     }
 
-    private void finishAlreadyDeliveredBatch(AIPlayerEntity bot, ServerWorld world) {
-        if (bot.isSubmergedInWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
+    private void finishAlreadyDeliveredBatch(AIPlayerEntity bot, ServerLevel world) {
+        if (bot.isUnderWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
             miner.cancel(bot);
             bot.getActionPack().stopAll();
             NavSafetyNet.INSTANCE.requestWaterRescue(bot);
@@ -1677,7 +1676,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * Other body intrusions retain the conservative close-leg behavior. Target/pickup ledgers are
      * never discarded here.
      */
-    private boolean recoverBlockedBody(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean recoverBlockedBody(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         BlockPos blocked = firstBodyCollision(world, feet);
         if (blocked == null) {
             if (blockedBodyRecoveryTarget == null) {
@@ -1704,7 +1703,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             bot.getActionPack().stopAll();
             boolean moved = io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                     bot, retreat, "ore_dig_blocked_body_retreat");
-            if (moved && bot.getBlockPos().equals(retreat)) {
+            if (moved && bot.blockPosition().equals(retreat)) {
                 blockedBodyRecoveryTarget = null;
                 boolean fallingBranchCollapse = blindBranchCollision
                         && obstruction.getBlock() instanceof FallingBlock;
@@ -1725,12 +1724,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         "from", feet.toShortString(),
                         "to", retreat.toShortString(),
                         "blocked", blocked.toShortString(),
-                        "block", Registries.BLOCK.getId(obstruction.getBlock()));
+                        "block", BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
                 if (fallingBranchCollapse) {
                     // The bot physically returned to a proven safe face. Marking that exact face as
                     // the cascade origin admits only finite visible side work or one observed dry
                     // escape step; it never grants an arbitrary walk through old territory.
-                    boundaryRerouteOrigin = retreat.toImmutable();
+                    boundaryRerouteOrigin = retreat.immutable();
                     rerouteBlindBranchAtObservedBoundary(
                             bot, world, "gravity", blocked);
                 }
@@ -1744,11 +1743,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!blocked.equals(blockedBodyRecoveryTarget)
                 || miner.target() == null || !miner.target().equals(blocked)) {
             miner.begin(bot, blocked);
-            blockedBodyRecoveryTarget = blocked.toImmutable();
+            blockedBodyRecoveryTarget = blocked.immutable();
             BotLog.danger(bot, "ore_dig_blocked_body_clear",
                     "at", feet.toShortString(),
                     "blocked", blocked.toShortString(),
-                    "block", Registries.BLOCK.getId(obstruction.getBlock()));
+                    "block", BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
         }
         BlockMiner.Status status = miner.tick(bot);
         if (status == BlockMiner.Status.FAILED) {
@@ -1780,25 +1779,25 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || bonusOre != null || stripDirIndex < 0
                 || stripDirIndex >= STRIP_DIRS.length || stripStepsLeft <= 0
                 || !bot.getActionPack().isPathExecutorIdle()
-                || bot.isSubmergedInWater()
+                || bot.isUnderWater()
                 || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)
                 || lastFace == null || stripProgressPos == null) {
             return false;
         }
         Direction direction = STRIP_DIRS[stripDirIndex];
         boolean liveForwardCell = stripProgressPos.equals(lastFace)
-                && feet.equals(lastFace.offset(direction))
+                && feet.equals(lastFace.relative(direction))
                 && retreat.equals(lastFace);
         boolean resumedBoundaryCell = boundaryRerouteOrigin != null
                 && boundaryRerouteOrigin.equals(feet)
                 && stripProgressPos.equals(feet)
                 && lastFace.equals(feet)
-                && retreat.equals(feet.offset(direction.getOpposite()));
+                && retreat.equals(feet.relative(direction.getOpposite()));
         return liveForwardCell || resumedBoundaryCell;
     }
 
     private BlockPos findBlockedBodyRetreat(AIPlayerEntity bot,
-                                            ServerWorld world,
+                                            ServerLevel world,
                                             BlockPos feet) {
         // A gravity block can put the eye inside collision geometry, making every ordinary rear
         // ray fail. The durable lastFace is still one exact factual cell even when pickup/target
@@ -1808,39 +1807,39 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (lastFace != null && lastFace.getY() == feet.getY()
                 && Math.abs(lastFace.getX() - feet.getX())
                 + Math.abs(lastFace.getZ() - feet.getZ()) == 1) {
-            return lastFace.toImmutable();
+            return lastFace.immutable();
         }
         // A resumed boundary can own the geometric rear while lastFace is the occupied face.
         // Keep this narrower branch-only identity for that checkpoint shape.
         if (lastFace != null && ownsActiveBlindBranchCollision(bot, feet, lastFace)) {
-            return lastFace.toImmutable();
+            return lastFace.immutable();
         }
         if (stripDirIndex >= 0 && stripDirIndex < STRIP_DIRS.length) {
-            BlockPos ownedRear = feet.offset(STRIP_DIRS[stripDirIndex].getOpposite());
+            BlockPos ownedRear = feet.relative(STRIP_DIRS[stripDirIndex].getOpposite());
             if (ownsActiveBlindBranchCollision(bot, feet, ownedRear)) {
-                return ownedRear.toImmutable();
+                return ownedRear.immutable();
             }
         }
         if (isAdjacentDryLanding(bot, world, feet, lastFace)) {
-            return lastFace.toImmutable();
+            return lastFace.immutable();
         }
         if (stripDirIndex >= 0 && stripDirIndex < STRIP_DIRS.length) {
-            BlockPos rear = feet.offset(STRIP_DIRS[stripDirIndex].getOpposite());
+            BlockPos rear = feet.relative(STRIP_DIRS[stripDirIndex].getOpposite());
             if (isAdjacentDryLanding(bot, world, feet, rear)) {
-                return rear.toImmutable();
+                return rear.immutable();
             }
         }
         for (Direction direction : STRIP_DIRS) {
-            BlockPos candidate = feet.offset(direction);
+            BlockPos candidate = feet.relative(direction);
             if (isAdjacentDryLanding(bot, world, feet, candidate)) {
-                return candidate.toImmutable();
+                return candidate.immutable();
             }
         }
         return null;
     }
 
     private static boolean isAdjacentDryLanding(AIPlayerEntity bot,
-                                                ServerWorld world,
+                                                ServerLevel world,
                                                 BlockPos feet,
                                                 BlockPos candidate) {
         if (candidate == null || candidate.getY() != feet.getY()) {
@@ -1852,23 +1851,23 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         if (!canObserveWorldState(bot, candidate)
-                || !canObserveWorldState(bot, candidate.up())
-                || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())) {
+                || !canObserveWorldState(bot, candidate.above())
+                || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
             return false;
         }
         Standability.clearCache();
         return world.getFluidState(candidate).isEmpty()
-                && world.getFluidState(candidate.up()).isEmpty()
+                && world.getFluidState(candidate.above()).isEmpty()
                 && Standability.isStandable(world, candidate);
     }
 
-    private static BlockPos firstBodyCollision(ServerWorld world, BlockPos feet) {
-        BlockPos head = feet.up();
+    private static BlockPos firstBodyCollision(ServerLevel world, BlockPos feet) {
+        BlockPos head = feet.above();
         if (!world.getBlockState(head).getCollisionShape(world, head).isEmpty()) {
-            return head.toImmutable();
+            return head.immutable();
         }
         if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()) {
-            return feet.toImmutable();
+            return feet.immutable();
         }
         return null;
     }
@@ -1882,7 +1881,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // STRIP_AFTER_SKIPS times in a row)" -- advancing into new territory also brings previously
     // unreachable ore into reach (real_armor testing: without forced strip-mining, it would lock
     // onto far ore and skip 372 times in place, mining only 9).
-    private void stripMine(AIPlayerEntity bot, ServerWorld world) {
+    private void stripMine(AIPlayerEntity bot, ServerLevel world) {
         Direction activeDirection = stripDirIndex < 0 ? null : STRIP_DIRS[stripDirIndex];
         BlockPos factualRear = publishStripProgress(bot, activeDirection);
         if (stripStepsLeft <= 0) {
@@ -1894,10 +1893,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // task must stop before extending an unlit branch. GoalExecutor may service exactly one new
         // epoch without replacing this task's durable branch/hard-budget checkpoint.
         boolean darkLightingBoundary = stripStepsLeft % 10 == 0
-                && world.getLightLevel(net.minecraft.world.LightType.BLOCK, bot.getBlockPos()) < 8;
+                && world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, bot.blockPosition()) < 8;
         if (darkLightingBoundary) {
             var torchSlot = io.github.zoyluo.minecraftai.action.InventoryAction.findItem(
-                    bot, net.minecraft.item.Items.TORCH);
+                    bot, net.minecraft.world.item.Items.TORCH);
             if (rareExpeditionBatch
                     && (torchPlacements >= MiningBudget.RARE_BATCH_TORCH_LIMIT || torchSlot.isEmpty())) {
                 miner.cancel(bot);
@@ -1908,12 +1907,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (torchSlot.isPresent()) {
                 io.github.zoyluo.minecraftai.action.InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
                 ActionResult placement = io.github.zoyluo.minecraftai.action.BuildAction.placeBlockAt(
-                        bot, bot.getBlockPos());
+                        bot, bot.blockPosition());
                 if (!placement.isFailed()) {
                     if (rareExpeditionBatch) {
                         torchPlacements++;
                     }
-                    BotLog.action(bot, "ore_dig_torch", "pos", bot.getBlockPos().toShortString());
+                    BotLog.action(bot, "ore_dig_torch", "pos", bot.blockPosition().toShortString());
                 } else if (rareExpeditionBatch) {
                     fail("ore_dig_torch_placement_failed:" + placement.reason());
                     return;
@@ -1925,7 +1924,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // now contain the torch and is not a valid restoration identity.
         restoreActiveChannelTool(bot, world, miner);
         Direction dir = STRIP_DIRS[stripDirIndex];
-        digTowardStep(bot, world, bot.getBlockPos().offset(dir, 2),
+        digTowardStep(bot, world, bot.blockPosition().relative(dir, 2),
                 TunnelIntent.BLIND_BRANCH, factualRear); // Reuses the digging primitive: mine the foot cell + head cell -> walk in
     }
 
@@ -1944,7 +1943,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         boolean factualCorner = completedDirection != null
                 && factualRear != null
                 && factualRear.equals(
-                bot.getBlockPos().offset(completedDirection.getOpposite()));
+                bot.blockPosition().relative(completedDirection.getOpposite()));
         publishStripSuccessor(bot, factualRear, factualCorner);
     }
 
@@ -1993,10 +1992,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
         }
         stripStepsLeft = stripLegLength;
-        stripProgressPos = bot.getBlockPos().toImmutable();
+        stripProgressPos = bot.blockPosition().immutable();
         if (preserveFactualCorner && factualRear != null) {
             boundaryRerouteOrigin = stripProgressPos;
-            controlledStripRear = factualRear.toImmutable();
+            controlledStripRear = factualRear.immutable();
         }
         BotLog.action(bot, "ore_dig_branch_leg",
                 "leg", stripLegIndex,
@@ -2018,23 +2017,23 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return null;
         }
         BlockPos previousProgress = stripProgressPos;
-        int moved = directionalProgress(previousProgress, bot.getBlockPos(), activeDirection);
+        int moved = directionalProgress(previousProgress, bot.blockPosition(), activeDirection);
         if (moved <= 0) {
             // The successor has not crossed its first cell yet. Preserve the perpendicular rear
             // proof for an immediate hostile pause; ordinary branch recovery deliberately accepts
             // only current-direction reverse and therefore must not reinterpret this identity.
-            if (ownsFactualCornerRear(bot.getBlockPos(), activeDirection)) {
+            if (ownsFactualCornerRear(bot.blockPosition(), activeDirection)) {
                 return null;
             }
             return controlledStripRearFor(bot, activeDirection);
         }
         BlockPos factualRear = moved == 1
-                && bot.getBlockPos().equals(previousProgress.offset(activeDirection))
-                ? previousProgress.toImmutable() : null;
+                && bot.blockPosition().equals(previousProgress.relative(activeDirection))
+                ? previousProgress.immutable() : null;
         clearPendingBlindAdvance();
         controlledStripRear = factualRear;
         stripStepsLeft = Math.max(0, stripStepsLeft - moved);
-        BlockPos factualFace = bot.getBlockPos().toImmutable();
+        BlockPos factualFace = bot.blockPosition().immutable();
         stripProgressPos = factualFace;
         lastFace = factualFace;
         // A boundary turn remains part of the pre-move cursor until the physical advance commits.
@@ -2058,31 +2057,31 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (controlledStripRear == null) {
             return null;
         }
-        BlockPos face = bot.getBlockPos();
-        BlockPos next = activeDirection == null ? null : face.offset(activeDirection);
+        BlockPos face = bot.blockPosition();
+        BlockPos next = activeDirection == null ? null : face.relative(activeDirection);
         BlockPos activeMine = miner.target();
         boolean branchMine = activeMine == null || next != null
-                && (activeMine.equals(next) || activeMine.equals(next.up()));
+                && (activeMine.equals(next) || activeMine.equals(next.above()));
         boolean valid = activeDirection != null
                 && stripDirIndex >= 0 && stripDirIndex < STRIP_DIRS.length
                 && STRIP_DIRS[stripDirIndex] == activeDirection
                 && stripStepsLeft > 0
                 && stripProgressPos != null && stripProgressPos.equals(face)
                 && lastFace != null && lastFace.equals(face)
-                && controlledStripRear.equals(face.offset(activeDirection.getOpposite()))
+                && controlledStripRear.equals(face.relative(activeDirection.getOpposite()))
                 && boundaryRerouteOrigin == null
                 && !restoringFace && targetOre == null && pendingPickupPos == null
                 && activeTargetBreakPos == null && veinQueue.isEmpty() && bonusOre == null
                 && blockedBodyRecoveryTarget == null && branchMine
                 && bot.getActionPack().isPathExecutorIdle()
                 && bot.getActionPack().isWalkToIdle()
-                && !bot.isSubmergedInWater()
+                && !bot.isUnderWater()
                 && !NavSafetyNet.INSTANCE.isWaterRescueActive(bot);
         if (!valid) {
             clearControlledStripRear();
             return null;
         }
-        return controlledStripRear.toImmutable();
+        return controlledStripRear.immutable();
     }
 
     private void clearControlledStripRear() {
@@ -2106,7 +2105,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 && lastFace != null && lastFace.equals(face)
                 && stripStepsLeft == stripLegLength
                 && controlledStripRear != null
-                && controlledStripRear.equals(face.offset(successor.rotateYClockwise()));
+                && controlledStripRear.equals(face.relative(successor.getClockWise()));
     }
 
     /**
@@ -2129,7 +2128,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || bonusOre != null
                 || blockedBodyRecoveryTarget != null || miner.target() != null
                 || !bot.getActionPack().isPathExecutorIdle()
-                || bot.isSubmergedInWater()
+                || bot.isUnderWater()
                 || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
             clearPendingBlindAdvance();
             return new PendingBlindAdvanceInspection(PendingBlindAdvancePhase.NONE, null);
@@ -2138,7 +2137,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         boolean exactOwner = pending.direction() == direction
                 && pending.rear().equals(lastFace)
                 && pending.rear().equals(stripProgressPos)
-                && pending.destination().equals(pending.rear().offset(direction));
+                && pending.destination().equals(pending.rear().relative(direction));
         if (!exactOwner) {
             clearPendingBlindAdvance();
             return new PendingBlindAdvanceInspection(PendingBlindAdvancePhase.NONE, null);
@@ -2161,19 +2160,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private boolean canRetainUnpublishedBlindAdvance(AIPlayerEntity bot,
-                                                       ServerWorld world,
+                                                       ServerLevel world,
                                                        BlockPos feet,
                                                        BlockPos exactRear) {
         if (exactRear == null || stripDirIndex < 0 || stripDirIndex >= STRIP_DIRS.length) {
             return false;
         }
         Direction rearDirection = STRIP_DIRS[stripDirIndex].getOpposite();
-        return exactRear.equals(feet.offset(rearDirection))
+        return exactRear.equals(feet.relative(rearDirection))
                 && isObservedSafeOpenEscapeCorridor(bot, world, feet, rearDirection);
     }
 
     static void restoreActiveChannelTool(AIPlayerEntity bot,
-                                         ServerWorld world,
+                                         ServerLevel world,
                                          BlockMiner activeMiner) {
         if (activeMiner.target() != null) {
             ToolSelector.equipMiningChannelTool(
@@ -2184,7 +2183,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static int directionalProgress(BlockPos from, BlockPos to, Direction direction) {
         int dx = to.getX() - from.getX();
         int dz = to.getZ() - from.getZ();
-        return Math.max(0, dx * direction.getOffsetX() + dz * direction.getOffsetZ());
+        return Math.max(0, dx * direction.getStepX() + dz * direction.getStepZ());
     }
 
     @Override
@@ -2193,7 +2192,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return Map.of();
         }
         BlockPos origin = cursorOrigin == null
-                ? (lastFace == null ? BlockPos.ORIGIN : lastFace)
+                ? (lastFace == null ? BlockPos.ZERO : lastFace)
                 : cursorOrigin;
         BlockPos face = detourPublishedFace(lastFace == null ? origin : lastFace);
         boolean committed = state == TaskState.COMPLETED;
@@ -2266,12 +2265,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         Direction forward = STRIP_DIRS[stripDirIndex];
         boolean ordinaryRear = boundaryRerouteOrigin == null
-                && controlledStripRear.equals(face.offset(forward.getOpposite()));
+                && controlledStripRear.equals(face.relative(forward.getOpposite()));
         boolean factualCornerRear = ownsFactualCornerRear(face, forward);
         if (!ordinaryRear && !factualCornerRear) {
             return null;
         }
-        return controlledStripRear.toImmutable();
+        return controlledStripRear.immutable();
     }
 
     /** Keeps only nearby structurally exact facts, so stale observations cannot poison a restart. */
@@ -2287,7 +2286,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 .filter(entry -> isRememberedHighWorkPoseNearFace(face, entry.getKey()))
                 .limit(VEIN_CAP)
                 .forEach(entry -> durable.put(
-                        entry.getKey().toImmutable(), entry.getValue().toImmutable()));
+                        entry.getKey().immutable(), entry.getValue().immutable()));
         return Map.copyOf(durable);
     }
 
@@ -2303,7 +2302,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         Set<Block> expanded = ores == null || ores.isEmpty()
                 ? OreScan.COMMON_ORES : OreScan.expandOreFamilies(ores);
         return expanded.stream()
-                .map(Registries.BLOCK::getId)
+                .map(BuiltInRegistries.BLOCK::getKey)
                 .map(Object::toString)
                 .sorted()
                 .collect(java.util.stream.Collectors.joining(","));
@@ -2382,7 +2381,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return Optional.empty();
             }
             try {
-                Block block = Registries.BLOCK.getOptionalValue(Identifier.of(encoded)).orElse(null);
+                Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(encoded)).orElse(null);
                 if (block == null) {
                     return Optional.empty();
                 }
@@ -2564,11 +2563,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private void returnToSavedFace(AIPlayerEntity bot) {
-        if (lastFace == null || bot.getBlockPos().equals(lastFace)) {
+        if (lastFace == null || bot.blockPosition().equals(lastFace)) {
             bot.getActionPack().stopAll();
             restoringFace = false;
-            stripProgressPos = bot.getBlockPos().toImmutable();
-            lastFace = bot.getBlockPos().toImmutable();
+            stripProgressPos = bot.blockPosition().immutable();
+            lastFace = bot.blockPosition().immutable();
             noteProgress();
             BotLog.task(bot, "ore_dig_face_restored", "face", lastFace.toShortString());
             return;
@@ -2592,7 +2591,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     // ── Ore vein: clear out the same-vein ore adjacent to the currently locked ore ──
-    private boolean advanceVein(AIPlayerEntity bot, ServerWorld world) {
+    private boolean advanceVein(AIPlayerEntity bot, ServerLevel world) {
         if (veinQueue.isEmpty()) {
             return false;
         }
@@ -2656,7 +2655,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             veinQueue.pollFirst();
             return true;
         }
-        BlockPos veinFeet = bot.getBlockPos();
+        BlockPos veinFeet = bot.blockPosition();
         if (v.getX() == veinFeet.getX() && v.getZ() == veinFeet.getZ()
                 && v.getY() - veinFeet.getY() > MAX_TARGET_BREAK_DY
                 && !withinReach(bot, v)) {
@@ -2695,7 +2694,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (egress == PickupEgressResult.TARGET_ORE) {
                 BlockPos egressOre = lowerOreTransitionHead(bot, v);
                 if (egressOre != null && !veinQueue.contains(egressOre)) {
-                    veinQueue.addFirst(egressOre.toImmutable());
+                    veinQueue.addFirst(egressOre.immutable());
                 }
                 return true;
             }
@@ -2739,7 +2738,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * Moves toward one observed target ore without allowing PathExecutor to use that ore itself as
      * a DIG_THROUGH endpoint. Both primary targets and queued vein members use this exact policy.
      */
-    private void approachTargetOre(AIPlayerEntity bot, ServerWorld world, BlockPos ore) {
+    private void approachTargetOre(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
         if (!bot.getActionPack().isPathExecutorIdle()
                 || !bot.getActionPack().isWalkToIdle()) {
             return;
@@ -2761,7 +2760,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (tryRememberedHighWorkPoseRoute(bot, world, ore)) {
                 return;
             }
-            BlockPos feet = bot.getBlockPos();
+            BlockPos feet = bot.blockPosition();
             if (ore.getX() == feet.getX()
                     && ore.getZ() == feet.getZ()
                     && ore.getY() - feet.getY() > MAX_TARGET_BREAK_DY) {
@@ -2771,7 +2770,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // Keep the ore intact unless this task previously observed and durably retained a
                 // standable high side pose before the lower shaft/pickup occluded it.
                 abandonTargetApproach(
-                        bot, ore, "overhead_drop_catch_unproven", ore.down());
+                        bot, ore, "overhead_drop_catch_unproven", ore.below());
                 return;
             }
             // No observed standable side exists yet. Open one controlled cell at a time; never use
@@ -2807,16 +2806,16 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BlockPos best = null;
         long bestDistance = Long.MAX_VALUE;
         for (Direction direction : STRIP_DIRS) {
-            BlockPos candidate = ore.offset(direction);
+            BlockPos candidate = ore.relative(direction);
             if (!veinBroken.contains(candidate)
-                    || !io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)
+                    || !io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), candidate)
                     || OreScan.adjacentHazard(bot, candidate) == OreScan.Observation.OBSERVED_PRESENT) {
                 continue;
             }
-            long distance = squaredBlockDistance(bot.getBlockPos(), candidate);
+            long distance = squaredBlockDistance(bot.blockPosition(), candidate);
             if (distance < bestDistance) {
                 bestDistance = distance;
-                best = candidate.toImmutable();
+                best = candidate.immutable();
             }
         }
         return best;
@@ -2828,17 +2827,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * authorizes changing terrain between the bot and that historical fact.
      */
     private boolean tryRememberedHighWorkPoseRoute(AIPlayerEntity bot,
-                                                   ServerWorld world,
+                                                   ServerLevel world,
                                                    BlockPos ore) {
         BlockPos workPose = rememberedHighWorkPose(bot, world, ore);
         if (workPose == null) {
             return false;
         }
-        if (bot.getBlockPos().equals(workPose)) {
+        if (bot.blockPosition().equals(workPose)) {
             return true;
         }
         if (!ore.equals(rememberedHighWorkPoseRouteOwner)) {
-            rememberedHighWorkPoseRouteOwner = ore.toImmutable();
+            rememberedHighWorkPoseRouteOwner = ore.immutable();
             rememberedHighWorkPoseRouteStartedBudget = totalBudget();
         }
         // The lease belongs to this finite ore owner, not to one particular planner attempt.
@@ -2876,15 +2875,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * ore itself, the task waits for ordinary perception instead of treating it as channel rock.
      */
     private void continueUnknownOwnerApproach(AIPlayerEntity bot,
-                                              ServerWorld world,
+                                              ServerLevel world,
                                               BlockPos owner,
                                               TunnelIntent intent) {
         if (owner == null || !bot.getActionPack().isPathExecutorIdle()
                 || !bot.getActionPack().isWalkToIdle()) {
             return;
         }
-        BlockPos next = stepToward(bot.getBlockPos(), owner);
-        if (next == null || next.equals(owner) || next.up().equals(owner)) {
+        BlockPos next = stepToward(bot.blockPosition(), owner);
+        if (next == null || next.equals(owner) || next.above().equals(owner)) {
             return;
         }
         if (miner.target() != null) {
@@ -2897,7 +2896,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (pendingPickupPos != null) {
             return;
         }
-        pendingPickupPos = minedPos.toImmutable();
+        pendingPickupPos = minedPos.immutable();
         pendingPickupLastSeenPos = pendingPickupPos;
         pendingPickupInventory = Math.max(0, inventoryBeforeBreak);
         pendingPickupStarted = totalBudget();
@@ -2909,9 +2908,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private BlockMiner.Status beginTargetMine(AIPlayerEntity bot, BlockPos pos) {
         MiningEvidenceAudit.observeDiamondOreBeforeBreak(
-                bot, pos, bot.getEntityWorld().getBlockState(pos).getBlock());
+                bot, pos, bot.level().getBlockState(pos).getBlock());
         if (activeTargetBreakPos == null || !activeTargetBreakPos.equals(pos)) {
-            activeTargetBreakPos = pos.toImmutable();
+            activeTargetBreakPos = pos.immutable();
             activeTargetBreakInventory = HarvestCore.countInventoryItems(bot, targetDrops);
         }
         return beginMine(bot, pos);
@@ -2928,24 +2927,24 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * resupply, change pose, or select another observed target.</p>
      */
     private boolean passesTargetDropCommitGate(AIPlayerEntity bot,
-                                               ServerWorld world,
+                                               ServerLevel world,
                                                BlockPos ore) {
         if (!hasRecoverableTargetBreakPose(bot, ore)) {
             BotLog.action(bot, "ore_dig_drop_pose_commit_blocked",
                     "ore", ore.toShortString(),
-                    "feet", bot.getBlockPos().toShortString());
+                    "feet", bot.blockPosition().toShortString());
             // This also fences old checkpoints whose active_break_pos was published under the
             // former high-shaft shortcut. The ore is still intact, so cancelling the partial miner
             // and releasing its finite owner is exact-once and cannot lose a physical drop debt.
             miner.cancel(bot);
             clearActiveTargetBreak(ore);
-            abandonTargetApproach(bot, ore, "drop_pose_unrecoverable", bot.getBlockPos());
+            abandonTargetApproach(bot, ore, "drop_pose_unrecoverable", bot.blockPosition());
             return false;
         }
         if (!needsTargetDropSupport(bot, ore)) {
             return true;
         }
-        BlockPos support = ore.down();
+        BlockPos support = ore.below();
         if (hasReliableObservedDropCatch(bot, world, support)) {
             return true;
         }
@@ -2968,7 +2967,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     /** Accepts only a visible, dry, stable collision surface as an already-owned drop catch. */
     private static boolean hasReliableObservedDropCatch(AIPlayerEntity bot,
-                                                        ServerWorld world,
+                                                        ServerLevel world,
                                                         BlockPos support) {
         if (!ObservableWorldQuery.canObserveBlock(bot, support)) {
             return false;
@@ -2982,8 +2981,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private void finishTargetBreak(AIPlayerEntity bot, BlockPos pos, int inventoryBeforeBreak) {
         if (veinMode) {
-            veinBroken.add(pos.toImmutable());
-            veinSweep.addLast(pos.toImmutable());
+            veinBroken.add(pos.immutable());
+            veinSweep.addLast(pos.immutable());
             veinFinalSwept = false;
             veinPickupGrace = 0;
         }
@@ -2992,7 +2991,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // Removing a lower vein member can expose a high side staircase for only the short physical
         // pickup window. Record every newly visible target pose now, before chasing the randomized
         // ItemEntity can settle the bot under the remaining ore and occlude that staircase again.
-        nearestOre(bot, bot.getEntityWorld());
+        nearestOre(bot, bot.level());
         stabilizeBrokenTargetDrop(bot, pos);
         MiningEvidenceAudit.recordDiamondOreBreak(bot, pos);
         int safeBaseline = inventoryBeforeBreak >= 0
@@ -3014,8 +3013,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!needsTargetDropSupport(bot, ore)) {
             return;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos support = ore.down();
+        ServerLevel world = bot.level();
+        BlockPos support = ore.below();
         if (!ObservableWorldQuery.canObserveCell(bot, support)) {
             BotLog.action(bot, "ore_dig_drop_support_unavailable",
                     "ore", ore.toShortString(),
@@ -3075,7 +3074,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         BotLog.action(bot, "ore_dig_drop_support_placed",
                 "ore", ore.toShortString(),
                 "support", support.toShortString(),
-                "block", Registries.BLOCK.getId(placedState.getBlock()));
+                "block", BuiltInRegistries.BLOCK.getKey(placedState.getBlock()));
     }
 
     private void clearActiveTargetBreak(BlockPos pos) {
@@ -3111,10 +3110,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // ItemEntity appears one or more ticks after the break. Chase an observable entity first;
         // when terrain occludes it, return to the exact mined cell so vanilla collision pickup can
         // occur without reading a hidden entity or mutating inventory.
-        Optional<net.minecraft.entity.ItemEntity> visibleDrop =
+        Optional<net.minecraft.world.entity.item.ItemEntity> visibleDrop =
                 HarvestCore.nearestDropAnyOf(bot, targetDrops, 16.0D);
         visibleDrop.ifPresent(drop ->
-                pendingPickupLastSeenPos = drop.getBlockPos().toImmutable());
+                pendingPickupLastSeenPos = drop.blockPosition().immutable());
         if (pendingPickupGainTick < 0
                 && age >= 3
                 && bot.getActionPack().isPathExecutorIdle()
@@ -3124,12 +3123,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // mined block. Follow the currently observed entity instead of camping the stale
                 // break cell. The shared pickup approach distinguishes same-level walking from a
                 // vertical path/descent, which matters when a staircase ore drops directly below.
-                net.minecraft.entity.ItemEntity drop = visibleDrop.orElseThrow();
+                net.minecraft.world.entity.item.ItemEntity drop = visibleDrop.orElseThrow();
                 boolean pursuingDrop = false;
                 boolean physicallySupported = HarvestCore.isDropPhysicallySupported(bot, drop);
                 if (physicallySupported) {
                     pursuingDrop = HarvestCore.approachDropPhysically(bot, drop);
-                } else if (isPendingDropInsideRecoverableFallNeighborhood(drop.getBlockPos())) {
+                } else if (isPendingDropInsideRecoverableFallNeighborhood(drop.blockPosition())) {
                     // A just-broken stacked vein member can remain airborne in its own visible
                     // shaft. Vanilla launch drift may move it one horizontal cell, but movement is
                     // admitted only when the shared helper proves that exact observed column dry,
@@ -3138,7 +3137,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 }
                 if (physicallySupported
                         && !pursuingDrop
-                        && !drop.getBlockPos().equals(pendingPickupPos)) {
+                        && !drop.blockPosition().equals(pendingPickupPos)) {
                     // A visible entity can rest on a factual but disconnected ledge. A failed exact
                     // route is not movement ownership; fall back to the durable break cell instead
                     // of suppressing it with a false-positive boolean. Unsupported entities outside
@@ -3176,7 +3175,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // envelope is the authoritative settled-pose invariant here: it rejects the transient
         // upper cell from an elevated pickup while accepting a physically supported shaft floor.
         boolean settledOnStandablePose = io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
-                bot.getEntityWorld(), bot.getBlockPos());
+                bot.level(), bot.blockPosition());
         if (pendingPickupGainTick >= 0
                 && totalBudget() - pendingPickupGainTick >= 5
                 && settledOnStandablePose
@@ -3214,7 +3213,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             resetPickupRecoveryStall();
             return;
         }
-        BlockPos current = bot.getBlockPos().toImmutable();
+        BlockPos current = bot.blockPosition().immutable();
         if (!current.equals(pendingPickupStallAnchor)) {
             pendingPickupStallAnchor = current;
             pendingPickupStallTicks = 0;
@@ -3254,18 +3253,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (anchor == null) {
             return false;
         }
-        ServerWorld world = bot.getEntityWorld();
-        int standY = bot.getBlockPos().getY();
+        ServerLevel world = bot.level();
+        int standY = bot.blockPosition().getY();
         for (int checked = 0; checked < PICKUP_SWEEP_OFFSETS.length; checked++) {
             int[] offset = PICKUP_SWEEP_OFFSETS[
                     Math.floorMod(pendingPickupSweepCursor++, PICKUP_SWEEP_OFFSETS.length)];
             BlockPos candidate = new BlockPos(
                     anchor.getX() + offset[0], standY, anchor.getZ() + offset[1]);
             Standability.clearCache();
-            if (candidate.equals(bot.getBlockPos())
+            if (candidate.equals(bot.blockPosition())
                     || !ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())
+                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())
                     || !Standability.isStandable(world, candidate)) {
                 continue;
             }
@@ -3301,11 +3300,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (bot == null || ore == null) {
             return null;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         int vertical = ore.getY() - current.getY();
         int horizontal = Math.abs(ore.getX() - current.getX())
                 + Math.abs(ore.getZ() - current.getZ());
-        return vertical == -1 && horizontal == 1 ? ore.up(2).toImmutable() : null;
+        return vertical == -1 && horizontal == 1 ? ore.above(2).immutable() : null;
     }
 
     /**
@@ -3315,7 +3314,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * pickup debt.
      */
     private PickupEgressResult tickPickupEgressClearance(AIPlayerEntity bot,
-                                                          ServerWorld world,
+                                                          ServerLevel world,
                                                           BlockPos ore) {
         BlockPos transitionHead = lowerOreTransitionHead(bot, ore);
         if (transitionHead == null) {
@@ -3346,7 +3345,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return PickupEgressResult.CLEAR;
         }
         if (!state.getFluidState().isEmpty()
-                || state.getHardness(world, transitionHead) < 0.0F
+                || state.getDestroySpeed(world, transitionHead) < 0.0F
                 || !ObservableWorldQuery.canObserveBlock(bot, transitionHead)) {
             return PickupEgressResult.UNSAFE;
         }
@@ -3364,20 +3363,20 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     static OreScan.Observation observePickupEgressClearance(AIPlayerEntity bot,
-                                                             ServerWorld world,
+                                                             ServerLevel world,
                                                              BlockPos transitionHead) {
         return OreScan.observe(bot, transitionHead,
                 state -> state.getCollisionShape(world, transitionHead).isEmpty());
     }
 
-    private void queueVeinAround(AIPlayerEntity bot, ServerWorld world, BlockPos around) {
+    private void queueVeinAround(AIPlayerEntity bot, ServerLevel world, BlockPos around) {
         for (BlockPos p : OreScan.veinFrom(bot, around, targetOres, VEIN_CAP)) {
             if (!p.equals(around)
                     && !veinQueue.contains(p)
                     && !oreExcluded(bot, p)
                     && io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, p)) {
                 rememberObservedHighWorkPose(bot, world, p);
-                veinQueue.addLast(p.toImmutable());
+                veinQueue.addLast(p.immutable());
             }
         }
     }
@@ -3426,7 +3425,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (sealResult.isFailed()
                 && bot.getActionPack().isPathExecutorIdle()) {
             bot.getActionPack().startDigPathTo(
-                    ore.down(), protectedStoneLikeReserve); // Close in until sealing is reachable
+                    ore.below(), protectedStoneLikeReserve); // Close in until sealing is reachable
         }
         return FluidSealStep.WORKING;
     }
@@ -3441,7 +3440,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * invisible to the pre-break flood, so this is what lets the vein continue through stone. Only cells
      * the bot can observe are ever queued; nothing hidden is read.
      */
-    private void tickVeinDiscovery(AIPlayerEntity bot, ServerWorld world) {
+    private void tickVeinDiscovery(AIPlayerEntity bot, ServerLevel world) {
         if (veinBroken.size() >= VEIN_CAP) {
             veinSweep.clear();
             if (miner.target() == null && activeTargetBreakPos == null) {
@@ -3455,14 +3454,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
-    private void discoverVeinAround(AIPlayerEntity bot, ServerWorld world, BlockPos center) {
+    private void discoverVeinAround(AIPlayerEntity bot, ServerLevel world, BlockPos center) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (dx == 0 && dy == 0 && dz == 0) {
                         continue;
                     }
-                    BlockPos n = center.add(dx, dy, dz).toImmutable();
+                    BlockPos n = center.offset(dx, dy, dz).immutable();
                     if (veinBroken.contains(n)
                             || veinQueue.contains(n)
                             || n.equals(targetOre)
@@ -3489,9 +3488,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * Exhaustion = every broken cell's neighbourhood was rechecked after the last break and nothing
      * observable, unexcluded and same-type remains.
      */
-    private void tickVeinWithoutTarget(AIPlayerEntity bot, ServerWorld world) {
+    private void tickVeinWithoutTarget(AIPlayerEntity bot, ServerLevel world) {
         if (!veinSeeded) {
-            int now = bot.getEntityWorld().getServer().getTicks();
+            int now = bot.level().getServer().getTickCount();
             if (now - lastScanTick < SCAN_INTERVAL) {
                 return;
             }
@@ -3502,7 +3501,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     BotLog.action(bot, "ore_dig_vein_no_seed",
                             "hint", veinSeedHint == null ? "none" : veinSeedHint.toShortString());
                     fail("vein_not_found: no observable "
-                            + Registries.BLOCK.getId(targetOres.iterator().next()).getPath()
+                            + BuiltInRegistries.BLOCK.getKey(targetOres.iterator().next()).getPath()
                             + " in view; move closer to the ore or give its x/y/z");
                 }
                 return;
@@ -3537,7 +3536,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "collected", collected, "capped", veinBroken.size() >= VEIN_CAP);
         io.github.zoyluo.minecraftai.brain.BotReporter.INSTANCE.onGoalMessage(bot,
                 "Vein finished: mined " + veinBroken.size() + " "
-                        + Registries.BLOCK.getId(targetOres.iterator().next()).getPath().replace('_', ' ')
+                        + BuiltInRegistries.BLOCK.getKey(targetOres.iterator().next()).getPath().replace('_', ' ')
                         + " block" + (veinBroken.size() == 1 ? "" : "s")
                         + (veinBroken.size() >= VEIN_CAP ? " (vein cap reached)" : "")
                         + "; no more of this vein is in view.");
@@ -3545,18 +3544,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
     // ── Dig one tunnel cell toward the target (only the cell within reach, driven by BlockMiner) ──
     private void digTowardStep(AIPlayerEntity bot,
-                               ServerWorld world,
+                               ServerLevel world,
                                BlockPos goal,
                                TunnelIntent intent) {
         digTowardStep(bot, world, goal, intent, null);
     }
 
     private void digTowardStep(AIPlayerEntity bot,
-                               ServerWorld world,
+                               ServerLevel world,
                                BlockPos goal,
                                TunnelIntent intent,
                                BlockPos factualRear) {
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         // P0 (fixes zero-displacement spinning on deep diagonally-below ore): the target is deep
         // underfoot (>=2 lower) and already horizontally close (<=2) -> the same-layer horizontal
         // approach can never reach it, so switch to a safe-stair descent by one layer
@@ -3595,7 +3594,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             return;
         }
-        BlockPos head = step.up();
+        BlockPos head = step.above();
 
         // An issued channel break remains factual even if the newly opened air cell no longer has
         // a direct ray. Settle that exact owner before asking ordinary perception to classify it.
@@ -3681,7 +3680,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             miner.cancel(bot);
             return;
         }
-        if (!canObserveWorldState(bot, step.down())) {
+        if (!canObserveWorldState(bot, step.below())) {
             // A hidden floor never authorizes movement or an open-drop classification. An observed
             // AIR floor, however, is a factual cell observation and must reach Standability below
             // so the branch can rotate instead of waiting forever on a block-face-only query.
@@ -3718,7 +3717,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // face. Reuse the executor's exact node threshold so the next task tick observes the
         // factual destination block before it may break a finite ore.
         ActionResult walk = bot.getActionPack().startWalkTo(
-                step.toCenterPos(), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
+                step.getCenter(), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
         if (intent == TunnelIntent.BLIND_BRANCH && !walk.isFailed()) {
             pendingBlindAdvance = new PendingBlindAdvance(
                     feet, step, STRIP_DIRS[stripDirIndex]);
@@ -3726,14 +3725,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             clearPendingBlindAdvance();
         }
         // Reaching a new cell also counts as progress (avoids the watchdog wrongly killing the task during the few ticks of "dug through, now walking there").
-        if (bot.getBlockPos().equals(step)) {
+        if (bot.blockPosition().equals(step)) {
             noteProgress();
         }
         return;
     }
 
     private boolean preflightBlindBodyEnvelope(AIPlayerEntity bot,
-                                                ServerWorld world,
+                                                ServerLevel world,
                                                 BlockPos step,
                                                 TunnelIntent intent,
                                                 BlockPos factualRear) {
@@ -3754,7 +3753,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private void mineObservedTunnelObstruction(AIPlayerEntity bot,
-                                               ServerWorld world,
+                                               ServerLevel world,
                                                BlockPos goal,
                                                TunnelIntent intent,
                                                BlockPos obstruction,
@@ -3803,7 +3802,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private void rejectObservedTunnelBoundary(AIPlayerEntity bot,
-                                              ServerWorld world,
+                                              ServerLevel world,
                                               BlockPos goal,
                                               TunnelIntent intent,
                                               String reason,
@@ -3818,8 +3817,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
     }
 
-    private static String observedFluidReason(net.minecraft.fluid.FluidState fluid) {
-        return fluid.isIn(FluidTags.WATER) ? "water" : "lava";
+    private static String observedFluidReason(net.minecraft.world.level.material.FluidState fluid) {
+        return fluid.is(FluidTags.WATER) ? "water" : "lava";
     }
 
     private static boolean hasObservedAdjacentDangerFluid(AIPlayerEntity bot,
@@ -3834,7 +3833,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private boolean preserveTargetOreAtBlindBoundary(AIPlayerEntity bot,
-                                                      ServerWorld world,
+                                                      ServerLevel world,
                                                       BlockPos obstruction,
                                                       BlockPos factualRear) {
         OreScan.Observation obstructionState = OreScan.observeOre(
@@ -3855,12 +3854,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return true;
         }
         clearStripMovementOwnership();
-        targetOre = obstruction.toImmutable();
+        targetOre = obstruction.immutable();
         lastTargetDist = Double.MAX_VALUE;
         targetApproachTick = elapsed;
         BotLog.action(bot, "ore_dig_branch_target_acquired",
                 "ore", obstruction.toShortString(),
-                "direction", STRIP_DIRS[stripDirIndex].asString(),
+                "direction", STRIP_DIRS[stripDirIndex].getSerializedName(),
                 "steps_left", stripStepsLeft);
         return true;
     }
@@ -3873,23 +3872,23 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * stair and continue its bounded approach from the lower level.
      */
     private boolean descendAcrossObservedOneBlockDrop(AIPlayerEntity bot,
-                                                       ServerWorld world,
+                                                       ServerLevel world,
                                                        BlockPos step,
                                                        BlockPos goal) {
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         if (step == null || goal == null || goal.getY() >= origin.getY()
                 || step.getY() != origin.getY()
                 || Math.abs(step.getX() - origin.getX())
                 + Math.abs(step.getZ() - origin.getZ()) != 1) {
             return false;
         }
-        BlockPos landing = step.down();
-        BlockPos floor = landing.down();
-        if (landing.getSquaredDistance(goal) >= origin.getSquaredDistance(goal)) {
+        BlockPos landing = step.below();
+        BlockPos floor = landing.below();
+        if (landing.distSqr(goal) >= origin.distSqr(goal)) {
             return false;
         }
         if (!ObservableWorldQuery.canObserveCell(bot, step)
-                || !ObservableWorldQuery.canObserveCell(bot, step.up())
+                || !ObservableWorldQuery.canObserveCell(bot, step.above())
                 || !ObservableWorldQuery.canObserveCell(bot, landing)
                 || !ObservableWorldQuery.canObserveBlock(bot, floor)) {
             return false;
@@ -3902,14 +3901,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || world.getBlockEntity(floor) != null
                 || Standability.isDangerous(floorState)
                 || floorState.getCollisionShape(world, floor)
-                .getMax(Direction.Axis.Y) < 1.0D
+                .max(Direction.Axis.Y) < 1.0D
                 || !isObservedAdjacentFluidSafe(bot, world, step, landing)) {
             return false;
         }
         Standability.clearCache();
         if (!Standability.isStandable(world, landing)
                 || !bot.getActionPack().descendInto(landing)
-                || !bot.getBlockPos().equals(landing)) {
+                || !bot.blockPosition().equals(landing)) {
             return false;
         }
         publishSynchronousMove(origin, landing);
@@ -3927,12 +3926,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * the result is used only to avoid danger.
      */
     static boolean isObservedAdjacentFluidSafe(AIPlayerEntity bot,
-                                                ServerWorld world,
+                                                ServerLevel world,
                                                 BlockPos... centers) {
         Set<BlockPos> checked = new HashSet<>();
         for (BlockPos center : centers) {
             for (Direction direction : Direction.values()) {
-                BlockPos adjacent = center.offset(direction).toImmutable();
+                BlockPos adjacent = center.relative(direction).immutable();
                 if (!checked.add(adjacent)) {
                     continue;
                 }
@@ -3942,7 +3941,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     return false;
                 }
                 var fluid = world.getFluidState(adjacent);
-                if (fluid.isIn(FluidTags.LAVA) || fluid.isIn(FluidTags.WATER)) {
+                if (fluid.is(FluidTags.LAVA) || fluid.is(FluidTags.WATER)) {
                     return false;
                 }
             }
@@ -3985,9 +3984,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // head cell, next = foot cell); if water/lava is hit, switch to a different diagonal direction,
     // descending to the new plane like digging a staircase (consistent with the staircase logic in
     // DescendToYTask / DigDownTask).
-    private boolean digDownOneLayer(AIPlayerEntity bot, ServerWorld world) {
-        BlockPos feet = bot.getBlockPos();
-        if (feet.down().getY() <= MIN_Y) {
+    private boolean digDownOneLayer(AIPlayerEntity bot, ServerLevel world) {
+        BlockPos feet = bot.blockPosition();
+        if (feet.below().getY() <= MIN_Y) {
             fail("ore_dig_reached_min_y collected=" + collected);
             return true;
         }
@@ -3998,14 +3997,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // boundary must not be escalated into a permanent failure of the entire OreDig task.
             return false;
         }
-        BlockPos ahead = feet.offset(dir);   // Next step's head cell (x+d, y)
-        BlockPos next = ahead.down();         // Next step's foot cell (x+d, y-1)
+        BlockPos ahead = feet.relative(dir);   // Next step's head cell (x+d, y)
+        BlockPos next = ahead.below();         // Next step's foot cell (x+d, y-1)
         // Clear three body cells: ahead (front head cell, mine first if visible) + ahead.up() (headroom
         // above the front) + next (foot cell). Digging ahead.up() too keeps the dive shaft 2 cells
         // tall along the diagonal -- clearing only next+ahead would leave a player descending the
         // stairs bumping their head on the solid ceiling ahead, making the passage effectively only
         // 1 block tall and impassable.
-        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.up(), next);
+        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.above(), next);
         if (solid != null) {
             BlockMiner.Status st = miner.target() != null && miner.target().equals(solid)
                     ? miner.tick(bot)
@@ -4019,7 +4018,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         // Body clearance confirmed -> step diagonally down onto the next stair (a 1-block micro-move, not the map-crossing teleport that roam uses).
         boolean moved = bot.getActionPack().descendInto(next);
-        if (moved && bot.getBlockPos().equals(next)) {
+        if (moved && bot.blockPosition().equals(next)) {
             publishSynchronousMove(feet, next);
             return true;
         }
@@ -4038,7 +4037,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return;
         }
         clearStripMovementOwnership();
-        BlockPos factualFace = destination.toImmutable();
+        BlockPos factualFace = destination.immutable();
         boundaryRerouteOrigin = null;
         lastFace = factualFace;
         stripProgressPos = factualFace;
@@ -4048,15 +4047,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // Pick a diagonal-down stair direction that is "not adjacent to water/lava": prefer the current
     // digging direction (naturally continues the tunnel), otherwise search in STRIP_DIRS order;
     // returns null if all four diagonal-down directions are blocked by water/lava.
-    private Direction safeStairDir(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private Direction safeStairDir(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         int base = stripDirIndex < 0 ? 0 : stripDirIndex;
         for (int i = 0; i < STRIP_DIRS.length; i++) {
             Direction dir = STRIP_DIRS[(base + i) % STRIP_DIRS.length];
-            BlockPos ahead = feet.offset(dir);
-            BlockPos next = ahead.down();
-            BlockPos support = next.down();
+            BlockPos ahead = feet.relative(dir);
+            BlockPos next = ahead.below();
+            BlockPos support = next.below();
             if (!canObserveWorldState(bot, ahead)
-                    || !canObserveWorldState(bot, ahead.up())
+                    || !canObserveWorldState(bot, ahead.above())
                     || !canObserveWorldState(bot, next)
                     || !ObservableWorldQuery.canObserveBlock(bot, support)) {
                 continue;
@@ -4065,24 +4064,24 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             boolean supported = supportState.getFluidState().isEmpty()
                     && !Standability.isDangerous(supportState)
                     && supportState.getCollisionShape(world, support)
-                    .getMax(Direction.Axis.Y) > 0.0D;
+                    .max(Direction.Axis.Y) > 0.0D;
             if (supported
                     && !isLava(world, next) && !isLava(world, support)
-                    && !isLava(world, ahead) && !isLava(world, ahead.up())
+                    && !isLava(world, ahead) && !isLava(world, ahead.above())
                     && !isWater(world, next) && !isWater(world, support)
-                    && !isWater(world, ahead) && !isWater(world, ahead.up())) {
+                    && !isWater(world, ahead) && !isWater(world, ahead.above())) {
                 return dir;
             }
         }
         return null;
     }
 
-    private static boolean isLava(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.LAVA);
+    private static boolean isLava(ServerLevel world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().is(FluidTags.LAVA);
     }
 
-    private static boolean isWater(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.WATER);
+    private static boolean isWater(ServerLevel world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().is(FluidTags.WATER);
     }
 
     private static boolean canObserveWorldState(AIPlayerEntity bot, BlockPos pos) {
@@ -4091,9 +4090,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private void rememberObservedHighWorkPose(AIPlayerEntity bot,
-                                              ServerWorld world,
+                                              ServerLevel world,
                                               BlockPos ore) {
-        if (ore == null || ore.getY() - bot.getBlockPos().getY() <= MAX_TARGET_BREAK_DY) {
+        if (ore == null || ore.getY() - bot.blockPosition().getY() <= MAX_TARGET_BREAK_DY) {
             return;
         }
         BlockPos observed = approachGoalFor(bot, world, ore);
@@ -4106,12 +4105,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                               BlockPos ore,
                                               BlockPos observedPose) {
         if (ore == null || observedPose == null
-                || ore.getY() - bot.getBlockPos().getY() <= MAX_TARGET_BREAK_DY
+                || ore.getY() - bot.blockPosition().getY() <= MAX_TARGET_BREAK_DY
                 || !isExactHighWorkPose(ore, observedPose)) {
             return;
         }
-        BlockPos immutableOre = ore.toImmutable();
-        BlockPos immutablePose = observedPose.toImmutable();
+        BlockPos immutableOre = ore.immutable();
+        BlockPos immutablePose = observedPose.immutable();
         BlockPos previous = rememberedHighWorkPoses.put(immutableOre, immutablePose);
         trimRememberedHighWorkPoseLedger(bot);
         if (rememberedHighWorkPoses.containsKey(immutableOre)
@@ -4130,7 +4129,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * distances deterministic across HashMap iteration and process restarts.</p>
      */
     private void trimRememberedHighWorkPoseLedger(AIPlayerEntity bot) {
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         java.util.Comparator<BlockPos> farthestFirst = java.util.Comparator
                 .comparingLong((BlockPos pos) -> squaredBlockDistance(origin, pos))
                 .thenComparingInt(BlockPos::getX)
@@ -4167,7 +4166,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * responsible while the old pose is occluded.
      */
     private BlockPos rememberedHighWorkPose(AIPlayerEntity bot,
-                                            ServerWorld world,
+                                            ServerLevel world,
                                             BlockPos ore) {
         BlockPos remembered = rememberedHighWorkPoses.get(ore);
         if (remembered == null) {
@@ -4187,8 +4186,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return null;
         }
         boolean envelopeObserved = ObservableWorldQuery.canObserveCell(bot, remembered)
-                && ObservableWorldQuery.canObserveCell(bot, remembered.up())
-                && ObservableWorldQuery.canObserveBlock(bot, remembered.down());
+                && ObservableWorldQuery.canObserveCell(bot, remembered.above())
+                && ObservableWorldQuery.canObserveBlock(bot, remembered.below());
         if (envelopeObserved) {
             Standability.clearCache();
         }
@@ -4226,7 +4225,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // never hand the ore block itself or the cell directly under it to DIG_THROUGH.
     // The latter could break both the foot-cell and head-cell ore blocks in a single path step,
     // bypassing the per-block drop accounting.
-    private static BlockPos approachGoalFor(AIPlayerEntity bot, ServerWorld world, BlockPos ore) {
+    private static BlockPos approachGoalFor(AIPlayerEntity bot, ServerLevel world, BlockPos ore) {
         AdjacentFluidObservation fluid = adjacentDangerFluidOf(bot, ore);
         BlockPos lava = fluid.position();
         Direction preferred = null;
@@ -4239,12 +4238,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         Direction[] order = preferred == null
                 ? new Direction[]{Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST}
-                : new Direction[]{preferred, preferred.rotateYClockwise(), preferred.rotateYCounterclockwise(), preferred.getOpposite()};
+                : new Direction[]{preferred, preferred.getClockWise(), preferred.getCounterClockWise(), preferred.getOpposite()};
         for (Direction direction : order) {
-            BlockPos candidate = ore.down().offset(direction);
+            BlockPos candidate = ore.below().relative(direction);
             if (!ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())) {
+                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
                 continue;
             }
             if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, candidate)
@@ -4258,7 +4257,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     /** Package-private deterministic geometry probe for strict-survival GameTests. */
     static BlockPos inspectApproachGoalFor(AIPlayerEntity bot,
-                                           ServerWorld world,
+                                           ServerLevel world,
                                            BlockPos ore) {
         return approachGoalFor(bot, world, ore);
     }
@@ -4272,7 +4271,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                                                                    BlockPos pos) {
         boolean unknown = false;
         for (Direction d : Direction.values()) {
-            BlockPos side = pos.offset(d);
+            BlockPos side = pos.relative(d);
             OreScan.Observation observation = OreScan.observeDangerFluid(bot, side);
             if (observation == OreScan.Observation.OBSERVED_PRESENT) {
                 return new AdjacentFluidObservation(observation, side);
@@ -4291,9 +4290,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // Purpose: freeze the real terrain behind cases like "A* returns a path, the executor breaks
     // blocks, but dist doesn't shrink" into a deterministic repro scenario, to refine approach
     // jitter.
-    private void dumpStallRegion(AIPlayerEntity bot, ServerWorld world) {
+    private void dumpStallRegion(AIPlayerEntity bot, ServerLevel world) {
         CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "ore_dig_stall_dump");
-        BlockPos b = bot.getBlockPos();
+        BlockPos b = bot.blockPosition();
         BlockPos t = targetOre != null ? targetOre : b;
         int minX = Math.min(b.getX(), t.getX()) - 3, maxX = Math.max(b.getX(), t.getX()) + 3;
         int minY = Math.min(b.getY(), t.getY()) - 2, maxY = Math.max(b.getY(), t.getY()) + 3;
@@ -4315,7 +4314,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         if (!st.getFluidState().isEmpty()) c = '~';
                         else if (OreScan.isOreBlock(st.getBlock())) c = 'O';
                         else if (st.getCollisionShape(world, p).isEmpty()) c = '.';
-                        else c = st.getHardness(world, p) < 0 ? 'X' : '#';
+                        else c = st.getDestroySpeed(world, p) < 0 ? 'X' : '#';
                     }
                     row.append(c);
                 }
@@ -4349,7 +4348,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // target pick in hand so the generic background watcher cannot consume unbudgeted sticks
             // by crafting one ad-hoc stone pick before GoalExecutor schedules that service.
             targetOres.stream()
-                    .map(Block::getDefaultState)
+                    .map(Block::defaultBlockState)
                     .filter(state -> ToolTier.canHarvestWithInventory(bot, state))
                     .findFirst()
                     .ifPresent(state -> ToolSelector.equipBestTool(bot, state));
@@ -4367,7 +4366,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * retain their existing typed-failure ownership and are never erased by this shortcut.
      */
     private boolean rerouteBlindBranchAroundHigherTierOre(AIPlayerEntity bot,
-                                                           ServerWorld world,
+                                                           ServerLevel world,
                                                            BlockPos obstruction,
                                                            BlockPos factualRear) {
         if (stripDirIndex < 0 || targetOre != null || pendingPickupPos != null
@@ -4387,10 +4386,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 bot, world, "tool_obstruction", obstruction, factualRear);
         BotLog.action(bot, "ore_dig_tool_obstruction_reroute",
                 "at", obstruction.toShortString(),
-                "block", Registries.BLOCK.getId(state.getBlock()),
+                "block", BuiltInRegistries.BLOCK.getKey(state.getBlock()),
                 "required", ToolTier.requiredPickaxeItemId(state.getBlock()),
                 "usable_tier", usableTier,
-                "direction", STRIP_DIRS[stripDirIndex].asString());
+                "direction", STRIP_DIRS[stripDirIndex].getSerializedName());
         return true;
     }
 
@@ -4411,20 +4410,20 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * lose the finite turn proof and misclassify a safe face as trapped.
      */
     private boolean rerouteBlindBranchAtObservedBoundary(AIPlayerEntity bot,
-                                                          ServerWorld world,
+                                                          ServerLevel world,
                                                           String reason,
                                                           BlockPos blocked) {
         return rerouteBlindBranchAtObservedBoundary(bot, world, reason, blocked, null);
     }
 
     private boolean rerouteBlindBranchAtObservedBoundary(AIPlayerEntity bot,
-                                                          ServerWorld world,
+                                                          ServerLevel world,
                                                           String reason,
                                                           BlockPos blocked,
                                                           BlockPos factualRear) {
         miner.cancel(bot);
         bot.getActionPack().stopAll();
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         if (stripDirIndex < 0 || stripDirIndex >= STRIP_DIRS.length || stripStepsLeft <= 0) {
             fail("ore_dig_branch_boundary_trapped:" + reason + ":" + blocked.toShortString());
             return false;
@@ -4447,7 +4446,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 RaisedBoundaryLanding raised = inspectRaisedBoundaryLanding(
                         bot, world, origin, direction);
                 if (raised != RaisedBoundaryLanding.NOT_APPLICABLE) {
-                    BlockPos landing = origin.offset(direction).up();
+                    BlockPos landing = origin.relative(direction).above();
                     if (raised == RaisedBoundaryLanding.READY
                             && FakePlayerMotion.jumpTo(
                             bot, landing, "ore_dig_open_drop_raised_landing")) {
@@ -4461,15 +4460,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         // its normal successor in the same durable transaction, retaining only the
                         // exact-landing marker for a possible immediate second boundary.
                         publishStripSuccessor(bot, null, false);
-                        boundaryRerouteOrigin = landing.toImmutable();
+                        boundaryRerouteOrigin = landing.immutable();
                         BotLog.action(bot, "ore_dig_branch_boundary_raised_landing",
                                 "at", origin.toShortString(),
                                 "blocked", blocked.toShortString(),
-                                "from", STRIP_DIRS[rejectedDirection].asString(),
-                                "via", STRIP_DIRS[closedDirection].asString(),
+                                "from", STRIP_DIRS[rejectedDirection].getSerializedName(),
+                                "via", STRIP_DIRS[closedDirection].getSerializedName(),
                                 "closed_leg", closedLeg,
                                 "landing", landing.toShortString(),
-                                "successor", STRIP_DIRS[stripDirIndex].asString(),
+                                "successor", STRIP_DIRS[stripDirIndex].getSerializedName(),
                                 "steps_left", stripStepsLeft);
                         return true;
                     }
@@ -4484,14 +4483,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             }
             clearStripMovementOwnership();
             stripDirIndex = candidate;
-            stripProgressPos = origin.toImmutable();
-            boundaryRerouteOrigin = origin.toImmutable();
+            stripProgressPos = origin.immutable();
+            boundaryRerouteOrigin = origin.immutable();
             BotLog.action(bot, "ore_dig_branch_boundary_reroute",
                     "at", origin.toShortString(),
                     "blocked", blocked.toShortString(),
                     "reason", reason,
-                    "from", STRIP_DIRS[rejectedDirection].asString(),
-                    "to", direction.asString(),
+                    "from", STRIP_DIRS[rejectedDirection].getSerializedName(),
+                    "to", direction.getSerializedName(),
                     "steps_left", stripStepsLeft);
             return true;
         }
@@ -4504,7 +4503,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         boolean progressedOpenDrop = "open_drop".equals(reason)
                 && !sameOriginCascade
                 && factualRear != null
-                && factualRear.equals(origin.offset(rearDirection));
+                && factualRear.equals(origin.relative(rearDirection));
         if (progressedOpenDrop
                 && isObservedSafeOpenEscapeCorridor(
                 bot, world, origin, rearDirection)
@@ -4519,14 +4518,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // genuinely available columns may be classified instead of losing this turn between
             // ticks and reporting a false trap (seed 3000, iron search at 48,16,-165).
             publishStripSuccessor(bot, null, false);
-            boundaryRerouteOrigin = bot.getBlockPos().toImmutable();
+            boundaryRerouteOrigin = bot.blockPosition().immutable();
             BotLog.action(bot, "ore_dig_branch_boundary_rear_retreat",
                     "at", origin.toShortString(),
                     "blocked", blocked.toShortString(),
-                    "from", STRIP_DIRS[closedDirection].asString(),
+                    "from", STRIP_DIRS[closedDirection].getSerializedName(),
                     "closed_leg", closedLeg,
                     "to", factualRear.toShortString(),
-                    "successor", STRIP_DIRS[stripDirIndex].asString(),
+                    "successor", STRIP_DIRS[stripDirIndex].getSerializedName(),
                     "steps_left", stripStepsLeft);
             return true;
         }
@@ -4546,7 +4545,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || "tool_obstruction".equals(reason))
                 && !sameOriginCascade
                 && factualRear != null
-                && factualRear.equals(origin.offset(rearDirection))
+                && factualRear.equals(origin.relative(rearDirection))
                 && isObservedSafeOpenEscapeCorridor(
                 bot, world, origin, rearDirection);
         if (progressedClosableBoundary) {
@@ -4555,7 +4554,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     "at", origin.toShortString(),
                     "blocked", blocked.toShortString(),
                     "reason", reason,
-                    "direction", STRIP_DIRS[closedDirection].asString(),
+                    "direction", STRIP_DIRS[closedDirection].getSerializedName(),
                     "factual_rear", factualRear.toShortString(),
                     "steps_left", 0);
             // Closing and publishing the perpendicular successor are one cursor transaction. If
@@ -4574,14 +4573,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 clearStripMovementOwnership();
                 stripDirIndex = candidate;
                 stripStepsLeft = 1;
-                stripProgressPos = origin.toImmutable();
-                boundaryRerouteOrigin = origin.toImmutable();
+                stripProgressPos = origin.immutable();
+                boundaryRerouteOrigin = origin.immutable();
                 BotLog.action(bot, "ore_dig_branch_boundary_backtrack",
                         "at", origin.toShortString(),
                         "blocked", blocked.toShortString(),
                         "reason", reason,
-                        "from", STRIP_DIRS[rejectedDirection].asString(),
-                        "to", direction.asString(),
+                        "from", STRIP_DIRS[rejectedDirection].getSerializedName(),
+                        "to", direction.getSerializedName(),
                         "escape_steps", stripStepsLeft);
                 return true;
             }
@@ -4592,18 +4591,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private BranchFluidSealResult sealOneObservableLateralBranchFluid(
             AIPlayerEntity bot,
-            ServerWorld world,
+            ServerLevel world,
             BlockPos branchCell,
             String reason) {
         BlockPos fluid = null;
         Set<BlockPos> checked = new HashSet<>();
-        for (BlockPos center : new BlockPos[]{branchCell, branchCell.up()}) {
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos candidate = center.offset(direction).toImmutable();
+        for (BlockPos center : new BlockPos[]{branchCell, branchCell.above()}) {
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos candidate = center.relative(direction).immutable();
                 if (!checked.add(candidate)
-                        || candidate.equals(branchCell) || candidate.equals(branchCell.up())
-                        || candidate.equals(bot.getBlockPos())
-                        || candidate.equals(bot.getBlockPos().up())) {
+                        || candidate.equals(branchCell) || candidate.equals(branchCell.above())
+                        || candidate.equals(bot.blockPosition())
+                        || candidate.equals(bot.blockPosition().above())) {
                     continue;
                 }
                 // The explicit fluid probe includes inset face rays and is itself capped by the
@@ -4648,7 +4647,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 "at", branchCell.toShortString(),
                 "fluid", fluid.toShortString(),
                 "reason", reason,
-                "direction", STRIP_DIRS[stripDirIndex].asString(),
+                "direction", STRIP_DIRS[stripDirIndex].getSerializedName(),
                 "steps_left", stripStepsLeft);
         BrainCoordinator.INSTANCE.sendBotReply(bot,
                 "Sealed off exposed " + fluidName + " while mining -- routing around it.");
@@ -4661,13 +4660,13 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * ordinary wall-mining path and destroy its own staircase support.
      */
     private RaisedBoundaryLanding inspectRaisedBoundaryLanding(AIPlayerEntity bot,
-                                                                 ServerWorld world,
+                                                                 ServerLevel world,
                                                                  BlockPos origin,
                                                                  Direction direction) {
-        BlockPos support = origin.offset(direction);
-        BlockPos landing = support.up();
-        BlockPos head = landing.up();
-        BlockPos takeoffHeadSweep = origin.up(2);
+        BlockPos support = origin.relative(direction);
+        BlockPos landing = support.above();
+        BlockPos head = landing.above();
+        BlockPos takeoffHeadSweep = origin.above(2);
         OreScan.Observation landingClearance = OreScan.observe(
                 bot, landing,
                 state -> state.getCollisionShape(world, landing).isEmpty());
@@ -4695,7 +4694,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         var sweepState = world.getBlockState(takeoffHeadSweep);
         boolean fullHeightSupport = supportState.getCollisionShape(world, support)
-                .getMax(Direction.Axis.Y) >= 1.0D;
+                .max(Direction.Axis.Y) >= 1.0D;
         if (!fullHeightSupport
                 || supportState.getBlock() instanceof FallingBlock
                 || !supportState.getFluidState().isEmpty()
@@ -4729,12 +4728,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * fail-closed.
      */
     private boolean isObservedSafeOpenEscapeCorridor(AIPlayerEntity bot,
-                                                       ServerWorld world,
+                                                       ServerLevel world,
                                                        BlockPos origin,
                                                        Direction direction) {
-        BlockPos feet = origin.offset(direction);
-        BlockPos head = feet.up();
-        BlockPos floor = feet.down();
+        BlockPos feet = origin.relative(direction);
+        BlockPos head = feet.above();
+        BlockPos floor = feet.below();
         if (!canObserveWorldState(bot, feet)
                 || !canObserveWorldState(bot, head)
                 || !ObservableWorldQuery.canObserveBlock(bot, floor)) {
@@ -4762,11 +4761,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * after the feet/head blocks are gone and before entering the cell.
      */
     private boolean isFreshSafeLateralBranch(AIPlayerEntity bot,
-                                             ServerWorld world,
+                                             ServerLevel world,
                                              BlockPos origin,
                                              Direction direction) {
-        BlockPos feet = origin.offset(direction);
-        BlockPos head = feet.up();
+        BlockPos feet = origin.relative(direction);
+        BlockPos head = feet.above();
         // Open the upper obstruction first. A safe observed head wall is finite work even when it
         // still occludes the lower cell; after opening it, the next tick factually re-observes the
         // foot cell before mining or movement. UNKNOWN therefore never becomes a content read or
@@ -4805,17 +4804,17 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private static boolean isSafeBranchBlock(AIPlayerEntity bot,
-                                             ServerWorld world,
+                                             ServerLevel world,
                                              BlockPos pos,
-                                             net.minecraft.block.BlockState state,
+                                             net.minecraft.world.level.block.state.BlockState state,
                                              boolean solid) {
         if (!solid) {
             return state.isAir();
         }
-        if (state.getHardness(world, pos) < 0.0F || world.getBlockEntity(pos) != null) {
+        if (state.getDestroySpeed(world, pos) < 0.0F || world.getBlockEntity(pos) != null) {
             return false;
         }
-        return !state.isToolRequired() || ToolTier.canHarvestWithInventory(bot, state);
+        return !state.requiresCorrectToolForDrops() || ToolTier.canHarvestWithInventory(bot, state);
     }
 
     /**
@@ -4829,8 +4828,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 || activeTargetBreakPos != null || !veinQueue.isEmpty()) {
             return false;
         }
-        BlockPos next = bot.getBlockPos().offset(STRIP_DIRS[stripDirIndex]);
-        OreScan.Observation headOpen = OreScan.observeAir(bot, next.up());
+        BlockPos next = bot.blockPosition().relative(STRIP_DIRS[stripDirIndex]);
+        OreScan.Observation headOpen = OreScan.observeAir(bot, next.above());
         if (headOpen != OreScan.Observation.OBSERVED_PRESENT) {
             return false;
         }
@@ -4845,9 +4844,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     // elevation while the bot falls into the ore vein; so the entire lower half-space is excluded
     // fail-closed. The range is still deliberately kept small and reuses the SCAN_INTERVAL cadence;
     // the existing same-layer/above-layer opportunistic-ore contract is unchanged.
-    private BlockPos scanBonusOre(AIPlayerEntity bot, ServerWorld world) {
-        BlockPos feet = bot.getBlockPos();
-        for (BlockPos p : BlockPos.iterate(feet.add(-2, -1, -2), feet.add(2, 3, 2))) {
+    private BlockPos scanBonusOre(AIPlayerEntity bot, ServerLevel world) {
+        BlockPos feet = bot.blockPosition();
+        for (BlockPos p : BlockPos.betweenClosed(feet.offset(-2, -1, -2), feet.offset(2, 3, 2))) {
             if (p.getY() < feet.getY()) {
                 continue;
             }
@@ -4858,7 +4857,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (!OreScan.isOreBlock(b) || targetOres.contains(b)) {
                 continue;
             }
-            BlockPos pos = p.toImmutable();
+            BlockPos pos = p.immutable();
             if (oreExcluded(bot, pos) || !withinReach(bot, pos)) {
                 continue;
             }
@@ -4895,18 +4894,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * P5 trigger (design 5.4). Returns true when a frontier excursion was just STARTED this tick (caller must
      * return without running stripMine). False leaves stripMine to run exactly as today.
      */
-    private boolean explorationTick(AIPlayerEntity bot, ServerWorld world) {
+    private boolean explorationTick(AIPlayerEntity bot, ServerLevel world) {
         if (!MiningAssistRuntime.senseConfigured() || !MiningAssistRuntime.config().explore().frontier()) {
             return false;
         }
         if (assistDetourActive()) {
             return false; // defensive: hook 9 already owns any active detour before control reaches here
         }
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         if (now < frontierCooldownUntilServerTick) {
             return false;
         }
-        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
         if (state == null) {
             return false;
         }
@@ -4915,7 +4914,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;
         }
         double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
-        Vec3d eye = bot.getEyePos();
+        Vec3 eye = bot.getEyePosition();
         double openVolume = state.ring().volume(now, SweepEngine.eyeCell(eye.x, eye.y, eye.z), radius);
         if (openVolume < FRONTIER_MIN_OPEN_VOLUME) {
             return false;
@@ -4940,7 +4939,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
 
         FrontierEnvironment env = new FrontierEnvironment(occ, state.hazards());
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         List<BlockPos> candidateStands = frontierCandidateStands(occ, feet, env);
         if (candidateStands.isEmpty()) {
             return false;
@@ -4959,7 +4958,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (cost == null) {
                 continue; // not reached by the observed graph -- excluded, never a ranking input
             }
-            double dist = Math.sqrt(feet.getSquaredDistance(stand));
+            double dist = Math.sqrt(feet.distSqr(stand));
             double unknownFrac = frontierUnknownFraction(occ, stand);
             int sightings6 = frontierSightingsWithin(state, stand, 6);
             double yBand = Math.max(0.0D, 1.0D - Math.abs(stand.getY() - bestY) / FRONTIER_Y_BAND_HALF_WIDTH);
@@ -4996,7 +4995,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         detourState = state;
         detour.startFrontier(detourHost, new OreDigDetourEngine.FrontierSelection(waypointList));
-        MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUUID());
         if (fresh != null) {
             fresh.publishDetour(this, detour.phase(), detourHost.serverTick(), detourHost);
         }
@@ -5008,9 +5007,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      *  DetourHostImpl.poseFor already uses for detour poses, not ObservedGraphSearch's narrower internal
      *  constants. */
     private static boolean frontierStandable(ObservedOccupancy occ, BlockPos pos, HazardField hazards) {
-        if (occ.get(pos.down()) != ObservedOccupancy.SOLID) return false;
+        if (occ.get(pos.below()) != ObservedOccupancy.SOLID) return false;
         if (occ.get(pos) != ObservedOccupancy.AIR) return false;
-        if (occ.get(pos.up()) != ObservedOccupancy.AIR) return false;
+        if (occ.get(pos.above()) != ObservedOccupancy.AIR) return false;
         int lavaClearRadius = MiningAssistRuntime.config().detour().lavaClearRadius();
         if (hazards.anyLavaWithin(pos, lavaClearRadius)) return false;
         if (hazards.anyTrapWithin(pos, 3)) return false;
@@ -5035,7 +5034,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 if (horiz < FrontierPlanner.MIN_DISTANCE || horiz > FrontierPlanner.MAX_DISTANCE) continue;
                 if (!frontierFreeRunOk(occ, feet, dx, dz)) continue;
                 for (int dy = -8; dy <= 8; dy += 4) {
-                    BlockPos candidate = feet.add(dx, dy, dz);
+                    BlockPos candidate = feet.offset(dx, dy, dz);
                     if (frontierStandable(occ, candidate, env.hazards)) {
                         result.add(candidate);
                     }
@@ -5096,7 +5095,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     private static int frontierSightingsWithin(MiningAssistState state, BlockPos stand, int radius) {
         int count = 0;
         for (SightingLedger.Sighting s : state.sightings().snapshotSortedByValueDesc()) {
-            if (Math.sqrt(stand.getSquaredDistance(s.pos())) <= radius) count++;
+            if (Math.sqrt(stand.distSqr(s.pos())) <= radius) count++;
         }
         return count;
     }
@@ -5134,7 +5133,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override public boolean isAdjacentToWater(BlockPos pos) {
             for (Direction d : Direction.values()) {
-                if (hazards.anyWithin(HazardField.Kind.WATER, pos.offset(d), 0)) return true;
+                if (hazards.anyWithin(HazardField.Kind.WATER, pos.relative(d), 0)) return true;
             }
             return false;
         }
@@ -5166,7 +5165,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * exception fence run OUTSIDE the assist-off fast path, so an idle bot with the mode off (or SENSE) pays one
      * volatile read and a return (M30, design 8.2 hook 9/13).
      */
-    private boolean tickOpportunistic(AIPlayerEntity bot, ServerWorld world) {
+    private boolean tickOpportunistic(AIPlayerEntity bot, ServerLevel world) {
         if (veinMode) {
             return false;                                     // vein mode never detours to other ore
         }
@@ -5176,7 +5175,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         }
         try {
             if (live) {
-                MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUUID());
                 if (fresh != detourState) {
                     // The coordinator's exception fence dropped (and possibly rebuilt) the bot's state: hazards,
                     // exclusions and POI facts of the running detour are gone or belong to a different instance.
@@ -5187,7 +5186,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     detour.requestAbort("safety_state_lost");
                 }
             } else {
-                detourState = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                detourState = MiningAssistRegistry.getIfPresent(bot.getUUID());
                 if (detourState == null) {
                     return false;                                 // the sensor never ran: nothing nominated
                 }
@@ -5208,7 +5207,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     if (detour.wasFrontierUnproductive()) {
                         frontierCooldownUntilServerTick = detourHost.serverTick() + FRONTIER_UNPRODUCTIVE_COOLDOWN_TICKS;
                     }
-                    MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                    MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUUID());
                     if (fresh != null) {
                         fresh.clearDetour();
                     }
@@ -5216,7 +5215,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     return true;
                 }
                 default -> {
-                    MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+                    MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUUID());
                     if (fresh != null) {
                         fresh.publishDetour(this, detour.phase(), detourHost.serverTick(), detourHost);
                     }
@@ -5239,7 +5238,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 } catch (RuntimeException ignored) {
                 }
             }
-            MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+            MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUUID());
             if (fresh != null) {
                 if (fresh.detourControl() != null) {
                     fresh.detourControl().abandoned(MiningAssistRuntime.serverTick(bot));
@@ -5302,7 +5301,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (detourHost == null) {
             detourHost = new DetourHostImpl();
         }
-        detourHost.bind(bot, bot.getEntityWorld(), detourState);
+        detourHost.bind(bot, bot.level(), detourState);
         DetourHost.Anchor anchor = detour.interrupt(detourHost, "paused");
         if (anchor == null) {
             return false;
@@ -5312,7 +5311,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         detourInterruptedFlag = true;
         detourResumeStart = -1;
         detourResumeAttempts = 0;
-        MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState fresh = MiningAssistRegistry.getIfPresent(bot.getUUID());
         if (fresh != null) {
             fresh.clearDetour();
         }
@@ -5376,7 +5375,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             detourResumeStart = elapsed;
         }
         boolean pathIdle = bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle();
-        if (bot.getBlockPos().equals(lastFace)
+        if (bot.blockPosition().equals(lastFace)
                 || elapsed - detourResumeStart > 300
                 || (detourResumeAttempts >= 3 && pathIdle)) {          // count a finished attempt, not a started one
             detourInterruptedFlag = false;
@@ -5384,7 +5383,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             return false;                                             // returnToSavedFace takes over (arrival bookkeeping too)
         }
         if (pathIdle && elapsed - detourResumeLastAttempt >= 20) {
-            int minY = Math.max(MIN_Y + 1, Math.min(bot.getBlockPos().getY(), lastFace.getY()) - 1);
+            int minY = Math.max(MIN_Y + 1, Math.min(bot.blockPosition().getY(), lastFace.getY()) - 1);
             ActionResult route = bot.getActionPack().startSurfacePathTo(lastFace, minY);
             detourResumeLastAttempt = elapsed;
             if (!"pathfinding_throttled".equals(route.reason())) {
@@ -5427,9 +5426,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         String trimmed = id.trim();
         int colon = trimmed.indexOf(':');
         Identifier identifier = colon >= 0
-                ? Identifier.of(trimmed.substring(0, colon), trimmed.substring(colon + 1))
-                : Identifier.of("minecraft", trimmed);
-        return Registries.BLOCK.getOptionalValue(identifier).orElse(null);
+                ? Identifier.fromNamespaceAndPath(trimmed.substring(0, colon), trimmed.substring(colon + 1))
+                : Identifier.fromNamespaceAndPath("minecraft", trimmed);
+        return BuiltInRegistries.BLOCK.getOptional(identifier).orElse(null);
     }
 
     /**
@@ -5442,7 +5441,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      */
     private final class DetourHostImpl implements DetourHost, DetourControl {
         private AIPlayerEntity bot;
-        private ServerWorld world;
+        private ServerLevel world;
         private MiningAssistState state;
         private String routeFailure = "";
         private final DropRestGate dropRestGate = new DropRestGate();
@@ -5458,7 +5457,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         /** The mission ledger key last resolved while an origin was present (design C.1 {@code ledger()}). */
         private String lastLedgerKey;
 
-        void bind(AIPlayerEntity bot, ServerWorld world, MiningAssistState state) {
+        void bind(AIPlayerEntity bot, ServerLevel world, MiningAssistState state) {
             this.bot = bot;
             this.world = world;
             this.state = state;
@@ -5499,7 +5498,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public int staggerSeed() {
-            return Math.floorMod(bot.getUuid().hashCode(), 10);
+            return Math.floorMod(bot.getUUID().hashCode(), 10);
         }
 
         @Override
@@ -5509,12 +5508,12 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public BlockPos feet() {
-            return bot.getBlockPos();
+            return bot.blockPosition();
         }
 
         @Override
-        public Vec3d eyePos() {
-            return bot.getEyePos();
+        public Vec3 eyePos() {
+            return bot.getEyePosition();
         }
 
         @Override
@@ -5524,10 +5523,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public boolean feetStandable() {
-            BlockPos feetPos = bot.getBlockPos();
+            BlockPos feetPos = bot.blockPosition();
             if (!ObservableWorldQuery.canObserveCell(bot, feetPos)
-                    || !ObservableWorldQuery.canObserveCell(bot, feetPos.up())
-                    || !ObservableWorldQuery.canObserveBlock(bot, feetPos.down())) {
+                    || !ObservableWorldQuery.canObserveCell(bot, feetPos.above())
+                    || !ObservableWorldQuery.canObserveBlock(bot, feetPos.below())) {
                 return false;
             }
             Standability.clearCache();
@@ -5546,7 +5545,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public boolean deterministic() {
-            return MiningAssistRuntime.deterministic(bot.getUuid());
+            return MiningAssistRuntime.deterministic(bot.getUUID());
         }
 
         // ---- owners -----------------------------------------------------------------------------------------
@@ -5566,7 +5565,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (targetOre == null) {
                 return DetourPolicy.TargetLock.NONE;
             }
-            return bot.getBlockPos().isWithinDistance(targetOre, DetourPolicy.TARGET_NEAR_BLOCKS)
+            return bot.blockPosition().closerThan(targetOre, DetourPolicy.TARGET_NEAR_BLOCKS)
                     ? DetourPolicy.TargetLock.NEAR : DetourPolicy.TargetLock.LOCKED;
         }
 
@@ -5589,7 +5588,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (bonusMined >= BONUS_CAP || blockId == null || !blockId.endsWith("_ore")) {
                 return false;
             }
-            BlockPos feetPos = bot.getBlockPos();
+            BlockPos feetPos = bot.blockPosition();
             if (Math.abs(pos.getX() - feetPos.getX()) > 2 || Math.abs(pos.getZ() - feetPos.getZ()) > 2) {
                 return false;
             }
@@ -5618,9 +5617,9 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             Optional<TaskOrigin> origin = TaskManager.INSTANCE.activeOrigin(bot);
             if (origin.isPresent()) {
                 lastLedgerKey = MissionAssistLedger.keyFor(
-                        bot.getUuid(), origin.get().missionId(), origin.get().jobId());
+                        bot.getUUID(), origin.get().missionId(), origin.get().jobId());
             } else if (lastLedgerKey == null) {
-                lastLedgerKey = MissionAssistLedger.keyFor(bot.getUuid(), null, null);
+                lastLedgerKey = MissionAssistLedger.keyFor(bot.getUUID(), null, null);
             }
             return MissionAssistLedger.get(lastLedgerKey, serverTick());
         }
@@ -5659,7 +5658,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public void releaseClaims() {
-            OreClaims.releaseAll(bot.getUuid());
+            OreClaims.releaseAll(bot.getUUID());
         }
 
         // ---- observation --------------------------------------------------------------------------------------
@@ -5670,10 +5669,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (block == null) {
                 return Seen.GONE;
             }
-            BlockPos immutable = pos.toImmutable();
+            BlockPos immutable = pos.immutable();
             OreScan.Observation observation = OreScan.observe(bot, pos, blockState -> {
                 rememberObservedState(immutable, blockState);
-                return blockState.isOf(block);
+                return blockState.is(block);
             });
             return switch (observation) {
                 case OBSERVED_PRESENT -> Seen.PRESENT;
@@ -5695,11 +5694,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             boolean unknown = false;
             for (Direction d : new Direction[]{
                     Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
-                BlockPos n = cell.offset(d);
+                BlockPos n = cell.relative(d);
                 OreScan.Observation observation = OreScan.observeDangerFluid(bot, n);
                 if (observation == OreScan.Observation.OBSERVED_PRESENT) {
                     if (present == null) {
-                        present = n.toImmutable();
+                        present = n.immutable();
                     }
                 } else if (observation == OreScan.Observation.UNKNOWN) {
                     unknown = true;
@@ -5735,10 +5734,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                         if (dx == 0 && dy == 0 && dz == 0) {
                             continue;
                         }
-                        BlockPos n = around.add(dx, dy, dz);
-                        if (OreScan.observe(bot, n, blockState -> blockState.isOf(block))
+                        BlockPos n = around.offset(dx, dy, dz);
+                        if (OreScan.observe(bot, n, blockState -> blockState.is(block))
                                 == OreScan.Observation.OBSERVED_PRESENT) {
-                            result.add(n.toImmutable());
+                            result.add(n.immutable());
                         }
                     }
                 }
@@ -5755,11 +5754,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return null;
             }
             MiningAssistConfig.Detour cfg = config();
-            BlockPos feetPos = bot.getBlockPos();
+            BlockPos feetPos = bot.blockPosition();
             List<BlockPos> candidates = new ArrayList<>();
             if (hasRecoverableTargetBreakPose(bot, ore)
                     && !OreDigTask.isCurrentSupport(bot, ore)
-                    && (!needsTargetDropSupport(bot, ore) || hasReliableObservedDropCatch(bot, world, ore.down()))) {
+                    && (!needsTargetDropSupport(bot, ore) || hasReliableObservedDropCatch(bot, world, ore.below()))) {
                 candidates.add(feetPos);
             }
             BlockPos approach = approachGoalFor(bot, world, ore);
@@ -5767,10 +5766,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 candidates.add(approach);
             }
             for (Direction d : new Direction[]{Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST}) {
-                BlockPos stand = ore.offset(d);
+                BlockPos stand = ore.relative(d);
                 if (!ObservableWorldQuery.canObserveCell(bot, stand)
-                        || !ObservableWorldQuery.canObserveCell(bot, stand.up())
-                        || !ObservableWorldQuery.canObserveBlock(bot, stand.down())) {
+                        || !ObservableWorldQuery.canObserveCell(bot, stand.above())
+                        || !ObservableWorldQuery.canObserveBlock(bot, stand.below())) {
                     continue;
                 }
                 if (!Standability.isStandable(world, stand)) {
@@ -5779,10 +5778,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 if (OreScan.adjacentHazard(bot, stand) != OreScan.Observation.OBSERVED_GONE) {
                     continue;
                 }
-                if (!hasReliableObservedDropCatch(bot, world, ore.down())) {
+                if (!hasReliableObservedDropCatch(bot, world, ore.below())) {
                     continue;
                 }
-                candidates.add(stand.toImmutable());
+                candidates.add(stand.immutable());
             }
             for (BlockPos stand : candidates) {
                 if (forbiddenStands.contains(stand) || excluded(stand)) {
@@ -5819,10 +5818,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public GeometryVerdict breakGeometry(BlockPos ore) {
-            BlockPos feetPos = bot.getBlockPos();
+            BlockPos feetPos = bot.blockPosition();
             int dy = ore.getY() - feetPos.getY();
             if (dy >= 1) {
-                BlockPos above = ore.up();
+                BlockPos above = ore.above();
                 if (!ObservableWorldQuery.canObserveBlock(bot, above)) {
                     return GeometryVerdict.ABOVE_UNOBSERVED;
                 }
@@ -5830,7 +5829,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     return GeometryVerdict.ABOVE_FALLING;
                 }
             }
-            if (needsTargetDropSupport(bot, ore) && !hasReliableObservedDropCatch(bot, world, ore.down())) {
+            if (needsTargetDropSupport(bot, ore) && !hasReliableObservedDropCatch(bot, world, ore.below())) {
                 return GeometryVerdict.CATCH_MISSING;
             }
             return GeometryVerdict.OK;
@@ -5846,18 +5845,18 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                     return ToolVerdict.NO_TOOL;
                 }
                 st = world.getBlockState(ore);
-                rememberObservedState(ore.toImmutable(), st);
+                rememberObservedState(ore.immutable(), st);
             }
             if (!ToolTier.canHarvestWithInventory(bot, st)) {
                 return ToolVerdict.NO_TOOL;
             }
             ToolSelector.Selection selection = ToolSelector.equipMiningChannelTool(bot, st);
-            if (selection.slot() < 0 || (st.isToolRequired() && selection.stack().isEmpty())) {
+            if (selection.slot() < 0 || (st.requiresCorrectToolForDrops() && selection.stack().isEmpty())) {
                 return ToolVerdict.NO_TOOL;
             }
             ItemStack stack = selection.stack();
             int maxDamage = stack.getMaxDamage();
-            int remaining = maxDamage - stack.getDamage();
+            int remaining = maxDamage - stack.getDamageValue();
             return InventoryHeadroom.durabilityOk(remaining, maxDamage, plannedMembers)
                     ? ToolVerdict.OK : ToolVerdict.WEAR;
         }
@@ -5865,7 +5864,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         @Override
         public boolean capacityOk(BlockPos ore, String blockId) {
             int reserve = rareExpeditionBatch ? config().minFreeSlotsRareBatch() : config().minFreeSlots();
-            List<ItemStack> main = bot.getInventory().getMainStacks();
+            List<ItemStack> main = bot.getInventory().getNonEquipmentItems();
             int empty = 0;
             for (ItemStack stack : main) {
                 if (stack.isEmpty()) {
@@ -5883,7 +5882,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (dropItem != null) {
                 for (ItemStack stack : main) {
                     if (!stack.isEmpty() && stack.getItem() == dropItem) {
-                        room += stack.getMaxCount() - stack.getCount();
+                        room += stack.getMaxStackSize() - stack.getCount();
                     }
                 }
             }
@@ -5896,7 +5895,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             if (slot.isEmpty()) {
                 return false;
             }
-            ItemStack stack = bot.getInventory().getMainStacks().get(slot.getAsInt());
+            ItemStack stack = bot.getInventory().getNonEquipmentItems().get(slot.getAsInt());
             Item item = stack.getItem();
             boolean protectedStoneLike = item == Items.COBBLESTONE
                     || item == Items.COBBLED_DEEPSLATE || item == Items.BLACKSTONE;
@@ -6009,14 +6008,14 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         @Override
         public DropView observeDrop(BlockPos breakCell) {
             Standability.clearCache();
-            Vec3d centre = breakCell.toCenterPos();
-            List<ItemEntity> nearby = bot.getEntityWorld().getEntitiesByClass(ItemEntity.class,
-                    bot.getBoundingBox().expand(8.0D),
-                    e -> !e.getStack().isEmpty() && ObservableWorldQuery.canObserveEntity(bot, e));
+            Vec3 centre = breakCell.getCenter();
+            List<ItemEntity> nearby = bot.level().getEntitiesOfClass(ItemEntity.class,
+                    bot.getBoundingBox().inflate(8.0D),
+                    e -> !e.getItem().isEmpty() && ObservableWorldQuery.canObserveEntity(bot, e));
             ItemEntity best = null;
             double bestDistSq = Double.MAX_VALUE;
             for (ItemEntity candidate : nearby) {
-                double distSq = candidate.getEntityPos().squaredDistanceTo(centre);
+                double distSq = candidate.position().distanceToSqr(centre);
                 if (distSq > 3.5D * 3.5D) {
                     continue;
                 }
@@ -6029,19 +6028,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 dropRestGate.reset(); // nothing tracked any more: a later item starts from scratch
                 return DropView.NONE;
             }
-            BlockPos stand = best.getBlockPos();
+            BlockPos stand = best.blockPosition();
             boolean legal = ObservableWorldQuery.canObserveCell(bot, stand)
-                    && ObservableWorldQuery.canObserveCell(bot, stand.up())
-                    && ObservableWorldQuery.canObserveBlock(bot, stand.down())
+                    && ObservableWorldQuery.canObserveCell(bot, stand.above())
+                    && ObservableWorldQuery.canObserveBlock(bot, stand.below())
                     && Standability.isStandable(world, stand)
                     && OreScan.adjacentHazard(bot, stand) == OreScan.Observation.OBSERVED_GONE;
             // A freshly spawned item is still falling for a few ticks; only treat it as settled
             // (design 4.9) once physics says it has actually come to rest. A lone low-velocity
             // reading is not enough (the apex of the pop is airborne and near-stationary for a
             // tick): see DropRestGate.
-            boolean atRest = dropRestGate.atRest(best.getUuid(), bot.getEntityWorld().getServer().getTicks(),
-                    best.isOnGround(), best.isTouchingWater(), best.getVelocity().lengthSquared());
-            return new DropView(true, legal ? stand.toImmutable() : null, atRest);
+            boolean atRest = dropRestGate.atRest(best.getUUID(), bot.level().getServer().getTickCount(),
+                    best.onGround(), best.isInWater(), best.getDeltaMovement().lengthSqr());
+            return new DropView(true, legal ? stand.immutable() : null, atRest);
         }
 
         // ---- safety and progress --------------------------------------------------------------------------------
@@ -6060,7 +6059,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public Anchor captureAnchor() {
-            return new Anchor(bot.getBlockPos(), stripDirIndex, stripLegIndex, stripStepsLeft, stripLegLength);
+            return new Anchor(bot.blockPosition(), stripDirIndex, stripLegIndex, stripStepsLeft, stripLegLength);
         }
 
         @Override
@@ -6088,7 +6087,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public void rebaseCursorHere() {
-            OreDigTask.this.detourRebaseCursor(bot.getBlockPos());
+            OreDigTask.this.detourRebaseCursor(bot.blockPosition());
         }
 
         // ---- logging and side effects ---------------------------------------------------------------------------
@@ -6117,7 +6116,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 return;
             }
             EpisodeLog.INSTANCE.record(bot, EpisodeLog.Type.RESOURCE_FOUND, pos,
-                    Registries.BLOCK.getId(block).toString());
+                    BuiltInRegistries.BLOCK.getKey(block).toString());
         }
 
         @Override
@@ -6128,8 +6127,8 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     // Prospecting: when no ore is found nearby, locate the nearest target ore over the wider
     // PROSPECT_RANGE (only scans loaded chunks); rate-limited to protect TPS.
-    private BlockPos prospect(AIPlayerEntity bot, ServerWorld world) {
-        int now = bot.getEntityWorld().getServer().getTicks();
+    private BlockPos prospect(AIPlayerEntity bot, ServerLevel world) {
+        int now = bot.level().getServer().getTickCount();
         if (now - lastProspectTick < PROSPECT_INTERVAL) {
             return null;
         }
@@ -6143,7 +6142,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 p -> !oreExcluded(bot, p));
     }
 
-    private BlockPos nearestOre(AIPlayerEntity bot, ServerWorld world) {
+    private BlockPos nearestOre(AIPlayerEntity bot, ServerLevel world) {
         return nearestOre(bot, world, null);
     }
 
@@ -6152,15 +6151,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * ranked by distance to the hint and must lie within a few blocks of it; without one, by distance to
      * the bot.
      */
-    private BlockPos nearestOre(AIPlayerEntity bot, ServerWorld world, BlockPos hint) {
-        BlockPos origin = hint != null ? hint : bot.getBlockPos();
-        BlockPos scanOrigin = bot.getBlockPos();
-        BlockPos min = scanOrigin.add(-SCAN_RADIUS, -VERTICAL_SCAN, -SCAN_RADIUS);
-        BlockPos max = scanOrigin.add(SCAN_RADIUS, VERTICAL_SCAN, SCAN_RADIUS);
+    private BlockPos nearestOre(AIPlayerEntity bot, ServerLevel world, BlockPos hint) {
+        BlockPos origin = hint != null ? hint : bot.blockPosition();
+        BlockPos scanOrigin = bot.blockPosition();
+        BlockPos min = scanOrigin.offset(-SCAN_RADIUS, -VERTICAL_SCAN, -SCAN_RADIUS);
+        BlockPos max = scanOrigin.offset(SCAN_RADIUS, VERTICAL_SCAN, SCAN_RADIUS);
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
-        for (BlockPos pos : BlockPos.iterate(min, max)) {
-            if (hint != null && hint.getSquaredDistance(pos) > VEIN_SEED_HINT_RADIUS_SQUARED) {
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (hint != null && hint.distSqr(pos) > VEIN_SEED_HINT_RADIUS_SQUARED) {
                 continue;
             }
             if (oreExcluded(bot, pos)
@@ -6169,10 +6168,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 continue;
             }
             rememberObservedHighWorkPose(bot, world, pos);
-            double dist = origin.getSquaredDistance(pos);
+            double dist = origin.distSqr(pos);
             if (dist < bestDist) {
                 bestDist = dist;
-                best = pos.toImmutable();
+                best = pos.immutable();
             }
         }
         return best;
@@ -6180,7 +6179,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     private boolean canHarvestAnyTarget(AIPlayerEntity bot) {
         for (Block ore : targetOres) {
-            if (ToolTier.canHarvestWithInventory(bot, ore.getDefaultState())) {
+            if (ToolTier.canHarvestWithInventory(bot, ore.defaultBlockState())) {
                 return true;
             }
         }
@@ -6188,7 +6187,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private static boolean withinReach(AIPlayerEntity bot, BlockPos pos) {
-        return bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) <= REACH_SQUARED;
+        return bot.getEyePosition().distanceToSqr(pos.getCenter()) <= REACH_SQUARED;
     }
 
     private static boolean canBreakTargetFromHere(AIPlayerEntity bot, BlockPos pos) {
@@ -6204,7 +6203,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
     /** Geometry from which a natural target drop remains inside an ordinary recovery envelope. */
     private static boolean hasRecoverableTargetBreakPose(AIPlayerEntity bot, BlockPos pos) {
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         int vertical = pos.getY() - feet.getY();
         int horizontalManhattan = Math.abs(feet.getX() - pos.getX())
                 + Math.abs(feet.getZ() - pos.getZ());
@@ -6221,7 +6220,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
      * remaining vertical geometries have dedicated descent recovery and do not depend on spare blocks.
      */
     private static boolean needsTargetDropSupport(AIPlayerEntity bot, BlockPos ore) {
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         int vertical = ore.getY() - feet.getY();
         int horizontalManhattan = Math.abs(feet.getX() - ore.getX())
                 + Math.abs(feet.getZ() - ore.getZ());
@@ -6242,7 +6241,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
     }
 
     private static boolean isCurrentSupport(AIPlayerEntity bot, BlockPos pos) {
-        return pos != null && pos.equals(bot.getBlockPos().down());
+        return pos != null && pos.equals(bot.blockPosition().below());
     }
 
     /**
@@ -6253,11 +6252,11 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         if (!bot.getActionPack().isPathExecutorIdle()) {
             return true;
         }
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         boolean throttled = false;
-        for (Direction direction : Direction.Type.HORIZONTAL) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
             for (int dy : new int[]{0, -1, 1}) {
-                BlockPos candidate = feet.offset(direction).up(dy);
+                BlockPos candidate = feet.relative(direction).above(dy);
                 // Leaving upward can put the old support two blocks below the new feet. The
                 // ordinary approach controller then descends straight back onto that support,
                 // creating an endless leave-support/descend-into loop. Only start a relocation
@@ -6265,10 +6264,10 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
                 // this awkward ore and continue the bounded search for a recoverable one.
                 if (!targetBreakEnvelope(candidate, support)
                         || !ObservableWorldQuery.canObserveCell(bot, candidate)
-                        || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                        || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())
+                        || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                        || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())
                         || !io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(
-                                bot.getEntityWorld(), candidate)) {
+                                bot.level(), candidate)) {
                     continue;
                 }
                 ActionResult result = bot.getActionPack().startPathTo(
@@ -6291,19 +6290,19 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         int dx = target.getX() - from.getX();
         int dz = target.getZ() - from.getZ();
         if (dy < 0 && Math.abs(dx) <= 1 && Math.abs(dz) <= 1) {
-            return from.down();
+            return from.below();
         }
         if (Math.abs(dx) >= Math.abs(dz) && dx != 0) {
-            return from.offset(dx > 0 ? net.minecraft.util.math.Direction.EAST : net.minecraft.util.math.Direction.WEST);
+            return from.relative(dx > 0 ? net.minecraft.core.Direction.EAST : net.minecraft.core.Direction.WEST);
         }
         if (dz != 0) {
-            return from.offset(dz > 0 ? net.minecraft.util.math.Direction.SOUTH : net.minecraft.util.math.Direction.NORTH);
+            return from.relative(dz > 0 ? net.minecraft.core.Direction.SOUTH : net.minecraft.core.Direction.NORTH);
         }
         if (dy < 0) {
-            return from.down();
+            return from.below();
         }
         if (dy > 0) {
-            return from.up();
+            return from.above();
         }
         return null;
     }

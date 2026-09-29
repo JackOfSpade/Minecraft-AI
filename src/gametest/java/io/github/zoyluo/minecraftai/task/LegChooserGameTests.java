@@ -13,16 +13,15 @@ import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import com.google.gson.JsonObject;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +55,7 @@ public final class LegChooserGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "off_by_default_reproduces_the_fixed_clockwise_spiral_start", maxTicks = 500)
-    public void offByDefaultReproducesTheFixedClockwiseSpiralStart(TestContext context) {
+    public void offByDefaultReproducesTheFixedClockwiseSpiralStart(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(10, -6, 6, -6, 6, 4);
 
@@ -73,7 +72,7 @@ public final class LegChooserGameTests {
         // runs on the mission's very first scan, well inside this test's budget.
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -137,7 +136,7 @@ public final class LegChooserGameTests {
 
     /** Cleanup-on-failure, strict-capability and DETOUR-mode config plumbing shared by every test. */
     private static final class Harness {
-        final TestContext context;
+        final GameTestHelper context;
         final List<String> bots = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
         final List<UUID> forced = new ArrayList<>();
@@ -145,7 +144,7 @@ public final class LegChooserGameTests {
         boolean tpsOverridden;
         boolean done;
 
-        Harness(TestContext context) {
+        Harness(GameTestHelper context) {
             this.context = context;
         }
 
@@ -156,19 +155,19 @@ public final class LegChooserGameTests {
         }
 
         AIPlayerEntity spawn(String name, Room room, int dx, int dz) {
-            ServerWorld world = room.world;
+            ServerLevel world = room.world;
             BlockPos feet = room.at(dx, 0, dz);
             bots.add(name);
             var spawned = AIPlayerManager.INSTANCE.spawn(
-                    world.getServer(), name, world, Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL);
+                    world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL);
             if (spawned.isEmpty()) {
                 fail("failed to spawn " + name + " (a bot of that name is still alive)");
             }
             AIPlayerEntity bot = spawned.get();
-            bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+            bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
             bot.setHealth(bot.getMaxHealth());
-            bot.getHungerManager().setFoodLevel(20);
-            bot.getHungerManager().setSaturationLevel(5.0F);
+            bot.getFoodData().setFoodLevel(20);
+            bot.getFoodData().setSaturation(5.0F);
             return bot;
         }
 
@@ -180,8 +179,8 @@ public final class LegChooserGameTests {
             MiningAssistRuntime.install(detourConfig(raysPerTick));
             MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
             tpsOverridden = true;
-            MiningAssistRuntime.forceEnable(bot.getUuid());
-            forced.add(bot.getUuid());
+            MiningAssistRuntime.forceEnable(bot.getUUID());
+            forced.add(bot.getUUID());
         }
 
         void require(boolean condition, String message) {
@@ -192,7 +191,7 @@ public final class LegChooserGameTests {
 
         void fail(String message) {
             cleanup();
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
 
         /** Runs one tick of a test body; anything thrown cleans up first so a failure never leaves a bot behind. */
@@ -208,7 +207,7 @@ public final class LegChooserGameTests {
         void cleanup() {
             done = true;
             for (String name : new ArrayList<>(bots)) {
-                AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
             bots.clear();
             for (Room room : rooms) {
@@ -235,7 +234,7 @@ public final class LegChooserGameTests {
 
         void pass() {
             cleanup();
-            context.complete();
+            context.succeed();
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {

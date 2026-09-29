@@ -11,16 +11,6 @@ import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import net.minecraft.block.AbstractFurnaceBlock;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -28,6 +18,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.AbstractFurnaceBlock;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 
 public final class SmeltTask extends AbstractTask {
     private enum Phase {
@@ -118,7 +117,7 @@ public final class SmeltTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Smelting " + Registries.ITEM.getId(input) + " -> " + Registries.ITEM.getId(output)
+        return "Smelting " + BuiltInRegistries.ITEM.getKey(input) + " -> " + BuiltInRegistries.ITEM.getKey(output)
                 + " " + collected + "/" + targetCount + " phase=" + phase;
     }
 
@@ -208,12 +207,12 @@ public final class SmeltTask extends AbstractTask {
 
     private boolean hasPendingInFurnace(AIPlayerEntity bot) {
         AbstractFurnaceBlockEntity f = furnace(bot);
-        return f != null && (!f.getStack(0).isEmpty() || !f.getStack(2).isEmpty());
+        return f != null && (!f.getItem(0).isEmpty() || !f.getItem(2).isEmpty());
     }
 
     private void findFurnace(AIPlayerEntity bot) {
         if (!InventoryAction.hasItems(bot, input, 1)) {
-            fail("missing " + Registries.ITEM.getId(input) + " x1");
+            fail("missing " + BuiltInRegistries.ITEM.getKey(input) + " x1");
             return;
         }
         walkDigging = false;
@@ -222,10 +221,10 @@ public final class SmeltTask extends AbstractTask {
         if (furnacePos == null) {
             // local scan found nothing -> check memory: where did I place a furnace before (only valid if same dimension and the block is still a furnace; torn down = invalidated)
             var remembered = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE
-                    .of(bot.getUuid()).placeIn(bot.getEntityWorld(), "furnace");
+                    .of(bot.getUUID()).placeIn(bot.level(), "furnace");
             if (remembered.isPresent()
                     && !rejectedFurnaces.contains(remembered.get())
-                    && remembered.get().isWithinDistance(bot.getBlockPos(), 96.0D)) {
+                    && remembered.get().closerThan(bot.blockPosition(), 96.0D)) {
                 furnacePos = remembered.get();
             }
         }
@@ -247,7 +246,7 @@ public final class SmeltTask extends AbstractTask {
             phase = Phase.PLACING_FURNACE;
             return;
         }
-        double furnaceDistanceSquared = bot.getEyePos().squaredDistanceTo(furnacePos.toCenterPos());
+        double furnaceDistanceSquared = bot.getEyePosition().distanceToSqr(furnacePos.getCenter());
         if (furnaceDistanceSquared > LOCAL_FURNACE_DISTANCE_SQUARED) {
             boolean hasPortableFurnace = InventoryAction.findItem(bot, Items.FURNACE).isPresent();
             boolean canCraftPortableFurnace = canCraftFurnaceFromInventory(bot);
@@ -301,7 +300,7 @@ public final class SmeltTask extends AbstractTask {
             phase = Phase.FINDING_FURNACE;
             return;
         }
-        double dist2 = bot.getEyePos().squaredDistanceTo(furnacePos.toCenterPos());
+        double dist2 = bot.getEyePosition().distanceToSqr(furnacePos.getCenter());
         if (observable && dist2 <= REACH_SQUARED) {
             clearMiner.cancel(bot);
             bot.getActionPack().stopAll();
@@ -351,7 +350,7 @@ public final class SmeltTask extends AbstractTask {
 
     private void rejectCurrentFurnace(AIPlayerEntity bot, String reason) {
         if (furnacePos != null) {
-            rejectedFurnaces.add(furnacePos.toImmutable());
+            rejectedFurnaces.add(furnacePos.immutable());
             BotLog.action(bot, "smelt_station_rejected", "station", furnacePos.toShortString(),
                     "reason", reason);
         }
@@ -458,10 +457,10 @@ public final class SmeltTask extends AbstractTask {
         boolean foundAir = false;
         boolean furnaceEquipped = false;
         ActionResult lastFailure = ActionResult.failed("no_adjacent_block");
-        BlockPos origin = bot.getBlockPos();
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = origin.offset(direction);
-            if (!bot.getEntityWorld().getBlockState(candidate).isAir()) {
+        BlockPos origin = bot.blockPosition();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = origin.relative(direction);
+            if (!bot.level().getBlockState(candidate).isAir()) {
                 continue;
             }
             foundAir = true;
@@ -474,13 +473,13 @@ public final class SmeltTask extends AbstractTask {
                 lastFailure = result;
                 continue;
             }
-            furnacePos = candidate.toImmutable();
+            furnacePos = candidate.immutable();
             // R2 fix: remember the furnace position -- after mining far away, nearestFurnace (a local
             // scan) can't find the furnace it placed, and missing furnace kills the whole chain
             // (observed in real_diamond testing: after using up the first furnace, mining a second
             // batch of iron and coming back, the furnace had "vanished").
-            io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
-                    .markPlace("furnace", bot.getEntityWorld(), furnacePos);
+            io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID())
+                    .markPlace("furnace", bot.level(), furnacePos);
             phase = Phase.LOADING;
             return;
         }
@@ -499,27 +498,27 @@ public final class SmeltTask extends AbstractTask {
             phase = Phase.FINDING_FURNACE;
             return;
         }
-        ItemStack inputSlot = furnace.getStack(0);
-        if (!inputSlot.isEmpty() && !inputSlot.isOf(input)) {
-            fail("furnace_input_occupied: " + Registries.ITEM.getId(inputSlot.getItem()));
+        ItemStack inputSlot = furnace.getItem(0);
+        if (!inputSlot.isEmpty() && !inputSlot.is(input)) {
+            fail("furnace_input_occupied: " + BuiltInRegistries.ITEM.getKey(inputSlot.getItem()));
             return;
         }
-        ItemStack outputSlot = furnace.getStack(2);
-        if (!outputSlot.isEmpty() && !outputSlot.isOf(output)) {
-            fail("unexpected_output: " + Registries.ITEM.getId(outputSlot.getItem()));
+        ItemStack outputSlot = furnace.getItem(2);
+        if (!outputSlot.isEmpty() && !outputSlot.is(output)) {
+            fail("unexpected_output: " + BuiltInRegistries.ITEM.getKey(outputSlot.getItem()));
             return;
         }
-        int outputQueued = outputSlot.isOf(output) ? outputSlot.getCount() : 0;
-        int inputQueued = inputSlot.isOf(input) ? inputSlot.getCount() : 0;
+        int outputQueued = outputSlot.is(output) ? outputSlot.getCount() : 0;
+        int inputQueued = inputSlot.is(input) ? inputSlot.getCount() : 0;
         int remainingToQueue = targetCount - collected - outputQueued - inputQueued;
         int inputRoom = inputSlot.isEmpty() ? 64 : 64 - inputSlot.getCount();
         int inventoryInput = InventoryAction.countItem(bot, input);
         int inputToLoad = Math.min(Math.min(remainingToQueue, inputRoom), inventoryInput);
         if (remainingToQueue > 0 && inputToLoad <= 0 && inputQueued == 0) {
-            fail("missing " + Registries.ITEM.getId(input) + " x" + remainingToQueue);
+            fail("missing " + BuiltInRegistries.ITEM.getKey(input) + " x" + remainingToQueue);
             return;
         }
-        ItemStack fuelSlot = furnace.getStack(1);
+        ItemStack fuelSlot = furnace.getItem(1);
         FuelChoice fuel = null;
         // Once a vanilla furnace starts burning it immediately consumes one unit of fuel; the fuel slot
         // can be empty while burnTime is still enough to keep smelting.
@@ -538,20 +537,20 @@ public final class SmeltTask extends AbstractTask {
         }
         if (inputToLoad > 0) {
             if (!InventoryAction.removeItems(bot, input, inputToLoad)) {
-                fail("missing " + Registries.ITEM.getId(input) + " x" + inputToLoad);
+                fail("missing " + BuiltInRegistries.ITEM.getKey(input) + " x" + inputToLoad);
                 return;
             }
-            furnace.setStack(0, new ItemStack(input, inputSlot.getCount() + inputToLoad));
+            furnace.setItem(0, new ItemStack(input, inputSlot.getCount() + inputToLoad));
         }
 
         if (fuel != null) {
             if (!InventoryAction.removeItems(bot, fuel.item(), fuel.count())) {
-                fail("out_of_fuel: " + Registries.ITEM.getId(fuel.item()));
+                fail("out_of_fuel: " + BuiltInRegistries.ITEM.getKey(fuel.item()));
                 return;
             }
-            furnace.setStack(1, new ItemStack(fuel.item(), fuel.count()));
+            furnace.setItem(1, new ItemStack(fuel.item(), fuel.count()));
         }
-        furnace.markDirty();
+        furnace.setChanged();
         phase = Phase.SMELTING;
     }
 
@@ -561,17 +560,17 @@ public final class SmeltTask extends AbstractTask {
             fail("furnace_missing");
             return;
         }
-        ItemStack outputSlot = furnace.getStack(2);
-        if (!outputSlot.isEmpty() && !outputSlot.isOf(output)) {
-            fail("unexpected_output: " + Registries.ITEM.getId(outputSlot.getItem()));
+        ItemStack outputSlot = furnace.getItem(2);
+        if (!outputSlot.isEmpty() && !outputSlot.is(output)) {
+            fail("unexpected_output: " + BuiltInRegistries.ITEM.getKey(outputSlot.getItem()));
             return;
         }
         if (!outputSlot.isEmpty()) {
             phase = Phase.COLLECTING;
             return;
         }
-        ItemStack inputSlot = furnace.getStack(0);
-        ItemStack fuelSlot = furnace.getStack(1);
+        ItemStack inputSlot = furnace.getItem(0);
+        ItemStack fuelSlot = furnace.getItem(1);
         if (collected < targetCount
                 && (inputSlot.isEmpty() || (fuelSlot.isEmpty() && !isBurning(bot)))) {
             phase = Phase.LOADING;
@@ -584,13 +583,13 @@ public final class SmeltTask extends AbstractTask {
             fail("furnace_missing");
             return;
         }
-        ItemStack outputSlot = furnace.getStack(2);
+        ItemStack outputSlot = furnace.getItem(2);
         if (outputSlot.isEmpty()) {
             phase = Phase.SMELTING;
             return;
         }
-        if (!outputSlot.isOf(output)) {
-            fail("unexpected_output: " + Registries.ITEM.getId(outputSlot.getItem()));
+        if (!outputSlot.is(output)) {
+            fail("unexpected_output: " + BuiltInRegistries.ITEM.getKey(outputSlot.getItem()));
             return;
         }
         int take = Math.min(targetCount - collected, outputSlot.getCount());
@@ -599,8 +598,8 @@ public final class SmeltTask extends AbstractTask {
             fail(result.reason());
             return;
         }
-        outputSlot.decrement(take);
-        furnace.markDirty();
+        outputSlot.shrink(take);
+        furnace.setChanged();
         collected += take;
         if (collected >= targetCount) {
             complete();
@@ -611,20 +610,20 @@ public final class SmeltTask extends AbstractTask {
 
     private AbstractFurnaceBlockEntity furnace(AIPlayerEntity bot) {
         if (furnacePos == null
-                || bot.getEyePos().squaredDistanceTo(furnacePos.toCenterPos()) > REACH_SQUARED
+                || bot.getEyePosition().distanceToSqr(furnacePos.getCenter()) > REACH_SQUARED
                 || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, furnacePos)
                 || !WorkshopLocator.isCompatibleFurnace(bot, furnacePos, input, output)) {
             return null;
         }
-        return bot.getEntityWorld().getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace ? furnace : null;
+        return bot.level().getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace ? furnace : null;
     }
 
     private boolean isBurning(AIPlayerEntity bot) {
         if (furnacePos == null) {
             return false;
         }
-        var state = bot.getEntityWorld().getBlockState(furnacePos);
-        return state.contains(AbstractFurnaceBlock.LIT) && state.get(AbstractFurnaceBlock.LIT);
+        var state = bot.level().getBlockState(furnacePos);
+        return state.hasProperty(AbstractFurnaceBlock.LIT) && state.getValue(AbstractFurnaceBlock.LIT);
     }
 
     private static Optional<BlockPos> nearestFurnace(
@@ -638,12 +637,12 @@ public final class SmeltTask extends AbstractTask {
 
     // When boxed in: mine one horizontally adjacent breakable block to clear a space for the furnace. Returns false = no breakable block on any side (e.g. bedrock/fluid).
     private boolean clearSpaceForFurnace(AIPlayerEntity bot) {
-        var world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = origin.offset(direction);
+        var world = bot.level();
+        BlockPos origin = bot.blockPosition();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = origin.relative(direction);
             var s = world.getBlockState(candidate);
-            if (s.isAir() || !s.getFluidState().isEmpty() || s.getHardness(world, candidate) < 0.0F
+            if (s.isAir() || !s.getFluidState().isEmpty() || s.getDestroySpeed(world, candidate) < 0.0F
                     || world.getBlockEntity(candidate) != null) {
                 continue;
             }
@@ -688,8 +687,8 @@ public final class SmeltTask extends AbstractTask {
     }
 
     private static void fetchFuelFromBase(AIPlayerEntity bot, int smeltCount) {
-        BlockPos base = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "base")
+        BlockPos base = BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "base")
                 .orElse(null);
         if (base == null) {
             return;
@@ -701,7 +700,7 @@ public final class SmeltTask extends AbstractTask {
                 return;
             }
             for (BlockPos pos : fuelContainers(bot, base, fuel)) {
-                Inventory container = ContainerAction.resolve(bot, pos).orElse(null);
+                Container container = ContainerAction.resolve(bot, pos).orElse(null);
                 if (container == null) {
                     continue;
                 }
@@ -718,12 +717,12 @@ public final class SmeltTask extends AbstractTask {
     }
 
     private static java.util.List<BlockPos> fuelContainers(AIPlayerEntity bot, BlockPos base, Item fuel) {
-        return BlockPos.stream(base.add(-BASE_FUEL_RADIUS, -3, -BASE_FUEL_RADIUS), base.add(BASE_FUEL_RADIUS, 4, BASE_FUEL_RADIUS))
-                .map(BlockPos::toImmutable)
+        return BlockPos.betweenClosedStream(base.offset(-BASE_FUEL_RADIUS, -3, -BASE_FUEL_RADIUS), base.offset(BASE_FUEL_RADIUS, 4, BASE_FUEL_RADIUS))
+                .map(BlockPos::immutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) <= REACH_SQUARED)
+                .filter(pos -> bot.getEyePosition().distanceToSqr(pos.getCenter()) <= REACH_SQUARED)
                 .filter(pos -> ContainerSupport.containsItem(bot, pos, fuel))
-                .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())))
+                .sorted(Comparator.comparingDouble(pos -> pos.distSqr(bot.blockPosition())))
                 .toList();
     }
 

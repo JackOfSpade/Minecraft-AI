@@ -5,68 +5,67 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.phys.Vec3;
 import java.util.Map;
 import java.util.Set;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import net.minecraft.text.Text;
 
 /** Live proof that a clientless fake player leaves shallow water through adjacent physical motion. */
 public final class SurfaceWaterRecoveryGameTests {
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_proactive_rescue_steps_onto_dry_ground", maxTicks = 80)
-    public void proactiveRescueStepsOntoDryGround(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -32));
+    public void proactiveRescueStepsOntoDryGround(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 5, -32));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        world.setBlockState(start, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         if (Standability.isStandable(world, start)) {
-            context.throwGameTestException(Text.of("water cell must not be an ordinary A* stand position"));
+            context.fail(Component.nullToEmpty("water cell must not be an ordinary A* stand position"));
         }
 
         String name = "SurfaceWaterRecoveryGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
 
-        context.runAtEveryTick(() -> {
-            if (bot.getBlockPos().equals(start)
-                    || bot.isTouchingWater()
-                    || !Standability.isStandable(world, bot.getBlockPos())
+        context.failIfEver(() -> {
+            if (bot.blockPosition().equals(start)
+                    || bot.isInWater()
+                    || !Standability.isStandable(world, bot.blockPosition())
                     || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
                 return;
             }
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_connected_shore_beats_an_unneeded_vertical_air_stroke", maxTicks = 40)
-    public void connectedShoreBeatsAnUnneededVerticalAirStroke(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 8, -106));
+    public void connectedShoreBeatsAnUnneededVerticalAirStroke(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 8, -106));
 
         // Seal a compact vertical shaft. A real dry landing is connected through the water cell
         // below the bot, while the water column above remains open. Connected-shore BFS must keep
@@ -75,117 +74,117 @@ public final class SurfaceWaterRecoveryGameTests {
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -3; dy <= 4; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         for (int dy = -1; dy <= 2; dy++) {
-            world.setBlockState(start.up(dy), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(start.above(dy), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         }
-        BlockPos lowerShore = start.down().east();
-        world.setBlockState(lowerShore, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(lowerShore.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(lowerShore.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos lowerShore = start.below().east();
+        world.setBlock(lowerShore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(lowerShore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(lowerShore.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "WaterMonotonicAscentGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY() + 0.125D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY() + 0.125D,
                 start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
-        bot.setAir(300);
+        bot.setAirSupply(300);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
 
         require(context, NavSafetyNet.INSTANCE.tickBot(world.getServer(), bot),
                 "water rescue did not take control");
-        require(context, bot.getBlockPos().equals(lowerShore),
+        require(context, bot.blockPosition().equals(lowerShore),
                 "water rescue ignored the connected lower-shore route: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         require(context, bot.isAlive() && bot.getHealth() == bot.getMaxHealth(),
                 "monotonic ascent lost health");
 
         NavSafetyNet.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_emergency_vertical_step_requires_low_air", maxTicks = 40)
-    public void emergencyVerticalStepRequiresLowAir(TestContext context) {
+    public void emergencyVerticalStepRequiresLowAir(GameTestHelper context) {
         WaterShaftFixture fixture = sealedWaterShaftFixture(context, -126);
         AIPlayerEntity bot = fixture.bot();
-        bot.setAir(300);
+        bot.setAirSupply(300);
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
 
-        require(context, NavSafetyNet.INSTANCE.tickBot(context.getWorld().getServer(), bot),
+        require(context, NavSafetyNet.INSTANCE.tickBot(context.getLevel().getServer(), bot),
                 "full-air rescue did not take control");
-        require(context, bot.getBlockPos().equals(fixture.lower()),
+        require(context, bot.blockPosition().equals(fixture.lower()),
                 "full-air rescue used the emergency vertical step: "
-                        + bot.getBlockPos().toShortString());
-        bot.setAir(100);
+                        + bot.blockPosition().toShortString());
+        bot.setAirSupply(100);
 
-        require(context, NavSafetyNet.INSTANCE.tickBot(context.getWorld().getServer(), bot),
+        require(context, NavSafetyNet.INSTANCE.tickBot(context.getLevel().getServer(), bot),
                 "low-air rescue did not take control");
-        require(context, bot.getBlockPos().equals(fixture.lower().up()),
+        require(context, bot.blockPosition().equals(fixture.lower().above()),
                 "low-air rescue failed to take the physical upward water step: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
 
         NavSafetyNet.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), fixture.name());
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), fixture.name());
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_rescue_routes_around_a_wall_even_when_the_first_step_moves_away_from_shore", maxTicks = 160)
-    public void rescueRoutesAroundAWallEvenWhenTheFirstStepMovesAwayFromShore(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -38));
+    public void rescueRoutesAroundAWallEvenWhenTheFirstStepMovesAwayFromShore(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 5, -38));
         // Seal the local volume, then carve a U-shaped two-block-deep water route. The only dry
         // landing is geometrically close behind NORTH, but NORTH itself is a wall. Reaching it
         // requires EAST as the first step, which the old greedy distance check permanently
         // rejected.
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
-                world.setBlockState(start.add(dx, -1, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(start.add(dx, 0, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(start.add(dx, 1, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(start.add(dx, 2, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(start.offset(dx, -1, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, 0, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, 1, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(start.offset(dx, 2, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         List<BlockPos> waterRoute = List.of(
                 start, start.east(), start.east().north(), start.east().north(2));
         for (BlockPos cell : waterRoute) {
-            world.setBlockState(cell, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(cell, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         // Keep only the initial eye cell submerged. A waterlogged plant supplies real water
         // without turning the whole upper route into spreading sources that would flood the dry
         // endpoint before the rescue reaches it.
-        world.setBlockState(start.up(), Blocks.SEAGRASS.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos shore = start.north(2).up();
-        world.setBlockState(shore, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(shore.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.above(), Blocks.SEAGRASS.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos shore = start.north(2).above();
+        world.setBlock(shore, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(shore.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "WaterWallDetourGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        bot.setAir(260);
-        AtomicReference<BlockPos> previous = new AtomicReference<>(start.toImmutable());
+        bot.setAirSupply(260);
+        AtomicReference<BlockPos> previous = new AtomicReference<>(start.immutable());
         AtomicBoolean sawRequiredDetour = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
-            BlockPos now = bot.getBlockPos();
-            BlockPos before = previous.getAndSet(now.toImmutable());
+        context.failIfEver(() -> {
+            BlockPos now = bot.blockPosition();
+            BlockPos before = previous.getAndSet(now.immutable());
             if (!now.equals(before)) {
                 int dx = Math.abs(now.getX() - before.getX());
                 int dy = Math.abs(now.getY() - before.getY());
@@ -197,7 +196,7 @@ public final class SurfaceWaterRecoveryGameTests {
             if (now.equals(start.east())) {
                 sawRequiredDetour.set(true);
             }
-            if (!now.equals(shore) || bot.isTouchingWater()
+            if (!now.equals(shore) || bot.isInWater()
                     || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
                 return;
             }
@@ -205,38 +204,38 @@ public final class SurfaceWaterRecoveryGameTests {
                     "rescue reached the blocked shore without taking the physical EAST detour");
             require(context, bot.isAlive() && bot.getHealth() == bot.getMaxHealth(),
                     "rescue lost health before reaching the dry landing");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_seals_ingress_and_hands_off_a_dry_ore_layer", maxTicks = 160)
-    public void descendSealsIngressAndHandsOffADryOreLayer(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 5, -44));
+    public void descendSealsIngressAndHandsOffADryOreLayer(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 5, -44));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         // A side source feeds a flowing-water work cell after the staircase has opened it. The
         // target Y is already reached: Descend must not report success while the next OreDig would
         // still start submerged.
-        world.setBlockState(start.east(), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start,
-                Blocks.WATER.getDefaultState().with(FluidBlock.LEVEL, 1), Block.NOTIFY_ALL);
+        world.setBlock(start.east(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start,
+                Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL, 1), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendWaterSealGT";
         BlockPos drySpawn = start.west(2);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(drySpawn),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(drySpawn),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
@@ -247,84 +246,84 @@ public final class SurfaceWaterRecoveryGameTests {
         task.start(bot);
         task.tick(bot);
         if (task.state() != TaskState.RUNNING) {
-            context.throwGameTestException(Text.of("Descend completed before sealing its wet target layer"
-                    + " bot=" + bot.getBlockPos().toShortString()
+            context.fail(Component.nullToEmpty("Descend completed before sealing its wet target layer"
+                    + " bot=" + bot.blockPosition().toShortString()
                     + " expected=" + start.toShortString()
-                    + " feet=" + world.getBlockState(bot.getBlockPos()).getBlock()
+                    + " feet=" + world.getBlockState(bot.blockPosition()).getBlock()
                     + " east=" + world.getBlockState(start.east()).getBlock()
                     + " east_fluid=" + world.getFluidState(start.east())));
         }
-        if (!world.getBlockState(start.east()).isOf(Blocks.COBBLESTONE)) {
-            context.throwGameTestException(Text.of("side ingress was not physically sealed"));
+        if (!world.getBlockState(start.east()).is(Blocks.COBBLESTONE)) {
+            context.fail(Component.nullToEmpty("side ingress was not physically sealed"));
         }
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(bot);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("water handoff ended as " + task.state()
+                context.fail(Component.nullToEmpty("water handoff ended as " + task.state()
                         + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            if (bot.isSubmergedInWater() || bot.isTouchingWater()) {
-                context.throwGameTestException(Text.of("Descend completed on a wet ore-layer handoff"));
+            if (bot.isUnderWater() || bot.isInWater()) {
+                context.fail(Component.nullToEmpty("Descend completed on a wet ore-layer handoff"));
             }
-            if (!Standability.isStandable(world, bot.getBlockPos())) {
-                context.throwGameTestException(Text.of("Descend completed without dry footing at "
-                        + bot.getBlockPos().toShortString()));
+            if (!Standability.isStandable(world, bot.blockPosition())) {
+                context.fail(Component.nullToEmpty("Descend completed without dry footing at "
+                        + bot.blockPosition().toShortString()));
             }
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_does_not_retry_safety_rejected_landing", maxTicks = 100)
-    public void descendDoesNotRetrySafetyRejectedLanding(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -56));
+    public void descendDoesNotRetrySafetyRejectedLanding(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -56));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -2; dy <= 2; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos rejected = start.north().down();
-        BlockPos alternate = start.east().down();
-        world.setBlockState(rejected.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(alternate.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos rejected = start.north().below();
+        BlockPos alternate = start.east().below();
+        world.setBlock(rejected.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(alternate.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendRejectedLandingGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
 
         DescendToYTask task = new DescendToYTask(start.getY() - 1);
         task.start(bot);
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(rejected),
+        require(context, bot.blockPosition().equals(rejected),
                 "fixture did not exercise the initial north landing");
 
         // Reproduce the production ordering explicitly: a dynamic footing change makes the just
         // accepted landing unsafe, SafetyNet returns the bot to its origin, then TaskManager gets
         // the next tick before SafetyNet can release rescue ownership.
-        world.setBlockState(rejected.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(rejected.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
         NavSafetyNet.INSTANCE.requestWaterRescue(bot);
         require(context, FakePlayerMotion.stepTo(bot, start, "gametest_rejected_landing_return"),
                 "fixture could not return the bot to the dry landing origin");
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "Descend immediately retried the SafetyNet-rejected landing");
         require(context, NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                 "task incorrectly cleared SafetyNet ownership");
@@ -334,9 +333,9 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, !NavSafetyNet.INSTANCE.isWaterRescueActive(bot),
                 "SafetyNet did not release rescue at the dry origin");
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(alternate),
+        require(context, bot.blockPosition().equals(alternate),
                 "Descend did not rotate to the safe alternate landing: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         task.tick(bot);
         require(context, task.state() == TaskState.COMPLETED,
                 "Descend did not complete from the alternate dry landing: "
@@ -344,42 +343,42 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, Standability.isStandable(world, alternate),
                 "alternate handoff is not physically standable");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_relocates_from_a_shoreline_dead_star_before_mutating", maxTicks = 80)
-    public void descendRelocatesFromAShorelineDeadStarBeforeMutating(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -50));
+    public void descendRelocatesFromAShorelineDeadStarBeforeMutating(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -50));
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.SAND.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.down(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.below(), Blocks.SAND.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.below(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         // Reproduce the seed-3000 shoreline topology: NORTH/WEST have no lower support while
         // EAST/SOUTH are water. The cardinal same-level fallback is therefore also invalid.
-        world.setBlockState(start.east().down(), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.south().down(), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.east().below(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.south().below(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
 
         BlockPos staging = start.south().west();
-        world.setBlockState(staging.down(), Blocks.SAND.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(staging.down(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos landing = staging.west().down();
-        world.setBlockState(landing.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(staging.below(), Blocks.SAND.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(staging.below(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos landing = staging.west().below();
+        world.setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendFreshEntryRelocationGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.TORCH));
@@ -391,17 +390,17 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, task.state() == TaskState.RUNNING,
                 "fresh-entry relocation ended Descend: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(staging),
+        require(context, bot.blockPosition().equals(staging),
                 "Descend did not take the safe diagonal staging step: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         require(context, InventoryAction.countItem(bot, Items.TORCH) == torchesBefore,
                 "Descend mutated inventory before completing fresh-entry relocation");
         require(context, world.getBlockState(start).isAir()
                         && world.getBlockState(staging).isAir()
                         && world.getBlockState(landing).isAir()
-                        && world.getBlockState(start.down()).isOf(Blocks.SAND)
-                        && world.getBlockState(staging.down()).isOf(Blocks.SAND)
-                        && world.getBlockState(landing.down()).isOf(Blocks.STONE),
+                        && world.getBlockState(start.below()).is(Blocks.SAND)
+                        && world.getBlockState(staging.below()).is(Blocks.SAND)
+                        && world.getBlockState(landing.below()).is(Blocks.STONE),
                 "Descend mutated shoreline blocks before relocation");
 
         Map<String, String> checkpoint = task.checkpoint();
@@ -411,7 +410,7 @@ public final class SurfaceWaterRecoveryGameTests {
         DescendToYTask restored = new DescendToYTask(start.getY() - 1, checkpoint);
         restored.start(bot);
         int[] restoredTicks = {0};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (restored.state() == TaskState.RUNNING) {
                 restored.tick(bot);
                 restoredTicks[0]++;
@@ -424,56 +423,56 @@ public final class SurfaceWaterRecoveryGameTests {
                             + restored.state() + ":" + restored.failureReason());
             require(context, restoredTicks[0] >= 2,
                     "restart proof did not cross two physical server ticks");
-            require(context, bot.getBlockPos().equals(landing),
+            require(context, bot.blockPosition().equals(landing),
                     "restarted Descend did not use the checkpointed WEST stair: "
-                            + bot.getBlockPos().toShortString());
-            require(context, world.getBlockState(start.down()).isOf(Blocks.SAND)
-                            && world.getBlockState(start.down(2)).isOf(Blocks.STONE)
-                            && world.getBlockState(staging.down()).isOf(Blocks.SAND)
-                            && world.getBlockState(staging.down(2)).isOf(Blocks.STONE)
-                            && world.getBlockState(landing.down()).isOf(Blocks.STONE),
+                            + bot.blockPosition().toShortString());
+            require(context, world.getBlockState(start.below()).is(Blocks.SAND)
+                            && world.getBlockState(start.below(2)).is(Blocks.STONE)
+                            && world.getBlockState(staging.below()).is(Blocks.SAND)
+                            && world.getBlockState(staging.below(2)).is(Blocks.STONE)
+                            && world.getBlockState(landing.below()).is(Blocks.STONE),
                     "restarted Descend damaged verified supports");
 
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_fresh_entry_relocation_cannot_cut_a_diagonal_corner", maxTicks = 40)
-    public void descendFreshEntryRelocationCannotCutADiagonalCorner(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -62));
+    public void descendFreshEntryRelocationCannotCutADiagonalCorner(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -62));
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.SAND.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.down(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.east().down(), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.south().down(), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.below(), Blocks.SAND.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.below(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.east().below(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.south().below(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
 
         BlockPos staging = start.south().west();
-        world.setBlockState(staging.down(), Blocks.SAND.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(staging.down(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos landing = staging.west().down();
-        world.setBlockState(landing.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(staging.below(), Blocks.SAND.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(staging.below(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos landing = staging.west().below();
+        world.setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         BlockPos blockedCorner = start.west();
         // MAGMA is a full collision corner and also prevents the ordinary upper-detour fallback
         // from treating the wall top as a safe support. The first tick therefore isolates the
         // diagonal corner rule instead of exercising an unrelated one-block retreat.
-        world.setBlockState(blockedCorner, Blocks.MAGMA_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(blockedCorner, Blocks.MAGMA_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendFreshEntryCornerGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
 
@@ -484,48 +483,48 @@ public final class SurfaceWaterRecoveryGameTests {
                         && task.failureReason().startsWith("descend_no_safe_landing"),
                 "blocked diagonal corner did not retain fail-closed descent: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "Descend cut across an occupied diagonal corner: "
-                        + bot.getBlockPos().toShortString());
-        require(context, world.getBlockState(blockedCorner).isOf(Blocks.MAGMA_BLOCK)
-                        && world.getBlockState(staging.down()).isOf(Blocks.SAND)
-                        && world.getBlockState(landing.down()).isOf(Blocks.STONE),
+                        + bot.blockPosition().toShortString());
+        require(context, world.getBlockState(blockedCorner).is(Blocks.MAGMA_BLOCK)
+                        && world.getBlockState(staging.below()).is(Blocks.SAND)
+                        && world.getBlockState(landing.below()).is(Blocks.STONE),
                 "failed diagonal preflight mutated the corner fixture");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_never_mines_the_water_seal_it_just_placed", maxTicks = 120)
-    public void descendNeverMinesTheWaterSealItJustPlaced(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -68));
+    public void descendNeverMinesTheWaterSealItJustPlaced(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -68));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -2; dy <= 3; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos northLanding = start.north().down();
-        BlockPos alternate = start.east().down();
-        world.setBlockState(northLanding.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(alternate.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos ingress = start.north().up();
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos northLanding = start.north().below();
+        BlockPos alternate = start.east().below();
+        world.setBlock(northLanding.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(alternate.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos ingress = start.north().above();
         // Give vanilla placement a real adjacent face, matching an aquifer source embedded in a
         // stone wall.  A source floating in the all-air fixture cannot be sealed by player use.
-        world.setBlockState(ingress.north(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(ingress, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(ingress.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(ingress, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendSealOwnershipGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 4));
@@ -533,7 +532,7 @@ public final class SurfaceWaterRecoveryGameTests {
         DescendToYTask task = new DescendToYTask(start.getY() - 1);
         task.start(bot);
         task.tick(bot);
-        require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+        require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                 "Descend did not physically seal the lateral water source");
         int blocksAfterSeal = InventoryAction.countItem(bot, Items.COBBLESTONE);
 
@@ -542,7 +541,7 @@ public final class SurfaceWaterRecoveryGameTests {
         // rejected while Descend rotates to EAST.
         for (int i = 0; i < 12 && task.state() == TaskState.RUNNING; i++) {
             task.tick(bot);
-            require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+            require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                     "Descend mined its own water seal on tick " + i);
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
                     "Descend consumed another block after sealing one ingress");
@@ -550,40 +549,40 @@ public final class SurfaceWaterRecoveryGameTests {
         require(context, task.state() == TaskState.COMPLETED,
                 "Descend did not finish through the alternate dry stair: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(alternate),
+        require(context, bot.blockPosition().equals(alternate),
                 "Descend failed to rotate away from the sealed north stair");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_descend_horizontal_fallback_never_mines_its_owned_water_seal", maxTicks = 60)
-    public void descendHorizontalFallbackNeverMinesItsOwnedWaterSeal(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -76));
+    public void descendHorizontalFallbackNeverMinesItsOwnedWaterSeal(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -76));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos ingress = start.north().up();
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos ingress = start.north().above();
         // No lower landing has support, so after sealing NORTH the task must exhaust its stair
         // choices and enter horizontal fallback.  The old fallback then selected this exact
         // cobblestone as its first obstruction and reopened the water forever.
-        world.setBlockState(ingress.north(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(ingress, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(ingress.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(ingress, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendHorizontalSealGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 4));
@@ -591,7 +590,7 @@ public final class SurfaceWaterRecoveryGameTests {
         DescendToYTask task = new DescendToYTask(start.getY() - 1);
         task.start(bot);
         task.tick(bot);
-        require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+        require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                 "fixture did not establish the Descend-owned water seal");
         int blocksAfterSeal = InventoryAction.countItem(bot, Items.COBBLESTONE);
         Map<String, String> checkpoint = task.checkpoint();
@@ -603,7 +602,7 @@ public final class SurfaceWaterRecoveryGameTests {
 
         for (int i = 0; i < 20 && task.state() == TaskState.RUNNING; i++) {
             task.tick(bot);
-            require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+            require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                     "Descend horizontal fallback mined its owned water seal on tick " + i);
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
                     "Descend consumed another block after its fallback reopened the seal");
@@ -612,39 +611,39 @@ public final class SurfaceWaterRecoveryGameTests {
                         && task.failureReason().startsWith("descend_no_safe_landing"),
                 "sealed unsupported descent did not fail closed: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "Descend left its supported origin while every landing was unsupported");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_dig_down_preserves_its_water_seal_and_protected_workstation", maxTicks = 80)
-    public void digDownPreservesItsWaterSealAndProtectedWorkstation(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -80));
+    public void digDownPreservesItsWaterSealAndProtectedWorkstation(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -80));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos eastLanding = start.east().down();
-        world.setBlockState(eastLanding.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos ingress = start.north().up();
-        world.setBlockState(ingress.north(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(ingress, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos eastLanding = start.east().below();
+        world.setBlock(eastLanding.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos ingress = start.north().above();
+        world.setBlock(ingress.north(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(ingress, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DigDownSealOwnershipGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         // The protected workstation deliberately occupies the first inventory slot. Emergency
         // sealing must choose the disposable cobblestone instead of the first arbitrary BlockItem.
@@ -655,57 +654,57 @@ public final class SurfaceWaterRecoveryGameTests {
         DigDownTask task = new DigDownTask(Blocks.STONE, 3);
         task.start(bot);
         task.tick(bot);
-        require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+        require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                 "DigDown did not physically seal the lateral water source");
         require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1,
                 "DigDown consumed the protected crafting table as a water seal");
         int blocksAfterSeal = InventoryAction.countItem(bot, Items.COBBLESTONE);
 
-        for (int i = 0; i < 12 && bot.getBlockPos().equals(start); i++) {
+        for (int i = 0; i < 12 && bot.blockPosition().equals(start); i++) {
             task.tick(bot);
-            require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+            require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                     "DigDown mined its own water seal on tick " + i);
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
                     "DigDown consumed another emergency block after sealing one ingress");
             require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1,
                     "DigDown lost the protected crafting table after sealing");
         }
-        require(context, bot.getBlockPos().equals(eastLanding),
+        require(context, bot.blockPosition().equals(eastLanding),
                 "DigDown did not rotate onto the dry east stair: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
 
         task.cancel(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:surface_water_recovery_game_tests_horizontal_fallback_never_mines_the_owned_water_seal", maxTicks = 40)
-    public void horizontalFallbackNeverMinesTheOwnedWaterSeal(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 6, -94));
+    public void horizontalFallbackNeverMinesTheOwnedWaterSeal(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(8, 6, -94));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         BlockPos ingress = start.north();
         // NORTH can support a same-level horizontal move, but has no lower stair support. The
         // other three directions are unsupported. Once NORTH is sealed/rejected, the horizontal
         // fallback must fail closed without treating its own cobblestone wall as mineable stone.
-        world.setBlockState(ingress.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(ingress, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(ingress.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(ingress, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DigDownHorizontalSealGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 4));
@@ -714,7 +713,7 @@ public final class SurfaceWaterRecoveryGameTests {
         DigDownTask[] active = {new DigDownTask(Blocks.STONE, 3)};
         active[0].start(bot);
         active[0].tick(bot);
-        require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+        require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                 "fixture did not establish an owned water seal");
         int blocksAfterSeal = InventoryAction.countItem(bot, Items.COBBLESTONE);
         boolean[] restartedSettleDebt = {false};
@@ -743,22 +742,22 @@ public final class SurfaceWaterRecoveryGameTests {
                 "fully rejected origin did not fail closed: "
                         + active[0].state() + ":" + active[0].failureReason());
         require(context, EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), start, bot.getEntityWorld().getServer().getTicks()),
+                        bot.getUUID(), start, bot.level().getServer().getTickCount()),
                 "observed walled entry was not retained for the next physical relocation");
-        require(context, world.getBlockState(ingress).isOf(Blocks.COBBLESTONE),
+        require(context, world.getBlockState(ingress).is(Blocks.COBBLESTONE),
                 "horizontal fallback mined its owned water seal");
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == blocksAfterSeal,
                 "horizontal fallback consumed another emergency block");
         require(context, InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 1,
                 "horizontal fallback consumed the protected workstation");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
-    private static WaterShaftFixture sealedWaterShaftFixture(TestContext context, int z) {
-        var world = context.getWorld();
-        BlockPos lower = context.getAbsolutePos(new BlockPos(8, 24, z));
+    private static WaterShaftFixture sealedWaterShaftFixture(GameTestHelper context, int z) {
+        var world = context.getLevel();
+        BlockPos lower = context.absolutePos(new BlockPos(8, 24, z));
 
         // Fill the complete local rescue window, then carve only a two-cell water shaft. There is
         // deliberately no dry standable target for either connected-shore BFS or the legacy shore
@@ -767,32 +766,32 @@ public final class SurfaceWaterRecoveryGameTests {
         for (int dx = -8; dx <= 8; dx++) {
             for (int dz = -8; dz <= 8; dz++) {
                 for (int dy = -16; dy <= 16; dy++) {
-                    world.setBlockState(lower.add(dx, dy, dz),
-                            Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(lower.offset(dx, dy, dz),
+                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(lower, Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(lower.up(), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(lower.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(lower, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(lower.above(), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(lower.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "WaterShaftGT" + Math.abs(z);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(lower),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(lower),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, lower.getX() + 0.5D, lower.getY() + 0.125D,
+        bot.teleportTo(world, lower.getX() + 0.5D, lower.getY() + 0.125D,
                 lower.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
-        return new WaterShaftFixture(name, bot, lower.toImmutable());
+        return new WaterShaftFixture(name, bot, lower.immutable());
     }
 
     private record WaterShaftFixture(String name, AIPlayerEntity bot, BlockPos lower) {
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

@@ -6,13 +6,12 @@ import io.github.zoyluo.minecraftai.action.HarvestCore;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
-import net.minecraft.block.CropBlock;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.CropBlock;
 
 /**
  * Village/wild crop raiding: wide-area scan for mature crops (wheat/carrots/potatoes/beetroot), walk over, harvest, pick up drops, until the target output count is reached.
@@ -84,7 +83,7 @@ public final class RaidCropsTask extends AbstractTask {
     }
 
     private void scan(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         BlockPos found = OreProspector.nearest(bot, SCAN_RADIUS, RaidCropsTask::isMatureCrop);
         if (found == null) {
             finishOrFail(bot, "no_mature_crops");
@@ -95,11 +94,11 @@ public final class RaidCropsTask extends AbstractTask {
     }
 
     private void goTo(AIPlayerEntity bot) {
-        if (current == null || !isMatureCrop(bot.getEntityWorld().getBlockState(current))) {
+        if (current == null || !isMatureCrop(bot.level().getBlockState(current))) {
             phase = Phase.SCAN; // Target is gone (eaten/harvested), rescan
             return;
         }
-        if (bot.getEyePos().distanceTo(current.toCenterPos()) <= REACH) {
+        if (bot.getEyePosition().distanceTo(current.getCenter()) <= REACH) {
             bot.getActionPack().stopAll();
             phase = Phase.HARVEST;
             return;
@@ -134,8 +133,8 @@ public final class RaidCropsTask extends AbstractTask {
         phase = Phase.SCAN;
     }
 
-    private static boolean isMatureCrop(net.minecraft.block.BlockState state) {
-        return state.getBlock() instanceof CropBlock crop && crop.isMature(state);
+    private static boolean isMatureCrop(net.minecraft.world.level.block.state.BlockState state) {
+        return state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state);
     }
 
     private void finishOrFail(AIPlayerEntity bot, String reason) {

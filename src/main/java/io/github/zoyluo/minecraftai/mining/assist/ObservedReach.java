@@ -1,10 +1,9 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.PriorityQueue;
+import net.minecraft.core.BlockPos;
 
 /**
  * Honest reachability precheck over the bot's own observed occupancy window (mining-assist design 4.3, I3).

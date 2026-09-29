@@ -1,8 +1,8 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * O(1), exception-free static entry points that other classes call (mining-assist design 3.3 and 8.1).
@@ -25,7 +25,7 @@ public final class MiningAssistHooks {
      * surface) costs one map lookup and nothing is stored. The hook does not decide that the break took
      * effect: the peek observes the cell and only then notes it in the bot's dug ring. Ignores non-bot players.
      */
-    public static void onBotBreak(ServerPlayerEntity player, BlockPos pos) {
+    public static void onBotBreak(ServerPlayer player, BlockPos pos) {
         try {
             if (!MiningAssistRuntime.senseConfigured()) {
                 return;
@@ -33,7 +33,7 @@ public final class MiningAssistHooks {
             if (!(player instanceof AIPlayerEntity bot) || pos == null) {
                 return;
             }
-            MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+            MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
             if (state != null) {
                 state.pendingBreaks().offer(pos.asLong());
             }

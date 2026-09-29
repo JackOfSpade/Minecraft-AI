@@ -3,12 +3,11 @@ package io.github.zoyluo.minecraftai.mining.assist;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 /**
  * Server-wide, per-dimension claims on valuables that a detour is about to break (mining-assist design 4.11),
@@ -161,9 +160,9 @@ public final class OreClaims {
             return false;
         }
         try {
-            String dimensionKey = BotEdits.dimensionKey(bot.getEntityWorld());
+            String dimensionKey = BotEdits.dimensionKey(bot.level());
             int nowTick = MiningAssistRuntime.serverTick(bot);
-            return heldByOther(dimensionKey, bot.getUuid(), pos.asLong(), nowTick);
+            return heldByOther(dimensionKey, bot.getUUID(), pos.asLong(), nowTick);
         } catch (RuntimeException e) {
             return false;
         }
@@ -171,13 +170,13 @@ public final class OreClaims {
 
     /** {@link #tryClaim} for a bot's own dimension, uuid and server tick. */
     public static boolean tryClaim(AIPlayerEntity bot, BlockPos pos) {
-        String dimensionKey = BotEdits.dimensionKey(bot.getEntityWorld());
+        String dimensionKey = BotEdits.dimensionKey(bot.level());
         int nowTick = MiningAssistRuntime.serverTick(bot);
-        return tryClaim(dimensionKey, bot.getUuid(), pos.asLong(), nowTick);
+        return tryClaim(dimensionKey, bot.getUUID(), pos.asLong(), nowTick);
     }
 
     /** {@link #renewAll} for a bot at its server tick. */
     public static int renewAll(AIPlayerEntity bot) {
-        return renewAll(bot.getUuid(), MiningAssistRuntime.serverTick(bot));
+        return renewAll(bot.getUUID(), MiningAssistRuntime.serverTick(bot));
     }
 }

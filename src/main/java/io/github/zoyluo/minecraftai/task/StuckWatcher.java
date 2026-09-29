@@ -5,11 +5,10 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.ItemStack;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,19 +29,19 @@ public final class StuckWatcher {
     }
 
     public void tickBot(MinecraftServer server, AIPlayerEntity bot) {
-        int now = server.getTicks();
+        int now = server.getTickCount();
         int window = MinecraftAiConfig.get().watchdog().stuckWindowTicks();
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
         if (active.isEmpty() || active.get().state() != TaskState.RUNNING || active.get().isWaiting()) {
-            samples.remove(bot.getUuid());
+            samples.remove(bot.getUUID());
             return;
         }
 
         Task task = active.get();
-        Sample current = new Sample(bot.getBlockPos().toImmutable(), task.progress(), inventoryTotal(bot), now);
-        Sample previous = samples.get(bot.getUuid());
+        Sample current = new Sample(bot.blockPosition().immutable(), task.progress(), inventoryTotal(bot), now);
+        Sample previous = samples.get(bot.getUUID());
         if (previous == null || previous.changed(current)) {
-            samples.put(bot.getUuid(), current);
+            samples.put(bot.getUUID(), current);
             return;
         }
 
@@ -53,7 +52,7 @@ public final class StuckWatcher {
         String reason = "stuck:" + task.name();
         TaskManager.INSTANCE.abort(bot);
         TaskManager.INSTANCE.recordFailure(bot, task.name(), reason, now);
-        samples.remove(bot.getUuid());
+        samples.remove(bot.getUUID());
         BotLog.warn(LogCategory.TASK, bot, "task_stuck_aborted",
                 "name", task.name(),
                 "reason", reason,
@@ -63,7 +62,7 @@ public final class StuckWatcher {
     }
 
     public boolean reset(AIPlayerEntity bot) {
-        return samples.remove(bot.getUuid()) != null;
+        return samples.remove(bot.getUUID()) != null;
     }
 
     public void clearAll() {
@@ -72,10 +71,10 @@ public final class StuckWatcher {
 
     private static int inventoryTotal(AIPlayerEntity bot) {
         int total = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             total += stack.getCount();
         }
-        total += bot.getEquippedStack(EquipmentSlot.OFFHAND).getCount();
+        total += bot.getItemBySlot(EquipmentSlot.OFFHAND).getCount();
         return total;
     }
 

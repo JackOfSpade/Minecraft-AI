@@ -5,12 +5,11 @@ import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 
 /** Boards a nearby empty boat through the normal entity-interaction path. */
 public final class BoardBoatTask extends AbstractTask {
@@ -100,16 +99,16 @@ public final class BoardBoatTask extends AbstractTask {
     }
 
     private void findBoat(AIPlayerEntity bot) {
-        AbstractBoatEntity boat = requestedBoatId == null
+        AbstractBoat boat = requestedBoatId == null
                 ? BoatSupport.nearbyEmptyBoat(bot, excludedBoats).orElse(null)
                 : BoatSupport.boatById(bot, requestedBoatId).orElse(null);
         if (boat == null) {
             fail(requestedBoatId == null ? "no_nearby_empty_boat" : "requested_boat_unavailable");
             return;
         }
-        boatId = boat.getUuid();
+        boatId = boat.getUUID();
         shore = BoatSupport.nearestBoardingShore(bot, boat).orElse(null);
-        if (bot.squaredDistanceTo(boat) <= BoatSupport.BOARD_REACH * BoatSupport.BOARD_REACH) {
+        if (bot.distanceToSqr(boat) <= BoatSupport.BOARD_REACH * BoatSupport.BOARD_REACH) {
             phase = Phase.BOARD;
             return;
         }
@@ -121,7 +120,7 @@ public final class BoardBoatTask extends AbstractTask {
     }
 
     private void approach(AIPlayerEntity bot) {
-        AbstractBoatEntity boat = BoatSupport.boatById(bot, boatId).orElse(null);
+        AbstractBoat boat = BoatSupport.boatById(bot, boatId).orElse(null);
         if (boat == null) {
             // "boat_unavailable" is the same reason from both approach() and board(); record the
             // phase it was lost in, since that is otherwise the only difference between them.
@@ -129,7 +128,7 @@ public final class BoardBoatTask extends AbstractTask {
             fail("boat_unavailable");
             return;
         }
-        if (bot.squaredDistanceTo(boat) <= BoatSupport.BOARD_REACH * BoatSupport.BOARD_REACH) {
+        if (bot.distanceToSqr(boat) <= BoatSupport.BOARD_REACH * BoatSupport.BOARD_REACH) {
             bot.getActionPack().stopAll();
             phase = Phase.BOARD;
             return;
@@ -143,7 +142,7 @@ public final class BoardBoatTask extends AbstractTask {
         }
         ActionResult path = bot.getActionPack().startPathTo(shore);
         if (path.isFailed()) {
-            ActionResult walk = bot.getActionPack().startWalkTo(shore.toCenterPos(), 1.0D);
+            ActionResult walk = bot.getActionPack().startWalkTo(shore.getCenter(), 1.0D);
             if (walk.isFailed()) {
                 phase = Phase.FIND_BOAT;
             }
@@ -152,7 +151,7 @@ public final class BoardBoatTask extends AbstractTask {
     }
 
     private void board(AIPlayerEntity bot) {
-        AbstractBoatEntity boat = BoatSupport.boatById(bot, boatId).orElse(null);
+        AbstractBoat boat = BoatSupport.boatById(bot, boatId).orElse(null);
         if (boat == null) {
             BotLog.warn(LogCategory.TASK, bot, "board_boat_target_lost", "phase", "board");
             fail("boat_unavailable");

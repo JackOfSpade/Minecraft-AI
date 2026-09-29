@@ -5,13 +5,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.TreeMap;
+import net.minecraft.core.BlockPos;
 
 /**
  * What the bot itself changed in the world, kept so its own residue (torches, cobble, dug tunnels)

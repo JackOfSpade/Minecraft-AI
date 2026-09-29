@@ -2,8 +2,7 @@ package io.github.zoyluo.minecraftai.mining.assist;
 
 import java.util.SplittableRandom;
 import java.util.function.ToDoubleFunction;
-
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -240,9 +239,9 @@ class FreeRunStatsTest {
     void entriesFromAFarawayEyeCellAreIgnored() {
         FreeRunStats stats = new FreeRunStats();
         stats.record(3, 5.0D, TICK, EYE);
-        int x = BlockPos.unpackLongX(EYE);
-        int y = BlockPos.unpackLongY(EYE);
-        int z = BlockPos.unpackLongZ(EYE);
+        int x = BlockPos.getX(EYE);
+        int y = BlockPos.getY(EYE);
+        int z = BlockPos.getZ(EYE);
 
         assertEquals(1, stats.validCount(TICK, EYE));
         assertEquals(1, stats.validCount(TICK, BlockPos.asLong(x + 4, y, z)), "4 blocks along x");
@@ -257,9 +256,9 @@ class FreeRunStatsTest {
     void eyeShiftIsMeasuredEuclideanNotChebyshev() {
         FreeRunStats stats = new FreeRunStats();
         stats.record(3, 5.0D, TICK, EYE);
-        int x = BlockPos.unpackLongX(EYE);
-        int y = BlockPos.unpackLongY(EYE);
-        int z = BlockPos.unpackLongZ(EYE);
+        int x = BlockPos.getX(EYE);
+        int y = BlockPos.getY(EYE);
+        int z = BlockPos.getZ(EYE);
 
         // Squared distance 16 is the boundary: (4,0,0) is in, (2,2,2)=12 is in, (3,3,0)=18 and
         // (3,2,3)=22 are out even though every axis is within 4.
@@ -317,9 +316,9 @@ class FreeRunStatsTest {
     void staleAndDisplacedEntriesDoNotCountTowardTheThreshold() {
         double radius = 16.0D;
         FreeRunStats stats = new FreeRunStats();
-        int x = BlockPos.unpackLongX(EYE);
-        int y = BlockPos.unpackLongY(EYE);
-        int z = BlockPos.unpackLongZ(EYE);
+        int x = BlockPos.getX(EYE);
+        int y = BlockPos.getY(EYE);
+        int z = BlockPos.getZ(EYE);
         long movedEye = BlockPos.asLong(x + 9, y, z);
         for (int k = 0; k < N; k++) {
             SphereSchedule.Dir d = SphereSchedule.direction(k, 5L, 6L, 0);
@@ -537,7 +536,7 @@ class FreeRunStatsTest {
                     model[idx] = new double[] {
                         Math.round(Math.max(0.0D, Math.min(65535.0D / 256.0D, length)) * 256.0D) / 256.0D,
                         Double.isNaN(dirY) ? Double.NaN : Math.round(Math.max(-1.0D, Math.min(1.0D, dirY)) * 32767.0D) / 32767.0D,
-                        stamp, BlockPos.unpackLongX(eye), BlockPos.unpackLongY(eye), BlockPos.unpackLongZ(eye)};
+                        stamp, BlockPos.getX(eye), BlockPos.getY(eye), BlockPos.getZ(eye)};
                 }
             }
 
@@ -557,9 +556,9 @@ class FreeRunStatsTest {
                         }
                         double[] e = model[i];
                         long age = (long) now - (long) e[2];
-                        long dx = (long) e[3] - BlockPos.unpackLongX(eyeNow);
-                        long dy = (long) e[4] - BlockPos.unpackLongY(eyeNow);
-                        long dz = (long) e[5] - BlockPos.unpackLongZ(eyeNow);
+                        long dx = (long) e[3] - BlockPos.getX(eyeNow);
+                        long dy = (long) e[4] - BlockPos.getY(eyeNow);
+                        long dz = (long) e[5] - BlockPos.getZ(eyeNow);
                         boolean valid = age >= 0 && age <= 120 && dx * dx + dy * dy + dz * dz <= 16;
                         assertEquals(valid, stats.isValid(i, now, eyeNow), "isValid " + i);
                         if (!valid) {

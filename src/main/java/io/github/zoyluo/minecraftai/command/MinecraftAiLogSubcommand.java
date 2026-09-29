@@ -5,11 +5,11 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.BotLogWriter;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiLogSubcommand {
     private static final int DEFAULT_OVERFLOW_EVENTS = 6_000;
@@ -17,7 +17,7 @@ public final class MinecraftAiLogSubcommand {
     private MinecraftAiLogSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         return literal("log")
                 .then(literal("status")
                         .executes(context -> status(context.getSource())))
@@ -29,12 +29,12 @@ public final class MinecraftAiLogSubcommand {
                                 .executes(context -> overflow(context.getSource(), IntegerArgumentType.getInteger(context, "count")))));
     }
 
-    private static int status(ServerCommandSource source) {
+    private static int status(CommandSourceStack source) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:log_status")) {
             return 0;
         }
         BotLogWriter writer = BotLogWriter.INSTANCE;
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] log started="
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] log started="
                 + writer.isStarted()
                 + " queue="
                 + writer.queueSize()
@@ -45,22 +45,22 @@ public final class MinecraftAiLogSubcommand {
         return 1;
     }
 
-    private static int rotate(ServerCommandSource source) {
+    private static int rotate(CommandSourceStack source) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:log_rotate")) {
             return 0;
         }
         BotLog.config("log_rotate_requested", "source", "command");
         BotLogWriter.INSTANCE.forceRotateForTest();
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] log rotation triggered"), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] log rotation triggered"), false);
         return 1;
     }
 
-    private static int overflow(ServerCommandSource source, int count) {
+    private static int overflow(CommandSourceStack source, int count) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:log_overflow")) {
             return 0;
         }
         BotLogWriter.INSTANCE.forceOverflowForTest(count);
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] log overflow validation enqueued " + count + " events"), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] log overflow validation enqueued " + count + " events"), false);
         return 1;
     }
 }

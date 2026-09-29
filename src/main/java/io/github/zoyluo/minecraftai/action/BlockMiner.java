@@ -1,11 +1,11 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.block.BlockState;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * BLOCKMINER: the correct shared primitive for mining a single block, curing the root cause of
@@ -56,7 +56,7 @@ public final class BlockMiner {
         }
         // Switching targets: stop the old mining first, then lock in the new target.
         bot.getActionPack().stopMining();
-        this.target = pos == null ? null : pos.toImmutable();
+        this.target = pos == null ? null : pos.immutable();
         this.sinceTick = 0;
         this.started = false;
         this.miningChannelToolPolicy = miningChannelToolPolicy;
@@ -80,7 +80,7 @@ public final class BlockMiner {
         if (target == null) {
             return Status.IDLE;
         }
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         // Target already broken (air / replaced with something else is the caller's concern; here we only recognize "no longer minable" = air).
         BlockState targetState = world.getBlockState(target);
         if (targetState.isAir()) {
@@ -110,7 +110,7 @@ public final class BlockMiner {
         // (observed: ore_dig dist=3.9, locked on and actively mining yet every block hit the 200t
         // timeout and got blacklisted, 13 in a row, with the root cause hidden below this layer).
         if (sinceTick == 100) {
-            double dist = Math.sqrt(bot.getEyePos().squaredDistanceTo(target.toCenterPos()));
+            double dist = Math.sqrt(bot.getEyePosition().distanceToSqr(target.getCenter()));
             io.github.zoyluo.minecraftai.log.BotLog.action(bot, "miner_slow_dump",
                     "target", target.toShortString(),
                     "dist", String.format(java.util.Locale.ROOT, "%.1f", dist),
@@ -129,10 +129,10 @@ public final class BlockMiner {
                 // do not require a tool.  Keep the explicit failure for stone/ores: those blocks
                 // would otherwise be broken without a harvest drop or consume a scarce wrong tier.
                 if (selection.slot() < 0
-                        || (equipTarget.isToolRequired() && selection.stack().isEmpty())) {
+                        || (equipTarget.requiresCorrectToolForDrops() && selection.stack().isEmpty())) {
                     bot.getActionPack().stopMining();
                     failureReason = "missing_mining_channel_tool:"
-                            + Registries.ITEM.getId(
+                            + BuiltInRegistries.ITEM.getKey(
                             ToolSelector.requiredMiningChannelTool(equipTarget));
                     target = null;
                     return Status.FAILED;
@@ -158,9 +158,9 @@ public final class BlockMiner {
 
     /** The direction from the bot's eyes toward the block's center, used as the breaking face (snapped to the dominant axis). Just needs to roughly face the block; doesn't need to be exact. */
     private static Direction faceToward(AIPlayerEntity bot, BlockPos pos) {
-        return Direction.getFacing(
-                pos.getX() + 0.5 - bot.getEyePos().x,
-                pos.getY() + 0.5 - bot.getEyePos().y,
-                pos.getZ() + 0.5 - bot.getEyePos().z);
+        return Direction.getApproximateNearest(
+                pos.getX() + 0.5 - bot.getEyePosition().x,
+                pos.getY() + 0.5 - bot.getEyePosition().y,
+                pos.getZ() + 0.5 - bot.getEyePosition().z);
     }
 }

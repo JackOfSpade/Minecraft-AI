@@ -1,11 +1,10 @@
 package io.github.zoyluo.minecraftai.craft;
 
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 /**
  * S5: single source of truth for the smelting chain — input item → smelted output (ingots/cooked

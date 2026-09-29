@@ -1,7 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -9,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
+import net.minecraft.core.BlockPos;
 
 /**
  * Single-source Dijkstra over observed-standable AIR cells (mining-assist design 5.4): the search
@@ -69,7 +68,7 @@ public final class ObservedGraphSearch {
     /** One reached cell and its cheapest observed cost from the source, used internally and for logs/tests. */
     public record Reached(BlockPos pos, double cost) {
         public Reached {
-            pos = Objects.requireNonNull(pos, "pos").toImmutable();
+            pos = Objects.requireNonNull(pos, "pos").immutable();
         }
     }
 
@@ -85,7 +84,7 @@ public final class ObservedGraphSearch {
     public static Map<BlockPos, Double> search(BlockPos source, Environment env) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(env, "env");
-        BlockPos start = source.toImmutable();
+        BlockPos start = source.immutable();
         Map<BlockPos, Double> best = new HashMap<>();
         PriorityQueue<Reached> frontier = new PriorityQueue<>(Comparator.comparingDouble(Reached::cost));
         best.put(start, 0.0D);
@@ -150,8 +149,8 @@ public final class ObservedGraphSearch {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(env, "env");
-        BlockPos start = source.toImmutable();
-        BlockPos goal = target.toImmutable();
+        BlockPos start = source.immutable();
+        BlockPos goal = target.immutable();
         Map<BlockPos, Double> best = new HashMap<>();
         Map<BlockPos, BlockPos> predecessor = new HashMap<>();
         PriorityQueue<Reached> frontier = new PriorityQueue<>(Comparator.comparingDouble(Reached::cost));

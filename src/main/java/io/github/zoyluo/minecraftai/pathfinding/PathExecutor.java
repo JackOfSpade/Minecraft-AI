@@ -14,12 +14,11 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.List;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 
 public final class PathExecutor {
     private static final int STUCK_TICKS_LIMIT = 60;
@@ -45,7 +44,7 @@ public final class PathExecutor {
     private MiningController subMiner;
     private boolean digWalking;
     private final ReplanGate replanGate = new ReplanGate();
-    private Vec3d lastPos;
+    private Vec3 lastPos;
     private int stuckTicks;
     private int totalTicks;
     private int lastReplanTick = -REPLAN_COOLDOWN_TICKS;
@@ -83,7 +82,7 @@ public final class PathExecutor {
                         int protectedStoneLikeReserve,
                         RouteContract routeContract) {
         this.path = List.copyOf(path);
-        this.originalGoal = originalGoal.toImmutable();
+        this.originalGoal = originalGoal.immutable();
         this.replanCanPillar = replanCanPillar;
         this.replanAllowDig = replanAllowDig;
         this.protectedStoneLikeReserve = Math.max(0, protectedStoneLikeReserve);
@@ -94,7 +93,7 @@ public final class PathExecutor {
         totalTicks++;
         if (path.isEmpty() || index >= path.size()) {
             if (routeContract.constrained()) {
-                BlockPos current = pack.player().getBlockPos();
+                BlockPos current = pack.player().blockPosition();
                 if (!current.equals(originalGoal)) {
                     return failRuntimeContract(
                             pack, "terminal_goal_not_exact current=" + compact(current)
@@ -104,7 +103,7 @@ public final class PathExecutor {
                     return failRuntimeContract(pack, "terminal_below_minimum_y");
                 }
                 Standability.clearCache();
-                if (!Standability.isStandable(pack.player().getEntityWorld(), current)
+                if (!Standability.isStandable(pack.player().level(), current)
                         || !FakePlayerMotion.isBlockCollisionFree(pack.player())) {
                     return failRuntimeContract(pack, "terminal_not_standable");
                 }
@@ -116,7 +115,7 @@ public final class PathExecutor {
                 return ActionResult.SUCCESS;
             }
             cleanup(pack);
-            double distSq = pack.player().getBlockPos().getSquaredDistance(originalGoal);
+            double distSq = pack.player().blockPosition().distSqr(originalGoal);
             if (distSq > 4.0D) {
                 BotLog.warn(LogCategory.PATH, pack.player(), "path_end_far_from_goal",
                         "dist_sq", distSq, "goal", LogFields.pos(originalGoal));
@@ -130,7 +129,7 @@ public final class PathExecutor {
         }
 
         Node next = path.get(index);
-        String danger = DangerCheck.scan(pack.player().getEntityWorld(), next.pos());
+        String danger = DangerCheck.scan(pack.player().level(), next.pos());
         if (danger != null) {
             BotLog.warn(LogCategory.PATH, pack.player(), "path_danger", "at_node", LogFields.pos(next.pos()), "reason", danger);
             cleanup(pack);
@@ -179,7 +178,7 @@ public final class PathExecutor {
             // executor never advances to the next node before the bot has actually landed.
             return tickJumpUp(pack, next);
         }
-        if (arrivedAt(pack.player().getBlockPos(), next.pos())) {
+        if (arrivedAt(pack.player().blockPosition(), next.pos())) {
             return commitAdvance(pack, index + 1);
         }
         if (subWalker == null) {
@@ -193,13 +192,13 @@ public final class PathExecutor {
                         "to", LogFields.pos(target.pos()));
             }
             subWalker = new WalkToController(
-                    Vec3d.ofCenter(target.pos()), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
+                    Vec3.atCenterOf(target.pos()), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
         }
         Node target = path.get(activeWalkTargetIndex);
-        if (arrivedAt(pack.player().getBlockPos(), target.pos())) {
+        if (arrivedAt(pack.player().blockPosition(), target.pos())) {
             return commitAdvance(pack, activeWalkTargetIndex + 1);
         }
-        BlockPos beforeControllerTick = pack.player().getBlockPos().toImmutable();
+        BlockPos beforeControllerTick = pack.player().blockPosition().immutable();
         ActionResult result = subWalker.tick(pack);
         ActionResult movedContract =
                 ensureRuntimeContractAfterControllerMove(pack, beforeControllerTick);
@@ -226,14 +225,14 @@ public final class PathExecutor {
     private ActionResult tickJumpUp(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
         BlockPos target = next.pos();
-        if (arrivedAt(player.getBlockPos(), target) && player.isOnGround()) {
+        if (arrivedAt(player.blockPosition(), target) && player.onGround()) {
             BotLog.path(player, "path_jump_complete", "to", LogFields.pos(target));
             return commitAdvance(pack, index + 1);
         }
         jumpAttemptTicks++;
         double dx = (target.getX() + 0.5D) - player.getX();
         double dz = (target.getZ() + 0.5D) - player.getZ();
-        LookAction.lookHorizontallyAt(player, player.getEntityPos().add(dx, 0.0D, dz));
+        LookAction.lookHorizontallyAt(player, player.position().add(dx, 0.0D, dz));
         pack.setForward(1.0F);
         pack.setStrafing(0.0F);
         pack.setSprinting(false);
@@ -241,7 +240,7 @@ public final class PathExecutor {
         // "Stalled" = still standing at the original (lower) footing with no vertical progress at
         // all -- the same clientless-quirk symptom documented on FakePlayerMotion.jumpTo, where a
         // held jump input alone can leave the fake player bouncing on the same block forever.
-        boolean stalledAtBase = player.isOnGround() && player.getBlockY() < target.getY();
+        boolean stalledAtBase = player.onGround() && player.getBlockY() < target.getY();
         boolean arcGraceExpired = jumpAttemptTicks > JUMP_UP_ARC_GRACE_TICKS && stalledAtBase;
         boolean hardTimeout = jumpAttemptTicks > JUMP_UP_HARD_TIMEOUT_TICKS;
         if (!arcGraceExpired && !hardTimeout) {
@@ -266,9 +265,9 @@ public final class PathExecutor {
      */
     private ActionResult tickDrop(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
-        BlockPos current = player.getBlockPos();
+        BlockPos current = player.blockPosition();
         BlockPos target = next.pos();
-        if (current.equals(target) && player.isOnGround()) {
+        if (current.equals(target) && player.onGround()) {
             BotLog.path(player, "path_drop_complete", "to", LogFields.pos(target));
             return commitAdvance(pack, index + 1);
         }
@@ -292,7 +291,7 @@ public final class PathExecutor {
         double dz = (target.getZ() + 0.5D) - player.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         if (horizontal > 0.05D) {
-            LookAction.lookHorizontallyAt(player, player.getEntityPos().add(dx, 0.0D, dz));
+            LookAction.lookHorizontallyAt(player, player.position().add(dx, 0.0D, dz));
             pack.setForward(1.0F);
         } else {
             pack.setForward(0.0F);
@@ -343,9 +342,9 @@ public final class PathExecutor {
             // Combined with NeighborEnumerator.digEnterable's relaxed rule that the head position
             // only needs to be diggable (headOk = headOpen || isMineable(...)), this upgrades
             // dig-pathfinding from ground-level pit-digging to full mountain tunneling.
-            BlockPos headPos = next.pos().up();
-            if (!pack.player().getEntityWorld().getBlockState(headPos)
-                    .getCollisionShape(pack.player().getEntityWorld(), headPos).isEmpty()) {
+            BlockPos headPos = next.pos().above();
+            if (!pack.player().level().getBlockState(headPos)
+                    .getCollisionShape(pack.player().level(), headPos).isEmpty()) {
                 Direction headFace = faceFromPlayer(pack, headPos);
                 LookAction.lookAtBlock(pack.player(), headPos, headFace);
                 subMiner = new MiningController(headPos, headFace);
@@ -354,10 +353,10 @@ public final class PathExecutor {
             subMiner = null;
             digWalking = true;
             subWalker = new WalkToController(
-                    Vec3d.ofCenter(next.pos()), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
+                    Vec3.atCenterOf(next.pos()), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
         }
 
-        BlockPos beforeControllerTick = pack.player().getBlockPos().toImmutable();
+        BlockPos beforeControllerTick = pack.player().blockPosition().immutable();
         ActionResult walk = subWalker.tick(pack);
         ActionResult movedContract =
                 ensureRuntimeContractAfterControllerMove(pack, beforeControllerTick);
@@ -389,8 +388,8 @@ public final class PathExecutor {
      */
     private ActionResult tickPillar(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
-        BlockPos placeSlot = next.pos().down(); // current feet position; the support block goes here
-        if (player.getBlockY() >= next.pos().getY() && player.isOnGround()) {
+        BlockPos placeSlot = next.pos().below(); // current feet position; the support block goes here
+        if (player.getBlockY() >= next.pos().getY() && player.onGround()) {
             return commitAdvance(pack, index + 1);
         }
         int slot = findPlaceableBlock(player, protectedStoneLikeReserve);
@@ -404,14 +403,14 @@ public final class PathExecutor {
         pack.jumpOnce();
         pillarAttemptTicks++;
         double rise = player.getY() - placeSlot.getY();
-        if (rise > 0.5D && rise < 1.2D && player.getEntityWorld().getBlockState(placeSlot).isAir()) {
+        if (rise > 0.5D && rise < 1.2D && player.level().getBlockState(placeSlot).isAir()) {
             BuildAction.placeBlockAt(player, placeSlot);
             return ActionResult.IN_PROGRESS;
         }
         // "Stalled" = still standing at the original (lower) footing with no vertical progress at
         // all -- the same clientless stale-isOnGround quirk FakePlayerMotion.jumpTo itself already
         // accounts for, not the ordinary mid-arc state of a real jump still developing.
-        boolean stalledAtBase = player.isOnGround() && player.getBlockPos().equals(placeSlot);
+        boolean stalledAtBase = player.onGround() && player.blockPosition().equals(placeSlot);
         boolean arcGraceExpired = pillarAttemptTicks > JUMP_UP_ARC_GRACE_TICKS && stalledAtBase;
         boolean hardTimeout = pillarAttemptTicks > JUMP_UP_HARD_TIMEOUT_TICKS;
         if (!arcGraceExpired && !hardTimeout) {
@@ -450,12 +449,12 @@ public final class PathExecutor {
     private ActionResult tickBridge(ActionPack pack, Node next) {
         AIPlayerEntity player = pack.player();
         BlockPos target = next.pos();
-        if (arrivedAt(player.getBlockPos(), target)) {
+        if (arrivedAt(player.blockPosition(), target)) {
             return commitAdvance(pack, index + 1);
         }
-        BlockPos placeSlot = target.down();
-        if (player.getEntityWorld().getBlockState(placeSlot)
-                .getCollisionShape(player.getEntityWorld(), placeSlot).isEmpty()) {
+        BlockPos placeSlot = target.below();
+        if (player.level().getBlockState(placeSlot)
+                .getCollisionShape(player.level(), placeSlot).isEmpty()) {
             int slot = findPlaceableBlock(player, protectedStoneLikeReserve);
             if (slot < 0) {
                 return handleStuck(pack, "bridge_no_block");
@@ -469,9 +468,9 @@ public final class PathExecutor {
         }
         if (subWalker == null) {
             subWalker = new WalkToController(
-                    Vec3d.ofCenter(target), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
+                    Vec3.atCenterOf(target), WalkToController.PATH_NODE_ARRIVAL_THRESHOLD);
         }
-        BlockPos beforeControllerTick = player.getBlockPos().toImmutable();
+        BlockPos beforeControllerTick = player.blockPosition().immutable();
         ActionResult result = subWalker.tick(pack);
         ActionResult movedContract = ensureRuntimeContractAfterControllerMove(pack, beforeControllerTick);
         if (movedContract.isFailed()) {
@@ -496,7 +495,7 @@ public final class PathExecutor {
     }
 
     private ActionResult checkProgress(ActionPack pack, Node next) {
-        Vec3d current = pack.player().getEntityPos();
+        Vec3 current = pack.player().position();
         if (lastPos != null && current.distanceTo(lastPos) < 0.03D) {
             stuckTicks++;
         } else {
@@ -540,7 +539,7 @@ public final class PathExecutor {
 
     private int chooseWalkTargetIndex(ActionPack pack) {
         int best = index;
-        BlockPos from = pack.player().getBlockPos();
+        BlockPos from = pack.player().blockPosition();
         int max = Math.min(path.size() - 1, index + MinecraftAiConfig.get().nav().lookahead());
         for (int candidate = index + 1; candidate <= max; candidate++) {
             if (!canStringPullTo(pack, from, candidate)) {
@@ -565,10 +564,10 @@ public final class PathExecutor {
         if (dy < -1 || dy > 1) {
             return false;
         }
-        return lineClearForStringPull(pack.player().getEntityWorld(), from, target);
+        return lineClearForStringPull(pack.player().level(), from, target);
     }
 
-    private static boolean lineClearForStringPull(net.minecraft.server.world.ServerWorld world, BlockPos from, BlockPos target) {
+    private static boolean lineClearForStringPull(net.minecraft.server.level.ServerLevel world, BlockPos from, BlockPos target) {
         int dx = target.getX() - from.getX();
         int dy = target.getY() - from.getY();
         int dz = target.getZ() - from.getZ();
@@ -577,7 +576,7 @@ public final class PathExecutor {
         int previousZ = from.getZ();
         for (int i = 1; i <= samples; i++) {
             double t = (double) i / samples;
-            BlockPos sample = BlockPos.ofFloored(
+            BlockPos sample = BlockPos.containing(
                     from.getX() + 0.5D + dx * t,
                     from.getY() + dy * t,
                     from.getZ() + 0.5D + dz * t);
@@ -601,13 +600,13 @@ public final class PathExecutor {
         return Standability.isStandable(world, target);
     }
 
-    private static boolean passableColumn(net.minecraft.server.world.ServerWorld world, BlockPos feet) {
+    private static boolean passableColumn(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
         return world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
-                && world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty();
+                && world.getBlockState(feet.above()).getCollisionShape(world, feet.above()).isEmpty();
     }
 
-    private static boolean hasSupport(net.minecraft.server.world.ServerWorld world, BlockPos feet) {
-        BlockPos below = feet.down();
+    private static boolean hasSupport(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
+        BlockPos below = feet.below();
         return !world.getBlockState(below).getCollisionShape(world, below).isEmpty();
     }
 
@@ -640,7 +639,7 @@ public final class PathExecutor {
 
     private ActionResult handleStuck(ActionPack pack, String reason) {
         if (replanGate.tryAcquire()) {
-            int now = pack.player().getEntityWorld().getServer().getTicks();
+            int now = pack.player().level().getServer().getTickCount();
             if (now - lastReplanTick < REPLAN_COOLDOWN_TICKS) {
                 cleanup(pack);
                 return ActionResult.failed(reason + "; replan_throttled");
@@ -648,7 +647,7 @@ public final class PathExecutor {
             lastReplanTick = now;
             BotLog.path(pack.player(), "path_stuck", "at_node", reason, "stuck_ticks", stuckTicks);
             if (routeContract.constrained()
-                    && pack.player().getBlockPos().getY() < routeContract.minimumY()) {
+                    && pack.player().blockPosition().getY() < routeContract.minimumY()) {
                 cleanup(pack);
                 return ActionResult.failed(
                         reason + "; replan_failed: ROUTE_CONTRACT:start_below_minimum_y");
@@ -676,11 +675,11 @@ public final class PathExecutor {
             AStarPathfinder.invalidateCache("runtime_path_obstruction");
             AStarPathfinder finder = routeContract.constrained()
                     ? new AStarPathfinder(
-                    pack.player(), pack.player().getEntityWorld(), pack.player().getBlockPos(), originalGoal,
+                    pack.player(), pack.player().level(), pack.player().blockPosition(), originalGoal,
                     CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                     false, false)
                     : new AStarPathfinder(
-                    pack.player(), pack.player().getEntityWorld(), pack.player().getBlockPos(), originalGoal,
+                    pack.player(), pack.player().level(), pack.player().blockPosition(), originalGoal,
                     canPillar, allowDig);
             PathfindingResult fresh = routeContract.constrained()
                     ? finder.findPathUncachedAtOrAbove(routeContract.minimumY())
@@ -731,7 +730,7 @@ public final class PathExecutor {
     private PathfindingResult proveConstrainedReturnRoute(
             ActionPack pack, BlockPos returnAnchor) {
         return new AStarPathfinder(
-                pack.player(), pack.player().getEntityWorld(), originalGoal, returnAnchor,
+                pack.player(), pack.player().level(), originalGoal, returnAnchor,
                 CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                 false, false).findPathUncachedAtOrAbove(routeContract.minimumY());
     }
@@ -740,7 +739,7 @@ public final class PathExecutor {
         if (!routeContract.constrained()) {
             return ActionResult.SUCCESS;
         }
-        BlockPos current = pack.player().getBlockPos().toImmutable();
+        BlockPos current = pack.player().blockPosition().immutable();
         if (current.getY() < routeContract.minimumY()) {
             return failRuntimeContract(pack, "current_below_minimum_y");
         }
@@ -752,7 +751,7 @@ public final class PathExecutor {
             return ActionResult.SUCCESS;
         }
         PathfindingResult proof = new AStarPathfinder(
-                pack.player(), pack.player().getEntityWorld(), current, routeContract.returnAnchor(),
+                pack.player(), pack.player().level(), current, routeContract.returnAnchor(),
                 CONSTRAINED_ROUTE_MAX_NODES, CONSTRAINED_ROUTE_MAX_MILLIS,
                 false, false).findPathUncachedAtOrAbove(routeContract.minimumY());
         RouteValidation validation =
@@ -766,7 +765,7 @@ public final class PathExecutor {
 
     private ActionResult ensureRuntimeContractAfterControllerMove(
             ActionPack pack, BlockPos beforeControllerTick) {
-        BlockPos current = pack.player().getBlockPos();
+        BlockPos current = pack.player().blockPosition();
         return current.equals(beforeControllerTick)
                 ? ActionResult.SUCCESS
                 : ensureRuntimeContract(pack, false);
@@ -776,7 +775,7 @@ public final class PathExecutor {
         cleanup(pack);
         BotLog.warn(LogCategory.PATH, pack.player(), "path_route_contract_lost",
                 "reason", reason,
-                "at", LogFields.pos(pack.player().getBlockPos()),
+                "at", LogFields.pos(pack.player().blockPosition()),
                 "goal", LogFields.pos(originalGoal));
         return ActionResult.failed("route_contract_lost: " + reason);
     }
@@ -892,7 +891,7 @@ public final class PathExecutor {
                 minimumY = Integer.MIN_VALUE;
                 returnAnchor = null;
             } else if (returnAnchor != null) {
-                returnAnchor = returnAnchor.toImmutable();
+                returnAnchor = returnAnchor.immutable();
             }
         }
 
@@ -966,11 +965,11 @@ public final class PathExecutor {
      */
     private ActionResult rejectIfHazardExposed(ActionPack pack, BlockPos justMined) {
         AIPlayerEntity bot = pack.player();
-        if (hasObservedHazardFluid(bot, justMined.up())) {
-            return handleStuck(pack, "dig_through_hazard_exposed: " + compact(justMined.up()));
+        if (hasObservedHazardFluid(bot, justMined.above())) {
+            return handleStuck(pack, "dig_through_hazard_exposed: " + compact(justMined.above()));
         }
         for (Direction direction : HORIZONTAL_NEIGHBORS) {
-            BlockPos neighbor = justMined.offset(direction);
+            BlockPos neighbor = justMined.relative(direction);
             if (hasObservedHazardFluid(bot, neighbor)) {
                 return handleStuck(pack, "dig_through_hazard_exposed: " + compact(neighbor));
             }
@@ -984,7 +983,7 @@ public final class PathExecutor {
     }
 
     private static Direction faceFromPlayer(ActionPack pack, BlockPos pos) {
-        Direction raw = Direction.getFacing(pack.player().getEyePos().subtract(pos.toCenterPos()));
+        Direction raw = Direction.getApproximateNearest(pack.player().getEyePosition().subtract(pos.getCenter()));
         if (raw == Direction.UP || raw == Direction.DOWN) {
             double dx = pack.player().getX() - (pos.getX() + 0.5D);
             double dz = pack.player().getZ() - (pos.getZ() + 0.5D);

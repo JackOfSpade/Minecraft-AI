@@ -6,24 +6,23 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.network.PlayerKind;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.entity.vehicle.BoatEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.DisconnectionInfo;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.DisconnectionDetails;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -49,15 +48,15 @@ public final class BoatFollowGameTests {
     private static final int FEET_Z = 12;
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_ai_player_boat_moves_when_steered_on_open_water", maxTicks = 200)
-    public void aiPlayerBoatMovesWhenSteeredOnOpenWater(TestContext context) {
+    public void aiPlayerBoatMovesWhenSteeredOnOpenWater(GameTestHelper context) {
         BlockPos feet = buildLake(context);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity bot = spawnBot(world, "BoatSteerGT", feet.add(20, 0, FEET_Z));
-        AbstractBoatEntity boat = placeBoat(world, feet.add(20, 0, FEET_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "BoatSteerGT", feet.offset(20, 0, FEET_Z));
+        AbstractBoat boat = placeBoat(world, feet.offset(20, 0, FEET_Z));
         boarded(bot, boat);
-        Vec3d start = boat.getEntityPos();
+        Vec3 start = boat.position();
         AtomicInteger ticks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.getVehicle() == boat, "bot left its boat while being steered");
             BoatSupport.steerToward(boat, start.x + 25.0D, start.z, 1.0D, 82.0D);
             if (ticks.incrementAndGet() < 80) {
@@ -66,22 +65,22 @@ public final class BoatFollowGameTests {
             double moved = Math.hypot(boat.getX() - start.x, boat.getZ() - start.z);
             require(context, moved >= 4.0D,
                     "boat driven by an AIPlayerEntity did not move: moved=" + moved
-                            + " velocity=" + boat.getVelocity()
-                            + " logicalSide=" + boat.isLogicalSideForUpdatingMovement()
+                            + " velocity=" + boat.getDeltaMovement()
+                            + " logicalSide=" + boat.isLocalInstanceAuthoritative()
                             + " controller=" + boat.getControllingPassenger());
             despawnAndComplete(context, bot);
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_walks_to_shore_launches_inventory_boat_and_follows_boating_target", maxTicks = 1500)
-    public void walksToShoreLaunchesInventoryBoatAndFollowsBoatingTarget(TestContext context) {
+    public void walksToShoreLaunchesInventoryBoatAndFollowsBoatingTarget(GameTestHelper context) {
         Scenario scenario = scenario(context, "InvBoat");
         InventoryAction.giveItem(scenario.bot(), new ItemStack(Items.OAK_BOAT, 1));
         runFollow(context, scenario, null, null, () -> { });
     }
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_crafts_boat_from_planks_then_launches_and_follows_boating_target", maxTicks = 2400)
-    public void craftsBoatFromPlanksThenLaunchesAndFollowsBoatingTarget(TestContext context) {
+    public void craftsBoatFromPlanksThenLaunchesAndFollowsBoatingTarget(GameTestHelper context) {
         Scenario scenario = scenario(context, "CraftBoat");
         InventoryAction.giveItem(scenario.bot(), new ItemStack(Items.OAK_PLANKS, 12));
         runFollow(context, scenario, null, null, () -> require(context,
@@ -90,23 +89,23 @@ public final class BoatFollowGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_boards_nearby_placed_empty_boat_instead_of_launching_and_follows", maxTicks = 1500)
-    public void boardsNearbyPlacedEmptyBoatInsteadOfLaunchingAndFollows(TestContext context) {
+    public void boardsNearbyPlacedEmptyBoatInsteadOfLaunchingAndFollows(GameTestHelper context) {
         Scenario scenario = scenario(context, "PlacedBoat");
         // Empty boat on the lake close to the shore; the bot has no boat item and no planks, so the
         // only way to follow is to board this one.
-        AbstractBoatEntity placed = placeBoat(context.getWorld(),
-                scenario.feet().add(LAND_MAX_X + 3, 0, FEET_Z + 2));
+        AbstractBoat placed = placeBoat(context.getLevel(),
+                scenario.feet().offset(LAND_MAX_X + 3, 0, FEET_Z + 2));
         runFollow(context, scenario, placed, null, () -> { });
     }
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_never_takes_the_boat_its_target_is_riding", maxTicks = 600)
-    public void neverTakesTheBoatItsTargetIsRiding(TestContext context) {
+    public void neverTakesTheBoatItsTargetIsRiding(GameTestHelper context) {
         Scenario scenario = scenario(context, "OwnBoat");
         AIPlayerEntity bot = scenario.bot();
         // Bot on the shore next to the target's boat; nothing else to board and nothing to build.
-        bot.teleport(context.getWorld(), scenario.feet().getX() + LAND_MAX_X + 0.5D,
+        bot.teleportTo(context.getLevel(), scenario.feet().getX() + LAND_MAX_X + 0.5D,
                 scenario.feet().getY(), scenario.feet().getZ() + 20.5D, Set.of(), 0.0F, 0.0F, true);
-        scenario.targetBoat().setPosition(
+        scenario.targetBoat().setPos(
                 scenario.feet().getX() + LAND_MAX_X + 3.5D, scenario.targetBoat().getY(),
                 scenario.feet().getZ() + 20.5D);
         require(context, BoatSupport.nearbyEmptyBoat(bot).isEmpty(),
@@ -115,12 +114,12 @@ public final class BoatFollowGameTests {
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_boat_follow_own_boat"));
         AtomicInteger ticks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, bot.getVehicle() != scenario.targetBoat(),
                     "the follower took the boat its target is riding");
-            require(context, scenario.targetBoat().getPassengerList().size() == 1,
+            require(context, scenario.targetBoat().getPassengers().size() == 1,
                     "the target's boat gained a passenger: "
-                            + scenario.targetBoat().getPassengerList().size());
+                            + scenario.targetBoat().getPassengers().size());
             if (ticks.incrementAndGet() >= 400) {
                 despawnAndComplete(context, bot, scenario.target());
             }
@@ -128,40 +127,40 @@ public final class BoatFollowGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_beached_boat_watchdog_abandons_it_and_relaunches_own_boat", maxTicks = 2400)
-    public void beachedBoatWatchdogAbandonsItAndRelaunchesOwnBoat(TestContext context) {
+    public void beachedBoatWatchdogAbandonsItAndRelaunchesOwnBoat(GameTestHelper context) {
         Scenario scenario = scenario(context, "Beached");
         BlockPos feet = scenario.feet();
-        ServerWorld world = context.getWorld();
+        ServerLevel world = context.getLevel();
         InventoryAction.giveItem(scenario.bot(), new ItemStack(Items.OAK_BOAT, 1));
         // A boat sitting on dry land in front of the bot, with a one-high stone wall right in the
         // line to the lake: boarding works, steering east never gets anywhere (a hull cannot climb
         // a block), while a walking bot simply steps over it once it has abandoned the boat.
-        BlockState stone = Blocks.STONE.getDefaultState();
+        BlockState stone = Blocks.STONE.defaultBlockState();
         for (int z = 4; z <= 20; z++) {
-            world.setBlockState(feet.add(10, 0, z), stone, Block.NOTIFY_ALL);
+            world.setBlock(feet.offset(10, 0, z), stone, Block.UPDATE_ALL);
         }
-        AbstractBoatEntity beached = placeBoat(world, feet.add(8, 0, FEET_Z));
-        beached.setPosition(feet.getX() + 8.5D, feet.getY(), feet.getZ() + FEET_Z + 0.5D);
+        AbstractBoat beached = placeBoat(world, feet.offset(8, 0, FEET_Z));
+        beached.setPos(feet.getX() + 8.5D, feet.getY(), feet.getZ() + FEET_Z + 0.5D);
         runFollow(context, scenario, beached, beached, () -> require(context,
-                beached.getPassengerList().isEmpty(), "the wedged boat still carries the bot"));
+                beached.getPassengers().isEmpty(), "the wedged boat still carries the bot"));
     }
 
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_target_leaving_boat_onto_land_makes_bot_exit_at_dry_shore_and_follow_on_foot", maxTicks = 1800)
-    public void targetLeavingBoatOntoLandMakesBotExitAtDryShoreAndFollowOnFoot(TestContext context) {
+    public void targetLeavingBoatOntoLandMakesBotExitAtDryShoreAndFollowOnFoot(GameTestHelper context) {
         Scenario scenario = scenario(context, "LeaveBoat");
-        ServerWorld world = context.getWorld();
+        ServerLevel world = context.getLevel();
         AIPlayerEntity bot = scenario.bot();
         BlockPos feet = scenario.feet();
-        AbstractBoatEntity botBoat = placeBoat(world, feet.add(22, 0, FEET_Z));
+        AbstractBoat botBoat = placeBoat(world, feet.offset(22, 0, FEET_Z));
         boarded(bot, botBoat);
         FollowTask follow = new FollowTask(scenario.targetName());
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_boat_follow_leave_boat"));
         AtomicInteger stage = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (follow.state() == TaskState.FAILED || follow.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("follow ended early: " + follow.state()
-                        + " reason=" + follow.failureReason() + " botPos=" + bot.getEntityPos()));
+                context.fail(Component.nullToEmpty("follow ended early: " + follow.state()
+                        + " reason=" + follow.failureReason() + " botPos=" + bot.position()));
                 return;
             }
             double toTargetBoat = Math.hypot(botBoat.getX() - scenario.targetBoat().getX(),
@@ -170,7 +169,7 @@ public final class BoatFollowGameTests {
                 if (bot.getVehicle() == botBoat && toTargetBoat <= 9.0D) {
                     // Bot has sailed up to the boating target; now the target steps out onto the bank.
                     scenario.target().stopRiding();
-                    scenario.target().teleport(world, feet.getX() + 6.5D, feet.getY(),
+                    scenario.target().teleportTo(world, feet.getX() + 6.5D, feet.getY(),
                             feet.getZ() + FEET_Z + 0.5D, Set.of(), 0.0F, 0.0F, true);
                     stage.set(1);
                 }
@@ -196,26 +195,26 @@ public final class BoatFollowGameTests {
      * (false) while an AIPlayerEntity in an identical boat makes it server-authoritative (true).
      */
     @GameTest(environment = "minecraftai-gametest:boat_follow_game_tests_human_driven_boat_stays_client_authoritative_while_ai_driven_is_server_authoritative", maxTicks = 100)
-    public void humanDrivenBoatStaysClientAuthoritativeWhileAiDrivenIsServerAuthoritative(TestContext context) {
-        ServerWorld world = context.getWorld();
-        BlockPos feet = context.getAbsolutePos(new BlockPos(3, 4, 3));
+    public void humanDrivenBoatStaysClientAuthoritativeWhileAiDrivenIsServerAuthoritative(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos feet = context.absolutePos(new BlockPos(3, 4, 3));
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
-                world.setBlockState(feet.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(feet.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 3; dy++) {
-                    world.setBlockState(feet.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(feet.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        AbstractBoatEntity emptyBoat = placeBoat(world, feet.add(-3, 0, -3));
-        AbstractBoatEntity humanBoat = placeBoat(world, feet.add(3, 0, -3));
-        AbstractBoatEntity aiBoat = placeBoat(world, feet.add(0, 0, 3));
-        AIPlayerEntity bot = spawnBot(world, "BoatAuthorityBotGT", feet.add(-3, 0, 3));
+        AbstractBoat emptyBoat = placeBoat(world, feet.offset(-3, 0, -3));
+        AbstractBoat humanBoat = placeBoat(world, feet.offset(3, 0, -3));
+        AbstractBoat aiBoat = placeBoat(world, feet.offset(0, 0, 3));
+        AIPlayerEntity bot = spawnBot(world, "BoatAuthorityBotGT", feet.offset(-3, 0, 3));
         boarded(bot, aiBoat);
-        ServerPlayerEntity human = SleepVoteGameTests.connectHuman(world.getServer(), world, humanBoat.getBlockPos());
-        context.addFinalTask(() -> {
-            if (human.networkHandler != null) {
-                human.networkHandler.onDisconnected(new DisconnectionInfo(Text.literal("boat authority test over")));
+        ServerPlayer human = SleepVoteGameTests.connectHuman(world.getServer(), world, humanBoat.blockPosition());
+        context.succeedIf(() -> {
+            if (human.connection != null) {
+                human.connection.onDisconnect(new DisconnectionDetails(Component.literal("boat authority test over")));
             }
             DangerWatcher.INSTANCE.clear(bot);
             AIPlayerManager.INSTANCE.despawn(world.getServer(), "BoatAuthorityBotGT");
@@ -225,24 +224,24 @@ public final class BoatFollowGameTests {
         });
         require(context, !PlayerKind.isBot(human) && !(human instanceof AIPlayerEntity),
                 "fixture: the stand-in must be a human, not one of our bots");
-        human.teleport(world, humanBoat.getX(), humanBoat.getY(), humanBoat.getZ(), Set.of(), 0.0F, 0.0F, true);
+        human.teleportTo(world, humanBoat.getX(), humanBoat.getY(), humanBoat.getZ(), Set.of(), 0.0F, 0.0F, true);
         require(context, human.startRiding(humanBoat, true, false),
                 "the human could not board its boat: removed=" + humanBoat.isRemoved()
-                        + " passengers=" + humanBoat.getPassengerList());
+                        + " passengers=" + humanBoat.getPassengers());
         AtomicInteger ticks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, humanBoat.getControllingPassenger() == human,
                     "fixture: the human is not the controlling passenger: " + humanBoat.getControllingPassenger());
             require(context, aiBoat.getControllingPassenger() == bot,
                     "fixture: the bot is not the controlling passenger: " + aiBoat.getControllingPassenger());
-            require(context, !humanBoat.isLogicalSideForUpdatingMovement(),
+            require(context, !humanBoat.isLocalInstanceAuthoritative(),
                     "the mixin leaked: a boat driven by a human player must stay client-authoritative on the server");
-            require(context, aiBoat.isLogicalSideForUpdatingMovement(),
+            require(context, aiBoat.isLocalInstanceAuthoritative(),
                     "an AIPlayerEntity-driven boat must be server-authoritative");
-            require(context, emptyBoat.isLogicalSideForUpdatingMovement(),
+            require(context, emptyBoat.isLocalInstanceAuthoritative(),
                     "an empty boat keeps vanilla's server authority");
             if (ticks.incrementAndGet() >= 20) {
-                context.complete();
+                context.succeed();
             }
         });
     }
@@ -250,18 +249,18 @@ public final class BoatFollowGameTests {
     // ---- scenario plumbing -------------------------------------------------------------------
 
     private record Scenario(BlockPos feet, AIPlayerEntity bot, AIPlayerEntity target,
-            AbstractBoatEntity targetBoat, String botName, String targetName) {
+            AbstractBoat targetBoat, String botName, String targetName) {
     }
 
-    private static Scenario scenario(TestContext context, String suffix) {
+    private static Scenario scenario(GameTestHelper context, String suffix) {
         BlockPos feet = buildLake(context);
-        ServerWorld world = context.getWorld();
+        ServerLevel world = context.getLevel();
         String botName = "Fol" + suffix;
         String targetName = "Tgt" + suffix;
-        AIPlayerEntity bot = spawnBot(world, botName, feet.add(4, 0, FEET_Z));
-        BlockPos targetPos = feet.add(32, 0, FEET_Z);
+        AIPlayerEntity bot = spawnBot(world, botName, feet.offset(4, 0, FEET_Z));
+        BlockPos targetPos = feet.offset(32, 0, FEET_Z);
         AIPlayerEntity target = spawnBot(world, targetName, targetPos);
-        AbstractBoatEntity targetBoat = placeBoat(world, targetPos);
+        AbstractBoat targetBoat = placeBoat(world, targetPos);
         boarded(target, targetBoat);
         return new Scenario(feet, bot, target, targetBoat, botName, targetName);
     }
@@ -274,32 +273,32 @@ public final class BoatFollowGameTests {
      * @param mustNotEndIn when non-null, a boat the bot must have left/abandoned by the end
      * @param onSuccess extra final assertions, run just before the test completes
      */
-    private static void runFollow(TestContext context, Scenario scenario,
-            AbstractBoatEntity mustBoardFirst, AbstractBoatEntity mustNotEndIn, Runnable onSuccess) {
+    private static void runFollow(GameTestHelper context, Scenario scenario,
+            AbstractBoat mustBoardFirst, AbstractBoat mustNotEndIn, Runnable onSuccess) {
         AIPlayerEntity bot = scenario.bot();
         FollowTask follow = new FollowTask(scenario.targetName());
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_boat_follow"));
-        AtomicReference<Vec3d> firstBoatPos = new AtomicReference<>();
-        AtomicReference<AbstractBoatEntity> firstBoat = new AtomicReference<>();
-        context.runAtEveryTick(() -> {
+        AtomicReference<Vec3> firstBoatPos = new AtomicReference<>();
+        AtomicReference<AbstractBoat> firstBoat = new AtomicReference<>();
+        context.failIfEver(() -> {
             if (follow.state() == TaskState.FAILED || follow.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("follow ended early: " + follow.state()
-                        + " reason=" + follow.failureReason() + " botPos=" + bot.getEntityPos()
+                context.fail(Component.nullToEmpty("follow ended early: " + follow.state()
+                        + " reason=" + follow.failureReason() + " botPos=" + bot.position()
                         + " vehicle=" + bot.getVehicle()
-                        + " expectedBoat=" + (mustBoardFirst == null ? "-" : mustBoardFirst.getEntityPos()
-                                + " passengers=" + mustBoardFirst.getPassengerList().size()
+                        + " expectedBoat=" + (mustBoardFirst == null ? "-" : mustBoardFirst.position()
+                                + " passengers=" + mustBoardFirst.getPassengers().size()
                                 + " alive=" + mustBoardFirst.isAlive())));
                 return;
             }
             require(context, bot.getVehicle() != scenario.targetBoat(),
                     "the follower took the boat its target is riding");
-            if (!(bot.getVehicle() instanceof AbstractBoatEntity boat)) {
+            if (!(bot.getVehicle() instanceof AbstractBoat boat)) {
                 return;
             }
             if (firstBoat.get() == null) {
                 firstBoat.set(boat);
-                firstBoatPos.set(boat.getEntityPos());
+                firstBoatPos.set(boat.position());
                 require(context, mustBoardFirst == null || boat == mustBoardFirst,
                         "bot boarded some other boat instead of the expected one first");
             }
@@ -311,7 +310,7 @@ public final class BoatFollowGameTests {
                         boat.getZ() - firstBoatPos.get().z);
                 require(context, travelled >= 1.0D || firstBoat.get() != boat,
                         "the bot's boat never moved: travelled=" + travelled);
-                require(context, !boat.getPassengerList().contains(scenario.target()),
+                require(context, !boat.getPassengers().contains(scenario.target()),
                         "bot and target share a boat");
                 onSuccess.run();
                 TaskManager.INSTANCE.abort(bot);
@@ -323,23 +322,23 @@ public final class BoatFollowGameTests {
     // ---- world / entity helpers --------------------------------------------------------------
 
     /** Builds the lake fixture and returns the feet-level origin cell (x=0, z=0). */
-    private static BlockPos buildLake(TestContext context) {
-        ServerWorld world = context.getWorld();
-        world.setTimeOfDay(1000L);
-        BlockPos feet = context.getAbsolutePos(new BlockPos(0, 4, 0));
-        BlockState stone = Blocks.STONE.getDefaultState();
-        BlockState air = Blocks.AIR.getDefaultState();
-        BlockState water = Blocks.WATER.getDefaultState();
+    private static BlockPos buildLake(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos feet = context.absolutePos(new BlockPos(0, 4, 0));
+        BlockState stone = Blocks.STONE.defaultBlockState();
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockState water = Blocks.WATER.defaultBlockState();
         // The gametest box is one chunk-sized structure; the lake is wider than that and boats
         // only tick (and only float/drive) in entity-ticking chunks, so force-load the whole area.
         forceLakeChunks(world, feet, true);
         // Released when the test ends (pass, fail or timeout) so a finished test never leaves its
         // chunks force-loaded for the rest of the batch.
-        context.addFinalTask(() -> forceLakeChunks(world, feet, false));
+        context.succeedIf(() -> forceLakeChunks(world, feet, false));
         // Leftover boats from earlier tests in the same server would be offered as "empty boats".
-        world.getEntitiesByClass(AbstractBoatEntity.class,
-                net.minecraft.util.math.Box.enclosing(feet.add(-30, -10, -30), feet.add(LAKE_MAX_X + 30, 10, MAX_Z + 30)),
-                boat -> true).forEach(net.minecraft.entity.Entity::discard);
+        world.getEntitiesOfClass(AbstractBoat.class,
+                net.minecraft.world.phys.AABB.encapsulatingFullBlocks(feet.offset(-30, -10, -30), feet.offset(LAKE_MAX_X + 30, 10, MAX_Z + 30)),
+                boat -> true).forEach(net.minecraft.world.entity.Entity::discard);
         for (int x = -1; x <= LAKE_MAX_X + 1; x++) {
             for (int z = -1; z <= MAX_Z + 1; z++) {
                 boolean frame = x == -1 || z == -1 || x == LAKE_MAX_X + 1 || z == MAX_Z + 1;
@@ -354,28 +353,28 @@ public final class BoatFollowGameTests {
                     } else {
                         state = air;
                     }
-                    world.setBlockState(feet.add(x, y, z), state, Block.NOTIFY_ALL);
+                    world.setBlock(feet.offset(x, y, z), state, Block.UPDATE_ALL);
                 }
             }
         }
         // The gametest world is a flat void-ish world below y=40: every slime chunk spawns slimes
         // regardless of light, and one slain bot fails an otherwise correct test (seen live).  Keep
         // the fixture monster-free instead of touching the global mob-spawning game rule.
-        net.minecraft.util.math.Box area = net.minecraft.util.math.Box.enclosing(
-                feet.add(-40, -10, -40), feet.add(LAKE_MAX_X + 40, 12, MAX_Z + 40));
-        context.runAtEveryTick(() -> world.getEntitiesByClass(net.minecraft.entity.mob.MobEntity.class, area,
-                mob -> mob instanceof net.minecraft.entity.mob.Monster)
-                .forEach(net.minecraft.entity.Entity::discard));
+        net.minecraft.world.phys.AABB area = net.minecraft.world.phys.AABB.encapsulatingFullBlocks(
+                feet.offset(-40, -10, -40), feet.offset(LAKE_MAX_X + 40, 12, MAX_Z + 40));
+        context.failIfEver(() -> world.getEntitiesOfClass(net.minecraft.world.entity.Mob.class, area,
+                mob -> mob instanceof net.minecraft.world.entity.monster.Enemy)
+                .forEach(net.minecraft.world.entity.Entity::discard));
         return feet;
     }
 
     /** Reference counts per forced chunk, so overlapping fixtures never unforce each other's chunks. */
     private static final Map<Long, Integer> FORCED_CHUNK_REFS = new HashMap<>();
 
-    private static void forceLakeChunks(ServerWorld world, BlockPos feet, boolean forced) {
+    private static void forceLakeChunks(ServerLevel world, BlockPos feet, boolean forced) {
         for (int cx = (feet.getX() - 1) >> 4; cx <= (feet.getX() + LAKE_MAX_X + 1) >> 4; cx++) {
             for (int cz = (feet.getZ() - 1) >> 4; cz <= (feet.getZ() + MAX_Z + 1) >> 4; cz++) {
-                long key = net.minecraft.util.math.ChunkPos.toLong(cx, cz);
+                long key = net.minecraft.world.level.ChunkPos.asLong(cx, cz);
                 int refs = FORCED_CHUNK_REFS.getOrDefault(key, 0) + (forced ? 1 : -1);
                 if (refs > 0) {
                     FORCED_CHUNK_REFS.put(key, refs);
@@ -389,48 +388,48 @@ public final class BoatFollowGameTests {
         }
     }
 
-    private static AbstractBoatEntity placeBoat(ServerWorld world, BlockPos cell) {
-        BoatEntity boat = EntityType.OAK_BOAT.create(world, SpawnReason.COMMAND);
+    private static AbstractBoat placeBoat(ServerLevel world, BlockPos cell) {
+        Boat boat = EntityType.OAK_BOAT.create(world, EntitySpawnReason.COMMAND);
         if (boat == null) {
             throw new IllegalStateException("failed to create boat");
         }
-        boat.refreshPositionAndAngles(cell.getX() + 0.5D, cell.getY() - 0.1D, cell.getZ() + 0.5D, 0.0F, 0.0F);
-        world.spawnEntity(boat);
+        boat.snapTo(cell.getX() + 0.5D, cell.getY() - 0.1D, cell.getZ() + 0.5D, 0.0F, 0.0F);
+        world.addFreshEntity(boat);
         return boat;
     }
 
-    private static void boarded(AIPlayerEntity rider, AbstractBoatEntity boat) {
-        rider.teleport((ServerWorld) boat.getEntityWorld(), boat.getX(), boat.getY(), boat.getZ(),
+    private static void boarded(AIPlayerEntity rider, AbstractBoat boat) {
+        rider.teleportTo((ServerLevel) boat.level(), boat.getX(), boat.getY(), boat.getZ(),
                 Set.of(), 0.0F, 0.0F, true);
         if (!rider.startRiding(boat, true, false)) {
             throw new IllegalStateException(rider.getGameProfile().name() + " could not board the fixture boat");
         }
     }
 
-    private static AIPlayerEntity spawnBot(ServerWorld world, String name, BlockPos feet) {
+    private static AIPlayerEntity spawnBot(ServerLevel world, String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(feet),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
+        bot.getFoodData().setFoodLevel(20);
         return bot;
     }
 
-    private static void despawnAndComplete(TestContext context, AIPlayerEntity... bots) {
-        var server = bots[0].getEntityWorld().getServer();
+    private static void despawnAndComplete(GameTestHelper context, AIPlayerEntity... bots) {
+        var server = bots[0].level().getServer();
         for (AIPlayerEntity bot : bots) {
             DangerWatcher.INSTANCE.clear(bot);
             AIPlayerManager.INSTANCE.despawn(server, bot.getGameProfile().name());
         }
-        context.complete();
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

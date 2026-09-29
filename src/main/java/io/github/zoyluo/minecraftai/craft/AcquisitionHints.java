@@ -1,9 +1,8 @@
 package io.github.zoyluo.minecraftai.craft;
 
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-
 import java.util.Set;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 public final class AcquisitionHints {
     private static final Set<Item> MINE_ITEMS = Set.of(

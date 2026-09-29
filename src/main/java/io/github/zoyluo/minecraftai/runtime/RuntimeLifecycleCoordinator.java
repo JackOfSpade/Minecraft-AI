@@ -139,29 +139,29 @@ public final class RuntimeLifecycleCoordinator {
         StuckWatcher.INSTANCE.reset(bot);
         DangerWatcher.INSTANCE.clear(bot);
         NavSafetyNet.INSTANCE.clear(bot);
-        EpisodeMemory.INSTANCE.reset(bot.getUuid());
+        EpisodeMemory.INSTANCE.reset(bot.getUUID());
         BotReporter.INSTANCE.onCleared(bot);
         DiagnosticLogger.INSTANCE.clear(bot);
         InventoryAudit.INSTANCE.clear(bot);
         CapabilityRuntime.clear(bot);
-        CapabilityTally.INSTANCE.clear(bot.getUuid());
+        CapabilityTally.INSTANCE.clear(bot.getUUID());
         MiningAssistRuntime.clearBotUnload(bot);
         // P3: the R4 in-flight-consult bookkeeping is per-bot state too, same restart-safety reasoning as
         // MiningAssistRuntime.clearBotUnload immediately above (see PoiCoordinator.clearBot's own javadoc).
-        PoiCoordinator.INSTANCE.clearBot(bot.getUuid());
+        PoiCoordinator.INSTANCE.clearBot(bot.getUUID());
     }
 
     private static void forgetBot(AIPlayerEntity bot) {
         MiningEvidenceAudit.clear(bot);
-        MiningAssistRuntime.clearForced(bot.getUuid());
+        MiningAssistRuntime.clearForced(bot.getUUID());
         clearTransient(bot);
         BotRuntimeOptions.INSTANCE.clear(bot);
-        BotMemoryStore.INSTANCE.remove(bot.getUuid());
-        EpisodeLog.INSTANCE.clearFor(bot.getUuid());
-        KnowledgeBase.INSTANCE.forget(bot.getUuid());
-        ReplayRecorder.INSTANCE.clear(bot.getUuid());
-        BotProfiler.INSTANCE.clear(bot.getUuid());
-        MinecraftAiServerNetworking.INSTANCE.clearBot(bot.getUuid());
+        BotMemoryStore.INSTANCE.remove(bot.getUUID());
+        EpisodeLog.INSTANCE.clearFor(bot.getUUID());
+        KnowledgeBase.INSTANCE.forget(bot.getUUID());
+        ReplayRecorder.INSTANCE.clear(bot.getUUID());
+        BotProfiler.INSTANCE.clear(bot.getUUID());
+        MinecraftAiServerNetworking.INSTANCE.clearBot(bot.getUUID());
     }
 
     private static void clearWorldRuntime() {

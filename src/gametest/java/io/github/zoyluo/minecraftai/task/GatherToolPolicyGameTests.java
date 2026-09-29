@@ -5,16 +5,15 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.loot.RuntimeDropIndex;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class GatherToolPolicyGameTests {
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_shovel_gathers_dirt_from_grass_without_roaming", maxTicks = 800)
-    public void shovelGathersDirtFromGrassWithoutRoaming(TestContext context) {
+    public void shovelGathersDirtFromGrassWithoutRoaming(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherToolShovelGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         placeGrassPatch(bot, fixture.start());
@@ -39,11 +38,11 @@ public final class GatherToolPolicyGameTests {
         task.start(bot);
         AtomicBoolean sawShovelEquippedDuringHarvest = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (task.describe().contains("phase=HARVEST")) {
-                require(context, bot.getMainHandStack().isOf(Items.WOODEN_SHOVEL),
-                        "broke a dirt source without the shovel equipped: " + bot.getMainHandStack());
+                require(context, bot.getMainHandItem().is(Items.WOODEN_SHOVEL),
+                        "broke a dirt source without the shovel equipped: " + bot.getMainHandItem());
                 sawShovelEquippedDuringHarvest.set(true);
             }
             require(context, !task.describe().contains("phase=ROAM") && !task.describe().contains("phase=EXPLORE"),
@@ -60,7 +59,7 @@ public final class GatherToolPolicyGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_crafts_shovel_from_planks_and_sticks_before_gathering", maxTicks = 1200)
-    public void craftsShovelFromPlanksAndSticksBeforeGathering(TestContext context) {
+    public void craftsShovelFromPlanksAndSticksBeforeGathering(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherToolCraftGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         placeGrassPatch(bot, fixture.start());
@@ -77,7 +76,7 @@ public final class GatherToolPolicyGameTests {
         AtomicBoolean sawCraftPhase = new AtomicBoolean();
         AtomicBoolean sawShovelEquippedDuringHarvest = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (task.describe().contains("phase=ENSURE_TOOL")) {
                 sawCraftPhase.set(true);
@@ -85,8 +84,8 @@ public final class GatherToolPolicyGameTests {
             if (task.describe().contains("phase=HARVEST")) {
                 require(context, sawCraftPhase.get(),
                         "started harvesting before ever detouring through the tool-crafting phase");
-                require(context, bot.getMainHandStack().isOf(Items.WOODEN_SHOVEL),
-                        "broke a dirt source without the crafted shovel equipped: " + bot.getMainHandStack());
+                require(context, bot.getMainHandItem().is(Items.WOODEN_SHOVEL),
+                        "broke a dirt source without the crafted shovel equipped: " + bot.getMainHandItem());
                 sawShovelEquippedDuringHarvest.set(true);
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -104,7 +103,7 @@ public final class GatherToolPolicyGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_missing_tool_and_materials_stops_without_roaming", maxTicks = 500)
-    public void missingToolAndMaterialsStopsWithoutRoaming(TestContext context) {
+    public void missingToolAndMaterialsStopsWithoutRoaming(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherToolStopGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         placeGrassPatch(bot, fixture.start());
@@ -113,7 +112,7 @@ public final class GatherToolPolicyGameTests {
         GatherQuotaTask task = GatherQuotaTask.collectAdditional(Items.DIRT, 8);
         task.start(bot);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 require(context, !task.describe().contains("phase=ROAM") && !task.describe().contains("phase=EXPLORE"),
                         "a missing tool must stop the task, not roam looking for another patch: " + task.describe());
@@ -128,22 +127,22 @@ public final class GatherToolPolicyGameTests {
                     "failure reason did not identify the missing tool category: " + task.failureReason());
             require(context, InventoryAction.countItem(bot, Items.DIRT) == 0,
                     "no dirt should have been collected before stopping");
-            require(context, bot.getEntityWorld().getBlockState(fixture.start().add(1, 0, 0)).isOf(Blocks.GRASS_BLOCK),
+            require(context, bot.level().getBlockState(fixture.start().offset(1, 0, 0)).is(Blocks.GRASS_BLOCK),
                     "grass in front of the bot was mined despite having no shovel and nothing to craft one from");
-            require(context, bot.getBlockPos().getSquaredDistance(fixture.start()) < 10.0D * 10.0D,
+            require(context, bot.blockPosition().distSqr(fixture.start()) < 10.0D * 10.0D,
                     "bot wandered away instead of stopping in place");
             finish(context, fixture);
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_pickaxe_preferred_over_shovel_for_cobblestone", maxTicks = 800)
-    public void pickaxePreferredOverShovelForCobblestone(TestContext context) {
+    public void pickaxePreferredOverShovelForCobblestone(GameTestHelper context) {
         Fixture fixture = fixture(context, "GatherToolPickaxeGT", new BlockPos(2, 2, 2), 5);
         AIPlayerEntity bot = fixture.bot();
         for (int dx = 1; dx <= 3; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                bot.getEntityWorld().setBlockState(fixture.start().add(dx, 0, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                bot.level().setBlock(fixture.start().offset(dx, 0, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SHOVEL));
@@ -153,12 +152,12 @@ public final class GatherToolPolicyGameTests {
         task.start(bot);
         AtomicBoolean sawPickaxeEquippedDuringHarvest = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (task.describe().contains("phase=HARVEST")) {
-                require(context, bot.getMainHandStack().isOf(Items.STONE_PICKAXE),
-                        "broke stone with a non-pickaxe while a pickaxe was available: " + bot.getMainHandStack());
-                require(context, !bot.getMainHandStack().isOf(Items.WOODEN_SHOVEL),
+                require(context, bot.getMainHandItem().is(Items.STONE_PICKAXE),
+                        "broke stone with a non-pickaxe while a pickaxe was available: " + bot.getMainHandItem());
+                require(context, !bot.getMainHandItem().is(Items.WOODEN_SHOVEL),
                         "used the shovel to mine cobblestone instead of the pickaxe");
                 sawPickaxeEquippedDuringHarvest.set(true);
             }
@@ -174,7 +173,7 @@ public final class GatherToolPolicyGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_drop_index_maps_dirt_sources_and_excludes_infrastructure", maxTicks = 40)
-    public void dropIndexMapsDirtSourcesAndExcludesInfrastructure(TestContext context) {
+    public void dropIndexMapsDirtSourcesAndExcludesInfrastructure(GameTestHelper context) {
         Optional<Set<Block>> deterministic = RuntimeDropIndex.deterministicSourcesFor(Items.DIRT);
         require(context, deterministic.isPresent(), "runtime drop index was not built by real server start");
         Set<Block> sources = deterministic.get();
@@ -193,11 +192,11 @@ public final class GatherToolPolicyGameTests {
         require(context, !sources.contains(Blocks.ROOTED_DIRT),
                 "rooted_dirt does not actually drop dirt in vanilla and must not be listed as a source");
 
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_log_bootstrap_crafts_axe_from_empty_inventory", maxTicks = 2000)
-    public void logBootstrapCraftsAxeFromEmptyInventory(TestContext context) {
+    public void logBootstrapCraftsAxeFromEmptyInventory(GameTestHelper context) {
         // The one relaxation of the strict optimal-tool rule (GatherToolPolicy.Bootstrap): logs are
         // axe-optimal but the axe itself comes from logs, so an empty-inventory bot must break the
         // MINIMUM logs by hand (crafting table + wooden axe = 3 logs), craft the axe, then finish
@@ -223,7 +222,7 @@ public final class GatherToolPolicyGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_break_blocks_on_logs_bootstraps_axe_from_empty_inventory", maxTicks = 2000)
-    public void breakBlocksOnLogsBootstrapsAxeFromEmptyInventory(TestContext context) {
+    public void breakBlocksOnLogsBootstrapsAxeFromEmptyInventory(GameTestHelper context) {
         // break_blocks counts PHYSICAL blocks broken, so the bootstrap logs broken by hand are part
         // of the requested 5 (they are not excluded like a gather quota's): at most 3 by hand, the
         // remainder with the crafted axe, and never more than 5 logs broken in total.
@@ -242,7 +241,7 @@ public final class GatherToolPolicyGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_break_blocks_with_carried_crafting_table_needs_fewer_hand_breaks", maxTicks = 2000)
-    public void breakBlocksWithCarriedCraftingTableNeedsFewerHandBreaks(TestContext context) {
+    public void breakBlocksWithCarriedCraftingTableNeedsFewerHandBreaks(GameTestHelper context) {
         // A carried crafting table removes the table's 4 planks from the bootstrap, so only the axe
         // itself (3 planks + 2 sticks = 2 logs) has to come from bare-hand breaks: at most 2.
         Fixture fixture = fixture(context, "BreakBootstrapTableGT", new BlockPos(2, 2, 2), 5);
@@ -260,7 +259,7 @@ public final class GatherToolPolicyGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:gather_tool_policy_game_tests_axe_arriving_mid_bootstrap_does_not_under_report_a_new_items_quota", maxTicks = 2000)
-    public void axeArrivingMidBootstrapDoesNotUnderReportANewItemsQuota(TestContext context) {
+    public void axeArrivingMidBootstrapDoesNotUnderReportANewItemsQuota(GameTestHelper context) {
         // The bootstrap plans to discount 3 hand-broken logs from a "gather 6 NEW logs" quota. If an
         // axe arrives by another route after only the first hand break, just that one log was
         // collected; discounting the planned 3 would under-report and make the bot break 2 logs too
@@ -294,14 +293,14 @@ public final class GatherToolPolicyGameTests {
      * On completion it hands (handBreaks, axeBreaks) to {@code onComplete}, which adds the
      * scenario-specific expectations.
      */
-    private static void runLogBootstrap(TestContext context, Fixture fixture, GatherQuotaTask task,
+    private static void runLogBootstrap(GameTestHelper context, Fixture fixture, GatherQuotaTask task,
                                         java.util.function.BiConsumer<Integer, Integer> onComplete,
                                         int maxTotalBroken) {
         runLogBootstrap(context, fixture, task, onComplete, maxTotalBroken, null, true);
     }
 
     /** As above; {@code afterTick} (nullable) sees {handBreaks, axeBreaks} at the end of every tick. */
-    private static void runLogBootstrap(TestContext context, Fixture fixture, GatherQuotaTask task,
+    private static void runLogBootstrap(GameTestHelper context, Fixture fixture, GatherQuotaTask task,
                                         java.util.function.BiConsumer<Integer, Integer> onComplete,
                                         int maxTotalBroken,
                                         java.util.function.Consumer<int[]> afterTick,
@@ -311,8 +310,8 @@ public final class GatherToolPolicyGameTests {
         for (int dx = 3; dx <= 4; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 for (int dy = 0; dy <= 1; dy++) {
-                    BlockPos pos = fixture.start().add(dx, dy, dz);
-                    bot.getEntityWorld().setBlockState(pos, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+                    BlockPos pos = fixture.start().offset(dx, dy, dz);
+                    bot.level().setBlock(pos, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
                     treeCells.add(pos);
                 }
             }
@@ -330,26 +329,26 @@ public final class GatherToolPolicyGameTests {
         // tick with an axe carried since before it began must have been broken with that axe.
         boolean[] axeCarriedBefore = {false};
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tickOrFail(context, task, bot);
             if (task.describe().contains("phase=ENSURE_TOOL")) {
                 sawEnsureTool.set(true);
             }
             int remaining = 0;
             for (BlockPos pos : treeCells) {
-                if (bot.getEntityWorld().getBlockState(pos).isOf(Blocks.OAK_LOG)) {
+                if (bot.level().getBlockState(pos).is(Blocks.OAK_LOG)) {
                     remaining++;
                 }
             }
             int broken = previousRemaining[0] - remaining;
             if (broken > 0) {
-                if (bot.getMainHandStack().isOf(Items.WOODEN_AXE)) {
+                if (bot.getMainHandItem().is(Items.WOODEN_AXE)) {
                     axeBreaks[0] += broken;
                 } else {
                     handBreaks[0] += broken;
                     require(context, !axeCarriedBefore[0],
                             "a log was broken by hand although a wooden axe was already in the inventory (main hand "
-                                    + bot.getMainHandStack() + ", hand breaks=" + handBreaks[0] + ")");
+                                    + bot.getMainHandItem() + ", hand breaks=" + handBreaks[0] + ")");
                 }
             }
             previousRemaining[0] = remaining;
@@ -378,50 +377,50 @@ public final class GatherToolPolicyGameTests {
     private static void placeGrassPatch(AIPlayerEntity bot, BlockPos start) {
         for (int dx = 1; dx <= 3; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                bot.getEntityWorld().setBlockState(start.add(dx, 0, dz),
-                        Blocks.GRASS_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
+                bot.level().setBlock(start.offset(dx, 0, dz),
+                        Blocks.GRASS_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
     }
 
-    private static Fixture fixture(TestContext context, String name, BlockPos relativeStart, int east) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(relativeStart);
+    private static Fixture fixture(GameTestHelper context, String name, BlockPos relativeStart, int east) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(relativeStart);
         // Keep every mutation inside FabricGameTest.EMPTY_STRUCTURE (8x8); see GatherPickupGameTests.
         for (int dx = -2; dx <= east; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         return new Fixture(bot, start, name);
     }
 
-    private static void tickOrFail(TestContext context, GatherQuotaTask task, AIPlayerEntity bot) {
+    private static void tickOrFail(GameTestHelper context, GatherQuotaTask task, AIPlayerEntity bot) {
         if (task.state() == TaskState.RUNNING) {
             task.tick(bot);
         }
         if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-            context.throwGameTestException(Text.of("gather ended as " + task.state() + ":" + task.failureReason()));
+            context.fail(Component.nullToEmpty("gather ended as " + task.state() + ":" + task.failureReason()));
         }
     }
 
-    private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+    private static void finish(GameTestHelper context, Fixture fixture) {
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

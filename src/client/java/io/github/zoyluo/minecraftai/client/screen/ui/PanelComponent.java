@@ -2,12 +2,11 @@ package io.github.zoyluo.minecraftai.client.screen.ui;
 
 import io.github.zoyluo.minecraftai.client.BotClientState;
 import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ClickableWidget;
-
 import java.util.List;
 import java.util.function.Consumer;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
 
 public interface PanelComponent {
     void setBounds(int x, int y, int w, int h);
@@ -16,7 +15,7 @@ public interface PanelComponent {
 
     void refresh(BotSnapshotS2C snapshot, List<BotClientState.ChatLine> chat);
 
-    void render(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer);
+    void render(GuiGraphics context, int mouseX, int mouseY, float delta, Font renderer);
 
     default boolean mouseClicked(double mouseX, double mouseY, int button) {
         return false;
@@ -26,6 +25,6 @@ public interface PanelComponent {
         return false;
     }
 
-    default void addWidgets(Consumer<ClickableWidget> sink) {
+    default void addWidgets(Consumer<AbstractWidget> sink) {
     }
 }

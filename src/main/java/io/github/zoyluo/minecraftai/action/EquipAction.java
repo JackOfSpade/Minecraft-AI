@@ -2,28 +2,27 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.PotionContentsComponent;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.attribute.EntityAttribute;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.effect.StatusEffectCategory;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ArrowItem;
-import net.minecraft.item.AxeItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.tag.EntityTypeTags;
-import net.minecraft.registry.tag.ItemTags;
-
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.tags.EntityTypeTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.effect.MobEffectCategory;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ArrowItem;
+import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
 
 public final class EquipAction {
     private static final int MIN_MELEE_RAW_DURABILITY = 2;
@@ -43,14 +42,14 @@ public final class EquipAction {
     }
 
     public static int equipBestArmor(AIPlayerEntity bot) {
-        PlayerInventory inventory = bot.getInventory();
+        Inventory inventory = bot.getInventory();
         Map<EquipmentSlot, Candidate> best = new EnumMap<>(EquipmentSlot.class);
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            ItemStack stack = inventory.getMainStacks().get(slot);
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
             if (stack.isEmpty()) {
                 continue;
             }
-            EquipmentSlot equipmentSlot = bot.getPreferredEquipmentSlot(stack);
+            EquipmentSlot equipmentSlot = bot.getEquipmentSlotForItem(stack);
             if (!isArmorSlot(equipmentSlot)) {
                 continue;
             }
@@ -67,12 +66,12 @@ public final class EquipAction {
         for (Map.Entry<EquipmentSlot, Candidate> entry : best.entrySet()) {
             EquipmentSlot slot = entry.getKey();
             Candidate candidate = entry.getValue();
-            ItemStack old = bot.getEquippedStack(slot).copy();
-            inventory.getMainStacks().set(candidate.sourceSlot(), old);
-            bot.equipStack(slot, candidate.stack());
-            inventory.markDirty();
+            ItemStack old = bot.getItemBySlot(slot).copy();
+            inventory.getNonEquipmentItems().set(candidate.sourceSlot(), old);
+            bot.setItemSlot(slot, candidate.stack());
+            inventory.setChanged();
             equipped++;
-            BotLog.action(bot, "equip_armor", "slot", slot.asString(), "item", candidate.stack().getItem(), "score", candidate.score());
+            BotLog.action(bot, "equip_armor", "slot", slot.getSerializedName(), "item", candidate.stack().getItem(), "score", candidate.score());
         }
         return equipped;
     }
@@ -84,13 +83,13 @@ public final class EquipAction {
     }
 
     public static OptionalInt bestWeaponSlot(AIPlayerEntity bot) {
-        PlayerInventory inventory = bot.getInventory();
+        Inventory inventory = bot.getInventory();
         int bestSlot = -1;
         double bestDamage = 1.0D;
         int bestSwordPriority = -1;
         int bestDurability = -1;
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            ItemStack stack = inventory.getMainStacks().get(slot);
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
             if (!isQualifiedMeleeWeapon(stack)) {
                 continue;
             }
@@ -115,17 +114,17 @@ public final class EquipAction {
     /** Only purpose-built melee tools may authorize a defensive Combat transaction. */
     public static boolean isQualifiedMeleeWeapon(ItemStack stack) {
         return !stack.isEmpty()
-                && (stack.isIn(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem)
+                && (stack.is(ItemTags.SWORDS) || stack.getItem() instanceof AxeItem)
                 && remainingDurability(stack) >= MIN_MELEE_RAW_DURABILITY;
     }
 
     private static int swordPriority(ItemStack stack) {
-        return stack.isIn(ItemTags.SWORDS) ? 1 : 0;
+        return stack.is(ItemTags.SWORDS) ? 1 : 0;
     }
 
     private static int remainingDurability(ItemStack stack) {
-        return stack.isDamageable()
-                ? Math.max(0, stack.getMaxDamage() - stack.getDamage())
+        return stack.isDamageableItem()
+                ? Math.max(0, stack.getMaxDamage() - stack.getDamageValue())
                 : Integer.MAX_VALUE;
     }
 
@@ -138,9 +137,9 @@ public final class EquipAction {
         if (bestArrowChoice(bot, target).isEmpty()) {
             return OptionalInt.empty();
         }
-        PlayerInventory inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            if (inventory.getMainStacks().get(slot).isOf(Items.BOW)) {
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(Items.BOW)) {
                 return OptionalInt.of(slot);
             }
         }
@@ -171,18 +170,18 @@ public final class EquipAction {
             return Optional.empty();
         }
         if (choice.isOffhand()) {
-            return Optional.of(RangedLoadout.alreadyHeld(bot.getOffHandStack()));
+            return Optional.of(RangedLoadout.alreadyHeld(bot.getOffhandItem()));
         }
 
-        PlayerInventory inventory = bot.getInventory();
-        ItemStack ammunition = inventory.getMainStacks().get(choice.mainSlot());
+        Inventory inventory = bot.getInventory();
+        ItemStack ammunition = inventory.getNonEquipmentItems().get(choice.mainSlot());
         if (!isCompatibleBowArrow(ammunition)) {
             return Optional.empty();
         }
-        ItemStack displacedOffhand = bot.getOffHandStack().copy();
-        bot.equipStack(EquipmentSlot.OFFHAND, ammunition.copy());
-        inventory.getMainStacks().set(choice.mainSlot(), displacedOffhand);
-        inventory.markDirty();
+        ItemStack displacedOffhand = bot.getOffhandItem().copy();
+        bot.setItemSlot(EquipmentSlot.OFFHAND, ammunition.copy());
+        inventory.getNonEquipmentItems().set(choice.mainSlot(), displacedOffhand);
+        inventory.setChanged();
         BotLog.action(bot, "equip_ranked_arrow_offhand",
                 "source_slot", choice.mainSlot(),
                 "item", ammunition.getItem(),
@@ -192,10 +191,10 @@ public final class EquipAction {
     }
 
     private static Optional<ArrowChoice> bestArrowChoice(AIPlayerEntity bot, LivingEntity target) {
-        PlayerInventory inventory = bot.getInventory();
+        Inventory inventory = bot.getInventory();
         ArrowChoice best = null;
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            ItemStack stack = inventory.getMainStacks().get(slot);
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
             if (!isCompatibleBowArrow(stack)) {
                 continue;
             }
@@ -204,7 +203,7 @@ public final class EquipAction {
                 best = candidate;
             }
         }
-        ItemStack offhand = bot.getOffHandStack();
+        ItemStack offhand = bot.getOffhandItem();
         if (isCompatibleBowArrow(offhand)) {
             ArrowChoice candidate = scoreArrow(-1, true, offhand, target);
             if (isBetterArrow(candidate, best)) {
@@ -224,16 +223,16 @@ public final class EquipAction {
                                           boolean offhand,
                                           ItemStack stack,
                                           LivingEntity target) {
-        boolean targetIsUndead = target != null && target.getType().isIn(EntityTypeTags.UNDEAD);
+        boolean targetIsUndead = target != null && target.getType().is(EntityTypeTags.UNDEAD);
         int damageScore = VANILLA_ARROW_DAMAGE_SCORE;
         int enemyEffectScore = 0;
-        PotionContentsComponent contents = stack.getOrDefault(
-                DataComponentTypes.POTION_CONTENTS, PotionContentsComponent.DEFAULT);
-        for (StatusEffectInstance effect : contents.getEffects()) {
-            boolean instantHarming = effect.getEffectType().matches(
-                    net.minecraft.entity.effect.StatusEffects.INSTANT_DAMAGE);
-            boolean instantHealingHurtsUndead = targetIsUndead && effect.getEffectType().matches(
-                    net.minecraft.entity.effect.StatusEffects.INSTANT_HEALTH);
+        PotionContents contents = stack.getOrDefault(
+                DataComponents.POTION_CONTENTS, PotionContents.EMPTY);
+        for (MobEffectInstance effect : contents.getAllEffects()) {
+            boolean instantHarming = effect.getEffect().is(
+                    net.minecraft.world.effect.MobEffects.INSTANT_DAMAGE);
+            boolean instantHealingHurtsUndead = targetIsUndead && effect.getEffect().is(
+                    net.minecraft.world.effect.MobEffects.INSTANT_HEALTH);
             if (instantHarming || instantHealingHurtsUndead) {
                 damageScore += instantDamageScore(effect.getAmplifier());
             }
@@ -247,19 +246,19 @@ public final class EquipAction {
         return 4 << capped;
     }
 
-    private static int enemyEffectScore(StatusEffectInstance effect,
+    private static int enemyEffectScore(MobEffectInstance effect,
                                         boolean instantHealingHurtsUndead) {
         int potency = Math.max(1, Math.min(MAX_EFFECT_AMPLIFIER_FOR_SCORE + 1,
                 effect.getAmplifier() + 1));
         int duration = Math.max(0, Math.min(MAX_EFFECT_DURATION_FOR_SCORE, effect.getDuration()));
         int magnitude = potency * 1_000 + duration;
-        StatusEffectCategory category = effect.getEffectType().value().getCategory();
-        if (category == StatusEffectCategory.HARMFUL) {
+        MobEffectCategory category = effect.getEffect().value().getCategory();
+        if (category == MobEffectCategory.HARMFUL) {
             return magnitude;
         }
         // A healing arrow is extra damage only to undead.  Against ordinary living targets it is
         // a benefit, so keep it below an otherwise equal normal arrow rather than healing a foe.
-        if (category == StatusEffectCategory.BENEFICIAL && !instantHealingHurtsUndead) {
+        if (category == MobEffectCategory.BENEFICIAL && !instantHealingHurtsUndead) {
             return -magnitude;
         }
         return 0;
@@ -284,19 +283,19 @@ public final class EquipAction {
     }
 
     public static boolean equipShieldOffhand(AIPlayerEntity bot) {
-        if (bot.getOffHandStack().isOf(Items.SHIELD)) {
+        if (bot.getOffhandItem().is(Items.SHIELD)) {
             return true;
         }
-        PlayerInventory inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            ItemStack stack = inventory.getMainStacks().get(slot);
-            if (!stack.isOf(Items.SHIELD)) {
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
+            if (!stack.is(Items.SHIELD)) {
                 continue;
             }
-            ItemStack oldOffhand = bot.getOffHandStack().copy();
-            bot.equipStack(EquipmentSlot.OFFHAND, stack.copy());
-            inventory.getMainStacks().set(slot, oldOffhand);
-            inventory.markDirty();
+            ItemStack oldOffhand = bot.getOffhandItem().copy();
+            bot.setItemSlot(EquipmentSlot.OFFHAND, stack.copy());
+            inventory.getNonEquipmentItems().set(slot, oldOffhand);
+            inventory.setChanged();
             BotLog.action(bot, "equip_shield_offhand", "source_slot", slot);
             return true;
         }
@@ -326,48 +325,48 @@ public final class EquipAction {
             if (restoreSlot < 0) {
                 return true;
             }
-            PlayerInventory inventory = bot.getInventory();
-            if (restoreSlot >= inventory.getMainStacks().size()) {
+            Inventory inventory = bot.getInventory();
+            if (restoreSlot >= inventory.getNonEquipmentItems().size()) {
                 return false;
             }
-            ItemStack currentOffhand = bot.getOffHandStack();
+            ItemStack currentOffhand = bot.getOffhandItem();
             boolean expectedAmmo = currentOffhand.isEmpty()
-                    || ItemStack.areItemsAndComponentsEqual(currentOffhand, ammunition);
-            if (!expectedAmmo || !ItemStack.areEqual(inventory.getMainStacks().get(restoreSlot), storedOffhand)) {
+                    || ItemStack.isSameItemSameComponents(currentOffhand, ammunition);
+            if (!expectedAmmo || !ItemStack.matches(inventory.getNonEquipmentItems().get(restoreSlot), storedOffhand)) {
                 return false;
             }
-            bot.equipStack(EquipmentSlot.OFFHAND, inventory.getMainStacks().get(restoreSlot).copy());
-            inventory.getMainStacks().set(restoreSlot, currentOffhand.copy());
-            inventory.markDirty();
+            bot.setItemSlot(EquipmentSlot.OFFHAND, inventory.getNonEquipmentItems().get(restoreSlot).copy());
+            inventory.getNonEquipmentItems().set(restoreSlot, currentOffhand.copy());
+            inventory.setChanged();
             BotLog.action(bot, "restore_ranged_offhand", "source_slot", restoreSlot);
             return true;
         }
     }
 
     public static double attackDamage(ItemStack stack) {
-        return attributeValue(stack, EquipmentSlot.MAINHAND, EntityAttributes.ATTACK_DAMAGE);
+        return attributeValue(stack, EquipmentSlot.MAINHAND, Attributes.ATTACK_DAMAGE);
     }
 
     private static double equippedArmorScore(AIPlayerEntity bot, EquipmentSlot slot) {
-        return armorScore(bot.getEquippedStack(slot), slot);
+        return armorScore(bot.getItemBySlot(slot), slot);
     }
 
     private static double armorScore(ItemStack stack, EquipmentSlot slot) {
         if (stack.isEmpty()) {
             return 0.0D;
         }
-        double armor = attributeValue(stack, slot, EntityAttributes.ARMOR);
-        double toughness = attributeValue(stack, slot, EntityAttributes.ARMOR_TOUGHNESS);
+        double armor = attributeValue(stack, slot, Attributes.ARMOR);
+        double toughness = attributeValue(stack, slot, Attributes.ARMOR_TOUGHNESS);
         return armor + toughness * 0.25D;
     }
 
     private static double attributeValue(ItemStack stack,
                                          EquipmentSlot slot,
-                                         RegistryEntry<EntityAttribute> attribute) {
+                                         Holder<Attribute> attribute) {
         double[] value = {0.0D};
-        stack.applyAttributeModifiers(slot, (entry, modifier) -> {
-            if (entry.equals(attribute) && modifier.operation() == EntityAttributeModifier.Operation.ADD_VALUE) {
-                value[0] += modifier.value();
+        stack.forEachModifier(slot, (entry, modifier) -> {
+            if (entry.equals(attribute) && modifier.operation() == AttributeModifier.Operation.ADD_VALUE) {
+                value[0] += modifier.amount();
             }
         });
         return value[0];

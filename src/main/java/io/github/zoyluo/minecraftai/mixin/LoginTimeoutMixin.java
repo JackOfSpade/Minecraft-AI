@@ -1,6 +1,6 @@
 package io.github.zoyluo.minecraftai.mixin;
 
-import net.minecraft.server.network.ServerLoginNetworkHandler;
+import net.minecraft.server.network.ServerLoginPacketListenerImpl;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.ModifyConstant;
@@ -23,7 +23,7 @@ import org.spongepowered.asm.mixin.injection.ModifyConstant;
  * singleplayer world (worst case a truly broken connection just waits longer before failing), while
  * comfortably covering even this modpack's slow first-time spawn generation.
  */
-@Mixin(ServerLoginNetworkHandler.class)
+@Mixin(ServerLoginPacketListenerImpl.class)
 public abstract class LoginTimeoutMixin {
     @ModifyConstant(method = "tick()V", constant = @Constant(intValue = 600))
     private int minecraftai$extendLoginTimeout(int original) {

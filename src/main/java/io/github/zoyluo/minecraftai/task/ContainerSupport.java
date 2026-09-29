@@ -3,10 +3,10 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.ContainerAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
 
 /**
  * Shared, byte-identical helpers that were previously reimplemented independently in several
@@ -20,10 +20,10 @@ final class ContainerSupport {
 
     /** First horizontally-adjacent standable cell next to {@code pos}, or null if none. */
     static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos pos) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = pos.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
-                return candidate.toImmutable();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = pos.relative(direction);
+            if (Standability.isStandable(bot.level(), candidate)) {
+                return candidate.immutable();
             }
         }
         return null;
@@ -31,7 +31,7 @@ final class ContainerSupport {
 
     /** True if the container at {@code pos} (if any) holds at least one stack of {@code item}. */
     static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
-        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
+        Container inventory = ContainerAction.resolve(bot, pos).orElse(null);
         if (inventory == null) {
             return false;
         }
@@ -39,9 +39,9 @@ final class ContainerSupport {
     }
 
     /** True if {@code inventory} holds at least one stack of {@code item}. */
-    static boolean containsItem(Inventory inventory, Item item) {
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(item)) {
+    static boolean containsItem(Container inventory, Item item) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (inventory.getItem(slot).is(item)) {
                 return true;
             }
         }

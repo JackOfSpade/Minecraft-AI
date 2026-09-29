@@ -7,24 +7,23 @@ import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
 import io.github.zoyluo.minecraftai.task.ServicePolicy;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import net.minecraft.text.Text;
 
 /** World-runtime coverage for mining plans that need bootstrapped Minecraft registries. */
 public final class GoalPlannerMiningGameTests {
     @GameTest(maxTicks = 20)
-    public void surfaceCoalWithoutVisibleOreDescendsToRockLayerBeforeMining(TestContext context) {
+    public void surfaceCoalWithoutVisibleOreDescendsToRockLayerBeforeMining(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.MineOre(Set.of(Blocks.COAL_ORE), 8));
         int descend = indexOf(plan, step -> step.kind() == GoalStep.Kind.DESCEND_TO_Y);
         int coal = indexOf(plan, GoalPlannerMiningGameTests::isCoalOreStep);
@@ -43,11 +42,11 @@ public final class GoalPlannerMiningGameTests {
                         step -> step.kind() == GoalStep.Kind.DESCEND_TO_Y),
                 "a visible surface coal vein should retain the local shortcut: "
                         + visible.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void nestedCoalTorchProvisionDoesNotRepeatTheSameLayerHandoff(TestContext context) {
+    public void nestedCoalTorchProvisionDoesNotRepeatTheSameLayerHandoff(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.OBSIDIAN, 32));
         int acquireWater = indexOf(plan, step -> step.kind() == GoalStep.Kind.ACQUIRE_WATER);
         require(context, plan.success() && acquireWater > 0,
@@ -66,11 +65,11 @@ public final class GoalPlannerMiningGameTests {
                         && !plan.steps().get(coal + 1).maintainsTunnelingTools(),
                 "nested coal must free physical crafting capacity before the parent resumes: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void emptyInventoryObsidianGoalBuildsDiamondPickaxeChain(TestContext context) {
+    public void emptyInventoryObsidianGoalBuildsDiamondPickaxeChain(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.OBSIDIAN, 32));
         int hunt = indexOf(plan, step -> step.kind() == GoalStep.Kind.HUNT);
         int lastHunt = lastIndexOf(plan, step -> step.kind() == GoalStep.Kind.HUNT);
@@ -197,12 +196,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, obsidianPreflight > diamondPickaxe && obsidian > obsidianPreflight,
                 "obsidian preflight must separate diamond pickaxe from the first pool search: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void mixedLogFuelInventoryOnlyPlansTheFamilyDeficit(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.of(
+    public void mixedLogFuelInventoryOnlyPlansTheFamilyDeficit(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.of(
                 Items.OAK_LOG, 1,
                 Items.BIRCH_LOG, 2,
                 Items.FURNACE, 1,
@@ -228,12 +227,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, firstHunt >= 0 && firstHunt < gather
                         && gather < lastHunt && lastHunt < cook,
                 "surface hunt/gather/cook order regressed: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void preparedObsidianExpeditionAcquiresWaterBeforeMining(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.of(
+    public void preparedObsidianExpeditionAcquiresWaterBeforeMining(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.of(
                 Items.BUCKET, 1,
                 Items.DIAMOND_PICKAXE, 1,
                 Items.STONE_PICKAXE, 4,
@@ -254,12 +253,12 @@ public final class GoalPlannerMiningGameTests {
                         && plan.steps().get(1).isObsidianPreflight()
                         && plan.steps().get(2).kind() == GoalStep.Kind.MAKE_OBSIDIAN,
                 "prepared empty-bucket plan must physically acquire water first: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void missingStoneSwordHasAnIndependentPreWaterBudget(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
+    public void missingStoneSwordHasAnIndependentPreWaterBudget(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.BUCKET, 1),
                 Map.entry(Items.DIAMOND_PICKAXE, 1),
                 Map.entry(Items.STONE_PICKAXE, 4),
@@ -287,12 +286,12 @@ public final class GoalPlannerMiningGameTests {
                                 && step.item() == Items.STICK),
                 "stone-sword margin spent the original service reserve: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void preparedWaterBucketSkipsDuplicateAcquisition(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.of(
+    public void preparedWaterBucketSkipsDuplicateAcquisition(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.of(
                 Items.WATER_BUCKET, 1,
                 Items.DIAMOND_PICKAXE, 1,
                 Items.STONE_PICKAXE, 4,
@@ -312,13 +311,13 @@ public final class GoalPlannerMiningGameTests {
                         && plan.steps().getFirst().isObsidianPreflight()
                         && plan.steps().get(1).kind() == GoalStep.Kind.MAKE_OBSIDIAN,
                 "prepared water bucket must not be refilled: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void preparedSevenAndEightTorchesFundTheWholePreWaterDescentBatch(
-            TestContext context) {
-        Map<net.minecraft.item.Item, Integer> sevenTorches = Map.ofEntries(
+            GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> sevenTorches = Map.ofEntries(
                 Map.entry(Items.DIAMOND_PICKAXE, 1),
                 Map.entry(Items.STONE_PICKAXE, 4),
                 Map.entry(Items.STONE_SWORD, 1),
@@ -329,7 +328,7 @@ public final class GoalPlannerMiningGameTests {
                 Map.entry(Items.COAL, 4),
                 Map.entry(Items.COOKED_BEEF, 8),
                 Map.entry(Items.TORCH, 7));
-        Map<net.minecraft.item.Item, Integer> eightTorches = Map.ofEntries(
+        Map<net.minecraft.world.item.Item, Integer> eightTorches = Map.ofEntries(
                 Map.entry(Items.DIAMOND_PICKAXE, 1),
                 Map.entry(Items.STONE_PICKAXE, 4),
                 Map.entry(Items.STONE_SWORD, 1),
@@ -340,11 +339,11 @@ public final class GoalPlannerMiningGameTests {
                 Map.entry(Items.COAL, 3),
                 Map.entry(Items.COOKED_BEEF, 8),
                 Map.entry(Items.TORCH, 8));
-        Map<net.minecraft.item.Item, Integer> underfunded =
+        Map<net.minecraft.world.item.Item, Integer> underfunded =
                 new java.util.HashMap<>(sevenTorches);
         underfunded.put(Items.STICK, 42);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 32);
-        Map<net.minecraft.item.Item, Integer> exactDiamondDurability =
+        Map<net.minecraft.world.item.Item, Integer> exactDiamondDurability =
                 Map.of(Items.DIAMOND_PICKAXE, 32);
         GoalPlanner.GoalPlan seven = GoalPlanner.planFromState(null, goal,
                 sevenTorches, exactDiamondDurability, 64, 64,
@@ -391,12 +390,12 @@ public final class GoalPlannerMiningGameTests {
                         reason.contains("underground_surface_resource_unavailable")),
                 "seven-torch kit with only 34 sticks incorrectly spent service reserve: "
                         + shortByOneStick.describeSteps() + " " + shortByOneStick.unresolved());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void preparedObsidianKitStillPlansItsMissingCarriedCraftingTable(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.of(
+    public void preparedObsidianKitStillPlansItsMissingCarriedCraftingTable(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.of(
                 Items.WATER_BUCKET, 1,
                 Items.DIAMOND_PICKAXE, 1,
                 Items.STONE_PICKAXE, 4,
@@ -417,12 +416,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, table >= 0 && table < preflight,
                 "obsidian readiness did not explicitly restore the carried table: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void obsidianReadinessUsesAggregateDiamondPickDurability(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.of(
+    public void obsidianReadinessUsesAggregateDiamondPickDurability(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.of(
                 Items.WATER_BUCKET, 1,
                 Items.DIAMOND_PICKAXE, 1,
                 Items.STONE_PICKAXE, 4,
@@ -469,13 +468,13 @@ public final class GoalPlannerMiningGameTests {
                                 || isDiamondStep(step)),
                 "raw33 planned an unnecessary replacement acquisition chain: "
                         + raw33.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void rawTwoDiamondPickUsesLooseDiamondsBeforeAddingAnAcquisitionPick(
-            TestContext context) {
-        Map<net.minecraft.item.Item, Integer> noLooseDiamonds = Map.ofEntries(
+            GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> noLooseDiamonds = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
                 Map.entry(Items.DIAMOND_PICKAXE, 1),
                 Map.entry(Items.IRON_INGOT, 3),
@@ -486,7 +485,7 @@ public final class GoalPlannerMiningGameTests {
                 Map.entry(Items.CRAFTING_TABLE, 1),
                 Map.entry(Items.COOKED_BEEF, 8),
                 Map.entry(Items.TORCH, 8));
-        Map<net.minecraft.item.Item, Integer> twoLooseDiamonds = Map.ofEntries(
+        Map<net.minecraft.world.item.Item, Integer> twoLooseDiamonds = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
                 Map.entry(Items.DIAMOND_PICKAXE, 1),
                 Map.entry(Items.DIAMOND, 2),
@@ -499,7 +498,7 @@ public final class GoalPlannerMiningGameTests {
                 Map.entry(Items.COOKED_BEEF, 8),
                 Map.entry(Items.TORCH, 8));
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 32);
-        Map<net.minecraft.item.Item, Integer> rawTwoDurability =
+        Map<net.minecraft.world.item.Item, Integer> rawTwoDurability =
                 Map.of(Items.DIAMOND_PICKAXE, 1);
         GoalPlanner.GoalPlan withoutLoose = GoalPlanner.planFromState(null, goal,
                 noLooseDiamonds, rawTwoDurability, 64, 64,
@@ -547,12 +546,12 @@ public final class GoalPlannerMiningGameTests {
                         step.kind() == GoalStep.Kind.CRAFT && step.item() == Items.STICK),
                 "exact 34-stick loose-diamond kit was replenished twice: "
                         + withTwoLoose.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void lowAndExactNetheriteDurabilityUseTheSameObsidianContract(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> lowKit = Map.ofEntries(
+    public void lowAndExactNetheriteDurabilityUseTheSameObsidianContract(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> lowKit = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
                 Map.entry(Items.NETHERITE_PICKAXE, 1),
                 Map.entry(Items.IRON_INGOT, 3),
@@ -564,7 +563,7 @@ public final class GoalPlannerMiningGameTests {
                 Map.entry(Items.COOKED_BEEF, MiningBudget.obsidianExpeditionFoodTarget(32)),
                 Map.entry(Items.TORCH, 8),
                 Map.entry(Items.OAK_LOG, EmergencyShelterTask.MAX_PLACEMENT_BLOCKS));
-        Map<net.minecraft.item.Item, Integer> exactKit = Map.ofEntries(
+        Map<net.minecraft.world.item.Item, Integer> exactKit = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
                 Map.entry(Items.NETHERITE_PICKAXE, 1),
                 Map.entry(Items.STONE_PICKAXE, 4),
@@ -604,12 +603,12 @@ public final class GoalPlannerMiningGameTests {
                         && exact.steps().get(1).kind() == GoalStep.Kind.MAKE_OBSIDIAN,
                 "usable32 netherite should directly satisfy the target-tool contract: "
                         + exact.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void mixedDiamondAndNetheriteDurabilityUsesTheAggregateBoundary(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> exactKit = Map.ofEntries(
+    public void mixedDiamondAndNetheriteDurabilityUsesTheAggregateBoundary(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> exactKit = Map.ofEntries(
                 Map.entry(Items.WATER_BUCKET, 1),
                 Map.entry(Items.DIAMOND_PICKAXE, 1),
                 Map.entry(Items.NETHERITE_PICKAXE, 1),
@@ -622,7 +621,7 @@ public final class GoalPlannerMiningGameTests {
                 Map.entry(Items.COOKED_BEEF, MiningBudget.obsidianExpeditionFoodTarget(32)),
                 Map.entry(Items.TORCH, 8),
                 Map.entry(Items.OAK_LOG, EmergencyShelterTask.MAX_PLACEMENT_BLOCKS));
-        Map<net.minecraft.item.Item, Integer> belowKit = new java.util.HashMap<>(exactKit);
+        Map<net.minecraft.world.item.Item, Integer> belowKit = new java.util.HashMap<>(exactKit);
         belowKit.put(Items.STICK, 42);
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 32);
         GoalPlanner.GoalPlan exact = GoalPlanner.planFromState(null, goal, exactKit,
@@ -651,12 +650,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, diamondOre >= 0 && diamondOre < diamondPick,
                 "mixed usable31 did not add exactly one diamond replacement: "
                         + below.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void undergroundObsidianReplanUsesCarriedKitWithoutSurfaceWork(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> carried = Map.ofEntries(
+    public void undergroundObsidianReplanUsesCarriedKitWithoutSurfaceWork(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> carried = Map.ofEntries(
                 Map.entry(Items.RAW_IRON, 2),
                 Map.entry(Items.OAK_LOG, 11),
                 Map.entry(Items.STICK, 2),
@@ -689,12 +688,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, indexOf(plan, GoalPlannerMiningGameTests::isIronOreStep) >= 0,
                 "underground replan must continue the one missing bucket iron: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void undergroundObsidianReplanConsumesMixedLogFuelAsOneFamily(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> carried = Map.ofEntries(
+    public void undergroundObsidianReplanConsumesMixedLogFuelAsOneFamily(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> carried = Map.ofEntries(
                 Map.entry(Items.OAK_LOG, 6),
                 Map.entry(Items.BIRCH_LOG, 9),
                 Map.entry(Items.STICK, 5),
@@ -723,15 +722,15 @@ public final class GoalPlannerMiningGameTests {
         require(context, ironStages >= 3,
                 "remaining bucket/tool/spare iron stages were not all planned: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void undergroundObsidianReplanUsesBirchLogsForMissingStickPlanks(TestContext context) {
+    public void undergroundObsidianReplanUsesBirchLogsForMissingStickPlanks(GameTestHelper context) {
         // seed 3000 evidence inventory at the hostile-cave interruption: one stray oak plank must
         // not bind the eight-stick readiness contract to oak when nine carried birch logs can make
         // the complete missing plank quota without any surface acquisition.
-        Map<net.minecraft.item.Item, Integer> carried = Map.ofEntries(
+        Map<net.minecraft.world.item.Item, Integer> carried = Map.ofEntries(
                 Map.entry(Items.BIRCH_LOG, 9),
                 Map.entry(Items.OAK_PLANKS, 1),
                 Map.entry(Items.STICK, 2),
@@ -759,13 +758,13 @@ public final class GoalPlannerMiningGameTests {
         require(context, plan.steps().stream().anyMatch(step ->
                         step.kind() == GoalStep.Kind.CRAFT && step.item() == Items.STICK),
                 "missing stick reserve did not retain its craft step: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void mixedLogFamiliesAggregateBeforePlanningOneRemainingPlankGap(
-            TestContext context) {
-        Map<net.minecraft.item.Item, Integer> mixedLogs = Map.of(
+            GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> mixedLogs = Map.of(
                 Items.OAK_LOG, 2,
                 Items.BIRCH_LOG, 6,
                 Items.OAK_PLANKS, 2,
@@ -800,12 +799,12 @@ public final class GoalPlannerMiningGameTests {
                         || gathers.getFirst().item() == Items.BIRCH_LOG),
                 "remaining plank-family gap was not planned exactly once: "
                         + oneLogShort.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void undergroundRawMeatCannotMasqueradeAsMiningFoodReserve(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> carried = Map.of(
+    public void undergroundRawMeatCannotMasqueradeAsMiningFoodReserve(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> carried = Map.of(
                 Items.BEEF, 64,
                 Items.BUCKET, 1,
                 Items.DIAMOND_PICKAXE, 1,
@@ -823,21 +822,21 @@ public final class GoalPlannerMiningGameTests {
         require(context, plan.steps().stream().noneMatch(
                         GoalPlannerMiningGameTests::isSurfaceAcquisitionStep),
                 "failed underground plan emitted surface work: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void netheriteTierDoesNotSilentlyDowngrade(TestContext context) {
+    public void netheriteTierDoesNotSilentlyDowngrade(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HavePickaxeTier(ToolTier.NETHERITE));
         require(context, !plan.success(), "netherite acquisition is not implemented and must remain explicit");
         require(context, plan.unresolved().stream().anyMatch(reason -> reason.contains("minecraft:netherite_pickaxe")),
                 "wrong tier selected: " + plan.unresolved());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void surfaceDiamondStackAddsExactlyFourteenRawLogShelterReserve(
-            TestContext context) {
+            GameTestHelper context) {
         Goal goal = new Goal.HaveItem(Items.DIAMOND, 64);
         // Keep every non-shelter dependency identical. A raw from-zero comparison lets the
         // carried wood change recipe-family rounding elsewhere in the bootstrap and does not
@@ -861,12 +860,12 @@ public final class GoalPlannerMiningGameTests {
                 "diamond raw-log reserve delta was not exactly "
                         + EmergencyShelterTask.MAX_PLACEMENT_BLOCKS
                         + ": empty=" + emptyGather + " carried=" + carriedGather);
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void surfaceDiamondStackTopsUpThirteenButNotFourteenShelterBlocks(
-            TestContext context) {
+            GameTestHelper context) {
         Goal goal = new Goal.HaveItem(Items.DIAMOND, 64);
         GoalPlanner.GoalPlan empty = GoalPlanner.planFromState(null, goal,
                 preparedDiamondContract(Map.of()),
@@ -894,12 +893,12 @@ public final class GoalPlannerMiningGameTests {
                         == EmergencyShelterTask.MAX_PLACEMENT_BLOCKS,
                 "fourteen carried shelter blocks did not eliminate the whole reserve top-up: "
                         + fourteen.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void surfaceDiamondStackDoesNotTreatPlanksAsHardShelterReserve(
-            TestContext context) {
+            GameTestHelper context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
                 new Goal.HaveItem(Items.DIAMOND, 64),
                 preparedDiamondContract(Map.of(
@@ -913,12 +912,12 @@ public final class GoalPlannerMiningGameTests {
                         == EmergencyShelterTask.MAX_PLACEMENT_BLOCKS,
                 "craft-spendable planks incorrectly satisfied the raw-log reserve: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void undergroundDiamondStackResumeDoesNotGatherShelterWood(
-            TestContext context) {
+            GameTestHelper context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
                 new Goal.HaveItem(Items.DIAMOND, 64),
                 preparedDiamondContract(Map.of()),
@@ -930,12 +929,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, plan.steps().stream().noneMatch(
                         step -> step.kind() == GoalStep.Kind.GATHER),
                 "underground diamond resume attempted surface shelter gathering");
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void surfaceObsidianStackAlsoReservesFourteenShelterBlocks(
-            TestContext context) {
+            GameTestHelper context) {
         Goal goal = new Goal.HaveItem(Items.OBSIDIAN, 32);
         GoalPlanner.GoalPlan empty = GoalPlanner.planFromState(null, goal,
                 preparedObsidianContract(Map.of()),
@@ -956,12 +955,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, plannedLogGatherCount(carried) == 0,
                 "prepared obsidian plan borrowed its fourteen carried shelter blocks: "
                         + plannedLogGatherCount(carried));
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void partialSurfaceObsidianStackRetainsThirtyTwoItemShelterContract(
-            TestContext context) {
+            GameTestHelper context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
                 new Goal.HaveItem(Items.OBSIDIAN, 32),
                 preparedObsidianContract(Map.of(Items.OBSIDIAN, 1)),
@@ -973,11 +972,11 @@ public final class GoalPlannerMiningGameTests {
                         == EmergencyShelterTask.MAX_PLACEMENT_BLOCKS,
                 "31 remaining obsidian lost the original half-stack shelter contract: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void diamondStackStrictlyAlternatesBoundedBatchesAndServiceCheckpoints(TestContext context) {
+    public void diamondStackStrictlyAlternatesBoundedBatchesAndServiceCheckpoints(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 64));
 
         require(context, plan.success(), "unresolved=" + plan.unresolved());
@@ -1151,12 +1150,12 @@ public final class GoalPlannerMiningGameTests {
                         + " capacity_upper=" + ordinaryCapacityUpper
                         + " expected_coal=" + expectedCoal
                         + " nominal=" + nominalStepWindows);
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void diamondStackReplansExactNetHuntAfterShelterConsumesRawMeat(
-            TestContext context) {
+            GameTestHelper context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(
                 null,
                 new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 64),
@@ -1182,18 +1181,18 @@ public final class GoalPlannerMiningGameTests {
                 "carried raw meat must still cook the full "
                         + MiningBudget.RARE_BOOTSTRAP_FOOD + "-unit hard reserve: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void nearBrokenStonePicksStillPlanRareKitImmediatelyBeforeFinalDescent(
-            TestContext context) {
+            GameTestHelper context) {
         MiningBudget rareBudget = MiningBudget.forQuota(64, true, ToolTier.IRON);
         int preKitStoneLike = rareBudget.emergencyBlocks()
                 + rareBudget.tunnelingPickaxes() * MiningBudget.STONE_PICKAXE_HEAD_COST + 2;
         int preKitSticks = rareBudget.spareToolSticks()
                 + rareBudget.tunnelingPickaxes() * MiningBudget.STONE_PICKAXE_STICK_COST;
-        Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.IRON_PICKAXE, 3),
                 Map.entry(Items.IRON_INGOT, 6),
                 Map.entry(Items.STONE_PICKAXE, 5),
@@ -1215,12 +1214,12 @@ public final class GoalPlannerMiningGameTests {
                         && plan.steps().get(finalDescent - 1).isRareDescentKitService(),
                 "near-broken count-five inventory suppressed the target64 kit service: "
                         + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
     public void subStackRareTargetsRetainDirectFreshCraftWithoutTarget64Kit(
-            TestContext context) {
+            GameTestHelper context) {
         for (int target : List.of(8, 32, 63)) {
             GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.DIAMOND, target));
             require(context, plan.success(), "target=" + target + " unresolved=" + plan.unresolved());
@@ -1240,12 +1239,12 @@ public final class GoalPlannerMiningGameTests {
                     "target=" + target + " incorrectly inherited target64 KIT identity: "
                             + plan.describeSteps());
         }
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void runningKitRestoreKeepsOnlyServiceAndProvenDescentTail(TestContext context) {
-        Set<net.minecraft.block.Block> diamonds = Set.of(Blocks.DIAMOND_ORE);
+    public void runningKitRestoreKeepsOnlyServiceAndProvenDescentTail(GameTestHelper context) {
+        Set<net.minecraft.world.level.block.Block> diamonds = Set.of(Blocks.DIAMOND_ORE);
         MiningBudget rareBudget = MiningBudget.forQuota(64, true, ToolTier.IRON);
         int preKitStoneLike = rareBudget.emergencyBlocks()
                 + rareBudget.tunnelingPickaxes() * MiningBudget.STONE_PICKAXE_HEAD_COST + 2;
@@ -1276,21 +1275,21 @@ public final class GoalPlannerMiningGameTests {
                         diamonds)
                         .isEmpty(),
                 "restore accepted a tail without the exact DESCEND->boundary0->batch proof");
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void sixteenDiamondsUseExactlyTwoBatchesWithOneCumulativeCheckpoint(TestContext context) {
+    public void sixteenDiamondsUseExactlyTwoBatchesWithOneCumulativeCheckpoint(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.MineOre(Set.of(Blocks.DIAMOND_ORE), 16));
 
         require(context, plan.success(), "unresolved=" + plan.unresolved());
         requireDiamondExpeditionSequence(context, plan, 2, true);
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void preparedAtMineLayerStartsDirectlyWithDiamondBatch(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.of(
+    public void preparedAtMineLayerStartsDirectlyWithDiamondBatch(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.of(
                 Items.IRON_PICKAXE, 5,
                 Items.STONE_PICKAXE, 4,
                 Items.IRON_INGOT, 12,
@@ -1306,7 +1305,7 @@ public final class GoalPlannerMiningGameTests {
                 new Goal.HaveItem(Items.DIAMOND, 64), prepared, 64, -59,
                 true, false, false, ignored -> true, null);
 
-        require(context, occupiedSlots + serviceFreeSlots <= PlayerInventory.MAIN_SIZE,
+        require(context, occupiedSlots + serviceFreeSlots <= Inventory.INVENTORY_SIZE,
                 "prepared rare contract does not fit the factual main-inventory capacity: occupied="
                         + occupiedSlots + " required_free=" + serviceFreeSlots);
         require(context, plan.success(), "unresolved=" + plan.unresolved());
@@ -1323,12 +1322,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, plan.steps().stream().noneMatch(GoalStep::bestEffort),
                 "prepared plan should contain only required diamond batches/checkpoints: " + plan.steps());
         requireDiamondExpeditionSequence(context, plan, 8, true);
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void partialDiamondStackRetainsLongMissionServiceIdentity(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
+    public void partialDiamondStackRetainsLongMissionServiceIdentity(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.DIAMOND, 55),
                 Map.entry(Items.IRON_PICKAXE, 3),
                 Map.entry(Items.IRON_INGOT, 6),
@@ -1361,12 +1360,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, plan.steps().stream().noneMatch(
                         GoalPlannerMiningGameTests::isSurfaceAcquisitionStep),
                 "deep diamond resume emitted surface work: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void fourDeliveredDiamondsResumeToTheNextEightBoundary(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
+    public void fourDeliveredDiamondsResumeToTheNextEightBoundary(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.DIAMOND, 4),
                 Map.entry(Items.IRON_PICKAXE, 3),
                 Map.entry(Items.IRON_INGOT, 6),
@@ -1408,12 +1407,12 @@ public final class GoalPlannerMiningGameTests {
         require(context, mineSteps.stream().mapToInt(GoalStep::count).sum() == 60
                         && mineSteps.getLast().count() == 8,
                 "4/64 plan emitted a duplicate four-item tail: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void finalDiamondAtMineLayerServicesMissingChannelToolsBeforeOreDig(TestContext context) {
-        Map<net.minecraft.item.Item, Integer> prepared = Map.ofEntries(
+    public void finalDiamondAtMineLayerServicesMissingChannelToolsBeforeOreDig(GameTestHelper context) {
+        Map<net.minecraft.world.item.Item, Integer> prepared = Map.ofEntries(
                 Map.entry(Items.DIAMOND, 63),
                 Map.entry(Items.IRON_PICKAXE, 3),
                 Map.entry(Items.IRON_INGOT, 6),
@@ -1435,11 +1434,11 @@ public final class GoalPlannerMiningGameTests {
         require(context, plan.steps().stream().noneMatch(
                         GoalPlannerMiningGameTests::isSurfaceAcquisitionStep),
                 "deep 63/64 resume emitted surface work: " + plan.describeSteps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void emptyInventoryBootstrapIsNotMistakenForOptionalProvisioning(TestContext context) {
+    public void emptyInventoryBootstrapIsNotMistakenForOptionalProvisioning(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = plan(new Goal.HaveItem(Items.DIAMOND, 64));
         int ironPickaxe = indexOf(plan, step -> step.kind() == GoalStep.Kind.CRAFT
                 && step.item() == Items.IRON_PICKAXE);
@@ -1448,11 +1447,11 @@ public final class GoalPlannerMiningGameTests {
         require(context, ironPickaxe >= 0, "missing iron-pickaxe bootstrap: " + plan.describeSteps());
         require(context, !plan.steps().get(ironPickaxe).bestEffort(),
                 "required iron-pickaxe bootstrap was marked optional: " + plan.steps());
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void directFoodGoalDoesNotInheritExpeditionBestEffortFlag(TestContext context) {
+    public void directFoodGoalDoesNotInheritExpeditionBestEffortFlag(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(null,
                 new Goal.Food(4), Map.of(), 64, 64,
                 true, false, false, ignored -> false, null);
@@ -1462,10 +1461,10 @@ public final class GoalPlannerMiningGameTests {
                 "direct Goal.Food steps must not inherit mining expedition flags: " + plan.steps());
         require(context, plan.steps().stream().anyMatch(step -> step.kind() == GoalStep.Kind.COOK_FOOD),
                 "direct Goal.Food must retain its required final cooking step: " + plan.steps());
-        context.complete();
+        context.succeed();
     }
 
-    private static void requireDiamondExpeditionSequence(TestContext context,
+    private static void requireDiamondExpeditionSequence(GameTestHelper context,
                                                          GoalPlanner.GoalPlan plan,
                                                          int expectedBatches,
                                                          boolean expectTunnelingService) {
@@ -1597,11 +1596,11 @@ public final class GoalPlannerMiningGameTests {
     }
 
     private static int occupiedInventorySlots(
-            Map<net.minecraft.item.Item, Integer> inventory) {
+            Map<net.minecraft.world.item.Item, Integer> inventory) {
         return inventory.entrySet().stream()
                 .mapToInt(entry -> {
                     int count = Math.max(0, entry.getValue());
-                    int stackSize = Math.max(1, entry.getKey().getMaxCount());
+                    int stackSize = Math.max(1, entry.getKey().getDefaultMaxStackSize());
                     return (count + stackSize - 1) / stackSize;
                 })
                 .sum();
@@ -1638,9 +1637,9 @@ public final class GoalPlannerMiningGameTests {
         return -1;
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

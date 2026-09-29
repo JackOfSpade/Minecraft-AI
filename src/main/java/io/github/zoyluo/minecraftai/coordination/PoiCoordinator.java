@@ -27,16 +27,15 @@ import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.DetourSafetyGate;
 import io.github.zoyluo.minecraftai.task.DigDownTask;
 import io.github.zoyluo.minecraftai.task.TaskManager;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * The stateful orchestrator of the R3 point-of-interest stop/notify flow (mining-assist design 6.5). This is
@@ -145,7 +144,7 @@ public final class PoiCoordinator {
      * {@code sense()}.
      */
     public void tick(AIPlayerEntity bot, int serverTick) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         if (caseIdByBot.containsKey(id)) {
             // A P3 consult is (or, after this call, was) in flight for this bot: checkConsultDeadline
             // either leaves it pending (deadline not yet reached) or resolves it itself via
@@ -186,8 +185,8 @@ public final class PoiCoordinator {
                         .map(task -> task instanceof DigDownTask digDownTask && digDownTask.isDescending())
                         .orElse(false);
                 String text = PoiNotice.renderStop(descending, Source.valueOf(open.source()) == Source.MANDATORY,
-                        open.label(), open.anchor(), bot.getBlockPos(), null, "Still paused: ");
-                sendNotice(bot, bot.getEntityWorld(), text);
+                        open.label(), open.anchor(), bot.blockPosition(), null, "Still paused: ");
+                sendNotice(bot, bot.level(), text);
                 BotLog.task(bot, "poi_restart_rehydrated", "label", label, "source", source);
             }
             return;
@@ -208,10 +207,10 @@ public final class PoiCoordinator {
      * Called only when {@code PoiDetector} produced an actionable result (MANDATORY, STRUCTURE_CERTAIN, or a
      * confirmed POSSIBLE/CAVERN_ONLY) — design 6.5's {@code onCandidate}.
      */
-    public void onCandidate(AIPlayerEntity bot, MiningAssistState state, ServerWorld world,
+    public void onCandidate(AIPlayerEntity bot, MiningAssistState state, ServerLevel world,
                             PoiDetector.Result result, int serverTick) {
         MiningAssistConfig cfg = MiningAssistRuntime.config();
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String dim = state.dimensionKey();
         BlockPos anchor = result.anchor();
         String label = result.label();
@@ -247,7 +246,7 @@ public final class PoiCoordinator {
      * matrix unchanged; a cache hit applies that cached verdict synchronously; otherwise a real R4 consult
      * starts (holding the mission when allowed).
      */
-    private void possibleFlow(AIPlayerEntity bot, ServerWorld world, MiningAssistState state,
+    private void possibleFlow(AIPlayerEntity bot, ServerLevel world, MiningAssistState state,
                               PoiDetector.Result result, Candidate candidate, MiningAssistConfig cfg,
                               MissionAssistLedger.Entry ledger, int serverTick) {
         boolean cavernOnly = result.band() == PoiScorer.Band.CAVERN_ONLY;
@@ -275,7 +274,7 @@ public final class PoiCoordinator {
     /** Design 6.7's fallback matrix, unchanged from P2: the entire {@code possibleFlow} body before this
      * phase existed. Used both up front (advisor unavailable) and, via {@link #applyFallbackForPending},
      * when a started consult's own deadline is reached with no verdict yet. */
-    private void applyFallback(AIPlayerEntity bot, ServerWorld world, Candidate candidate,
+    private void applyFallback(AIPlayerEntity bot, ServerLevel world, Candidate candidate,
                                MissionAssistLedger.Entry ledger, int serverTick) {
         MiningAssistConfig cfg = MiningAssistRuntime.config();
         PoiDecisionPolicy.Decision decision = PoiDecisionPolicy.decide(candidate.band(), candidate.structureScore(),
@@ -284,10 +283,10 @@ public final class PoiCoordinator {
             stopNow(bot, world, candidate.dim(), candidate.anchor(), candidate.label(), Source.FALLBACK,
                     candidate.structureScore(), ledger, serverTick, "(auto-detected)", false);
         } else if (!ledger.poiFyiCapReached()) {
-            PoiRegistry.record(bot.getUuid(), candidate.dim(), candidate.anchor(), candidate.label(),
+            PoiRegistry.record(bot.getUUID(), candidate.dim(), candidate.anchor(), candidate.label(),
                     PoiRegistry.State.DECLINED, candidate.structureScore(), serverTick);
             ledger.notePoiFyi();
-            sendNotice(bot, world, PoiNotice.renderFyi(candidate.label(), candidate.anchor(), bot.getBlockPos()));
+            sendNotice(bot, world, PoiNotice.renderFyi(candidate.label(), candidate.anchor(), bot.blockPosition()));
             BotLog.task(bot, "poi_fyi", "label", candidate.label(), "pos", PoiNotice.anchorStr(candidate.anchor()));
         }
     }
@@ -312,7 +311,7 @@ public final class PoiCoordinator {
         if (MiningAssistRuntime.tpsDegraded(bot)) {
             return false;
         }
-        return PoiConsultBudget.canConsult(ledgerKey, bot.getUuid(), cavernOnly, serverTick, cfg.advisor());
+        return PoiConsultBudget.canConsult(ledgerKey, bot.getUUID(), cavernOnly, serverTick, cfg.advisor());
     }
 
     /**
@@ -333,10 +332,10 @@ public final class PoiCoordinator {
      * table, so "cfg.hold" there is read as "holding is available whenever a real consult is," gated only by
      * these per-attempt conditions), and starts the async {@link PoiAdvisor} call either way.
      */
-    private void startConsult(AIPlayerEntity bot, ServerWorld world, MiningAssistState state, PoiDetector.Result result,
+    private void startConsult(AIPlayerEntity bot, ServerLevel world, MiningAssistState state, PoiDetector.Result result,
                               Candidate candidate, MiningAssistConfig cfg, String ledgerKey, boolean cavernOnly,
                               String cacheKey, int serverTick) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         PoiConsultBudget.reserve(ledgerKey, id, cavernOnly, serverTick);
         PoiRegistry.record(id, candidate.dim(), candidate.anchor(), candidate.label(), PoiRegistry.State.CONSULTING,
                 candidate.structureScore(), serverTick);
@@ -407,7 +406,7 @@ public final class PoiCoordinator {
         if (bot.isRemoved()) {
             return;
         }
-        applyDecision(bot, bot.getEntityWorld(), pending.candidate(), pending.ledgerKey(), verdict.decision(),
+        applyDecision(bot, bot.level(), pending.candidate(), pending.ledgerKey(), verdict.decision(),
                 pending.ownsPause(), pending.pauseEpoch(), serverTick, pending.deadlineResolved());
     }
 
@@ -430,13 +429,13 @@ public final class PoiCoordinator {
         if (pending.deadlineResolved() || bot.isRemoved()) {
             return;
         }
-        applyFallbackForPending(bot, bot.getEntityWorld(), pending, serverTick);
+        applyFallbackForPending(bot, bot.level(), pending, serverTick);
     }
 
     /** Called from {@link #tick} every coordinator tick while this bot has a tracked case: resolves it via
      * {@link #applyFallbackForPending} once {@code serverTick} reaches its deadline, otherwise leaves it be. */
     private void checkConsultDeadline(AIPlayerEntity bot, int serverTick) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Long caseId = caseIdByBot.get(id);
         if (caseId == null) {
             return;
@@ -458,7 +457,7 @@ public final class PoiCoordinator {
                 pending.ledgerKey(), pending.cavernOnly(), pending.cacheKey(), pending.hold(), pending.ownsPause(),
                 pending.pauseEpoch(), pending.deadlineTick(), true));
         BotLog.task(bot, "poi_consult_deadline", "label", pending.candidate().label());
-        applyFallbackForPending(bot, bot.getEntityWorld(), pending, serverTick);
+        applyFallbackForPending(bot, bot.level(), pending, serverTick);
     }
 
     /** Design 6.5 "deadline reached (any state) -> applyFallback()", made hold-aware: a STOP fallback
@@ -466,7 +465,7 @@ public final class PoiCoordinator {
      * fallback resumes it first. A stale hold (the player already acted) never resumes and never claims a
      * stop, matching {@link #applyDecision}'s own rule for a genuine late verdict. Always {@code
      * forceLate=false}: this is the case's primary (first) resolution, never itself a late reply. */
-    private void applyFallbackForPending(AIPlayerEntity bot, ServerWorld world, PendingConsult pending, int serverTick) {
+    private void applyFallbackForPending(AIPlayerEntity bot, ServerLevel world, PendingConsult pending, int serverTick) {
         Candidate c = pending.candidate();
         MiningAssistConfig cfg = MiningAssistRuntime.config();
         PoiDecisionPolicy.Decision decision = PoiDecisionPolicy.decide(c.band(), c.structureScore(),
@@ -494,10 +493,10 @@ public final class PoiCoordinator {
      * (it never expires on its own) instead of being replaced by the resolved STOPPED/DECLINED entry. The
      * advisor's own label/confidence are still logged for diagnostics.</p>
      */
-    private void applyDecision(AIPlayerEntity bot, ServerWorld world, Candidate candidate, String ledgerKey,
+    private void applyDecision(AIPlayerEntity bot, ServerLevel world, Candidate candidate, String ledgerKey,
                                PoiPrompt.Decision decision, boolean ownsPause, int pauseEpoch, int serverTick,
                                boolean forceLate) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String label = candidate.label();
         boolean stop = decision == PoiPrompt.Decision.STOP;
         boolean stale = forceLate || (ownsPause && (TaskManager.INSTANCE.userPauseEpoch(bot) != pauseEpoch
@@ -534,13 +533,13 @@ public final class PoiCoordinator {
      * reverse of {@link #startConsult}'s hold-start bookkeeping. */
     private static void resumeHold(AIPlayerEntity bot, String label, String why) {
         TaskManager.INSTANCE.resumeUserIntent(bot, why);
-        BotMemory mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
+        BotMemory mem = BotMemoryStore.INSTANCE.of(bot.getUUID());
         mem.forgetPlace(HOLD_PLACE_PREFIX + label);
     }
 
     /** Design 6.8 "Multi-bot routing": true while a POI stop is open for this bot and the player has not yet resumed. */
     public boolean awaitingContinue(AIPlayerEntity bot) {
-        return PoiRegistry.openCase(bot.getUuid()) != null && TaskManager.INSTANCE.isUserPaused(bot);
+        return PoiRegistry.openCase(bot.getUUID()) != null && TaskManager.INSTANCE.isUserPaused(bot);
     }
 
     /**
@@ -548,9 +547,9 @@ public final class PoiCoordinator {
      * or STOPPED {@code PoiRegistry} entry must never suppress a mandatory candidate, so mandatory never
      * consults the registry at all — only {@link MandatoryLatch}.
      */
-    private void mandatoryFlow(AIPlayerEntity bot, ServerWorld world, String dim, BlockPos anchor,
+    private void mandatoryFlow(AIPlayerEntity bot, ServerLevel world, String dim, BlockPos anchor,
                                PoiScorer.PoiScore score, int serverTick) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         boolean wardenVisible = score.mandatoryTrigger().contains("warden_visible");
         if (MandatoryLatch.suppresses(id, dim, anchor, wardenVisible, serverTick)) {
             return;
@@ -574,10 +573,10 @@ public final class PoiCoordinator {
      *                      IntentController.pause} is never called a second time. Always {@code false} for a
      *                      deterministic (mandatory/certain/keyless-fallback) stop, which never held anything.
      */
-    private void stopNow(AIPlayerEntity bot, ServerWorld world, String dim, BlockPos anchor, String label,
+    private void stopNow(AIPlayerEntity bot, ServerLevel world, String dim, BlockPos anchor, String label,
                          Source source, double structureScore, MissionAssistLedger.Entry ledger, int serverTick,
                          String autoDetectedNote, boolean alreadyPaused) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         // Design 6.1's DigDown-descend variant needs the task's phase at the MOMENT of the stop, captured
         // from the still-active task BEFORE it is paused: IntentController.pause below routes through
         // TaskManager.pauseFor -> DigDownTask.onPause, which -- as its own documented side effect (design
@@ -602,7 +601,7 @@ public final class PoiCoordinator {
         mem.markPlace(HOLD_PLACE_PREFIX + label, world, anchor);
         PoiRegistry.openCase(id, new PoiRegistry.OpenCase(label, source.name(), dim, anchor));
         String text = PoiNotice.renderStop(descending, source == Source.MANDATORY, label, anchor,
-                bot.getBlockPos(), autoDetectedNote, null);
+                bot.blockPosition(), autoDetectedNote, null);
         sendNotice(bot, world, text);
         BotLog.task(bot, "poi_stop", "label", label, "source", source, "pos", PoiNotice.anchorStr(anchor),
                 "ledger_key", ledgerKeyFor(bot));
@@ -613,7 +612,7 @@ public final class PoiCoordinator {
      * gets one notify-and-continue line each, up to {@value #MAX_CERTAIN_NOTIFY_AFTER_CAP} more per mission;
      * anything else (POSSIBLE, CAVERN_ONLY, NONE) is silently dropped once the cap is reached.
      */
-    private void notifyOnlyIfCertain(AIPlayerEntity bot, ServerWorld world, String dim, BlockPos anchor,
+    private void notifyOnlyIfCertain(AIPlayerEntity bot, ServerLevel world, String dim, BlockPos anchor,
                                      String label, PoiScorer.Band band, double structureScore,
                                      MissionAssistLedger.Entry ledger, int serverTick) {
         if (band != PoiScorer.Band.STRUCTURE_CERTAIN) {
@@ -623,19 +622,19 @@ public final class PoiCoordinator {
             return;
         }
         ledger.notePoiCertainNotifyAfterCap();
-        PoiRegistry.record(bot.getUuid(), dim, anchor, label, PoiRegistry.State.DECLINED, structureScore, serverTick);
-        sendNotice(bot, world, PoiNotice.renderFyi(label, anchor, bot.getBlockPos()));
+        PoiRegistry.record(bot.getUUID(), dim, anchor, label, PoiRegistry.State.DECLINED, structureScore, serverTick);
+        sendNotice(bot, world, PoiNotice.renderFyi(label, anchor, bot.blockPosition()));
         BotLog.task(bot, "poi_certain_notify_after_cap", "label", label);
     }
 
     /** Panel chat plus, per {@code poi.noticeRecipients}, either every online player or only an authorized one. */
-    private void sendNotice(AIPlayerEntity bot, ServerWorld world, String text) {
+    private void sendNotice(AIPlayerEntity bot, ServerLevel world, String text) {
         BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", text);
         MiningAssistConfig.NoticeRecipients recipients = MiningAssistRuntime.config().poi().noticeRecipients();
-        for (ServerPlayerEntity player : world.getServer().getPlayerManager().getPlayerList()) {
+        for (ServerPlayer player : world.getServer().getPlayerList().getPlayers()) {
             if (recipients == MiningAssistConfig.NoticeRecipients.BROADCAST
                     || BotAuthorizationGate.INSTANCE.canCommand(player, bot)) {
-                player.sendMessage(Text.literal("[Minecraft-AI] " + text), false);
+                player.displayClientMessage(Component.literal("[Minecraft-AI] " + text), false);
             }
         }
     }
@@ -648,7 +647,7 @@ public final class PoiCoordinator {
      * instance shared by every bot on the server, unlike a per-task detour host).
      */
     private String ledgerKeyFor(AIPlayerEntity bot) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Optional<TaskOrigin> origin = TaskManager.INSTANCE.activeOrigin(bot);
         if (origin.isPresent()) {
             String key = MissionAssistLedger.keyFor(id, origin.get().missionId(), origin.get().jobId());

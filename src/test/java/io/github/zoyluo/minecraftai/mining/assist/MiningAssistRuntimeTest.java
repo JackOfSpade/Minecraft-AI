@@ -3,7 +3,6 @@ package io.github.zoyluo.minecraftai.mining.assist;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +14,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,7 +62,7 @@ class MiningAssistRuntimeTest {
         assertFalse(MiningAssistRuntime.senseConfigured());
         // Passing null proves the gate returns before it reads anything from the bot.
         assertFalse(MiningAssistRuntime.enabledFor(null, 100));
-        MiningAssistHooks.onBotBreak(null, new net.minecraft.util.math.BlockPos(1, 2, 3));
+        MiningAssistHooks.onBotBreak(null, new net.minecraft.core.BlockPos(1, 2, 3));
     }
 
     // ---- harness default -------------------------------------------------------------------------

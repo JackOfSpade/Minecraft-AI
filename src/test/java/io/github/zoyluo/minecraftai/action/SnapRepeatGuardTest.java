@@ -1,10 +1,11 @@
 package io.github.zoyluo.minecraftai.action;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.core.BlockPos;
 
 /** One physical start re-snap per origin cell per stall: no snap yo-yo against a walk fallback. */
 class SnapRepeatGuardTest {

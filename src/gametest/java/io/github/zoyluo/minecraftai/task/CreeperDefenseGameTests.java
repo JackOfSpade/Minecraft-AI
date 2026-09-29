@@ -10,23 +10,22 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.entity.mob.ZombieEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.Set;
-import net.minecraft.text.Text;
 
 /**
  * Black-box safety contracts for the dedicated Creeper owner.
@@ -37,31 +36,31 @@ import net.minecraft.text.Text;
  */
 public final class CreeperDefenseGameTests {
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_late_fuse_assignment_starts_physical_defense_synchronously", maxTicks = 40)
-    public void lateFuseAssignmentStartsPhysicalDefenseSynchronously(TestContext context) {
+    public void lateFuseAssignmentStartsPhysicalDefenseSynchronously(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateFuseGT", 200);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 8));
         assertStrictCapabilities(context, bot);
 
         HoldingTask mission = new HoldingTask("late_fuse_mission");
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_late_fuse_mission"));
-        CreeperEntity creeper = spawnDisabledCreeper(context, origin.east(2));
+        Creeper creeper = spawnDisabledCreeper(context, origin.east(2));
         creeper.ignite();
-        creeper.setFuseSpeed(1);
+        creeper.setSwellDir(1);
         for (int tick = 0; tick < 20; tick++) {
             creeper.tick();
         }
         require(context, creeper.isAlive()
                         && creeper.isIgnited()
-                        && creeper.getFuseSpeed() > 0
-                        && creeper.getLerpedFuseTime(1.0F) > 0.0F,
+                        && creeper.getSwellDir() > 0
+                        && creeper.getSwelling(1.0F) > 0.0F,
                 "late-fuse fixture did not retain a live finite explosion clock");
 
-        Vec3d before = bot.getEntityPos();
+        Vec3 before = bot.position();
         int materialBefore = MaterialPalette.countEmergencyShelterBlocks(bot);
         require(context, DangerWatcher.INSTANCE.scanBot(
-                        context.getWorld().getServer(), bot),
+                        context.getLevel().getServer(), bot),
                 "late-fuse Creeper scan was not handled");
 
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
@@ -74,7 +73,7 @@ public final class CreeperDefenseGameTests {
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "late-fuse scan did not preserve exactly one mission frame");
 
-        boolean physicallyStepped = bot.getEntityPos().squaredDistanceTo(before) >= 0.80D;
+        boolean physicallyStepped = bot.position().distanceToSqr(before) >= 0.80D;
         boolean physicallyPlacedCore = MaterialPalette.countEmergencyShelterBlocks(bot)
                 < materialBefore && hasPlacedOakLogNear(bot, origin);
         require(context, physicallyStepped || physicallyPlacedCore,
@@ -84,59 +83,59 @@ public final class CreeperDefenseGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_near_memory_is_not_overwritten_by_far_unarmed_creeper", maxTicks = 40)
-    public void hiddenNearMemoryIsNotOverwrittenByFarUnarmedCreeper(TestContext context) {
+    public void hiddenNearMemoryIsNotOverwrittenByFarUnarmedCreeper(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperMemoryGT", 206);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         assertStrictCapabilities(context, bot);
 
         HoldingTask mission = new HoldingTask("creeper_memory_mission");
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_creeper_memory"));
-        CreeperEntity near = spawnDisabledCreeper(context, origin.east(3));
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        Creeper near = spawnDisabledCreeper(context, origin.east(3));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof CreeperDefenseTask,
                 "near Creeper did not assign the dedicated owner");
-        String nearSource = compact(near.getBlockPos());
+        String nearSource = compact(near.blockPosition());
         require(context, active.describe().contains("source=" + nearSource),
                 "owner did not bind the initially observed near source: " + active.describe());
 
         bot.getActionPack().stopAll();
-        bot.teleport(context.getWorld(), origin.getX() + 0.5D, origin.getY(),
+        bot.teleportTo(context.getLevel(), origin.getX() + 0.5D, origin.getY(),
                 origin.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         buildOccludingWall(context, origin.east(), 1);
         require(context, !ObservableWorldQuery.canObserveEntity(bot, near),
                 "near Creeper remained observable through the memory occluder");
-        CreeperEntity far = spawnDisabledCreeper(context, origin.west(5));
+        Creeper far = spawnDisabledCreeper(context, origin.west(5));
         require(context, ObservableWorldQuery.canObserveEntity(bot, far)
-                        && !far.isIgnited() && far.getFuseSpeed() <= 0,
+                        && !far.isIgnited() && far.getSwellDir() <= 0,
                 "far replacement fixture was not a visible unarmed Creeper");
 
         active.tick(bot);
         require(context, active.describe().contains("source=" + nearSource),
                 "visible unarmed far Creeper overwrote the more dangerous hidden near memory:"
-                        + " near=" + nearSource + " far=" + compact(far.getBlockPos())
+                        + " near=" + nearSource + " far=" + compact(far.blockPosition())
                         + " owner=" + active.describe());
         finish(context, bot, "CreeperMemoryGT", near, far);
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_older_occluded_risk_cannot_complete_while_second_risk_just_turned_hidden", maxTicks = 40)
     public void olderOccludedRiskCannotCompleteWhileSecondRiskJustTurnedHidden(
-            TestContext context) {
+            GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperAllRiskGraceGT", 236);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 2));
         assertStrictCapabilities(context, bot);
 
-        CreeperEntity older = spawnDisabledCreeper(context, origin.east(3));
+        Creeper older = spawnDisabledCreeper(context, origin.east(3));
         older.ignite();
-        older.setFuseSpeed(1);
+        older.setSwellDir(1);
         for (int tick = 0; tick < 20; tick++) {
             older.tick();
         }
         CreeperDefenseTask owner = new CreeperDefenseTask(
-                older.getUuid(), older.getBlockPos());
+                older.getUUID(), older.blockPosition());
         TaskManager.INSTANCE.assign(bot, owner,
                 TaskOrigin.safety("gametest_all_risk_grace"));
         require(context, phase(owner, "HOLD_BARRIER"),
@@ -150,7 +149,7 @@ public final class CreeperDefenseGameTests {
         require(context, owner.state() == TaskState.RUNNING,
                 "older risk completed before its own observation grace");
 
-        CreeperEntity newer = spawnDisabledCreeper(context, origin.west(5));
+        Creeper newer = spawnDisabledCreeper(context, origin.west(5));
         require(context, ObservableWorldQuery.canObserveEntity(bot, newer),
                 "second-risk fixture was not factually observable");
         owner.tick(bot);
@@ -167,12 +166,12 @@ public final class CreeperDefenseGameTests {
         makeStandable(context, allRiskClearance);
         for (int tick = 0; tick < 100 && owner.state() == TaskState.RUNNING; tick++) {
             bot.getActionPack().stopAll();
-            bot.teleport(context.getWorld(),
+            bot.teleportTo(context.getLevel(),
                     allRiskClearance.getX() + 0.5D,
                     allRiskClearance.getY(),
                     allRiskClearance.getZ() + 0.5D,
                     Set.of(), 0.0F, 0.0F, true);
-            bot.setVelocity(Vec3d.ZERO);
+            bot.setDeltaMovement(Vec3.ZERO);
             owner.tick(bot);
         }
         require(context, owner.state() == TaskState.COMPLETED,
@@ -183,22 +182,22 @@ public final class CreeperDefenseGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_lateral_oscillation_cannot_reset_away_progress", maxTicks = 60)
-    public void lateralOscillationCannotResetAwayProgress(TestContext context) {
+    public void lateralOscillationCannotResetAwayProgress(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperLateralStallGT", 212);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 6));
         assertStrictCapabilities(context, bot);
-        CreeperEntity creeper = spawnDisabledCreeper(context, origin.east(6));
+        Creeper creeper = spawnDisabledCreeper(context, origin.east(6));
         CreeperDefenseTask owner = new CreeperDefenseTask(
-                creeper.getUuid(), creeper.getBlockPos());
+                creeper.getUUID(), creeper.blockPosition());
         TaskManager.INSTANCE.assign(bot, owner,
                 TaskOrigin.safety("gametest_lateral_stall"));
 
         for (int tick = 0; tick < 8 && phase(owner, "ESCAPE"); tick++) {
             double lateral = tick % 2 == 0 ? 0.10D : 0.90D;
-            bot.teleport(context.getWorld(), origin.getX() + 0.5D, origin.getY(),
+            bot.teleportTo(context.getLevel(), origin.getX() + 0.5D, origin.getY(),
                     origin.getZ() + lateral, Set.of(), 0.0F, 0.0F, true);
-            bot.setVelocity(Vec3d.ZERO);
+            bot.setDeltaMovement(Vec3.ZERO);
             owner.tick(bot);
         }
 
@@ -209,30 +208,30 @@ public final class CreeperDefenseGameTests {
         owner.tick(bot);
         BlockPos center = origin;
         require(context, isPhysicalBarrierCell(bot, center)
-                        && isPhysicalBarrierCell(bot, center.up()),
+                        && isPhysicalBarrierCell(bot, center.above()),
                 "lateral-stall escalation did not physically complete its central two-high wall:"
-                        + " bot=" + bot.getBlockPos().toShortString()
+                        + " bot=" + bot.blockPosition().toShortString()
                         + " owner=" + owner.describe());
         finish(context, bot, "CreeperLateralStallGT", creeper);
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_two_legal_blocks_complete_core_and_hold_without_side_material", maxTicks = 60)
-    public void twoLegalBlocksCompleteCoreAndHoldWithoutSideMaterial(TestContext context) {
+    public void twoLegalBlocksCompleteCoreAndHoldWithoutSideMaterial(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperTwoBlockCoreGT", 218);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 2));
         assertStrictCapabilities(context, bot);
-        CreeperEntity creeper = spawnDisabledCreeper(context, origin.east(3));
+        Creeper creeper = spawnDisabledCreeper(context, origin.east(3));
         creeper.ignite();
         CreeperDefenseTask owner = new CreeperDefenseTask(
-                creeper.getUuid(), creeper.getBlockPos());
+                creeper.getUUID(), creeper.blockPosition());
         TaskManager.INSTANCE.assign(bot, owner,
                 TaskOrigin.safety("gametest_two_block_core"));
 
         owner.tick(bot);
         owner.tick(bot);
         require(context, isPhysicalBarrierCell(bot, origin)
-                        && isPhysicalBarrierCell(bot, origin.up()),
+                        && isPhysicalBarrierCell(bot, origin.above()),
                 "two legal blocks did not become the central two-high physical wall: "
                         + owner.describe());
         require(context, MaterialPalette.countEmergencyShelterBlocks(bot) == 0,
@@ -247,15 +246,15 @@ public final class CreeperDefenseGameTests {
                         + " retaining HOLD_BARRIER ownership: " + owner.describe()
                         + " state=" + owner.state() + ":" + owner.failureReason());
         require(context, isPhysicalBarrierCell(bot, origin)
-                        && isPhysicalBarrierCell(bot, origin.up()),
+                        && isPhysicalBarrierCell(bot, origin.above()),
                 "central wall was not maintained during the hidden-pressure hold");
         finish(context, bot, "CreeperTwoBlockCoreGT");
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_hidden_creeper_memory_yields_to_non_creeper_low_hp_shelter", maxTicks = 60)
-    public void hiddenCreeperMemoryYieldsToNonCreeperLowHpShelter(TestContext context) {
+    public void hiddenCreeperMemoryYieldsToNonCreeperLowHpShelter(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperShelterHandoffGT", 224);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 32));
         assertStrictCapabilities(context, bot);
 
@@ -265,8 +264,8 @@ public final class CreeperDefenseGameTests {
         // Five blocks is still factual Creeper pressure, but stays outside the synchronous
         // four-block core-wall boundary so this fixture tests scheduler handoff rather than
         // deliberately teleporting back into an owned placement cell.
-        CreeperEntity creeper = spawnDisabledCreeper(context, origin.east(5));
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        Creeper creeper = spawnDisabledCreeper(context, origin.east(5));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task creeperOwner = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, creeperOwner instanceof CreeperDefenseTask
                         && mission.state() == TaskState.PAUSED
@@ -275,25 +274,25 @@ public final class CreeperDefenseGameTests {
                 "fixture did not establish one Creeper SAFETY owner over one mission frame");
 
         bot.getActionPack().stopAll();
-        bot.teleport(context.getWorld(), origin.getX() + 0.5D, origin.getY(),
+        bot.teleportTo(context.getLevel(), origin.getX() + 0.5D, origin.getY(),
                 origin.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         bot.fallDistance = 0.0F;
         bot.setOnGround(true);
         buildOccludingWall(context, origin.east(2), 1);
         require(context, !ObservableWorldQuery.canObserveEntity(bot, creeper),
                 "Creeper was not hidden while its owner retained last-seen memory");
 
-        ZombieEntity zombie = spawnDisabledZombie(context, origin.west(3));
+        Zombie zombie = spawnDisabledZombie(context, origin.west(3));
         bot.setHealth(4.7F);
-        bot.getHungerManager().setFoodLevel(17);
+        bot.getFoodData().setFoodLevel(17);
         require(context, ObservableWorldQuery.canObserveEntity(bot, zombie)
                         && CombatCore.hasLineOfSight(bot, zombie),
                 "non-Creeper LOW_HP fixture was not factual visible pressure");
         require(context, EmergencyShelterTask.hasMaterialsForCurrentPose(bot),
                 "handoff fixture could not admit a physical emergency shelter");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof EmergencyShelterTask
                         && TaskManager.INSTANCE.activeOrigin(bot)
@@ -308,18 +307,18 @@ public final class CreeperDefenseGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:creeper_defense_game_tests_non_safety_eat_is_paused_and_resumed_as_exact_instance", maxTicks = 180)
-    public void nonSafetyEatIsPausedAndResumedAsExactInstance(TestContext context) {
+    public void nonSafetyEatIsPausedAndResumedAsExactInstance(GameTestHelper context) {
         AIPlayerEntity bot = spawnArenaBot(context, "CreeperEatResumeGT", 230);
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         InventoryAction.giveItem(bot, new ItemStack(Items.COOKED_BEEF, 2));
-        bot.getHungerManager().setFoodLevel(17);
+        bot.getFoodData().setFoodLevel(17);
         assertStrictCapabilities(context, bot);
 
         EatTask eat = new EatTask();
         TaskManager.INSTANCE.assign(bot, eat,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_non_safety_eat"));
-        CreeperEntity creeper = spawnDisabledCreeper(context, origin.east(4));
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        Creeper creeper = spawnDisabledCreeper(context, origin.east(4));
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof CreeperDefenseTask,
@@ -336,26 +335,26 @@ public final class CreeperDefenseGameTests {
         BlockPos clearance = origin.west(12);
         makeStandable(context, clearance);
         bot.getActionPack().stopAll();
-        bot.teleport(context.getWorld(), clearance.getX() + 0.5D, clearance.getY(),
+        bot.teleportTo(context.getLevel(), clearance.getX() + 0.5D, clearance.getY(),
                 clearance.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         for (int tick = 0; tick < 105 && owner.state() == TaskState.RUNNING; tick++) {
             owner.tick(bot);
         }
         require(context, owner.state() == TaskState.COMPLETED,
                 "cleared Creeper owner did not settle after its bounded hidden-source grace: "
                         + owner.describe() + " state=" + owner.state());
-        TaskManager.INSTANCE.tickAll(context.getWorld().getServer());
+        TaskManager.INSTANCE.tickAll(context.getLevel().getServer());
         require(context, TaskManager.INSTANCE.getActive(bot).isEmpty()
                         && TaskManager.INSTANCE.peekPaused(bot).orElse(null) == eat
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "completed Creeper owner did not expose the exact paused EatTask");
 
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
+        bot.getFoodData().setFoodLevel(20);
         bot.hurtTime = 0;
         bot.getActionPack().stopAll();
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == eat
                         && eat.state() == TaskState.RUNNING
                         && TaskManager.INSTANCE.pausedDepth(bot) == 0,
@@ -371,86 +370,86 @@ public final class CreeperDefenseGameTests {
         finish(context, bot, "CreeperEatResumeGT");
     }
 
-    private static AIPlayerEntity spawnArenaBot(TestContext context,
+    private static AIPlayerEntity spawnArenaBot(GameTestHelper context,
                                                  String name,
                                                  int relativeY) {
-        var world = context.getWorld();
-        world.setTimeOfDay(1000L);
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, relativeY, 4));
+        var world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos feet = context.absolutePos(new BlockPos(4, relativeY, 4));
         for (int dx = -6; dx <= 6; dx++) {
             for (int dz = -6; dz <= 6; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                world.setBlockState(
-                        cell.down(), Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos cell = feet.offset(dx, 0, dz);
+                world.setBlock(
+                        cell.below(), Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(feet),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         return bot;
     }
 
-    private static CreeperEntity spawnDisabledCreeper(TestContext context, BlockPos feet) {
-        CreeperEntity creeper = EntityType.CREEPER.create(
-                context.getWorld(), SpawnReason.COMMAND);
+    private static Creeper spawnDisabledCreeper(GameTestHelper context, BlockPos feet) {
+        Creeper creeper = EntityType.CREEPER.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (creeper == null) {
             throw new IllegalStateException("failed to create Creeper fixture");
         }
         makeStandable(context, feet);
-        creeper.setPersistent();
-        creeper.setAiDisabled(true);
-        creeper.refreshPositionAndAngles(
+        creeper.setPersistenceRequired();
+        creeper.setNoAi(true);
+        creeper.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, 90.0F, 0.0F);
-        require(context, context.getWorld().spawnEntity(creeper),
+        require(context, context.getLevel().addFreshEntity(creeper),
                 "failed to spawn Creeper fixture");
         return creeper;
     }
 
-    private static ZombieEntity spawnDisabledZombie(TestContext context, BlockPos feet) {
-        ZombieEntity zombie = EntityType.ZOMBIE.create(
-                context.getWorld(), SpawnReason.COMMAND);
+    private static Zombie spawnDisabledZombie(GameTestHelper context, BlockPos feet) {
+        Zombie zombie = EntityType.ZOMBIE.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (zombie == null) {
             throw new IllegalStateException("failed to create Zombie fixture");
         }
         makeStandable(context, feet);
-        zombie.setPersistent();
-        zombie.setAiDisabled(true);
-        zombie.refreshPositionAndAngles(
+        zombie.setPersistenceRequired();
+        zombie.setNoAi(true);
+        zombie.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, 90.0F, 0.0F);
-        require(context, context.getWorld().spawnEntity(zombie),
+        require(context, context.getLevel().addFreshEntity(zombie),
                 "failed to spawn Zombie fixture");
         return zombie;
     }
 
-    private static void makeStandable(TestContext context, BlockPos feet) {
-        context.getWorld().setBlockState(
-                feet.down(), Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(
-                feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(
-                feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(
-                feet.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    private static void makeStandable(GameTestHelper context, BlockPos feet) {
+        context.getLevel().setBlock(
+                feet.below(), Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(
+                feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(
+                feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(
+                feet.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
     }
 
-    private static void buildOccludingWall(TestContext context,
+    private static void buildOccludingWall(GameTestHelper context,
                                             BlockPos center,
                                             int halfWidth) {
         for (int dz = -halfWidth; dz <= halfWidth; dz++) {
             for (int dy = 0; dy <= 2; dy++) {
-                context.getWorld().setBlockState(
-                        center.add(0, dy, dz),
-                        Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
+                context.getLevel().setBlock(
+                        center.offset(0, dy, dz),
+                        Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
     }
@@ -459,8 +458,8 @@ public final class CreeperDefenseGameTests {
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = 0; dy <= 1; dy++) {
-                    if (bot.getEntityWorld().getBlockState(
-                            origin.add(dx, dy, dz)).isOf(Blocks.OAK_LOG)) {
+                    if (bot.level().getBlockState(
+                            origin.offset(dx, dy, dz)).is(Blocks.OAK_LOG)) {
                         return true;
                     }
                 }
@@ -470,8 +469,8 @@ public final class CreeperDefenseGameTests {
     }
 
     private static boolean isPhysicalBarrierCell(AIPlayerEntity bot, BlockPos pos) {
-        var state = bot.getEntityWorld().getBlockState(pos);
-        return !state.getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
+        var state = bot.level().getBlockState(pos);
+        return !state.getCollisionShape(bot.level(), pos).isEmpty();
     }
 
     private static boolean phase(Task task, String expected) {
@@ -482,7 +481,7 @@ public final class CreeperDefenseGameTests {
         return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
-    private static void assertStrictCapabilities(TestContext context, AIPlayerEntity bot) {
+    private static void assertStrictCapabilities(GameTestHelper context, AIPlayerEntity bot) {
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         for (PrivilegedCapability capability : PrivilegedCapability.values()) {
@@ -492,7 +491,7 @@ public final class CreeperDefenseGameTests {
         }
     }
 
-    private static void finish(TestContext context,
+    private static void finish(GameTestHelper context,
                                AIPlayerEntity bot,
                                String name,
                                Entity... entities) {
@@ -503,13 +502,13 @@ public final class CreeperDefenseGameTests {
         }
         DangerWatcher.INSTANCE.clear(bot);
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

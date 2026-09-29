@@ -1,27 +1,27 @@
 package io.github.zoyluo.minecraftai.network.payload;
 
 import io.github.zoyluo.minecraftai.MinecraftAiMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record BotChatS2C(String botName, String role, String text) implements CustomPayload {
-    public static final Id<BotChatS2C> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "bot_chat"));
-    public static final PacketCodec<RegistryByteBuf, BotChatS2C> CODEC = PacketCodec.of(BotChatS2C::write, BotChatS2C::new);
+public record BotChatS2C(String botName, String role, String text) implements CustomPacketPayload {
+    public static final Type<BotChatS2C> ID = new Type<>(Identifier.fromNamespaceAndPath(MinecraftAiMod.MOD_ID, "bot_chat"));
+    public static final StreamCodec<RegistryFriendlyByteBuf, BotChatS2C> CODEC = StreamCodec.ofMember(BotChatS2C::write, BotChatS2C::new);
 
-    private BotChatS2C(RegistryByteBuf buf) {
-        this(buf.readString(), buf.readString(), buf.readString());
+    private BotChatS2C(RegistryFriendlyByteBuf buf) {
+        this(buf.readUtf(), buf.readUtf(), buf.readUtf());
     }
 
-    private void write(RegistryByteBuf buf) {
-        buf.writeString(botName);
-        buf.writeString(role);
-        buf.writeString(text);
+    private void write(RegistryFriendlyByteBuf buf) {
+        buf.writeUtf(botName);
+        buf.writeUtf(role);
+        buf.writeUtf(text);
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

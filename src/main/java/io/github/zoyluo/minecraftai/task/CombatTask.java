@@ -13,20 +13,19 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Comparator;
 import java.util.List;
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 public final class CombatTask extends AbstractTask {
     private enum Phase {
@@ -108,7 +107,7 @@ public final class CombatTask extends AbstractTask {
         this.targetKills = Math.max(1, targetKills);
         this.retreatHpThreshold = retreatHpThreshold;
         this.fixedDefensiveTarget = fixedDefensiveTarget;
-        this.defensiveAnchor = defensiveAnchor == null ? null : defensiveAnchor.toImmutable();
+        this.defensiveAnchor = defensiveAnchor == null ? null : defensiveAnchor.immutable();
     }
 
     public static CombatTask defensive(LivingEntity threat,
@@ -127,7 +126,7 @@ public final class CombatTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Attacking " + Registries.ENTITY_TYPE.getId(targetType) + " " + kills + "/" + targetKills + " phase=" + phase;
+        return "Attacking " + BuiltInRegistries.ENTITY_TYPE.getKey(targetType) + " " + kills + "/" + targetKills + " phase=" + phase;
     }
 
     @Override
@@ -264,7 +263,7 @@ public final class CombatTask extends AbstractTask {
      * returns false once neither threat remains.
      */
     private boolean handleReactiveShield(AIPlayerEntity bot) {
-        if (!bot.getOffHandStack().isOf(Items.SHIELD) && !EquipAction.equipShieldOffhand(bot)) {
+        if (!bot.getOffhandItem().is(Items.SHIELD) && !EquipAction.equipShieldOffhand(bot)) {
             return false;
         }
         ProjectileThreat.Incoming incoming = ProjectileThreat.mostImminent(bot).orElse(null);
@@ -276,10 +275,10 @@ public final class CombatTask extends AbstractTask {
             }
             return false;
         }
-        Vec3d faceTowards = incoming != null ? incoming.projectile().getEntityPos() : fusingCreeper.getEntityPos();
+        Vec3 faceTowards = incoming != null ? incoming.projectile().position() : fusingCreeper.position();
         LookAction.lookAt(bot, faceTowards);
-        if (!bot.isUsingItem() || bot.getActiveHand() != Hand.OFF_HAND) {
-            InteractAction.useItemInAir(bot, Hand.OFF_HAND);
+        if (!bot.isUsingItem() || bot.getUsedItemHand() != InteractionHand.OFF_HAND) {
+            InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
         }
         bot.getActionPack().stopMovement();
         if (!reactiveShieldRaised) {
@@ -287,20 +286,20 @@ public final class CombatTask extends AbstractTask {
             BotLog.action(bot, "reactive_shield_raised",
                     "reason", incoming != null ? "incoming_projectile" : "creeper_fuse",
                     "source", incoming != null
-                            ? Registries.ENTITY_TYPE.getId(incoming.projectile().getType()).toString()
+                            ? BuiltInRegistries.ENTITY_TYPE.getKey(incoming.projectile().getType()).toString()
                             : "creeper");
         }
         return true;
     }
 
     private static LivingEntity nearbyImminentCreeper(AIPlayerEntity bot) {
-        return bot.getEntityWorld().getEntitiesByClass(CreeperEntity.class,
-                        bot.getBoundingBox().expand(SHIELD_CREEPER_FUSE_RANGE),
+        return bot.level().getEntitiesOfClass(Creeper.class,
+                        bot.getBoundingBox().inflate(SHIELD_CREEPER_FUSE_RANGE),
                         creeper -> creeper.isAlive()
                                 && ObservableWorldQuery.canObserveEntity(bot, creeper)
-                                && creeper.getLerpedFuseTime(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD)
+                                && creeper.getSwelling(1.0F) >= SHIELD_CREEPER_FUSE_THRESHOLD)
                 .stream()
-                .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                .min(Comparator.comparingDouble(bot::distanceToSqr))
                 .orElse(null);
     }
 
@@ -383,7 +382,7 @@ public final class CombatTask extends AbstractTask {
         }
         CombatCore.lookAtForBowShot(bot, target);
         if (!bot.isUsingItem()) {
-            ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+            ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
             if (result.isFailed()) {
                 finishRangedLoadout(bot);
                 CombatCore.ensureMeleeWeapon(bot);
@@ -396,8 +395,8 @@ public final class CombatTask extends AbstractTask {
         // self-resets if something upstream (e.g. ActionPack#stopAll from another task) interrupted
         // and restarted the use. A hand-rolled tick counter here would desync from that and could
         // release a shot well before it's actually at full pull.
-        if (bot.getItemUseTime() >= BOW_CHARGE_TICKS) {
-            bot.stopUsingItem();
+        if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
+            bot.releaseUsingItem();
             phase = Phase.APPROACH;
         }
     }
@@ -438,18 +437,18 @@ public final class CombatTask extends AbstractTask {
 
     private void block(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
-            bot.stopUsingItem();
+            bot.releaseUsingItem();
             kills++;
             finishOrAcquire(bot);
             return;
         }
         CombatCore.lookAt(bot, target);
         if (!bot.isUsingItem()) {
-            InteractAction.useItemInAir(bot, Hand.OFF_HAND);
+            InteractAction.useItemInAir(bot, InteractionHand.OFF_HAND);
         }
         blockTicks--;
         if (blockTicks <= 0 || bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 1.5F) {
-            bot.stopUsingItem();
+            bot.releaseUsingItem();
             phase = Phase.STRIKE;
         }
     }
@@ -520,7 +519,7 @@ public final class CombatTask extends AbstractTask {
 
         if (retreatDestination == null || bot.getActionPack().isPathExecutorIdle()) {
             retreatDestination = EvadeTask.admitBestSurfaceEscapePath(
-                    bot, threat, threat.getBlockPos(), RETREAT_STEP_DISTANCE);
+                    bot, threat, threat.blockPosition(), RETREAT_STEP_DISTANCE);
             if (retreatDestination == null) {
                 fail("combat_no_valid_retreat_route");
             }
@@ -529,7 +528,7 @@ public final class CombatTask extends AbstractTask {
 
     private void beginRetreat(AIPlayerEntity bot) {
         finishRangedLoadout(bot);
-        bot.clearActiveItem();
+        bot.stopUsingItem();
         eating = false;
         healTicks = 0;
         retreatDestination = null;
@@ -576,13 +575,13 @@ public final class CombatTask extends AbstractTask {
         if (defensiveAnchor == null) {
             return true;
         }
-        BlockPos here = bot.getBlockPos();
+        BlockPos here = bot.blockPosition();
         if (belowDefenseFloor(here) || outsideDefenseRadius(here)) {
             return disengageOrRetreatFromImmediatePressure(
                     bot, "bot_left_leash", here);
         }
         if (target != null && target.isAlive()) {
-            BlockPos targetPos = target.getBlockPos();
+            BlockPos targetPos = target.blockPosition();
             if (belowDefenseFloor(targetPos) || outsideDefenseRadius(targetPos)) {
                 return disengageOrRetreatFromImmediatePressure(
                         bot, "target_left_leash", targetPos);
@@ -626,7 +625,7 @@ public final class CombatTask extends AbstractTask {
         }
         kills++;
         finishRangedLoadout(bot);
-        bot.stopUsingItem();
+        bot.releaseUsingItem();
         eating = false;
 
         LivingEntity pressure = refreshRetreatThreat(bot);
@@ -658,9 +657,9 @@ public final class CombatTask extends AbstractTask {
     private LivingEntity nearestObservablePressure(AIPlayerEntity bot) {
         LivingEntity nearest = isObservablePressure(bot, target) ? target : null;
         double nearestDistance = nearest == null
-                ? Double.POSITIVE_INFINITY : bot.squaredDistanceTo(nearest);
+                ? Double.POSITIVE_INFINITY : bot.distanceToSqr(nearest);
         for (LivingEntity hostile : observableActiveHostiles(bot)) {
-            double distance = bot.squaredDistanceTo(hostile);
+            double distance = bot.distanceToSqr(hostile);
             if (distance < nearestDistance) {
                 nearest = hostile;
                 nearestDistance = distance;
@@ -670,9 +669,9 @@ public final class CombatTask extends AbstractTask {
     }
 
     private List<LivingEntity> observableActiveHostiles(AIPlayerEntity bot) {
-        return bot.getEntityWorld().getEntitiesByClass(
+        return bot.level().getEntitiesOfClass(
                 LivingEntity.class,
-                bot.getBoundingBox().expand(CombatCore.hostilePressureScanRange()),
+                bot.getBoundingBox().inflate(CombatCore.hostilePressureScanRange()),
                 entity -> entity != bot
                         && DangerWatcher.isActiveHostileThreat(bot, entity)
                         && ObservableWorldQuery.canObserveEntity(bot, entity)
@@ -769,8 +768,8 @@ public final class CombatTask extends AbstractTask {
 
     private void beginPeekaboo(AIPlayerEntity bot) {
         if (peekCoverFeet != null && peekHideSpot != null
-                && bot.getBlockPos().equals(peekHideSpot)
-                && isObservableSolid(bot, peekCoverFeet) && isObservableSolid(bot, peekCoverFeet.up())) {
+                && bot.blockPosition().equals(peekHideSpot)
+                && isObservableSolid(bot, peekCoverFeet) && isObservableSolid(bot, peekCoverFeet.above())) {
             // Cover from an earlier cycle is still standing right where the bot already is.
             phase = Phase.COVER_HIDE;
             peekCycleTicks = 0;
@@ -788,17 +787,17 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         Direction towardTarget = CombatCore.dominantHorizontalDirection(
-                bot.getBlockPos(), target.getBlockPos());
+                bot.blockPosition(), target.blockPosition());
         if (towardTarget == null) {
             abandonPeekaboo(bot, "peekaboo_missing_direction");
             return;
         }
-        BlockPos hideSpot = bot.getBlockPos().toImmutable();
-        BlockPos coverFeet = hideSpot.offset(towardTarget).toImmutable();
-        Direction sideStep = towardTarget.rotateYClockwise();
-        BlockPos exposeSpot = hideSpot.offset(sideStep).toImmutable();
+        BlockPos hideSpot = bot.blockPosition().immutable();
+        BlockPos coverFeet = hideSpot.relative(towardTarget).immutable();
+        Direction sideStep = towardTarget.getClockWise();
+        BlockPos exposeSpot = hideSpot.relative(sideStep).immutable();
         if (!canStandAt(bot, exposeSpot)) {
-            exposeSpot = hideSpot.offset(sideStep.getOpposite()).toImmutable();
+            exposeSpot = hideSpot.relative(sideStep.getOpposite()).immutable();
             if (!canStandAt(bot, exposeSpot)) {
                 abandonPeekaboo(bot, "peekaboo_no_expose_spot");
                 return;
@@ -806,7 +805,7 @@ public final class CombatTask extends AbstractTask {
         }
         String failure = placePeekabooColumnBlock(bot, coverFeet);
         if (failure == null) {
-            failure = placePeekabooColumnBlock(bot, coverFeet.up());
+            failure = placePeekabooColumnBlock(bot, coverFeet.above());
         }
         if (failure != null) {
             peekBuildAttempts++;
@@ -826,7 +825,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private String placePeekabooColumnBlock(AIPlayerEntity bot, BlockPos target) {
-        if (bot.getBoundingBox().intersects(new Box(target))) {
+        if (bot.getBoundingBox().intersects(new AABB(target))) {
             return "target_intersects_bot";
         }
         OptionalInt slot = MaterialPalette.pickSacrificialBlockSlot(bot);
@@ -845,16 +844,16 @@ public final class CombatTask extends AbstractTask {
 
     private static boolean canStandAt(AIPlayerEntity bot, BlockPos feet) {
         return ObservableWorldQuery.canObserveCell(bot, feet)
-                && ObservableWorldQuery.canObserveCell(bot, feet.up())
-                && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, feet.down());
+                && ObservableWorldQuery.canObserveCell(bot, feet.above())
+                && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, feet.below());
     }
 
     private static boolean isObservableSolid(AIPlayerEntity bot, BlockPos pos) {
         if (!ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
             return false;
         }
-        return !bot.getEntityWorld().getBlockState(pos)
-                .getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
+        return !bot.level().getBlockState(pos)
+                .getCollisionShape(bot.level(), pos).isEmpty();
     }
 
     private void abandonPeekaboo(AIPlayerEntity bot, String reason) {
@@ -872,7 +871,7 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire(bot);
             return;
         }
-        if (!bot.getBlockPos().equals(peekHideSpot) && bot.getActionPack().isPathExecutorIdle()) {
+        if (!bot.blockPosition().equals(peekHideSpot) && bot.getActionPack().isPathExecutorIdle()) {
             FakePlayerMotion.stepToStandable(bot, peekHideSpot, "peekaboo_return_to_hide");
         }
         if (rangedLoadout == null) {
@@ -885,7 +884,7 @@ public final class CombatTask extends AbstractTask {
             }
         }
         if (!bot.isUsingItem()) {
-            ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+            ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
             if (result.isFailed()) {
                 finishRangedLoadout(bot);
                 CombatCore.ensureMeleeWeapon(bot);
@@ -896,7 +895,7 @@ public final class CombatTask extends AbstractTask {
         }
         // See the identical check in ranged(): getItemUseTime() tracks the CURRENT draw, so it
         // can't fire early even if this draw was interrupted and restarted mid-charge.
-        if (bot.getItemUseTime() >= BOW_CHARGE_TICKS) {
+        if (bot.getTicksUsingItem() >= BOW_CHARGE_TICKS) {
             phase = Phase.COVER_PEEK;
             peekCycleTicks = 0;
         }
@@ -904,7 +903,7 @@ public final class CombatTask extends AbstractTask {
 
     private void coverPeek(AIPlayerEntity bot) {
         if (target == null || !target.isAlive()) {
-            bot.stopUsingItem();
+            bot.releaseUsingItem();
             kills++;
             finishOrAcquire(bot);
             return;
@@ -912,7 +911,7 @@ public final class CombatTask extends AbstractTask {
         peekCycleTicks++;
         if (peekCycleTicks == 1) {
             if (!FakePlayerMotion.stepToStandable(bot, peekExposeSpot, "peekaboo_peek_out")) {
-                bot.stopUsingItem();
+                bot.releaseUsingItem();
                 abandonPeekaboo(bot, "peekaboo_peek_step_failed");
                 return;
             }
@@ -924,7 +923,7 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         if (bot.isUsingItem()) {
-            bot.stopUsingItem();
+            bot.releaseUsingItem();
             BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());
         }
         if (!FakePlayerMotion.stepToStandable(bot, peekHideSpot, "peekaboo_duck_back")) {
@@ -944,7 +943,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private boolean shouldBlock(AIPlayerEntity bot) {
-        return bot.getOffHandStack().isOf(Items.SHIELD)
+        return bot.getOffhandItem().is(Items.SHIELD)
                 && target != null
                 && target.isAlive()
                 && bot.distanceTo(target) <= CombatCore.ATTACK_RANGE + 1.0F
@@ -963,7 +962,7 @@ public final class CombatTask extends AbstractTask {
         }
         // Releasing a charged bow here could fire after the enemy crossed the melee boundary.
         // The regular full-charge branch owns intentional releases; exits only cancel use.
-        bot.clearActiveItem();
+        bot.stopUsingItem();
         if (!rangedLoadout.restore(bot)) {
             BotLog.action(bot, "restore_ranged_offhand_skipped", "reason", "inventory_changed");
         }
@@ -986,7 +985,7 @@ public final class CombatTask extends AbstractTask {
 
     private void lowerReactiveShield(AIPlayerEntity bot) {
         if (reactiveShieldRaised) {
-            bot.stopUsingItem();
+            bot.releaseUsingItem();
             reactiveShieldRaised = false;
         }
     }

@@ -4,8 +4,8 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.EatAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Hand;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
 
 public final class EatTask extends AbstractTask {
     private enum Phase {
@@ -63,7 +63,7 @@ public final class EatTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (bot.getHungerManager().getFoodLevel() >= 20) {
+        if (bot.getFoodData().getFoodLevel() >= 20) {
             complete();
             return;
         }
@@ -93,7 +93,7 @@ public final class EatTask extends AbstractTask {
             finishOnTimeoutOrFailure("no_food");
             return;
         }
-        startingFoodLevel = bot.getHungerManager().getFoodLevel();
+        startingFoodLevel = bot.getFoodData().getFoodLevel();
         phase = Phase.STARTING;
     }
 
@@ -103,7 +103,7 @@ public final class EatTask extends AbstractTask {
             finishOnTimeoutOrFailure(result.reason());
             return;
         }
-        ItemStack stack = bot.getStackInHand(Hand.MAIN_HAND);
+        ItemStack stack = bot.getItemInHand(InteractionHand.MAIN_HAND);
         startingStackCount = stack.isEmpty() ? 0 : stack.getCount();
         waitTicks = 0;
         phase = Phase.WAITING;
@@ -111,12 +111,12 @@ public final class EatTask extends AbstractTask {
 
     private void waitForFinish(AIPlayerEntity bot) {
         waitTicks++;
-        ItemStack stack = bot.getStackInHand(Hand.MAIN_HAND);
+        ItemStack stack = bot.getItemInHand(InteractionHand.MAIN_HAND);
         int currentCount = stack.isEmpty() ? 0 : stack.getCount();
         if (!bot.isUsingItem() && waitTicks > 5) {
-            if (bot.getHungerManager().getFoodLevel() > startingFoodLevel || currentCount < startingStackCount) {
+            if (bot.getFoodData().getFoodLevel() > startingFoodLevel || currentCount < startingStackCount) {
                 itemsConsumed++;
-                if (bot.getHungerManager().getFoodLevel() >= 20) {
+                if (bot.getFoodData().getFoodLevel() >= 20) {
                     complete();
                     return;
                 }

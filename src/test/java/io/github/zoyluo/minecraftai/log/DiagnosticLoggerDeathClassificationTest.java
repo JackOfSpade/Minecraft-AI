@@ -1,10 +1,11 @@
 package io.github.zoyluo.minecraftai.log;
 
-import net.minecraft.entity.Entity;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.world.entity.Entity;
 
 /**
  * Entity.isAlive() goes false both for a real death and for a plain removal (chunk unload,

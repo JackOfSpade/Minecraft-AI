@@ -1,12 +1,12 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.SplittableRandom;
+import net.minecraft.core.BlockPos;
 
 import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.AIR;
 import static io.github.zoyluo.minecraftai.mining.assist.ObservedOccupancy.FLUID;

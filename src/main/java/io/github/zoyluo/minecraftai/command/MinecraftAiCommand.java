@@ -5,23 +5,22 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.command.CommandRegistryAccess;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.world.GameMode;
-
 import java.util.UUID;
 import java.util.stream.Collectors;
+import net.minecraft.commands.CommandBuildContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.GameType;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiCommand {
     private MinecraftAiCommand() {
     }
 
-    public static void register(CommandDispatcher<ServerCommandSource> dispatcher, CommandRegistryAccess registryAccess) {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext registryAccess) {
         dispatcher.register(literal("minecraftai")
                 .then(literal("spawn")
                         .then(argument("name", StringArgumentType.word())
@@ -44,18 +43,18 @@ public final class MinecraftAiCommand {
                 .then(MinecraftAiSnapshotSubcommand.build()));
     }
 
-    private static int spawn(ServerCommandSource source, String name) {
+    private static int spawn(CommandSourceStack source, String name) {
         if (!BotAuthorizationGate.INSTANCE.canProvisionPersonalBot(source, "command:spawn")) {
             return 0;
         }
-        ServerPlayerEntity executor = source.getPlayer();
-        GameMode gameMode = executor == null ? GameMode.SURVIVAL : executor.interactionManager.getGameMode();
-        UUID ownerUuid = executor == null ? null : executor.getUuid();
+        ServerPlayer executor = source.getPlayer();
+        GameType gameMode = executor == null ? GameType.SURVIVAL : executor.gameMode.getGameModeForPlayer();
+        UUID ownerUuid = executor == null ? null : executor.getUUID();
         var rotation = source.getRotation();
         var spawned = AIPlayerManager.INSTANCE.spawn(
                 source.getServer(),
                 name,
-                source.getWorld(),
+                source.getLevel(),
                 source.getPosition(),
                 rotation.y,
                 rotation.x,
@@ -63,15 +62,15 @@ public final class MinecraftAiCommand {
                 ownerUuid);
 
         if (spawned.isPresent()) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] Spawned " + name), true);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] Spawned " + name), true);
             return 1;
         }
 
-        source.sendError(Text.literal("[Minecraft-AI] Failed to spawn " + name + " (name already in use)"));
+        source.sendFailure(Component.literal("[Minecraft-AI] Failed to spawn " + name + " (name already in use)"));
         return 0;
     }
 
-    private static int despawn(ServerCommandSource source, String name) {
+    private static int despawn(CommandSourceStack source, String name) {
         var bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:despawn");
         if (bot.isEmpty()) {
@@ -79,22 +78,22 @@ public final class MinecraftAiCommand {
         }
         boolean removed = AIPlayerManager.INSTANCE.despawn(source.getServer(), name);
         if (removed) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] Despawned " + name), true);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] Despawned " + name), true);
             return 1;
         }
 
-        source.sendError(Text.literal("[Minecraft-AI] No such bot: " + name));
+        source.sendFailure(Component.literal("[Minecraft-AI] No such bot: " + name));
         return 0;
     }
 
-    private static int list(ServerCommandSource source) {
+    private static int list(CommandSourceStack source) {
         var bots = AIPlayerManager.INSTANCE.all().stream()
                 .filter(bot -> BotAuthorizationGate.INSTANCE.canView(source, bot))
                 .toList();
         String names = bots.stream()
                 .map(player -> player.getGameProfile().name())
                 .collect(Collectors.joining(", "));
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + bots.size() + " bot(s): " + names), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] " + bots.size() + " bot(s): " + names), false);
         return bots.size();
     }
 }

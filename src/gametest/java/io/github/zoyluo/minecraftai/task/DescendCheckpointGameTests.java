@@ -13,52 +13,51 @@ import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.persist.MissionRecord;
 import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.persist.MissionSpec;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.text.Text;
 
 /** Restart contracts for the exact staircase hand-off owned by {@link DescendToYTask}. */
 public final class DescendCheckpointGameTests {
     @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_full_depth_deepslate_descent_with_five_stone_pickaxes_fits_its_persisted_window", maxTicks = 9_000)
     public void fullDepthDeepslateDescentWithFiveStonePickaxesFitsItsPersistedWindow(
-            TestContext context) {
-        BlockPos relativeOrigin = context.getAbsolutePos(new BlockPos(4, 0, 80));
+            GameTestHelper context) {
+        BlockPos relativeOrigin = context.absolutePos(new BlockPos(4, 0, 80));
         BlockPos start = new BlockPos(relativeOrigin.getX(), 16, relativeOrigin.getZ());
         int targetY = -59;
         require(context, start.getY() - targetY == 75,
                 "full-depth fixture did not span 75 levels: " + start + " -> " + targetY);
 
-        context.getWorld().setBlockState(start,
-                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(start.up(),
-                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(start.down(),
-                Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(start,
+                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(start.above(),
+                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(start.below(),
+                Blocks.DEEPSLATE.defaultBlockState(), Block.UPDATE_ALL);
         List<BlockPos> physicalBreaks = new java.util.ArrayList<>();
         BlockPos cursor = start;
         for (int level = 0; level < 75; level++) {
             BlockPos ahead = cursor.north();
-            BlockPos landing = ahead.down();
-            for (BlockPos breakPos : List.of(ahead, ahead.up(), landing)) {
-                context.getWorld().setBlockState(breakPos,
-                        Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
-                physicalBreaks.add(breakPos.toImmutable());
+            BlockPos landing = ahead.below();
+            for (BlockPos breakPos : List.of(ahead, ahead.above(), landing)) {
+                context.getLevel().setBlock(breakPos,
+                        Blocks.DEEPSLATE.defaultBlockState(), Block.UPDATE_ALL);
+                physicalBreaks.add(breakPos.immutable());
             }
-            context.getWorld().setBlockState(landing.down(),
-                    Blocks.DEEPSLATE.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(landing.below(),
+                    Blocks.DEEPSLATE.defaultBlockState(), Block.UPDATE_ALL);
             cursor = landing;
         }
         BlockPos expectedLanding = cursor;
@@ -77,7 +76,7 @@ public final class DescendCheckpointGameTests {
                 "Y=16 to Y=-59 did not receive the derived 8,400-tick window: "
                         + task.checkpoint());
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             // One task tick per real server tick is part of the contract. Replaying ActionPack in
             // the same server tick can make MiningController reach progress=1 before the server's
             // interaction manager has settled the break, which only burns the persisted budget.
@@ -92,24 +91,24 @@ public final class DescendCheckpointGameTests {
             }
             Map<String, String> terminal = task.checkpoint();
             int budgetUsed = Integer.parseInt(terminal.get("budget_used"));
-            require(context, bot.getBlockPos().equals(expectedLanding),
+            require(context, bot.blockPosition().equals(expectedLanding),
                     "full-depth descent completed at the wrong landing: expected="
                             + expectedLanding.toShortString() + " actual="
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             require(context, budgetUsed > 4_800 && budgetUsed <= 8_400
                             && "8400".equals(terminal.get("budget_limit"))
                             && "false".equals(terminal.get("task_open")),
                     "full-depth descent violated its persisted dynamic budget: " + terminal);
             require(context, physicalBreaks.stream().allMatch(pos ->
-                            !context.getWorld().getBlockState(pos).isOf(Blocks.DEEPSLATE)),
+                            !context.getLevel().getBlockState(pos).is(Blocks.DEEPSLATE)),
                     "full-depth descent completed without physically clearing every body block");
             finish(context, bot, name);
         });
     }
 
     @GameTest(maxTicks = 40)
-    public void exhaustedCheckpointFailsOnItsPersistedClock(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(2, 4, 2));
+    public void exhaustedCheckpointFailsOnItsPersistedClock(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(2, 4, 2));
         prepareLanding(context, start);
         AIPlayerEntity bot = spawn(context, "DescendBudgetRestoreGT", start);
 
@@ -127,19 +126,19 @@ public final class DescendCheckpointGameTests {
                 "exhausted checkpoint received a fresh clock: " + restored.state());
         require(context, restored.failureReason().startsWith("descend_timeout"),
                 "unexpected exhausted-checkpoint failure: " + restored.failureReason());
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "timeout restore moved before enforcing its persisted budget");
         finish(context, bot, "DescendBudgetRestoreGT");
     }
 
     @GameTest(maxTicks = 30)
-    public void schemaFourRestartKeepsTheOriginalDepthWindowAtANewHeight(TestContext context) {
-        BlockPos lane = context.getAbsolutePos(new BlockPos(3, 0, 12));
+    public void schemaFourRestartKeepsTheOriginalDepthWindowAtANewHeight(GameTestHelper context) {
+        BlockPos lane = context.absolutePos(new BlockPos(3, 0, 12));
         BlockPos start = new BlockPos(lane.getX(), 16, lane.getZ());
         BlockPos restart = new BlockPos(lane.getX(), 0, lane.getZ());
         prepareLanding(context, start);
         prepareLanding(context, restart);
-        prepareLanding(context, restart.north().down());
+        prepareLanding(context, restart.north().below());
         String name = "DescendWindowRestoreGT";
         AIPlayerEntity bot = spawn(context, name, start);
 
@@ -152,7 +151,7 @@ public final class DescendCheckpointGameTests {
                         && DescendToYTask.inspectCheckpoint(checkpoint).isPresent(),
                 "dynamic restart fixture was invalid: " + checkpoint);
         first.cancel(bot, "gametest_restart");
-        bot.teleport(context.getWorld(), restart.getX() + 0.5D, restart.getY(),
+        bot.teleportTo(context.getLevel(), restart.getX() + 0.5D, restart.getY(),
                 restart.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
 
         DescendToYTask restored = new DescendToYTask(-59, checkpoint);
@@ -172,8 +171,8 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 30)
-    public void detourCheckpointSchemaRejectsInventedOrIncompleteEdgeHistory(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(4, 7, 2));
+    public void detourCheckpointSchemaRejectsInventedOrIncompleteEdgeHistory(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(4, 7, 2));
         prepareLanding(context, start);
         AIPlayerEntity bot = spawn(context, "DescendEdgeSchemaGT", start);
         Map<String, String> current = new LinkedHashMap<>(
@@ -271,20 +270,20 @@ public final class DescendCheckpointGameTests {
 
     @GameTest(maxTicks = 40)
     public void edgeSeventeenCheckpointContinuesToANearbySupportedCaveRim(
-            TestContext context) {
-        BlockPos restart = context.getAbsolutePos(new BlockPos(8, 7, 8));
+            GameTestHelper context) {
+        BlockPos restart = context.absolutePos(new BlockPos(8, 7, 8));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -7; dz <= 2; dz++) {
                 for (int dy = -3; dy <= 2; dy++) {
-                    context.getWorld().setBlockState(restart.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(restart.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         for (int step = 0; step <= 4; step++) {
             prepareLanding(context, restart.north(step));
         }
-        BlockPos lowerExit = restart.north(5).down();
+        BlockPos lowerExit = restart.north(5).below();
         prepareLanding(context, lowerExit);
 
         String name = "DescendEdge17RestoreGT";
@@ -324,7 +323,7 @@ public final class DescendCheckpointGameTests {
         // ActionPack#onUpdate-driven advancement) could never complete inside one. Drive one task
         // tick per real server tick instead, matching every other fixture in this suite whose
         // outcome must reflect real ticked state rather than a synchronous burst of calls.
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (restored.state() == TaskState.RUNNING) {
                 restored.tick(bot);
                 maxDebt[0] = Math.max(maxDebt[0],
@@ -334,10 +333,10 @@ public final class DescendCheckpointGameTests {
             require(context, restored.state() == TaskState.COMPLETED,
                     "edge-17 restart did not reach the supported rim: "
                             + restored.state() + ":" + restored.failureReason());
-            require(context, bot.getBlockPos().equals(lowerExit),
+            require(context, bot.blockPosition().equals(lowerExit),
                     "edge-17 restart completed at the wrong landing: expected="
                             + lowerExit.toShortString() + " actual="
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             // DescendToYTask now recognizes ahead as an already-open, already-supported flat
             // landing before ever treating the riser below it as a stair to mine through (a real
             // player standing here would just walk onto visibly-open, visibly-supported ground
@@ -361,13 +360,13 @@ public final class DescendCheckpointGameTests {
 
     @GameTest(maxTicks = 20)
     public void fullThirtyTwoEdgeCheckpointFailsClosedWithoutRefreshingOrReplaying(
-            TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 7, 8));
+            GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(8, 7, 8));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -3; dy <= 2; dy++) {
-                    context.getWorld().setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
@@ -405,9 +404,9 @@ public final class DescendCheckpointGameTests {
                         && restored.failureReason().startsWith("descend_no_safe_landing"),
                 "full edge-cap checkpoint escaped its bounded terminal: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "full edge-cap checkpoint moved after exhaustion: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         require(context, "32".equals(restored.checkpoint().get("lateral_detours"))
                         && encodedHistory.equals(
                         restored.checkpoint().get("traversed_detour_edges")),
@@ -424,16 +423,16 @@ public final class DescendCheckpointGameTests {
      */
     @GameTest(maxTicks = 30)
     public void knockbackLandingDriftReanchorsInsteadOfFailingTheMission(
-            TestContext context) {
-        BlockPos floor = context.getAbsolutePos(new BlockPos(11, 7, 6));
-        BlockPos origin = floor.east().up();
+            GameTestHelper context) {
+        BlockPos floor = context.absolutePos(new BlockPos(11, 7, 6));
+        BlockPos origin = floor.east().above();
         BlockPos drifted = floor.west();
         prepareLanding(context, floor);
         prepareLanding(context, origin);
         prepareLanding(context, drifted);
         // Keep the next stair below the drifted pose solid so the recovered tick plans calmly.
-        context.getWorld().setBlockState(drifted.north(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(drifted.north(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "DescendDriftGT";
         AIPlayerEntity bot = spawn(context, name, drifted);
@@ -466,16 +465,16 @@ public final class DescendCheckpointGameTests {
 
     @GameTest(maxTicks = 30)
     public void upperRetreatLandingBackOnTheObstacleFloorKeepsItsDetourDebt(
-            TestContext context) {
-        BlockPos floor = context.getAbsolutePos(new BlockPos(5, 7, 6));
+            GameTestHelper context) {
+        BlockPos floor = context.absolutePos(new BlockPos(5, 7, 6));
         BlockPos south = floor.south();
-        BlockPos upper = floor.east().up();
+        BlockPos upper = floor.east().above();
         BlockPos upperSouth = upper.south();
         prepareLanding(context, floor);
-        BlockPos freshLowerLanding = floor.north().down();
+        BlockPos freshLowerLanding = floor.north().below();
         prepareLanding(context, freshLowerLanding);
-        context.getWorld().setBlockState(floor.north(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(floor.north(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "DescendFloorDebtGT";
         AIPlayerEntity bot = spawn(context, name, floor);
@@ -509,9 +508,9 @@ public final class DescendCheckpointGameTests {
         require(context, restored.state() == TaskState.RUNNING,
                 "same-floor landing ended unexpectedly: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(floor),
+        require(context, bot.blockPosition().equals(floor),
                 "same-floor landing fixture moved away before debt inspection: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         require(context, "5".equals(afterLanding.get("lateral_detours"))
                         && detourHistory.equals(afterLanding.get("traversed_detour_edges")),
                 "upper retreat landing reset same-floor detour debt: " + afterLanding);
@@ -521,25 +520,25 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 50)
-    public void interruptedLandingAtOriginRejectsTheSameEdgeAfterRestore(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 2));
+    public void interruptedLandingAtOriginRejectsTheSameEdgeAfterRestore(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(6, 5, 2));
         prepareLanding(context, start);
-        prepareLanding(context, start.north().down());
-        prepareLanding(context, start.east().down());
+        prepareLanding(context, start.north().below());
+        prepareLanding(context, start.east().below());
         AIPlayerEntity bot = spawn(context, "DescendLandingRestoreGT", start);
 
         DescendToYTask first = new DescendToYTask(start.getY() - 1);
         first.start(bot);
         first.tick(bot);
-        BlockPos northLanding = start.north().down();
-        require(context, bot.getBlockPos().equals(northLanding),
+        BlockPos northLanding = start.north().below();
+        require(context, bot.blockPosition().equals(northLanding),
                 "fixture did not issue the initial north landing");
         Map<String, String> checkpoint = first.checkpoint();
         require(context, encode(start).equals(checkpoint.get("pending_landing_origin"))
                         && encode(northLanding).equals(checkpoint.get("pending_landing_target")),
                 "fixture did not persist its unresolved landing: " + checkpoint);
         first.cancel(bot, "gametest_restart");
-        bot.teleport(context.getWorld(), start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(context.getLevel(), start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
 
         DescendToYTask restored = new DescendToYTask(start.getY() - 1, checkpoint);
@@ -553,33 +552,33 @@ public final class DescendCheckpointGameTests {
                 "restart did not reject the interrupted north edge: " + promoted);
 
         restored.tick(bot);
-        require(context, !bot.getBlockPos().equals(northLanding),
+        require(context, !bot.blockPosition().equals(northLanding),
                 "restored Descend retried the interrupted landing");
         finish(context, bot, "DescendLandingRestoreGT");
     }
 
     @GameTest(maxTicks = 30)
-    public void traversedDetourEdgesSurviveRestartAndUnlockTheUpperSealRoute(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(8, 7, 2));
+    public void traversedDetourEdgesSurviveRestartAndUnlockTheUpperSealRoute(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(8, 7, 2));
         BlockPos south = start.south();
         BlockPos northSeal = start.north();
-        BlockPos upperEscape = northSeal.up();
+        BlockPos upperEscape = northSeal.above();
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    context.getWorld().setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         prepareLanding(context, start);
         prepareLanding(context, south);
-        context.getWorld().setBlockState(northSeal,
-                Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(upperEscape,
-                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(upperEscape.up(),
-                Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(northSeal,
+                Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(upperEscape,
+                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(upperEscape.above(),
+                Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         AIPlayerEntity bot = spawn(context, "DescendEdgeRestoreGT", start);
 
         Map<String, String> checkpoint = new LinkedHashMap<>(
@@ -601,10 +600,10 @@ public final class DescendCheckpointGameTests {
         require(context, restored.state() == TaskState.RUNNING,
                 "restored detour ended unexpectedly: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(upperEscape),
+        require(context, bot.blockPosition().equals(upperEscape),
                 "restored detour replayed the visited south edge instead of using the upper "
-                        + "water-seal route: " + bot.getBlockPos().toShortString());
-        require(context, context.getWorld().getBlockState(northSeal).isOf(Blocks.DIRT),
+                        + "water-seal route: " + bot.blockPosition().toShortString());
+        require(context, context.getLevel().getBlockState(northSeal).is(Blocks.DIRT),
                 "upper-route escape mined its owned water seal");
         require(context, DescendToYTask.inspectCheckpoint(restored.checkpoint()).isPresent(),
                 "upper-route move produced an invalid checkpoint: " + restored.checkpoint());
@@ -613,28 +612,28 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 50)
-    public void unsupportedSolidDetourPreservesUpperRetreatAcrossRestart(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(14, 7, 2));
+    public void unsupportedSolidDetourPreservesUpperRetreatAcrossRestart(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(14, 7, 2));
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    context.getWorld().setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        context.getWorld().setBlockState(start.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(start.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         BlockPos unsupportedBody = start.east();
-        BlockPos upperRetreat = unsupportedBody.up();
+        BlockPos upperRetreat = unsupportedBody.above();
         // The same-level EAST candidate is solid but has no floor. It is also the sole support for
         // the dry upper retreat. The old detour mined it before stepToStandable rejected the lower
         // landing, thereby destroying both escape options.
-        context.getWorld().setBlockState(unsupportedBody,
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos freshLanding = upperRetreat.north().down();
-        context.getWorld().setBlockState(freshLanding.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(unsupportedBody,
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos freshLanding = upperRetreat.north().below();
+        context.getLevel().setBlock(freshLanding.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         String name = "DescendUpperRetreatRestoreGT";
@@ -654,17 +653,17 @@ public final class DescendCheckpointGameTests {
         // onto EAST, a second to recognize the safe climb-over onto its own top face instead of
         // mining through it (see DescendToYTask's climb-over branch). Bound the wait generously.
         for (int i = 0; i < 5 && first.state() == TaskState.RUNNING
-                && !bot.getBlockPos().equals(upperRetreat); i++) {
+                && !bot.blockPosition().equals(upperRetreat); i++) {
             first.tick(bot);
         }
 
         require(context, first.state() == TaskState.RUNNING,
                 "unsupported detour ended before its bounded upper retreat: "
                         + first.state() + ":" + first.failureReason());
-        require(context, bot.getBlockPos().equals(upperRetreat),
+        require(context, bot.blockPosition().equals(upperRetreat),
                 "unsupported solid candidate was not skipped for the safe upper retreat: "
-                        + start.toShortString() + " -> " + bot.getBlockPos().toShortString());
-        require(context, context.getWorld().getBlockState(unsupportedBody).isOf(Blocks.STONE),
+                        + start.toShortString() + " -> " + bot.blockPosition().toShortString());
+        require(context, context.getLevel().getBlockState(unsupportedBody).is(Blocks.STONE),
                 "Descend destroyed the only support for its upper retreat");
 
         Map<String, String> checkpoint = first.checkpoint();
@@ -693,22 +692,22 @@ public final class DescendCheckpointGameTests {
         require(context, restored.state() == TaskState.RUNNING,
                 "restored upper retreat ended unexpectedly: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(upperRetreat),
+        require(context, bot.blockPosition().equals(upperRetreat),
                 "restored Descend moved instead of rotating in place on its first tick: "
-                        + upperRetreat.toShortString() + " -> " + bot.getBlockPos().toShortString());
-        require(context, context.getWorld().getBlockState(unsupportedBody).isOf(Blocks.STONE),
+                        + upperRetreat.toShortString() + " -> " + bot.blockPosition().toShortString());
+        require(context, context.getLevel().getBlockState(unsupportedBody).is(Blocks.STONE),
                 "restored Descend destroyed the only support for its upper retreat");
         for (int i = 0; i < 5 && restored.state() == TaskState.RUNNING
-                && !bot.getBlockPos().equals(freshLanding); i++) {
+                && !bot.blockPosition().equals(freshLanding); i++) {
             restored.tick(bot);
         }
         require(context, restored.state() == TaskState.RUNNING,
                 "restored upper retreat failed before reaching the fresh column: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(freshLanding),
+        require(context, bot.blockPosition().equals(freshLanding),
                 "restored Descend replayed the rejected stair instead of using the fresh column: "
-                        + upperRetreat.toShortString() + " -> " + bot.getBlockPos().toShortString());
-        require(context, !bot.getBlockPos().equals(start),
+                        + upperRetreat.toShortString() + " -> " + bot.blockPosition().toShortString());
+        require(context, !bot.blockPosition().equals(start),
                 "restored Descend immediately fell back into the escaped lower cell");
 
         restored.cancel(bot, "gametest_complete");
@@ -716,7 +715,7 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void isolatedPillarBuildsOnePhysicalFloorBeforeDetourMovement(TestContext context) {
+    public void isolatedPillarBuildsOnePhysicalFloorBeforeDetourMovement(GameTestHelper context) {
         String name = "DescendBridgeReceiptGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
                 context, name, MiningBudget.EMERGENCY_STONE_LIKE + 1);
@@ -727,11 +726,11 @@ public final class DescendCheckpointGameTests {
         require(context, task.state() == TaskState.RUNNING,
                 "isolated-pillar bridge ended on placement: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(fixture.origin()),
+        require(context, bot.blockPosition().equals(fixture.origin()),
                 "Descend moved in the same tick as support placement: "
-                        + bot.getBlockPos().toShortString());
-        require(context, context.getWorld().getBlockState(fixture.support())
-                        .isOf(Blocks.COBBLESTONE),
+                        + bot.blockPosition().toShortString());
+        require(context, context.getLevel().getBlockState(fixture.support())
+                        .is(Blocks.COBBLESTONE),
                 "Descend did not leave a factual bridge receipt");
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                         == MiningBudget.EMERGENCY_STONE_LIKE,
@@ -744,9 +743,9 @@ public final class DescendCheckpointGameTests {
         require(context, task.state() == TaskState.RUNNING,
                 "bridge receipt was not accepted on the following tick: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(fixture.landing()),
+        require(context, bot.blockPosition().equals(fixture.landing()),
                 "Descend did not physically step onto its verified bridge: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                         == MiningBudget.EMERGENCY_STONE_LIKE,
                 "receipt acknowledgement consumed a second support block");
@@ -758,7 +757,7 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void bridgeWorldReceiptSurvivesRestartWithoutDuplicateMaterial(TestContext context) {
+    public void bridgeWorldReceiptSurvivesRestartWithoutDuplicateMaterial(GameTestHelper context) {
         String name = "DescendBridgeRestartGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
                 context, name, MiningBudget.EMERGENCY_STONE_LIKE + 1);
@@ -766,8 +765,8 @@ public final class DescendCheckpointGameTests {
         AIPlayerEntity bot = fixture.bot();
 
         first.tick(bot);
-        require(context, context.getWorld().getBlockState(fixture.support())
-                        .isOf(Blocks.COBBLESTONE),
+        require(context, context.getLevel().getBlockState(fixture.support())
+                        .is(Blocks.COBBLESTONE),
                 "restart fixture did not place its bridge receipt");
         int blocksAfterPlacement = InventoryAction.countItem(bot, Items.COBBLESTONE);
         Map<String, String> checkpoint = first.checkpoint();
@@ -782,14 +781,14 @@ public final class DescendCheckpointGameTests {
         require(context, restored.state() == TaskState.RUNNING,
                 "restored bridge receipt ended unexpectedly: "
                         + restored.state() + ":" + restored.failureReason());
-        require(context, bot.getBlockPos().equals(fixture.landing()),
+        require(context, bot.blockPosition().equals(fixture.landing()),
                 "restored Descend did not consume the factual support receipt: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                         == blocksAfterPlacement,
                 "restart duplicated the support placement material");
-        require(context, context.getWorld().getBlockState(fixture.support())
-                        .isOf(Blocks.COBBLESTONE),
+        require(context, context.getLevel().getBlockState(fixture.support())
+                        .is(Blocks.COBBLESTONE),
                 "restart removed or replaced its factual support receipt");
 
         restored.cancel(bot, "gametest_complete");
@@ -797,7 +796,7 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 30)
-    public void isolatedPillarKeepsEmergencyReserveAndFailsClosed(TestContext context) {
+    public void isolatedPillarKeepsEmergencyReserveAndFailsClosed(GameTestHelper context) {
         String name = "DescendBridgeReserveGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
                 context, name, MiningBudget.EMERGENCY_STONE_LIKE);
@@ -809,9 +808,9 @@ public final class DescendCheckpointGameTests {
                         && task.failureReason().startsWith("descend_no_safe_landing"),
                 "reserve-only isolated pillar did not fail closed: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(fixture.origin()),
+        require(context, bot.blockPosition().equals(fixture.origin()),
                 "reserve-only failure moved off the supported origin");
-        require(context, context.getWorld().getBlockState(fixture.support()).isAir(),
+        require(context, context.getLevel().getBlockState(fixture.support()).isAir(),
                 "reserve-only failure placed an unauthorized bridge");
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                         == MiningBudget.EMERGENCY_STONE_LIKE,
@@ -821,22 +820,22 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 30)
-    public void visibleAdjacentLavaRejectsBridgePlacement(TestContext context) {
+    public void visibleAdjacentLavaRejectsBridgePlacement(GameTestHelper context) {
         String name = "DescendBridgeLavaGT";
         IsolatedDetourFixture fixture = isolatedDetourFixture(
                 context, name, MiningBudget.EMERGENCY_STONE_LIKE + 1);
         BlockPos visibleLava = fixture.support().north();
-        context.getWorld().setBlockState(visibleLava,
-                Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(visibleLava,
+                Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
         // Keep NORTH as the only replaceable missing floor. The other candidates are dangerous
         // collision supports, so rejecting the visible adjacent lava cannot silently bridge in a
         // different direction and make the test pass for the wrong reason.
-        context.getWorld().setBlockState(fixture.origin().east().down(),
-                Blocks.MAGMA_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(fixture.origin().west().down(),
-                Blocks.MAGMA_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(fixture.origin().south().down(),
-                Blocks.MAGMA_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(fixture.origin().east().below(),
+                Blocks.MAGMA_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(fixture.origin().west().below(),
+                Blocks.MAGMA_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(fixture.origin().south().below(),
+                Blocks.MAGMA_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         DescendToYTask task = fixture.task();
@@ -846,11 +845,11 @@ public final class DescendCheckpointGameTests {
                         && task.failureReason().startsWith("descend_no_safe_landing"),
                 "lava-adjacent isolated pillar did not fail closed: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(fixture.origin()),
+        require(context, bot.blockPosition().equals(fixture.origin()),
                 "lava-adjacent rejection moved the bot");
-        require(context, context.getWorld().getBlockState(fixture.support()).isAir(),
+        require(context, context.getLevel().getBlockState(fixture.support()).isAir(),
                 "Descend bridged beside visible lava");
-        require(context, context.getWorld().getBlockState(visibleLava).isOf(Blocks.LAVA),
+        require(context, context.getLevel().getBlockState(visibleLava).is(Blocks.LAVA),
                 "lava-adjacent rejection mutated the hazard");
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE)
                         == MiningBudget.EMERGENCY_STONE_LIKE + 1,
@@ -860,11 +859,11 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_settled_landing_survives_safety_task_displacement", maxTicks = 40)
-    public void settledLandingSurvivesSafetyTaskDisplacement(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
-        BlockPos firstLanding = start.north().down();
+    public void settledLandingSurvivesSafetyTaskDisplacement(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 5, 3));
+        BlockPos firstLanding = start.north().below();
         BlockPos displaced = firstLanding.east();
-        BlockPos finalLanding = displaced.north().down();
+        BlockPos finalLanding = displaced.north().below();
         prepareLanding(context, start);
         prepareLanding(context, firstLanding);
         prepareLanding(context, displaced);
@@ -874,7 +873,7 @@ public final class DescendCheckpointGameTests {
         DescendToYTask task = new DescendToYTask(start.getY() - 2);
         task.start(bot);
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(firstLanding),
+        require(context, bot.blockPosition().equals(firstLanding),
                 "fixture did not issue the first physical landing");
         require(context, encode(firstLanding).equals(task.checkpoint().get("pending_landing_target")),
                 "fixture did not retain the unresolved first landing");
@@ -892,7 +891,7 @@ public final class DescendCheckpointGameTests {
         require(context, task.state() == TaskState.RUNNING,
                 "resumed Descend rejected the safety displacement: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(finalLanding),
+        require(context, bot.blockPosition().equals(finalLanding),
                 "resumed Descend did not continue from the new factual pose");
         task.tick(bot);
         require(context, task.state() == TaskState.COMPLETED,
@@ -902,9 +901,9 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:descend_checkpoint_game_tests_threat_pause_preserves_rejection_at_the_settled_landing", maxTicks = 30)
-    public void threatPausePreservesRejectionAtTheSettledLanding(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 5, 3));
-        BlockPos landing = start.north().down();
+    public void threatPausePreservesRejectionAtTheSettledLanding(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 5, 3));
+        BlockPos landing = start.north().below();
         prepareLanding(context, start);
         prepareLanding(context, landing);
         AIPlayerEntity bot = spawn(context, "DescendThreatPauseGT", start);
@@ -912,7 +911,7 @@ public final class DescendCheckpointGameTests {
         DescendToYTask task = new DescendToYTask(start.getY() - 2);
         task.start(bot);
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(landing),
+        require(context, bot.blockPosition().equals(landing),
                 "fixture did not issue the pending physical landing");
 
         task.avoidCurrentDescentDirection(bot, landing.east());
@@ -934,8 +933,8 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 60)
-    public void plannerOmittedDescentStillReplaysTheActiveCheckpoint(TestContext context) {
-        BlockPos anchor = context.getAbsolutePos(new BlockPos(10, 2, 2));
+    public void plannerOmittedDescentStillReplaysTheActiveCheckpoint(GameTestHelper context) {
+        BlockPos anchor = context.absolutePos(new BlockPos(10, 2, 2));
         BlockPos mineFace = new BlockPos(anchor.getX(), -58, anchor.getZ());
         prepareLanding(context, mineFace);
         AIPlayerEntity bot = spawnPreparedMiner(context, "DescendMissionReplayGT", mineFace);
@@ -969,8 +968,8 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 60)
-    public void committedDescentAtBudgetBoundaryIsAcknowledgedWithoutReplay(TestContext context) {
-        BlockPos anchor = context.getAbsolutePos(new BlockPos(12, 2, 2));
+    public void committedDescentAtBudgetBoundaryIsAcknowledgedWithoutReplay(GameTestHelper context) {
+        BlockPos anchor = context.absolutePos(new BlockPos(12, 2, 2));
         BlockPos mineFace = new BlockPos(anchor.getX(), -58, anchor.getZ());
         prepareLanding(context, mineFace);
         AIPlayerEntity bot = spawnPreparedMiner(context, "DescendCommittedRestoreGT", mineFace);
@@ -1005,8 +1004,8 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void satisfiedGoalRejectsMissingDescendCheckpoint(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(14, 4, 2));
+    public void satisfiedGoalRejectsMissingDescendCheckpoint(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(14, 4, 2));
         prepareLanding(context, start);
         AIPlayerEntity bot = spawn(context, "DescendMissingCheckpointGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND, 8));
@@ -1025,10 +1024,10 @@ public final class DescendCheckpointGameTests {
     }
 
     @GameTest(maxTicks = 20)
-    public void descentLightingDoesNotConsumeToolServiceSticks(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(16, 4, 2));
+    public void descentLightingDoesNotConsumeToolServiceSticks(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(16, 4, 2));
         prepareLanding(context, start);
-        prepareLanding(context, start.north().down());
+        prepareLanding(context, start.north().below());
         AIPlayerEntity bot = spawn(context, "DescendTorchReserveGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL));
@@ -1076,7 +1075,7 @@ public final class DescendCheckpointGameTests {
                 List.of(), false);
     }
 
-    private static AIPlayerEntity spawnPreparedMiner(TestContext context, String name, BlockPos pos) {
+    private static AIPlayerEntity spawnPreparedMiner(GameTestHelper context, String name, BlockPos pos) {
         AIPlayerEntity bot = spawn(context, name, pos);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 2));
         for (int i = 0; i < 5; i++) {
@@ -1090,22 +1089,22 @@ public final class DescendCheckpointGameTests {
         return bot;
     }
 
-    private static AIPlayerEntity spawn(TestContext context, String name, BlockPos pos) {
+    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos pos) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(),
-                        Vec3d.ofBottomCenter(pos), 0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(pos), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(context.getWorld(), pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
+        bot.teleportTo(context.getLevel(), pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
+        bot.getFoodData().setFoodLevel(20);
         return bot;
     }
 
-    private static void prepareLanding(TestContext context, BlockPos feet) {
-        context.getWorld().setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    private static void prepareLanding(GameTestHelper context, BlockPos feet) {
+        context.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
     }
 
     private static String encode(BlockPos pos) {
@@ -1116,20 +1115,20 @@ public final class DescendCheckpointGameTests {
         return encode(origin) + "," + encode(target);
     }
 
-    private static IsolatedDetourFixture isolatedDetourFixture(TestContext context,
+    private static IsolatedDetourFixture isolatedDetourFixture(GameTestHelper context,
                                                                String name,
                                                                int cobblestoneCount) {
-        BlockPos origin = context.getAbsolutePos(new BlockPos(18, 8, 18));
+        BlockPos origin = context.absolutePos(new BlockPos(18, 8, 18));
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
-                    context.getWorld().setBlockState(origin.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(origin.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        context.getWorld().setBlockState(origin.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(origin.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         Standability.clearCache();
 
         AIPlayerEntity bot = spawn(context, name, origin);
@@ -1150,7 +1149,7 @@ public final class DescendCheckpointGameTests {
         task.start(bot);
         BlockPos landing = origin.north();
         return new IsolatedDetourFixture(
-                bot, task, origin.toImmutable(), landing.toImmutable(), landing.down().toImmutable());
+                bot, task, origin.immutable(), landing.immutable(), landing.below().immutable());
     }
 
     private record IsolatedDetourFixture(AIPlayerEntity bot,
@@ -1160,16 +1159,16 @@ public final class DescendCheckpointGameTests {
                                          BlockPos support) {
     }
 
-    private static void finish(TestContext context, AIPlayerEntity bot, String name) {
+    private static void finish(GameTestHelper context, AIPlayerEntity bot, String name) {
         GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

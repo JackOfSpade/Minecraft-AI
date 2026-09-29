@@ -9,13 +9,12 @@ import io.github.zoyluo.minecraftai.mining.assist.MiningAssistState;
 import io.github.zoyluo.minecraftai.mining.assist.PoiRegistry;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.block.Block;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Block;
 
 // ---------------------------------------------------------------------------------------------------------
 // Mining assist P4 (design 5.3): L1 LegChooser adapter. Off by default (explore.legChooser); every method
@@ -78,7 +77,7 @@ final class OreDigLegChooserAdapter {
     /** Measures the four design-5.3 signals for one candidate absolute {@code STRIP_DIRS} index. */
     private LegChooser.DirectionSignal stripDirectionSignal(AIPlayerEntity bot, int dirIndex, int corridorLength) {
         Direction direction = OreDigTask.STRIP_DIRS[dirIndex];
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         double freshFraction = stripCoverage.freshFraction(
                 origin, direction, corridorLength, LEG_CHOOSER_Y_BAND, LEG_CHOOSER_HALF_WIDTH);
         double openBias = stripOpenBias(bot, direction);
@@ -95,7 +94,7 @@ final class OreDigLegChooserAdapter {
      * from both the numerator and the denominator, never counted as open or as blocked.
      */
     private double stripOpenBias(AIPlayerEntity bot, Direction direction) {
-        double baseAngle = Math.atan2(direction.getOffsetX(), direction.getOffsetZ());
+        double baseAngle = Math.atan2(direction.getStepX(), direction.getStepZ());
         int sampled = 0;
         int free = 0;
         for (int i = 0; i < LEG_CHOOSER_OPEN_BIAS_RAYS; i++) {
@@ -127,22 +126,22 @@ final class OreDigLegChooserAdapter {
         BlockPos nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
         for (Block oreBlock : targetOres) {
-            String oreId = Registries.BLOCK.getId(oreBlock).toString();
+            String oreId = BuiltInRegistries.BLOCK.getKey(oreBlock).toString();
             var zone = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.richZoneNear(
-                    bot.getUuid(), oreId, origin, LEG_CHOOSER_ZONE_MAX_DIST,
+                    bot.getUUID(), oreId, origin, LEG_CHOOSER_ZONE_MAX_DIST,
                     LEG_CHOOSER_ZONE_MIN_POINTS, LEG_CHOOSER_ZONE_RADIUS);
             if (zone.isPresent()) {
-                double distSq = origin.getSquaredDistance(zone.get());
+                double distSq = origin.distSqr(zone.get());
                 if (distSq < nearestDistSq) {
                     nearestDistSq = distSq;
                     nearest = zone.get();
                 }
             }
         }
-        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
         if (state != null) {
             for (SightingLedger.Sighting sighting : state.sightings().nearestTo(origin, 1)) {
-                double distSq = origin.getSquaredDistance(sighting.pos());
+                double distSq = origin.distSqr(sighting.pos());
                 if (distSq < nearestDistSq) {
                     nearestDistSq = distSq;
                     nearest = sighting.pos();
@@ -158,7 +157,7 @@ final class OreDigLegChooserAdapter {
         if (horizontalDist < 1.0e-6D) {
             return 0.0D;
         }
-        double alignment = (dx * direction.getOffsetX() + dz * direction.getOffsetZ()) / horizontalDist;
+        double alignment = (dx * direction.getStepX() + dz * direction.getStepZ()) / horizontalDist;
         if (alignment <= 0.0D) {
             return 0.0D;
         }
@@ -174,14 +173,14 @@ final class OreDigLegChooserAdapter {
      * this bot has already acknowledged, so L1 steers around it the same way a live hold would).
      */
     private double stripHazardProximity(AIPlayerEntity bot, BlockPos origin, Direction direction, int corridorLength) {
-        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUuid());
+        MiningAssistState state = MiningAssistRegistry.getIfPresent(bot.getUUID());
         HazardField hazards = state == null ? null : state.hazards();
-        List<PoiRegistry.Entry> pois = PoiRegistry.snapshot(bot.getUuid());
+        List<PoiRegistry.Entry> pois = PoiRegistry.snapshot(bot.getUUID());
         int step = Math.max(1, LEG_CHOOSER_HAZARD_SAMPLE_STEP);
         int sampled = 0;
         int near = 0;
         for (int along = 0; along <= corridorLength; along += step) {
-            BlockPos sample = origin.offset(direction, along);
+            BlockPos sample = origin.relative(direction, along);
             sampled++;
             boolean hazardous = hazards != null
                     && (hazards.anyWithin(HazardField.Kind.LAVA, sample, LEG_CHOOSER_HAZARD_RADIUS)
@@ -189,7 +188,7 @@ final class OreDigLegChooserAdapter {
                     || hazards.anyWithin(HazardField.Kind.TRAP, sample, LEG_CHOOSER_HAZARD_RADIUS));
             if (!hazardous) {
                 for (PoiRegistry.Entry entry : pois) {
-                    if (entry.anchor().isWithinDistance(sample, LEG_CHOOSER_HAZARD_RADIUS)) {
+                    if (entry.anchor().closerThan(sample, LEG_CHOOSER_HAZARD_RADIUS)) {
                         hazardous = true;
                         break;
                     }

@@ -1,10 +1,11 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.core.BlockPos;
 
 /**
  * xPerf-NAVSAFE-01 / detour-refactor-navsafetynet-water-search-cost: locks the invalidation rules
@@ -30,9 +31,9 @@ final class NavSafetyNetWaterSearchCacheTest {
 
     @Test
     void movedFeetCellInvalidatesImmediatelyEvenOnTheSameTick() {
-        assertFalse(NavSafetyNet.waterSearchCacheValid(FEET, 100, FEET.add(1, 0, 0), 100),
+        assertFalse(NavSafetyNet.waterSearchCacheValid(FEET, 100, FEET.offset(1, 0, 0), 100),
                 "a changed feet cell must recompute on the very next tick regardless of age");
-        assertFalse(NavSafetyNet.waterSearchCacheValid(FEET, 100, FEET.up(), 100));
+        assertFalse(NavSafetyNet.waterSearchCacheValid(FEET, 100, FEET.above(), 100));
     }
 
     @Test

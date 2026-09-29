@@ -1,6 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -10,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import net.minecraft.core.BlockPos;
 
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.BOT;
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.OVERWORLD;

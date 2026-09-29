@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
 
 /**
  * Working memory (layer 1 of the three-layer memory model): what has been tried / where has
@@ -73,7 +72,7 @@ public final class EpisodeMemory {
                     .skip(ep.excludedUntil.size() / 2).findFirst().orElse(nowTick);
             ep.excludedUntil.values().removeIf(until -> until <= median);
         }
-        ep.excludedUntil.put(pos.toImmutable(), nowTick + ttlTicks);
+        ep.excludedUntil.put(pos.immutable(), nowTick + ttlTicks);
     }
 
     public boolean isExcluded(UUID botId, BlockPos pos, int nowTick) {
@@ -107,10 +106,10 @@ public final class EpisodeMemory {
         BotEpisode ep = of(botId);
         Deque<BlockPos> trail = ep.trails.computeIfAbsent(normalizePurpose(purpose), ignored -> new ArrayDeque<>());
         BlockPos last = trail.peekLast();
-        if (last != null && last.getSquaredDistance(pos) < TRAIL_SPACING * TRAIL_SPACING) {
+        if (last != null && last.distSqr(pos) < TRAIL_SPACING * TRAIL_SPACING) {
             return;
         }
-        trail.addLast(pos.toImmutable());
+        trail.addLast(pos.immutable());
         while (trail.size() > TRAIL_MAX) {
             trail.pollFirst();
         }

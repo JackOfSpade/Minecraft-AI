@@ -38,7 +38,7 @@ public final class SurvivalGuard {
         // Note: RecoverDropsTask is deliberately **not** exempt -- cutting it off when air is critical during an underwater corpse run is correct:
         // exempting it = the task continues = drowning and dropping a whole second set of gear; accepting the item loss to save the bot's life is the only correct call (this was suggested for exemption during review; do not change it).
         // (1) Drowning: head submerged in water and air is down to only 5 seconds left -- no matter how urgent the work is, staying alive to breathe comes first.
-        if (bot.isSubmergedInWater() && bot.getAir() < 100) {
+        if (bot.isUnderWater() && bot.getAirSupply() < 100) {
             // OreDigTask has its own drowning circuit-breaker (line 169) and will [exclude this underwater ore block] -- defer to it; this layer does not preempt with an interrupt.
             // Otherwise this layer would interrupt without excluding the ore -> the bot surfaces (NavSafetyNet) and then re-locks onto the same underwater ore -> repeated guard_drowning
             // infinite loop (observed 2026-06-10 near a cliffside body of water: mining iron while diving, navsafe_surface fired 32 times and was still repeatedly interrupted -> goal failed).

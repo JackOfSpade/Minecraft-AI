@@ -11,18 +11,18 @@ import io.github.zoyluo.minecraftai.client.screen.ui.cards.QuickActionCard;
 import io.github.zoyluo.minecraftai.client.screen.ui.cards.SettingsCard;
 import io.github.zoyluo.minecraftai.client.screen.ui.cards.StatusCard;
 import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
 
 public final class BotPanelScreen extends Screen {
     public enum Mode {
@@ -35,15 +35,15 @@ public final class BotPanelScreen extends Screen {
 
     private final List<PanelComponent> leftCards = new ArrayList<>();
     private final List<PanelComponent> laidOutCards = new ArrayList<>();
-    private final List<ClickableWidget> panelWidgets = new ArrayList<>();
+    private final List<AbstractWidget> panelWidgets = new ArrayList<>();
     private final Mode mode;
     private ChatView chat;
-    private TextFieldWidget input;
-    private ButtonWidget sendButton;
-    private ButtonWidget goalButton;
-    private ButtonWidget inventoryButton;
-    private ButtonWidget settingsButton;
-    private ButtonWidget closeButton;
+    private EditBox input;
+    private Button sendButton;
+    private Button goalButton;
+    private Button inventoryButton;
+    private Button settingsButton;
+    private Button closeButton;
     private int px;
     private int py;
     private int pw;
@@ -53,8 +53,8 @@ public final class BotPanelScreen extends Screen {
     private String target = "";
 
     public BotPanelScreen(Mode mode) {
-        super(mode == Mode.GOAL ? Text.literal("Goal & Execution Chain")
-                : Text.translatable(mode == Mode.ACTIONS ? "screen.minecraftai.actions_panel"
+        super(mode == Mode.GOAL ? Component.literal("Goal & Execution Chain")
+                : Component.translatable(mode == Mode.ACTIONS ? "screen.minecraftai.actions_panel"
                 : mode == Mode.SETTINGS ? "screen.minecraftai.settings_panel"
                 : mode == Mode.INVENTORY ? "screen.minecraftai.inventory_panel"
                 : "screen.minecraftai.panel"));
@@ -74,39 +74,39 @@ public final class BotPanelScreen extends Screen {
         layoutComponents();
         if (mode == Mode.CHAT_STATUS) {
             int stripY = py + ph - Theme.INPUT_H - Theme.PAD + 1;
-            input = new TextFieldWidget(textRenderer, px + leftW + Theme.GUTTER + Theme.PAD, stripY,
-                    Math.max(60, rightW - Theme.PAD * 2 - 54), 18, Text.translatable("chat.minecraftai.input"));
+            input = new EditBox(font, px + leftW + Theme.GUTTER + Theme.PAD, stripY,
+                    Math.max(60, rightW - Theme.PAD * 2 - 54), 18, Component.translatable("chat.minecraftai.input"));
             input.setMaxLength(512);
             input.setSuggestion(Theme.tr("chat.minecraftai.input"));
-            sendButton = ButtonWidget.builder(Text.translatable("btn.minecraftai.send"), button -> sendChat())
-                    .dimensions(px + pw - Theme.PAD - 48, stripY, 48, 18)
+            sendButton = Button.builder(Component.translatable("btn.minecraftai.send"), button -> sendChat())
+                    .bounds(px + pw - Theme.PAD - 48, stripY, 48, 18)
                     .build();
             register(input);
             register(sendButton);
         }
-        goalButton = ButtonWidget.builder(Text.literal(mode == Mode.GOAL ? "Chat" : "Goal"), button -> {
-                    if (client != null) {
-                        client.setScreen(new BotPanelScreen(mode == Mode.GOAL ? Mode.CHAT_STATUS : Mode.GOAL));
+        goalButton = Button.builder(Component.literal(mode == Mode.GOAL ? "Chat" : "Goal"), button -> {
+                    if (minecraft != null) {
+                        minecraft.setScreen(new BotPanelScreen(mode == Mode.GOAL ? Mode.CHAT_STATUS : Mode.GOAL));
                     }
                 })
-                .dimensions(px + pw - 178, py + 4, 40, 14)
+                .bounds(px + pw - 178, py + 4, 40, 14)
                 .build();
-        inventoryButton = ButtonWidget.builder(Text.translatable(mode == Mode.INVENTORY ? "btn.minecraftai.chat" : "btn.minecraftai.inventory"), button -> {
-                    if (client != null) {
-                        client.setScreen(new BotPanelScreen(mode == Mode.INVENTORY ? Mode.CHAT_STATUS : Mode.INVENTORY));
+        inventoryButton = Button.builder(Component.translatable(mode == Mode.INVENTORY ? "btn.minecraftai.chat" : "btn.minecraftai.inventory"), button -> {
+                    if (minecraft != null) {
+                        minecraft.setScreen(new BotPanelScreen(mode == Mode.INVENTORY ? Mode.CHAT_STATUS : Mode.INVENTORY));
                     }
                 })
-                .dimensions(px + pw - 134, py + 4, 40, 14)
+                .bounds(px + pw - 134, py + 4, 40, 14)
                 .build();
-        settingsButton = ButtonWidget.builder(Text.translatable(mode == Mode.SETTINGS ? "btn.minecraftai.chat" : "btn.minecraftai.settings"), button -> {
-                    if (client != null) {
-                        client.setScreen(new BotPanelScreen(mode == Mode.SETTINGS ? Mode.CHAT_STATUS : Mode.SETTINGS));
+        settingsButton = Button.builder(Component.translatable(mode == Mode.SETTINGS ? "btn.minecraftai.chat" : "btn.minecraftai.settings"), button -> {
+                    if (minecraft != null) {
+                        minecraft.setScreen(new BotPanelScreen(mode == Mode.SETTINGS ? Mode.CHAT_STATUS : Mode.SETTINGS));
                     }
                 })
-                .dimensions(px + pw - 90, py + 4, 40, 14)
+                .bounds(px + pw - 90, py + 4, 40, 14)
                 .build();
-        closeButton = ButtonWidget.builder(Text.translatable("btn.minecraftai.close"), button -> close())
-                .dimensions(px + pw - 46, py + 4, 38, 14)
+        closeButton = Button.builder(Component.translatable("btn.minecraftai.close"), button -> onClose())
+                .bounds(px + pw - 46, py + 4, 38, 14)
                 .build();
         register(goalButton);
         register(inventoryButton);
@@ -121,19 +121,19 @@ public final class BotPanelScreen extends Screen {
         }
     }
 
-    private void register(ClickableWidget widget) {
-        addDrawableChild(widget);   // Register so it takes over click/focus/input routing
+    private void register(AbstractWidget widget) {
+        addRenderableWidget(widget);   // Register so it takes over click/focus/input routing
         panelWidgets.add(widget);   // Rendering is handled manually by this class (see render), bypassing super.render's background blur pass
     }
 
     @Override
-    public void close() {
+    public void onClose() {
         BotCommandBridge.subscribe(target, false);
-        super.close();
+        super.onClose();
     }
 
     @Override
-    public boolean shouldPause() {
+    public boolean isPauseScreen() {
         return false;
     }
 
@@ -151,7 +151,7 @@ public final class BotPanelScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(Click click, boolean doubled) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
         for (PanelComponent card : laidOutCards) {
             if (card.mouseClicked(click.x(), click.y(), click.button())) {
                 return true;
@@ -161,7 +161,7 @@ public final class BotPanelScreen extends Screen {
     }
 
     @Override
-    public boolean keyPressed(KeyInput keyInput) {
+    public boolean keyPressed(KeyEvent keyInput) {
         int keyCode = keyInput.key();
         if ((keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) && input != null && input.isFocused()) {
             sendChat();
@@ -171,24 +171,24 @@ public final class BotPanelScreen extends Screen {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
         Theme.panel(context, px, py, pw, ph, Theme.PANEL_BG);
         drawTitleBar(context);
         BotSnapshotS2C snapshot = BotClientState.INSTANCE.snapshot();
         List<BotClientState.ChatLine> transcript = BotClientState.INSTANCE.transcript();
         for (PanelComponent card : laidOutCards) {
             card.refresh(snapshot, transcript);
-            card.render(context, mouseX, mouseY, delta, textRenderer);
+            card.render(context, mouseX, mouseY, delta, font);
         }
         if (chat != null) {
             chat.refresh(snapshot, transcript);
-            chat.render(context, mouseX, mouseY, delta, textRenderer);
+            chat.render(context, mouseX, mouseY, delta, font);
         }
         if (mode == Mode.CHAT_STATUS) {
             drawInputStrip(context);
         }
         // Render widgets manually, without calling super.render() -- this bypasses the 1.21 screen background blur/darken pass (otherwise the panel content would be blurred while the widgets stay sharp).
-        for (ClickableWidget widget : panelWidgets) {
+        for (AbstractWidget widget : panelWidgets) {
             widget.render(context, mouseX, mouseY, delta);
         }
     }
@@ -272,30 +272,30 @@ public final class BotPanelScreen extends Screen {
         }
     }
 
-    private void drawTitleBar(DrawContext context) {
+    private void drawTitleBar(GuiGraphics context) {
         String name = displayTarget();
         if (mode == Mode.GOAL) {
-            context.drawTextWithShadow(textRenderer, Text.literal("Goal & Execution Chain · " + name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
+            context.drawString(font, Component.literal("Goal & Execution Chain · " + name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
         } else {
             String titleKey = mode == Mode.ACTIONS ? "screen.minecraftai.actions_title"
                     : mode == Mode.SETTINGS ? "screen.minecraftai.settings_title"
                     : mode == Mode.INVENTORY ? "screen.minecraftai.inventory_title"
                     : "screen.minecraftai.title";
-            context.drawTextWithShadow(textRenderer, Theme.tr(titleKey, name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
+            context.drawString(font, Theme.tr(titleKey, name), px + Theme.PAD, py + 6, Theme.TEXT_STRONG);
         }
-        context.drawHorizontalLine(px + Theme.PAD, px + pw - Theme.PAD - 1, py + Theme.TITLE_H, Theme.BORDER);
+        context.hLine(px + Theme.PAD, px + pw - Theme.PAD - 1, py + Theme.TITLE_H, Theme.BORDER);
         if (mode == Mode.CHAT_STATUS) {
-            context.drawVerticalLine(px + leftW, py + Theme.TITLE_H + 1, py + ph - Theme.PAD, Theme.BORDER);
+            context.vLine(px + leftW, py + Theme.TITLE_H + 1, py + ph - Theme.PAD, Theme.BORDER);
         }
     }
 
-    private void drawInputStrip(DrawContext context) {
+    private void drawInputStrip(GuiGraphics context) {
         int x = px + leftW + Theme.GUTTER + Theme.PAD - 2;
         int y = py + ph - Theme.INPUT_H - Theme.PAD - 1;
         int w = rightW - Theme.PAD * 2 + 4;
         int h = Theme.INPUT_H + 2;
         Theme.panel(context, x, y, w, h, Theme.CHAT_INPUT_BG);
-        context.drawHorizontalLine(x + 1, x + w - 2, y + 1, Theme.BORDER_BRIGHT);
+        context.hLine(x + 1, x + w - 2, y + 1, Theme.BORDER_BRIGHT);
     }
 
     private String displayTarget() {
@@ -310,11 +310,11 @@ public final class BotPanelScreen extends Screen {
         if (input == null) {
             return;
         }
-        String text = input.getText().trim();
+        String text = input.getValue().trim();
         if (text.isEmpty()) {
             return;
         }
         BotCommandBridge.chat(target, text);
-        input.setText("");
+        input.setValue("");
     }
 }

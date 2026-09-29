@@ -1,7 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -13,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 /**
  * Immutable input snapshot for {@link PoiScorer} and {@link PoiLabeler}. Everything the scorer
@@ -80,7 +79,7 @@ public final class PoiSignals {
     private PoiSignals(Builder b) {
         EnumMap<PoiBucket, List<BlockPos>> grouped = new EnumMap<>(PoiBucket.class);
         for (Map.Entry<Long, PoiBucket> e : b.owner.entrySet()) {
-            grouped.computeIfAbsent(e.getValue(), k -> new ArrayList<>()).add(BlockPos.fromLong(e.getKey()));
+            grouped.computeIfAbsent(e.getValue(), k -> new ArrayList<>()).add(BlockPos.of(e.getKey()));
         }
         EnumMap<PoiBucket, List<BlockPos>> frozen = new EnumMap<>(PoiBucket.class);
         int total = 0;

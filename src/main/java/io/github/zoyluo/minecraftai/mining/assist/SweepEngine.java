@@ -1,8 +1,7 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.function.LongPredicate;
+import net.minecraft.core.BlockPos;
 
 /**
  * The pure core of the view sweeper (mining-assist design 3.3). It owns everything that happens to a
@@ -81,7 +80,7 @@ public final class SweepEngine {
         HazardField hazards = state.hazards();
         SenseCounters counters = state.counters();
         long eyeCell = eyeCell(ctx.eyeX(), ctx.eyeY(), ctx.eyeZ());
-        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         long foldNanos = 0L;
         int cast = 0;
 
@@ -216,7 +215,7 @@ public final class SweepEngine {
      * back to FLUID (the mark pass has just written AIR over it). Only runs while the field holds a fluid
      * cell; the hit cell itself is left to {@link EvidenceFold#foldHit}, which read its state.
      */
-    private static void reconcileTraversedFluids(HazardField hazards, ObservedOccupancy occ, BlockPos.Mutable cursor,
+    private static void reconcileTraversedFluids(HazardField hazards, ObservedOccupancy occ, BlockPos.MutableBlockPos cursor,
                                                  Context ctx, SphereSchedule.Dir dir, RayResult ray) {
         final boolean stopAtHit = ray.hit();
         final int hitX = stopAtHit ? ray.pos().getX() : 0;

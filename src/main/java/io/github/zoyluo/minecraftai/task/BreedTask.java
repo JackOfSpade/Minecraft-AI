@@ -7,16 +7,15 @@ import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.passive.AnimalEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Comparator;
 import java.util.List;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
 
 public final class BreedTask extends AbstractTask {
     private enum Phase {
@@ -35,8 +34,8 @@ public final class BreedTask extends AbstractTask {
     private final int targetPairs;
     private final Item food;
     private Phase phase = Phase.FIND_PAIR;
-    private AnimalEntity first;
-    private AnimalEntity second;
+    private Animal first;
+    private Animal second;
     private int bredPairs;
 
     public BreedTask(EntityType<?> type, int pairs) {
@@ -52,7 +51,7 @@ public final class BreedTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Breeding " + Registries.ENTITY_TYPE.getId(type) + " " + bredPairs + "/" + targetPairs + " phase=" + phase;
+        return "Breeding " + BuiltInRegistries.ENTITY_TYPE.getKey(type) + " " + bredPairs + "/" + targetPairs + " phase=" + phase;
     }
 
     @Override
@@ -86,13 +85,13 @@ public final class BreedTask extends AbstractTask {
     }
 
     private void findPair(AIPlayerEntity bot) {
-        List<AnimalEntity> candidates = bot.getEntityWorld()
-                .getEntitiesByClass(AnimalEntity.class, bot.getBoundingBox().expand(SEARCH_RANGE),
+        List<Animal> candidates = bot.level()
+                .getEntitiesOfClass(Animal.class, bot.getBoundingBox().inflate(SEARCH_RANGE),
                         animal -> animal.isAlive()
                                 && animal.getType().equals(type)
                                 && !animal.isBaby()
-                                && animal.getBreedingAge() == 0
-                                && animal.canEat())
+                                && animal.getAge() == 0
+                                && animal.canFallInLove())
                 .stream()
                 .filter(animal -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveEntity(bot, animal))
                 .sorted(Comparator.comparingDouble(bot::distanceTo))
@@ -106,7 +105,7 @@ public final class BreedTask extends AbstractTask {
         phase = Phase.APPROACH_A;
     }
 
-    private void approach(AIPlayerEntity bot, AnimalEntity animal, Phase nextPhase) {
+    private void approach(AIPlayerEntity bot, Animal animal, Phase nextPhase) {
         if (animal == null || !animal.isAlive()) {
             phase = Phase.FIND_PAIR;
             return;
@@ -118,18 +117,18 @@ public final class BreedTask extends AbstractTask {
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
-            bot.getActionPack().startPathTo(animal.getBlockPos());
+            bot.getActionPack().startPathTo(animal.blockPosition());
         }
     }
 
-    private void feed(AIPlayerEntity bot, AnimalEntity animal, Phase nextPhase) {
+    private void feed(AIPlayerEntity bot, Animal animal, Phase nextPhase) {
         ActionResult result = equipFood(bot);
         if (result.isFailed()) {
             fail(result.reason());
             return;
         }
         lookAt(bot, animal);
-        ActionResult feed = InteractAction.useItemOnEntity(bot, animal, Hand.MAIN_HAND);
+        ActionResult feed = InteractAction.useItemOnEntity(bot, animal, InteractionHand.MAIN_HAND);
         if (feed.isFailed()) {
             fail("cannot_breed:" + feed.reason());
             return;
@@ -140,15 +139,15 @@ public final class BreedTask extends AbstractTask {
     private void feedSecond(AIPlayerEntity bot) {
         feed(bot, second, Phase.DONE);
         if (state == TaskState.RUNNING && phase == Phase.DONE) {
-            if (first != null && second != null && first.canBreedWith(second)) {
-                first.breed(bot.getEntityWorld(), second);
+            if (first != null && second != null && first.canMate(second)) {
+                first.spawnChildFromBreeding(bot.level(), second);
             } else {
                 // bredPairs still counts this toward the target below even though no baby was
                 // actually produced (e.g. the pair went on breeding cooldown between the two feed
                 // ticks) -- the task then completes normally, so this is the only place that fact
                 // is ever recorded.
                 BotLog.warn(LogCategory.TASK, bot, "breed_pair_not_receptive",
-                        "type", Registries.ENTITY_TYPE.getId(type).toString());
+                        "type", BuiltInRegistries.ENTITY_TYPE.getKey(type).toString());
             }
             bredPairs++;
             first = null;
@@ -167,8 +166,8 @@ public final class BreedTask extends AbstractTask {
                 : ActionResult.failed("cannot_equip_food");
     }
 
-    private static void lookAt(AIPlayerEntity bot, AnimalEntity animal) {
-        Vec3d target = animal.getEntityPos().add(0.0D, animal.getHeight() * 0.5D, 0.0D);
+    private static void lookAt(AIPlayerEntity bot, Animal animal) {
+        Vec3 target = animal.position().add(0.0D, animal.getBbHeight() * 0.5D, 0.0D);
         LookAction.lookAt(bot, target);
     }
 
@@ -185,6 +184,6 @@ public final class BreedTask extends AbstractTask {
         if (type == EntityType.HORSE || type == EntityType.DONKEY || type == EntityType.MULE) {
             return Items.GOLDEN_CARROT;
         }
-        throw new IllegalArgumentException("unsupported_breed_entity: " + Registries.ENTITY_TYPE.getId(type));
+        throw new IllegalArgumentException("unsupported_breed_entity: " + BuiltInRegistries.ENTITY_TYPE.getKey(type));
     }
 }

@@ -54,23 +54,22 @@ import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskState;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.ZombieEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -85,8 +84,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiVerifySubcommand {
     private static final int DIAMOND_STACK_TARGET = 64;
@@ -327,7 +326,7 @@ public final class MinecraftAiVerifySubcommand {
     private MinecraftAiVerifySubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         return literal("verify")
                 .executes(context -> start(context.getSource(), List.of("all")))
                 .then(literal("all")
@@ -365,28 +364,28 @@ public final class MinecraftAiVerifySubcommand {
         }
     }
 
-    private static int start(ServerCommandSource source, List<String> requested) {
+    private static int start(CommandSourceStack source, List<String> requested) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:verify")) {
             return 0;
         }
         Optional<AIPlayerEntity> bot = selectBot(source);
         if (bot.isEmpty()) {
-            source.sendError(Text.literal("[MinecraftAi Verify] FAIL no_bot: spawn a bot first with /minecraftai spawn <name>"));
+            source.sendFailure(Component.literal("[MinecraftAi Verify] FAIL no_bot: spawn a bot first with /minecraftai spawn <name>"));
             return 0;
         }
         List<String> features = expandFeatures(requested);
         if (features.isEmpty()) {
-            source.sendError(Text.literal("[MinecraftAi Verify] unknown feature. Available: " + String.join(", ", ALL_FEATURES)));
+            source.sendFailure(Component.literal("[MinecraftAi Verify] unknown feature. Available: " + String.join(", ", ALL_FEATURES)));
             return 0;
         }
-        UUID botId = bot.get().getUuid();
+        UUID botId = bot.get().getUUID();
         if (RUNS.containsKey(botId)) {
-            source.sendError(Text.literal("[MinecraftAi Verify] already running for " + bot.get().getGameProfile().name()));
+            source.sendFailure(Component.literal("[MinecraftAi Verify] already running for " + bot.get().getGameProfile().name()));
             return 0;
         }
         VerifyRun run = new VerifyRun(source, botId, features);
         RUNS.put(botId, run);
-        source.sendFeedback(() -> Text.literal("[MinecraftAi Verify] started for "
+        source.sendSuccess(() -> Component.literal("[MinecraftAi Verify] started for "
                 + bot.get().getGameProfile().name()
                 + ": "
                 + String.join(", ", features)), false);
@@ -396,13 +395,13 @@ public final class MinecraftAiVerifySubcommand {
     // Package-private deterministic hooks for the verifier's own GameTest. This command lives only
     // in the isolated gametest source set, so exercising the real VerifyRun state machine is both
     // cheaper and stronger than duplicating its polling semantics in a unit-test facade.
-    static boolean startForGameTest(ServerCommandSource source, AIPlayerEntity bot, String feature) {
+    static boolean startForGameTest(CommandSourceStack source, AIPlayerEntity bot, String feature) {
         boolean supportedFeature = MINING_ACCEPTANCE_FROM_ZERO_SUITE.contains(feature)
                 || STRICT_STRIP_MINE_REJECTION_FEATURE.equals(feature);
-        if (!supportedFeature || RUNS.containsKey(bot.getUuid())) {
+        if (!supportedFeature || RUNS.containsKey(bot.getUUID())) {
             return false;
         }
-        RUNS.put(bot.getUuid(), new VerifyRun(source, bot.getUuid(), List.of(feature)));
+        RUNS.put(bot.getUUID(), new VerifyRun(source, bot.getUUID(), List.of(feature)));
         return true;
     }
 
@@ -426,9 +425,9 @@ public final class MinecraftAiVerifySubcommand {
         MiningEvidenceAudit.clear(botId);
     }
 
-    private static Optional<AIPlayerEntity> selectBot(ServerCommandSource source) {
+    private static Optional<AIPlayerEntity> selectBot(CommandSourceStack source) {
         return Optional.ofNullable(source.getPlayer())
-                .flatMap(player -> AIPlayerManager.INSTANCE.botOf(player.getUuid()))
+                .flatMap(player -> AIPlayerManager.INSTANCE.botOf(player.getUUID()))
                 .or(() -> AIPlayerManager.INSTANCE.all().stream().findFirst());
     }
 
@@ -510,7 +509,7 @@ public final class MinecraftAiVerifySubcommand {
         destination.add(feature);
     }
 
-    private static Result startScenario(ServerCommandSource source, AIPlayerEntity bot, String feature) throws IOException {
+    private static Result startScenario(CommandSourceStack source, AIPlayerEntity bot, String feature) throws IOException {
         // Uniformly clear execution state before each scenario starts: when the previous scenario's assertion is satisfied and it's judged PASS, the goal may still have steps left running
         // (runningGoal's assertion ≠ goal completion); an active plan would reject this scenario's submit (observed as forage's
         // goal_submit_failed) or leak a leftover task into it. Every scenario starts from a clean execution state — fixing this in one place stops leakage between all scenarios.
@@ -653,7 +652,7 @@ public final class MinecraftAiVerifySubcommand {
         }
         // Ordinary navigation from an already valid start is not an emergency teleport. This
         // guards against accidentally putting the capability gate before the standability check.
-        var ordinaryPath = bot.getActionPack().startPathTo(bot.getBlockPos());
+        var ordinaryPath = bot.getActionPack().startPathTo(bot.blockPosition());
         boolean ordinaryPathAllowed = !ordinaryPath.isFailed();
         bot.getActionPack().stopAll();
         boolean pass = matched && sideEffects.get() == expectedExecutions && ordinaryPathAllowed;
@@ -675,7 +674,7 @@ public final class MinecraftAiVerifySubcommand {
     private static Result verifyMiningCountContract(String feature, Item item, int target) {
         Goal goal = new Goal.HaveItem(item, target);
         Optional<Goal> restored = MissionSpec.fromGoal(goal).toGoal();
-        String itemId = net.minecraft.registry.Registries.ITEM.getId(item).toString();
+        String itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString();
         GoalPredicate predicate = GoalPredicates.forGoal(goal);
         GoalSnapshot below = new GoalSnapshot(
                 Map.of(itemId, target - 1), 0, java.util.Set.of(), Map.of(), Map.of(), 0, Optional.empty());
@@ -700,16 +699,16 @@ public final class MinecraftAiVerifySubcommand {
         return pass ? Result.pass(feature, detail) : Result.fail(feature, detail);
     }
 
-    private static Result verifyPersist(ServerCommandSource source) {
+    private static Result verifyPersist(CommandSourceStack source) {
         int saved = BotPersistence.INSTANCE.saveAll(source.getServer());
         return Result.pass("persist", "saveAll ok, bots=" + saved);
     }
 
     private static Result verifyMemory(AIPlayerEntity bot) {
-        String key = "verify_" + bot.getUuid();
-        BotMemoryStore.INSTANCE.of(bot.getUuid()).remember(key, "ok");
-        boolean found = BotMemoryStore.INSTANCE.of(bot.getUuid()).recall(key).filter("ok"::equals).isPresent();
-        BotMemoryStore.INSTANCE.of(bot.getUuid()).forget(key);
+        String key = "verify_" + bot.getUUID();
+        BotMemoryStore.INSTANCE.of(bot.getUUID()).remember(key, "ok");
+        boolean found = BotMemoryStore.INSTANCE.of(bot.getUUID()).recall(key).filter("ok"::equals).isPresent();
+        BotMemoryStore.INSTANCE.of(bot.getUUID()).forget(key);
         return found ? Result.pass("memory", "remember/recall/forget ok") : Result.fail("memory", "recall_mismatch");
     }
 
@@ -726,8 +725,8 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignContainer(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        BlockPos chest = bot.getBlockPos().offset(Direction.NORTH);
-        bot.getEntityWorld().setBlockState(chest, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos chest = bot.blockPosition().relative(Direction.NORTH);
+        bot.level().setBlock(chest, Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
         Task task = ContainerTask.deposit(chest, Items.COBBLESTONE, 3, false);
         return assignTask(bot, "container", task, 200, ignored -> countContainer(bot, chest, Items.COBBLESTONE) >= 3);
@@ -737,13 +736,13 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD, 1));
-        ServerWorld world = bot.getEntityWorld();
-        ZombieEntity zombie = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
+        ServerLevel world = bot.level();
+        Zombie zombie = EntityType.ZOMBIE.create(world, EntitySpawnReason.COMMAND);
         if (zombie == null) {
             return Result.fail("combat", "zombie_create_failed");
         }
-        zombie.refreshPositionAndAngles(bot.getX() + 2.0D, bot.getY(), bot.getZ(), 0.0F, 0.0F);
-        world.spawnEntity(zombie);
+        zombie.snapTo(bot.getX() + 2.0D, bot.getY(), bot.getZ(), 0.0F, 0.0F);
+        world.addFreshEntity(zombie);
         return assignTask(bot, "combat", new CombatTask(EntityType.ZOMBIE, 1, MinecraftAiConfig.get().combat().retreatHp()),
                 600,
                 ignored -> !zombie.isAlive());
@@ -752,14 +751,14 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignFarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        BlockPos farm = bot.getBlockPos().offset(Direction.EAST);
-        bot.getEntityWorld().setBlockState(farm, Blocks.FARMLAND.getDefaultState(), Block.NOTIFY_ALL);
-        bot.getEntityWorld().setBlockState(farm.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos farm = bot.blockPosition().relative(Direction.EAST);
+        bot.level().setBlock(farm, Blocks.FARMLAND.defaultBlockState(), Block.UPDATE_ALL);
+        bot.level().setBlock(farm.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 4));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_HOE, 1));
         return assignTask(bot, "farm", new FarmTask(farm, 1, Items.WHEAT_SEEDS, Blocks.WHEAT, false, false),
                 300,
-                ignored -> bot.getEntityWorld().getBlockState(farm.up()).isOf(Blocks.WHEAT));
+                ignored -> bot.level().getBlockState(farm.above()).is(Blocks.WHEAT));
     }
 
     private static Result assignStripMine(AIPlayerEntity bot) {
@@ -768,8 +767,8 @@ public final class MinecraftAiVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
         Direction direction = Direction.NORTH;
         for (int distance = 1; distance <= 2; distance++) {
-            bot.getEntityWorld().setBlockState(bot.getBlockPos().offset(direction, distance), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            bot.getEntityWorld().setBlockState(bot.getBlockPos().offset(direction, distance).up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            bot.level().setBlock(bot.blockPosition().relative(direction, distance), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            bot.level().setBlock(bot.blockPosition().relative(direction, distance).above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         return assignTask(bot, "strip_mine", new StripMineTask(direction, 2, 0, null, java.util.Set.of()),
                 800,
@@ -831,28 +830,28 @@ public final class MinecraftAiVerifySubcommand {
                 io.github.zoyluo.minecraftai.task.Threat.Type.DROWNING,
                 io.github.zoyluo.minecraftai.task.Threat.Severity.MEDIUM,
                 null,
-                bot.getBlockPos()));
+                bot.blockPosition()));
         return assignTask(bot, "drowning", task, 300, status -> status.state() == TaskState.COMPLETED);
     }
 
     private static Result assignNavObstacle(AIPlayerEntity bot) {
         prepareArea(bot);
-        BlockPos origin = bot.getBlockPos();
-        BlockPos obstacle = origin.offset(Direction.NORTH);
-        BlockPos goal = origin.offset(Direction.NORTH, 3);
-        bot.getEntityWorld().setBlockState(obstacle, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos origin = bot.blockPosition();
+        BlockPos obstacle = origin.relative(Direction.NORTH);
+        BlockPos goal = origin.relative(Direction.NORTH, 3);
+        bot.level().setBlock(obstacle, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
         return assignTask(bot, "nav_obstacle", new MoveTask(bot, goal), 400,
-                ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
+                ignored -> bot.blockPosition().distSqr(goal) <= 4.0D);
     }
 
     private static Result assignNavGap(AIPlayerEntity bot) {
         prepareArea(bot);
-        BlockPos origin = bot.getBlockPos();
-        BlockPos gap = origin.offset(Direction.NORTH);
-        BlockPos goal = origin.offset(Direction.NORTH, 3);
-        bot.getEntityWorld().setBlockState(gap.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos origin = bot.blockPosition();
+        BlockPos gap = origin.relative(Direction.NORTH);
+        BlockPos goal = origin.relative(Direction.NORTH, 3);
+        bot.level().setBlock(gap.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         return assignTask(bot, "nav_gap", new MoveTask(bot, goal), 400,
-                ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
+                ignored -> bot.blockPosition().distSqr(goal) <= 4.0D);
     }
 
     /**
@@ -863,8 +862,8 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        BlockPos ore = bot.getBlockPos().offset(Direction.NORTH, 2);
-        bot.getEntityWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos ore = bot.blockPosition().relative(Direction.NORTH, 2);
+        bot.level().setBlock(ore, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         return assignTask(bot, "mine_exposed", new MineTask(Blocks.IRON_ORE, 1), 800,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
     }
@@ -872,11 +871,11 @@ public final class MinecraftAiVerifySubcommand {
     private static Result verifyPickupBlocked(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos dropPos = bot.getBlockPos().offset(Direction.NORTH);
-        world.setBlockState(dropPos.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        ServerLevel world = bot.level();
+        BlockPos dropPos = bot.blockPosition().relative(Direction.NORTH);
+        world.setBlock(dropPos.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         ItemEntity drop = new ItemEntity(world, dropPos.getX() + 0.5D, dropPos.getY(), dropPos.getZ() + 0.5D, new ItemStack(Items.COBBLESTONE, 1));
-        world.spawnEntity(drop);
+        world.addFreshEntity(drop);
         boolean picked = HarvestCore.forcePickupNearby(bot, Items.COBBLESTONE);
         return picked && InventoryAction.countItem(bot, Items.COBBLESTONE) >= 1
                 ? Result.pass("pickup_blocked", "forced pickup ok")
@@ -887,8 +886,8 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
-        BlockPos ore = bot.getBlockPos().offset(Direction.NORTH, 2);
-        bot.getEntityWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos ore = bot.blockPosition().relative(Direction.NORTH, 2);
+        bot.level().setBlock(ore, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         return assignTask(bot, "mine_to_iron", new OreDigTask(java.util.Set.of(Blocks.IRON_ORE), 1),
                 1200,
                 ignored -> InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
@@ -897,17 +896,17 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignMineIronFromScratch(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin); // in the from-scratch chain the bot has no gear, and the y6 mob sea would swarm it (observed aborted = killed by a zombie)
         // GOALFIX-GF3: the from-scratch-to-iron chain (wood pickaxe → mine stone → stone pickaxe → mine iron) needs roughly 3 raw logs + 3 cobblestone; give a comfortable margin (6/6) to avoid boundary failures.
         for (int dy = 0; dy < 6; dy++) {
-            world.setBlockState(origin.offset(Direction.WEST, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.relative(Direction.WEST, 2).above(dy), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         }
         for (int i = 0; i < 6; i++) {
-            world.setBlockState(origin.offset(Direction.EAST, 2 + i), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.relative(Direction.EAST, 2 + i), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
-        world.setBlockState(origin.offset(Direction.NORTH, 3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.relative(Direction.NORTH, 3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
         if (!started) {
             return Result.fail("mine_iron_from_scratch", "goal_submit_failed");
@@ -926,17 +925,17 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // Build a solid stone wall (2 high) + floor spanning north +3..+6; once the bot reaches +2 it must dig through 3 blocks of stone to reach the iron ore at +6.
         for (int d = 3; d <= 6; d++) {
-            BlockPos col = origin.offset(Direction.NORTH, d);
-            world.setBlockState(col, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(col.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(col.down(), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos col = origin.relative(Direction.NORTH, d);
+            world.setBlock(col, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(col.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(col.below(), Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
         }
-        BlockPos ore = origin.offset(Direction.NORTH, 6);
-        world.setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos ore = origin.relative(Direction.NORTH, 6);
+        world.setBlock(ore, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
         if (!started) {
             return Result.fail("mine_buried_iron", "goal_submit_failed");
@@ -954,13 +953,13 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // Underfoot: y-1, y-2 laid with dirt (topsoil), stone pillar starting at y-3 going down; simulates "digging from grass down into a stone layer".
-        world.setBlockState(origin.down(), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.down(2), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.below(), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(origin.below(2), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
         for (int dy = 3; dy <= 10; dy++) {
-            world.setBlockState(origin.down(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.below(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         Task task = new DigDownTask(Blocks.STONE, 3);
         return assignTask(bot, "dig_down", task, 1200,
@@ -975,18 +974,18 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // Underfoot y-1..-4 is solid stone; the iron ore is buried slightly offset directly below at y-3: the bot must dig straight down through stone to reach it.
         for (int dy = 1; dy <= 5; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    world.setBlockState(origin.add(dx, -dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(dx, -dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.down(4), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL); // a small vein, tests flood-fill
+        world.setBlock(origin.below(3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(origin.below(4), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL); // a small vein, tests flood-fill
         Task task = new OreDigTask(java.util.Set.of(Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE), 2);
         return assignTask(bot, "ore_dig_buried", task, 2400,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 2);
@@ -1000,14 +999,14 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignMineIronPocket(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // A 5x5 stone wall (4 high) encloses a narrow pit, forcing out the "terrain-constrained" variable.
         for (int dy = 0; dy <= 3; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
                 for (int dz = -2; dz <= 2; dz++) {
                     if (Math.abs(dx) == 2 || Math.abs(dz) == 2) {
-                        world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                        world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                     }
                 }
             }
@@ -1015,13 +1014,13 @@ public final class MinecraftAiVerifySubcommand {
         clearNearbyMobs(world, origin); // the y6 mob sea would kill an unequipped bot (respawn clears the inventory → the task is doomed to fail)
         // One small tree in the pit (4 log segments — the from-scratch chain needs crafting-table 4 + wood pickaxe 3 + stick 2 = 9 planks; 2 log segments yield only 8 planks, 1 short — observed need:oak_planks x1).
         for (int dy = 0; dy < 4; dy++) {
-            world.setBlockState(origin.offset(Direction.EAST).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.relative(Direction.EAST).above(dy), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         }
         // Stone layer underfoot + iron ore deeper down.
         for (int dy = 1; dy <= 8; dy++) {
-            world.setBlockState(origin.down(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.below(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
-        world.setBlockState(origin.down(5), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.below(5), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
         if (!started) {
             return Result.fail("mine_iron_pocket", "goal_submit_failed");
@@ -1039,20 +1038,20 @@ public final class MinecraftAiVerifySubcommand {
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_SWORD, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // Clear the y6 ambient mob sea (it would swarm-kill the bot; respawn clears the inventory → the tool gate reports a missing pickaxe), leaving only the 1 controlled spawn below —
         // this scenario tests combat preemption/recovery while "mining with 1 mob around", not surviving the mob sea. Wearing armor improves determinism.
         clearNearbyMobs(world, origin);
         giveDeepMineKit(bot);
         io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         fillStoneCube(world, origin, 4, 8);
-        world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        ZombieEntity zombie = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
+        world.setBlock(origin.below(3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        Zombie zombie = EntityType.ZOMBIE.create(world, EntitySpawnReason.COMMAND);
         if (zombie != null) {
-            zombie.setPersistent();
-            zombie.refreshPositionAndAngles(bot.getX() + 2.0D, bot.getY(), bot.getZ() + 2.0D, 0.0F, 0.0F);
-            world.spawnEntity(zombie);
+            zombie.setPersistenceRequired();
+            zombie.snapTo(bot.getX() + 2.0D, bot.getY(), bot.getZ() + 2.0D, 0.0F, 0.0F);
+            world.addFreshEntity(zombie);
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
         if (!started) {
@@ -1070,14 +1069,14 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveIronIngot(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 4));
-        world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.below(3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.IRON_INGOT, 1));
         if (!started) {
             return Result.fail("achieve_iron_ingot", "goal_submit_failed");
@@ -1090,14 +1089,14 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveGoldIngot(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -16);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                world.setBlockState(origin.add(dx, -3, dz), Blocks.GOLD_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -3, dz), Blocks.GOLD_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.GOLD_INGOT, 1));
@@ -1112,16 +1111,16 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveObsidian(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
         // Lay a 5×5 layer of obsidian at down(2..3), guaranteeing the downward stepped dig hits it regardless of direction (only 1 block needs to be mined to pass).
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.setBlockState(origin.add(dx, -2, dz), Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(dx, -3, dz), Blocks.OBSIDIAN.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -2, dz), Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(dx, -3, dz), Blocks.OBSIDIAN.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.OBSIDIAN, 1));
@@ -1136,8 +1135,8 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignIronExtreme(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 10);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
@@ -1145,7 +1144,7 @@ public final class MinecraftAiVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 4));
         giveDeepMineKit(bot);
         io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
-        world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.below(3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         spawnHostiles(world, origin, 2);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.IRON_INGOT, 1));
         if (!started) {
@@ -1159,14 +1158,14 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignDiamondExtreme(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
         io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                world.setBlockState(origin.add(dx, -2, dz), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -2, dz), Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         spawnHostiles(world, origin, 2);
@@ -1182,18 +1181,18 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignFoodExtreme(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 8));
         giveDeepMineKit(bot); // includes an iron sword (dual-use for hunting and fighting mobs) + armor
         io.github.zoyluo.minecraftai.action.EquipAction.equipBestArmor(bot);
         for (int i = 0; i < 6; i++) {
-            var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
+            var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
             if (cow != null) {
-                cow.refreshPositionAndAngles(origin.getX() + 2.0D, origin.getY(), origin.getZ() + (i - 3), 0.0F, 0.0F);
-                world.spawnEntity(cow);
+                cow.snapTo(origin.getX() + 2.0D, origin.getY(), origin.getZ() + (i - 3), 0.0F, 0.0F);
+                world.addFreshEntity(cow);
             }
         }
         spawnHostiles(world, origin, 2);
@@ -1211,21 +1210,21 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveIronPickaxe(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin); // early in the full chain the bot has no gear; clear the y6 mob sea
         // Two columns of 24 logs: the from_scratch chain includes smelting, and execution drift from burning raw logs as fuel + crafting whole logs into planks can eat into the resupply margin;
         // with a single column of 12 logs, once the first pass chops it bare the replan resupply hits no_resource (observed in suite runs). Give enough trees to absorb all the drift.
         for (int dy = 0; dy < 12; dy++) {
-            world.setBlockState(origin.offset(Direction.WEST, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(origin.offset(Direction.WEST, 2).offset(Direction.NORTH, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.relative(Direction.WEST, 2).above(dy), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(origin.relative(Direction.WEST, 2).relative(Direction.NORTH, 2).above(dy), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         }
         // A solid-stone area replaces a single stone pillar: the mine-stone/mine-iron task digs a diagonal stepped shaft, and with a single pillar the first step already walks off it into a leftover pit (the culprit behind no_resource).
         fillStoneCube(world, origin, 4, 10);
         // 3 iron ore blocks (an iron pickaxe needs 3 iron ingots).
-        world.setBlockState(origin.down(4), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.down(5), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.down(6), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.below(4), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(origin.below(5), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(origin.below(6), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.IRON_PICKAXE, 1));
         if (!started) {
             return Result.fail("achieve_iron_pickaxe", "goal_submit_failed");
@@ -1241,8 +1240,8 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveFood(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // Focuses on the "source-perception → hunting → cooking" food core: give the prerequisites ready-made (furnace + fuel + sword) so Goal.Food never has to backward-plan mining stone for a furnace
         // (dig_down digging a deep shaft would trap the bot at the bottom, unable to chase surface cows — that's a mining-scenario bug, fixed separately).
         InventoryAction.giveItem(bot, new ItemStack(Items.FURNACE, 1));
@@ -1250,10 +1249,10 @@ public final class MinecraftAiVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD, 1));
         // 5 cows placed right next to the bot (within the flattened area), to avoid a long chase getting stuck on obstacles
         for (int i = 0; i < 5; i++) {
-            var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
+            var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
             if (cow != null) {
-                cow.refreshPositionAndAngles(origin.getX() + 1.5D, origin.getY(), origin.getZ() + (i - 2), 0.0F, 0.0F);
-                world.spawnEntity(cow);
+                cow.snapTo(origin.getX() + 1.5D, origin.getY(), origin.getZ() + (i - 2), 0.0F, 0.0F);
+                world.addFreshEntity(cow);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Food(4));
@@ -1270,17 +1269,17 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveFoodFull(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 8));
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_SWORD, 1));
         for (int i = 0; i < 6; i++) {
-            var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
+            var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
             if (cow != null) {
-                cow.refreshPositionAndAngles(origin.getX() + 2.0D, origin.getY(), origin.getZ() + (i - 3), 0.0F, 0.0F);
-                world.spawnEntity(cow);
+                cow.snapTo(origin.getX() + 2.0D, origin.getY(), origin.getZ() + (i - 3), 0.0F, 0.0F);
+                world.addFreshEntity(cow);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Food(4));
@@ -1302,19 +1301,19 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveFoodFarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         // 1) Clear nearby animals + hostile mobs: planting source-selection needs "no animals" (otherwise it misjudges prey present → hunts instead), and this avoids a skeleton preempting and aborting the farming.
         clearNearbyMobs(world, origin);
         // 2) Lay tillable dirt on the floor (y-1) within radius 4 of the bot (the FARM step's FarmTask is centered on the bot, till/plant happens within radius 4 here).
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         // 3) Place a few tufts of short grass as the "grass present" signal (short grass within FOOD_GRASS_SCAN=32 triggers planting source-selection); placed on the edge dirt, not filling the whole farmland.
         for (int dz = -1; dz <= 1; dz++) {
-            world.setBlockState(origin.add(4, 0, dz), Blocks.SHORT_GRASS.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.offset(4, 0, dz), Blocks.SHORT_GRASS.defaultBlockState(), Block.UPDATE_ALL);
         }
         // 4) Give seeds + planks + a crafting table, but withhold a hoe (a hoe = a tool that needs a crafting table; bread/sticks don't). Verifies the backward-planned hoe (Fix B).
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 16));
@@ -1333,11 +1332,11 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     // Forcibly ripens unripe instances of the given crop within center±radius to maxAge (lets headless tests skip waiting on natural growth).
-    private static void forceGrowCrops(ServerWorld world, BlockPos center, int radius, Block crop) {
-        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -1, -radius), center.add(radius, 2, radius))) {
-            net.minecraft.block.BlockState st = world.getBlockState(pos);
-            if (st.isOf(crop) && st.getBlock() instanceof net.minecraft.block.CropBlock cb && !cb.isMature(st)) {
-                world.setBlockState(pos, cb.withAge(cb.getMaxAge()), Block.NOTIFY_LISTENERS);
+    private static void forceGrowCrops(ServerLevel world, BlockPos center, int radius, Block crop) {
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -1, -radius), center.offset(radius, 2, radius))) {
+            net.minecraft.world.level.block.state.BlockState st = world.getBlockState(pos);
+            if (st.is(crop) && st.getBlock() instanceof net.minecraft.world.level.block.CropBlock cb && !cb.isMaxAge(st)) {
+                world.setBlock(pos, cb.getStateForAge(cb.getMaxAge()), Block.UPDATE_CLIENTS);
             }
         }
     }
@@ -1347,17 +1346,17 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignForage(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // Lay a patch of ripe (age3) sweet-berry bushes to the north, with dirt underneath to prevent a "no support" block update from knocking them out. Berries drop probabilistically, so 15 bushes are laid — far more than the target of 4.
-        net.minecraft.block.BlockState ripeBush = Blocks.SWEET_BERRY_BUSH.getDefaultState()
-                .with(net.minecraft.state.property.Properties.AGE_3, 3);
+        net.minecraft.world.level.block.state.BlockState ripeBush = Blocks.SWEET_BERRY_BUSH.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_3, 3);
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = 1; dz <= 3; dz++) {
-                BlockPos ground = origin.add(dx, -1, -dz);
-                world.setBlockState(ground, Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(ground.up(), ripeBush, Block.NOTIFY_ALL);
+                BlockPos ground = origin.offset(dx, -1, -dz);
+                world.setBlock(ground, Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(ground.above(), ripeBush, Block.UPDATE_ALL);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.SWEET_BERRIES, 4));
@@ -1374,17 +1373,17 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignFarmIrrigate(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // A patch of solid dirt is laid on the floor layer (y-1), serving as the ground to dig the pit into plus the retaining walls around the 2×2 pit.
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET, 2));
-        BlockPos waterCenter = origin.add(2, -1, 0); // dig a 2×2 pool in the floor layer (next to the bot)
+        BlockPos waterCenter = origin.offset(2, -1, 0); // dig a 2×2 pool in the floor layer (next to the bot)
         return assignTask(bot, "farm_irrigate", new IrrigateTask(waterCenter), 2400,
                 ignored -> bot.isAlive()
                         && countWaterSources(world, waterCenter) >= 4
@@ -1397,8 +1396,8 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignCake(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin); // clear first (including cows left over from earlier contamination), then spawn 3 clean ones
         InventoryAction.giveItem(bot, new ItemStack(Items.BUCKET, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.EGG, 1));
@@ -1406,10 +1405,10 @@ public final class MinecraftAiVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT, 3));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
         for (int i = 0; i < 3; i++) {
-            var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
+            var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
             if (cow != null) {
-                cow.refreshPositionAndAngles(origin.getX() + 1.5D, origin.getY(), origin.getZ() + (i - 1), 0.0F, 0.0F);
-                world.spawnEntity(cow);
+                cow.snapTo(origin.getX() + 1.5D, origin.getY(), origin.getZ() + (i - 1), 0.0F, 0.0F);
+                world.addFreshEntity(cow);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.CAKE, 1));
@@ -1426,28 +1425,28 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignVillageHarvest(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // Corridor: dirt laid on the floor, 3 blocks of headroom cleared above, running from the bot all the way to the field.
         for (int x = 0; x <= 16; x++) {
             for (int z = -3; z <= 3; z++) {
-                world.setBlockState(origin.add(x, -1, z), Blocks.DIRT.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(x, -1, z), Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
                 for (int y = 0; y <= 2; y++) {
-                    world.setBlockState(origin.add(x, y, z), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(x, y, z), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         // Ripe crop field (wheat/carrot/potato mixed, all CropBlock): x 10..14 × z -1..1 = 15 plants, far more than the target of 4.
-        net.minecraft.block.BlockState[] crops = {
-                Blocks.WHEAT.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7),
-                Blocks.CARROTS.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7),
-                Blocks.POTATOES.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7)};
+        net.minecraft.world.level.block.state.BlockState[] crops = {
+                Blocks.WHEAT.defaultBlockState().setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_7, 7),
+                Blocks.CARROTS.defaultBlockState().setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_7, 7),
+                Blocks.POTATOES.defaultBlockState().setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_7, 7)};
         int i = 0;
         for (int x = 10; x <= 14; x++) {
             for (int z = -1; z <= 1; z++) {
-                world.setBlockState(origin.add(x, -1, z), Blocks.FARMLAND.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(x, 0, z), crops[i++ % crops.length], Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(x, -1, z), Blocks.FARMLAND.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(x, 0, z), crops[i++ % crops.length], Block.UPDATE_ALL);
             }
         }
         return assignTask(bot, "village_harvest", new RaidCropsTask(4), 4000,
@@ -1463,39 +1462,39 @@ public final class MinecraftAiVerifySubcommand {
     // Note: an assertion only means "the result was obtained", not that the process wasn't dumb (detours/stutter still need manual confirmation).
 
     private static BlockPos prepareRealistic(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        world.setTimeOfDay(1000L); // same as prepareArea: start in daytime, isolating flakiness from nighttime reflexes
+        ServerLevel world = bot.level();
+        world.setDayTime(1000L); // same as prepareArea: start in daytime, isolating flakiness from nighttime reflexes
         bot.getActionPack().stopAll();
         clearInventory(bot); // real-play start = empty inventory; leave everything else untouched (no mob clearing/no laying blocks/no giving items)
         // real_wheat adjusts randomTickSpeed; reset it uniformly here to avoid leaking between scenarios
-        world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
+        world.getGameRules().set(net.minecraft.world.level.gamerules.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
         surfaceTeleport(bot);
-        return bot.getBlockPos();
+        return bot.blockPosition();
     }
 
     // Mining First's final baseline is stricter than the legacy real_* one: it keeps the seed's genuine spawn position and does no surfaceTeleport.
     // The dedicated evidence server only ever runs one from_zero scenario at a time, so there's no need to teleport away to clean up positional contamination from a previous scenario.
     private static BlockPos prepareMiningFromZero(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        world.setTimeOfDay(1000L);
+        ServerLevel world = bot.level();
+        world.setDayTime(1000L);
         bot.getActionPack().stopAll();
         clearInventory(bot);
-        world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
-        return bot.getBlockPos();
+        world.getGameRules().set(net.minecraft.world.level.gamerules.GameRules.RANDOM_TICK_SPEED, 3, world.getServer());
+        return bot.blockPosition();
     }
 
     // If the spawn point is in a cave/underground, lift it to the natural surface (real players operate on the surface); if already on the surface, leave it in place.
     // Wall-enclosure/buried-alive scenarios must be surfaced first: building a wall in the y6 underground darkness would trigger DangerWatcher's "trapped in a death pit" life-saving teleport
     // (dark_trap_escape), which would directly override the real escape being tested (pillaring/digging through walls) (observed as nav_pillar_out aborted).
     private static void surfaceTeleport(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos at = bot.getBlockPos();
-        if (world.isSkyVisible(at)) {
+        ServerLevel world = bot.level();
+        BlockPos at = bot.blockPosition();
+        if (world.canSeeSky(at)) {
             return;
         }
-        int topY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, at.getX(), at.getZ());
-        bot.teleport(world, at.getX() + 0.5D, topY, at.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        int topY = world.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, at.getX(), at.getZ());
+        bot.teleportTo(world, at.getX() + 0.5D, topY, at.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         bot.getActionPack().stopAll();
     }
 
@@ -1503,7 +1502,7 @@ public final class MinecraftAiVerifySubcommand {
     // in real play, dying and respawning is a major incident — dropped gear/lost position/wasted progress — that can't be waved off even if the goal is completed after respawn.
     // Checking isAlive() alone can't catch "died and came back"; the death count must be compared instead.
     private static int deathCount(AIPlayerEntity bot) {
-        return bot.getStatHandler().getStat(net.minecraft.stat.Stats.CUSTOM.getOrCreateStat(net.minecraft.stat.Stats.DEATHS));
+        return bot.getStats().getValue(net.minecraft.stats.Stats.CUSTOM.get(net.minecraft.stats.Stats.DEATHS));
     }
 
     private static Function<AIPlayerEntity, Optional<String>> zeroDeathFailFast(int deathBase) {
@@ -1523,8 +1522,8 @@ public final class MinecraftAiVerifySubcommand {
         if (InventoryAction.countItem(bot, item) >= 1) {
             return true;
         }
-        for (net.minecraft.entity.EquipmentSlot slot : net.minecraft.entity.EquipmentSlot.values()) {
-            if (bot.getEquippedStack(slot).isOf(item)) {
+        for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+            if (bot.getItemBySlot(slot).is(item)) {
                 return true;
             }
         }
@@ -1564,8 +1563,8 @@ public final class MinecraftAiVerifySubcommand {
     // without the speedup, natural ripening takes 20+ minutes and the suite couldn't run; this is a different tier from perTick's magic ripening (food_farm).
     private static Result assignRealWheat(AIPlayerEntity bot) {
         prepareRealistic(bot);
-        ServerWorld world = bot.getEntityWorld();
-        world.getGameRules().setValue(net.minecraft.world.rule.GameRules.RANDOM_TICK_SPEED, 40, world.getServer());
+        ServerLevel world = bot.level();
+        world.getGameRules().set(net.minecraft.world.level.gamerules.GameRules.RANDOM_TICK_SPEED, 40, world.getServer());
         final int deathBase = deathCount(bot); // zero-death red line: dying and respawning is also judged FAIL (in real play, dying once is a major incident)
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.BREAD, 2));
         if (!started) {
@@ -1670,7 +1669,7 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignDiamondStack64Prepared(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         MiningBudget budget = MiningBudget.forQuota(
                 DIAMOND_STACK_TARGET, true, ToolTier.IRON);
         // The prepared isolation layer shares the same expedition-budget source as from-zero, so hand-written fixture values never drift out of sync with
@@ -1690,23 +1689,23 @@ public final class MinecraftAiVerifySubcommand {
         // layout would hide remaining ore behind the bot after batch recovery, testing a geometric dead angle instead of an 8-batch expedition.
         for (int dz = -34; dz <= 0; dz++) {
             for (int dx = -3; dx <= 3; dx++) {
-                world.setBlockState(origin.add(dx, -1, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(origin.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 // Stable roof keeps naturally generated gravel above the prepared canvas from
                 // falling through the newly carved corridor and burying the bot on the first
                 // neighbouring block update. This is environmental isolation, not a target grant.
-                world.setBlockState(origin.add(dx, 3, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, 3, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
             for (int dy = 0; dy <= 3; dy++) {
-                world.setBlockState(origin.add(-4, dy, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(4, dy, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(-4, dy, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(4, dy, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         for (int dz = -1; dz >= -32; dz--) {
@@ -1714,8 +1713,8 @@ public final class MinecraftAiVerifySubcommand {
                 // Uses only a single eye-level ore wall: every block is genuinely visible from the central corridor, mined from the side, with drops landing on
                 // the stone floor. prepared's job is to isolate continuous batches/tools/physical pickup, without mixing in
                 // the separate perception variable of "an underfoot ore layer being occluded by the floor".
-                world.setBlockState(origin.add(dx, 1, dz),
-                        Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, 1, dz),
+                        Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         final int deathBase = deathCount(bot);
@@ -1787,11 +1786,11 @@ public final class MinecraftAiVerifySubcommand {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 256));        // fill material for FLATTEN's dig-high-fill-low leveling
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 128));
         InventoryAction.giveItem(bot, new ItemStack(Items.CRAFTING_TABLE, 1));
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> plankBlocks = new java.util.HashSet<>();
         for (Item planks : io.github.zoyluo.minecraftai.craft.RecipeRegistry.PLANKS) {
-            Block block = Block.getBlockFromItem(planks);
+            Block block = Block.byItem(planks);
             if (block != Blocks.AIR) {
                 plankBlocks.add(block);
             }
@@ -1804,18 +1803,18 @@ public final class MinecraftAiVerifySubcommand {
         // rather than an origin-anchored "only above" — this fixes the assertion-anchor limitation where a house finished 116/116 with zero deaths was still missed by an origin-centered count.
         return Result.runningGoal("real_build", 20000,
                 ignored -> bot.isAlive() && deathCount(bot) == deathBase
-                        && countNearbyBlocks(world, bot.getBlockPos(), 10, -6, 8, plankBlocks) >= 80);
+                        && countNearbyBlocks(world, bot.blockPosition(), 10, -6, 8, plankBlocks) >= 80);
     }
 
     // snapshot placement helper: places one block in its default state at a relative coordinate (pairs with the setRel lines exported by /minecraftai snapshot).
-    static void setRel(ServerWorld world, BlockPos origin, int dx, int dy, int dz, String id) {
-        net.minecraft.block.Block block = net.minecraft.registry.Registries.BLOCK
-                .getOptionalValue(net.minecraft.util.Identifier.of(id)).orElse(null);
+    static void setRel(ServerLevel world, BlockPos origin, int dx, int dy, int dz, String id) {
+        net.minecraft.world.level.block.Block block = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getOptional(net.minecraft.resources.Identifier.parse(id)).orElse(null);
         if (block == null) {
             io.github.zoyluo.minecraftai.log.BotLog.config("snapshot_unknown_block", "id", id);
             return;
         }
-        world.setBlockState(origin.add(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_LISTENERS);
+        world.setBlock(origin.offset(dx, dy, dz), block.defaultBlockState(), Block.UPDATE_CLIENTS);
     }
 
     // Real play: one block of obsidian from scratch. In the natural world, obsidian requires "find a lava lake + pour water" — the bot currently lacks this capability,
@@ -1837,23 +1836,23 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignObsidianHalfStack32Prepared(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // A 7×5 sunken source pool (35 blocks) + a stone rim: real water flow sweeps across the pool surface converting it in bulk, then it's mined block by block after the water is recovered.
         // This is also the safe collection method players commonly use, avoiding an isolated same-plane source spreading endlessly across the whole canvas.
         for (int dx = 4; dx <= 10; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        world.setBlockState(origin.add(3, 0, 0), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.teleport(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        world.setBlock(origin.offset(3, 0, 0), Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
+        bot.teleportTo(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         // A refillable 2x2 water source; the target implementation should genuinely pour/recover water rather than writing obsidian blocks directly.
         for (int dx = -3; dx <= -2; dx++) {
             for (int dz = 0; dz <= 1; dz++) {
-                world.setBlockState(origin.add(dx, 0, dz), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, 0, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
@@ -1874,7 +1873,7 @@ public final class MinecraftAiVerifySubcommand {
                 ignored -> {
                     // Prepared isolates the long quota/fluid/pickup pipeline. Keep its 12-minute
                     // laboratory run in daylight; hostile survival remains a from-zero gate.
-                    world.setTimeOfDay(1000L);
+                    world.setDayTime(1000L);
                     return bot.isAlive()
                             && InventoryAction.countItem(bot, Items.OBSIDIAN) >= OBSIDIAN_HALF_STACK_TARGET
                             && deathCount(bot) == deathBase;
@@ -1886,23 +1885,23 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignObsidianStack64Prepared(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         for (int dx = 4; dx <= 13; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz),
-                        Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz),
+                        Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        world.setBlockState(origin.add(3, 0, 0),
-                Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.teleport(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        world.setBlock(origin.offset(3, 0, 0),
+                Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
+        bot.teleportTo(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         for (int dx = -3; dx <= -2; dx++) {
             for (int dz = 0; dz <= 1; dz++) {
-                world.setBlockState(origin.add(dx, 0, dz),
-                        Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, 0, dz),
+                        Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
@@ -1923,7 +1922,7 @@ public final class MinecraftAiVerifySubcommand {
         return Result.runningGoal("obsidian_stack_64_prepared",
                 OBSIDIAN_STACK_64_PREPARED_TIMEOUT,
                 ignored -> {
-                    world.setTimeOfDay(1000L);
+                    world.setDayTime(1000L);
                     return bot.isAlive()
                             && InventoryAction.countItem(bot, Items.OBSIDIAN)
                             >= OBSIDIAN_STACK_TARGET
@@ -1979,14 +1978,14 @@ public final class MinecraftAiVerifySubcommand {
     // pulled out and tested on its own so that if navigation breaks, it's immediately clear it's a "walking" problem, not a gathering/crafting one.
     private static Result assignRealNavFar(AIPlayerEntity bot) {
         BlockPos start = prepareRealistic(bot);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         int gx = start.getX() + 120;
         int gz = start.getZ();
         // Uses the MOTION_BLOCKING heightmap to get a natural surface footing y (including leaves/water surfaces), consistent with "a player eyeballing a surface spot"
-        int gy = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, gx, gz);
+        int gy = world.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, gx, gz);
         BlockPos goal = new BlockPos(gx, gy, gz);
         return assignTask(bot, "real_nav_far", new MoveTask(bot, goal), 6000,
-                ignored -> bot.isAlive() && bot.getBlockPos().getSquaredDistance(goal) <= 9.0D);
+                ignored -> bot.isAlive() && bot.blockPosition().distSqr(goal) <= 9.0D);
     }
 
     // ==================== R2 LLM full-chain layer (llm_*) ====================
@@ -2132,9 +2131,9 @@ public final class MinecraftAiVerifySubcommand {
             IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_setup_cleanup");
             return Result.fail("cancel_no_resurrection", "active_paused_setup_failed");
         }
-        BotMemoryStore.INSTANCE.of(bot.getUuid()).setGoal("verify_cancel", List.of("craft sticks"));
-        TaskManager.INSTANCE.recordFailure(bot, "verify_old_task", "verify_old_failure", bot.getEntityWorld().getServer().getTicks());
-        bot.getHungerManager().setFoodLevel(10);
+        BotMemoryStore.INSTANCE.of(bot.getUUID()).setGoal("verify_cancel", List.of("craft sticks"));
+        TaskManager.INSTANCE.recordFailure(bot, "verify_old_task", "verify_old_failure", bot.level().getServer().getTickCount());
+        bot.getFoodData().setFoodLevel(10);
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 1));
         if (EatAction.startEating(bot).isFailed() || !bot.isUsingItem()) {
             IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_setup_cleanup");
@@ -2142,8 +2141,8 @@ public final class MinecraftAiVerifySubcommand {
         }
         // Immediately restore hunger right after establishing the isUsingItem action, to prevent DangerWatcher from legitimately dispatching a new EatTask after cancellation;
         // this scenario only checks whether the old Mission/Task/memory resurrects, and must not mistake new work from the safety layer for the old intent.
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         var outcome = IntentController.INSTANCE.cancelAll(
                 bot, IntentController.ControlOrigin.SYSTEM, "verify_cancel_no_resurrection");
         if (!outcome.currentMissionDetached()
@@ -2154,7 +2153,7 @@ public final class MinecraftAiVerifySubcommand {
                 || pausedTask.state() != TaskState.CANCELLED) {
             return Result.fail("cancel_no_resurrection", "incomplete_cancel_outcome=" + outcome);
         }
-        int quietUntilTick = bot.getEntityWorld().getServer().getTicks() + 200;
+        int quietUntilTick = bot.level().getServer().getTickCount() + 200;
         boolean[] violated = {false};
         return Result.runningPatient("cancel_no_resurrection", 260,
                 ignored -> {
@@ -2166,7 +2165,7 @@ public final class MinecraftAiVerifySubcommand {
                         && TaskManager.INSTANCE.status(bot).state() == TaskState.CANCELLED
                         && activeTask.state() == TaskState.CANCELLED
                         && pausedTask.state() == TaskState.CANCELLED
-                        && !BotMemoryStore.INSTANCE.of(bot.getUuid()).hasActiveGoal()
+                        && !BotMemoryStore.INSTANCE.of(bot.getUUID()).hasActiveGoal()
                         && !BrainCoordinator.INSTANCE.status(bot).busy()
                         && !bot.getActionPack().hasActiveActions()
                         && !bot.isUsingItem()
@@ -2174,7 +2173,7 @@ public final class MinecraftAiVerifySubcommand {
                         && InventoryAction.countItem(bot, Items.CRAFTING_TABLE) == 0
                         && InventoryAction.countItem(bot, Items.BREAD) == 1;
                     violated[0] |= !cleanNow;
-                    return bot.getEntityWorld().getServer().getTicks() >= quietUntilTick && !violated[0];
+                    return bot.level().getServer().getTickCount() >= quietUntilTick && !violated[0];
                 });
     }
 
@@ -2272,7 +2271,7 @@ public final class MinecraftAiVerifySubcommand {
                 || !GoalExecutor.INSTANCE.submit(bot, queuedGoal)) {
             return Result.fail("replace_action_only", "goal_setup_failed");
         }
-        BlockPos target = bot.getBlockPos().add(6, 0, 0);
+        BlockPos target = bot.blockPosition().offset(6, 0, 0);
         String moveArgs = "{\"x\":" + target.getX()
                 + ",\"y\":" + target.getY()
                 + ",\"z\":" + target.getZ() + "}";
@@ -2297,13 +2296,13 @@ public final class MinecraftAiVerifySubcommand {
             IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "verify_cleanup");
             return Result.fail("replace_action_only", detail);
         }
-        bot.getHungerManager().setFoodLevel(10); // not critical, but reaches the auto-eat threshold: must not preempt the move action
+        bot.getFoodData().setFoodLevel(10); // not critical, but reaches the auto-eat threshold: must not preempt the move action
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 1));
         String[] violation = {null};
         boolean[] violationLogged = {false};
         return Result.runningPatient("replace_action_only", 1200,
                 ignored -> {
-                    boolean reachedTarget = bot.getBlockPos().getSquaredDistance(target) <= 4.0D;
+                    boolean reachedTarget = bot.blockPosition().distSqr(target) <= 4.0D;
                     boolean moveActive = !bot.getActionPack().isPathExecutorIdle()
                             || !bot.getActionPack().isWalkToIdle();
                     if (violation[0] == null && moveActive
@@ -2484,10 +2483,10 @@ public final class MinecraftAiVerifySubcommand {
     private static void prepareRuntimeControlArea(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        clearNearbyMobs(bot.getEntityWorld(), bot.getBlockPos());
+        clearNearbyMobs(bot.level(), bot.blockPosition());
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
     }
 
     /**
@@ -2501,12 +2500,12 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_LOG, 32)); // raw logs only: the 114 planks must be figured out and crafted on its own
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> plankBlocks = new java.util.HashSet<>();
         for (Item planks : io.github.zoyluo.minecraftai.craft.RecipeRegistry.PLANKS) {
-            Block block = Block.getBlockFromItem(planks);
+            Block block = Block.byItem(planks);
             if (block != Blocks.AIR) {
                 plankBlocks.add(block);
             }
@@ -2532,8 +2531,8 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 128));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         final int deathBase = deathCount(bot);
         java.util.Set<Block> stoneLike = java.util.Set.of(Blocks.COBBLESTONE, Blocks.STONE, Blocks.STONE_BRICKS);
         if (!GoalExecutor.INSTANCE.submit(bot, new Goal.Build("custom:5x4x3:stone_like"))) {
@@ -2559,32 +2558,32 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignMineGeo(AIPlayerEntity bot, String geo) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         switch (geo) {
             // Vertically buried ore: 3 blocks underfoot (the old lab baseline)
-            case "vertical" -> world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+            case "vertical" -> world.setBlock(origin.below(3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
             // Mountainside: a 6-high stone slope is piled up 8 blocks away, with ore embedded in the slope face (a recreation of three real-play failures in a row)
             case "slope" -> {
                 for (int dx = 0; dx <= 6; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
                         for (int dy = 0; dy <= dx; dy++) {
-                            world.setBlockState(origin.add(8 + dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(8 + dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(11, 3, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(11, 3, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
             // Suspended overhead: ore in the underside of a stone slab 5 blocks overhead (requires pillaring up / stepping up if it can't be reached — tests vertical approach)
             case "overhang" -> {
                 for (int dx = -2; dx <= 2; dx++) {
                     for (int dz = -2; dz <= 2; dz++) {
-                        world.setBlockState(origin.add(dx, 5, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                        world.setBlock(origin.offset(dx, 5, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                     }
                 }
-                world.setBlockState(origin.add(0, 5, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(0, 5, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 16)); // footing material
             }
             // Wall between: a 3-thick stone wall between the bot and the ore (must dig through the wall)
@@ -2592,27 +2591,27 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 3; dx <= 5; dx++) {
                     for (int dz = -2; dz <= 2; dz++) {
                         for (int dy = 0; dy <= 3; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(7, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
             // Fully enclosed pocket: ore fully embedded at the center of a solid stone cube 6 blocks away (a direct test of the endpoint exemption)
             case "pocket" -> {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
                         for (int dy = -1; dy <= 4; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(7, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
             // Deep and diagonally below: ore diagonally 6 blocks down (deep deepslate iron ore, testing diagonal downward digging). Torches given generously: fixed-interval strip-corridor lighting
             // (ore_dig_torch) is incidentally verified in this row — a torch should appear every 10 blocks in the dark corridor.
             case "deep" -> {
-                world.setBlockState(origin.add(4, -6, 4), Blocks.DEEPSLATE_IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(4, -6, 4), Blocks.DEEPSLATE_IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
                 InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 16));
             }
             // P0 verification · lava adjacency: one lava-source block adjoins the east face of the fully enclosed ore — the precheck should route A* in from a safe face (north/south/top, etc.);
@@ -2621,12 +2620,12 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
                         for (int dy = -1; dy <= 4; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 1, 0), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL); // lava adjoining the ore's east face
+                world.setBlock(origin.offset(7, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(8, 1, 0), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL); // lava adjoining the ore's east face
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8)); // sealing material (a real player always has cobblestone on hand)
             }
             // R9 flowing water adjoining ore (waterfall base): a water source hangs 2 blocks above the cell adjacent to the ore and naturally flows down over the ore's east neighbor — flowing water (not a source)
@@ -2635,14 +2634,14 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
                         for (int dy = -1; dy <= 4; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 1, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 2, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 3, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL); // a high source, flowing down to the ore's neighbor
+                world.setBlock(origin.offset(7, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(8, 1, 0), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(8, 2, 0), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(8, 3, 0), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL); // a high source, flowing down to the ore's neighbor
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
             }
             // R9 hidden-lake wall breach: a water tank hides behind the straight z=0/1 wall leading to the ore (digging through floods it), with a dry path left on the negative-z side —
@@ -2652,7 +2651,7 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 3; dx <= 9; dx++) {
                     for (int dz = -4; dz <= 3; dz++) {
                         for (int dy = -1; dy <= 4; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
@@ -2663,11 +2662,11 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 5; dx <= 6; dx++) {
                     for (int dz = 2; dz <= 3; dz++) {
                         for (int dy = 1; dy <= 2; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(9, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(9, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
             }
             // Water-adjacent ore: structurally identical to the lava row, with the fluid swapped for a water source — the instant it's dug open, the inrushing water could push the bot away or flood the corridor and drown the drops;
@@ -2676,12 +2675,12 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 4; dx <= 9; dx++) {
                     for (int dz = -3; dz <= 3; dz++) {
                         for (int dy = -1; dy <= 4; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
-                world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(8, 1, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL); // water source adjoining the ore's east face
+                world.setBlock(origin.offset(7, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(8, 1, 0), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL); // water source adjoining the ore's east face
                 InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 8));
             }
             // P0 verification · gravel overhead: a 3-block gravel column hangs overhead on the mandatory wall-crossing segment (the z=0 straight line); the precheck should route through a safe z±1 column instead —
@@ -2690,16 +2689,16 @@ public final class MinecraftAiVerifySubcommand {
                 for (int dx = 3; dx <= 5; dx++) {
                     for (int dz = -2; dz <= 2; dz++) {
                         for (int dy = 0; dy <= 3; dy++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
                 for (int dx = 3; dx <= 5; dx++) {
                     for (int dy = 4; dy <= 6; dy++) {
-                        world.setBlockState(origin.add(dx, dy, 0), Blocks.GRAVEL.getDefaultState(), Block.NOTIFY_ALL);
+                        world.setBlock(origin.offset(dx, dy, 0), Blocks.GRAVEL.defaultBlockState(), Block.UPDATE_ALL);
                     }
                 }
-                world.setBlockState(origin.add(7, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(7, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
             // P0 verification · full inventory: the work face must not just dropJunk directly; OreDig should pause and wait for the sealed
             // ORE_BATCH capacity service to free up four slots, then retry from the same cursor and pick up the target ore.
@@ -2708,27 +2707,27 @@ public final class MinecraftAiVerifySubcommand {
                 for (int i = 0; i < 36; i++) {
                     InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 64));
                 }
-                world.setBlockState(origin.down(3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.below(3), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
             // Sunken ore next to a shaft (deterministic reproduction of real_iron seed777): the ore sits in solid stone 5 down/10 across,
             // with an open shaft left 2 blocks away going all the way down (simulating a leftover shaft from the bot having just dug dig_down). Observed in real play:
             // the bot breaks 14 blocks entirely at the starting Y level, tunneling horizontally without ever sinking to the ore's Y → no_progress. geo_deep (pure solid diagonal-down)
             // still PASSes, and the difference is exactly this open shaft mixed into the terrain. Once the approacher's descent is fixed, this scenario and real_iron should turn green together.
             case "shaft" -> {
-                world.setBlockState(origin.add(10, -5, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(10, -5, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy >= -8; dy--) {
-                    world.setBlockState(origin.add(2, dy, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(2, dy, 0), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
             // Sunken ore across a cavity (real_iron seed777, hypothesis #2): a 5x4x5 cave lies between the bot and the sunken ore.
             // Hypothesis: the approacher's A* sees the cavity and WALKs into the cave, lands at the bottom facing the ore from the wrong angle, and stalls tunneling horizontally.
             // If geo_shaft (pure solid) PASSes while this scenario fails → the air gap is the real cause.
             case "cave" -> {
-                world.setBlockState(origin.add(10, -5, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(10, -5, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dx = 3; dx <= 7; dx++) {
                     for (int dy = -1; dy >= -4; dy--) {
                         for (int dz = -2; dz <= 2; dz++) {
-                            world.setBlockState(origin.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                            world.setBlock(origin.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                         }
                     }
                 }
@@ -2753,30 +2752,30 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoRich(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         // (the high-altitude premise is already satisfied by the unified canvas: prospect's 64-block sphere naturally has zero ore, so the rich-area-guidance test is no longer hijacked.)
         // Rich area: 80 blocks away, 3 remembered resource points (clustered within 20 blocks) + one real ore block; a stone corridor is laid along the way to guarantee passage (the barren band, no ore within 64 blocks)
-        BlockPos rich = origin.add(80, 0, 0);
+        BlockPos rich = origin.offset(80, 0, 0);
         for (int dx = 0; dx <= 82; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(origin.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(rich, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(rich, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         // The platform is fully laid before the bot is placed (lay first, teleport after, to prevent a falling window)
-        bot.teleport(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        bot.teleportTo(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         bot.fallDistance = 0.0F;
         io.github.zoyluo.minecraftai.memory.EpisodeLog log = io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE;
-        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(0, 0, 10), "minecraft:iron_ore");
-        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(10, 0, 0), "minecraft:iron_ore");
-        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.add(0, 0, -10), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.offset(0, 0, 10), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.offset(10, 0, 0), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, rich.offset(0, 0, -10), "minecraft:iron_ore");
         final int deathBase = deathCount(bot);
         boolean started = GoalExecutor.INSTANCE.submit(bot,
                 new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
@@ -2793,16 +2792,16 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoBonus(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 6, 8);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         // Target iron ore: 6 blocks east, same level
-        world.setBlockState(origin.add(6, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.offset(6, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         // Coal along the way: on both tunnel walls (enters the ±2 scan window as the tunnel is dug through)
-        world.setBlockState(origin.add(2, 1, 1), Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.add(4, 0, -1), Blocks.COAL_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.offset(2, 1, 1), Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(origin.offset(4, 0, -1), Blocks.COAL_ORE.defaultBlockState(), Block.UPDATE_ALL);
         final int deathBase = deathCount(bot);
         boolean started = GoalExecutor.INSTANCE.submit(bot,
                 new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
@@ -2820,17 +2819,17 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoStockpile(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         fillStoneCube(world, origin, 4, 8);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        world.setBlockState(origin.add(5, 1, 0), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin.offset(5, 1, 0), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
         // Base: a marker at the bot's feet + a chest
-        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID())
                 .markPlace("base", world, origin);
-        BlockPos chest = origin.add(-2, 0, 0);
-        world.setBlockState(chest, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos chest = origin.offset(-2, 0, 0);
+        world.setBlock(chest, Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
         boolean started = GoalExecutor.INSTANCE.submit(bot,
                 new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
         if (!started) {
@@ -2845,8 +2844,8 @@ public final class MinecraftAiVerifySubcommand {
             if (inv == null) {
                 return false;
             }
-            for (int i = 0; i < inv.size(); i++) {
-                if (inv.getStack(i).isOf(Items.RAW_IRON)) {
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                if (inv.getItem(i).is(Items.RAW_IRON)) {
                     return true;
                 }
             }
@@ -2859,27 +2858,27 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoResume(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         // Work face: 35 blocks east, corridor kept clear, 2 iron ore embedded beside the face
-        BlockPos face = origin.add(35, 0, 0);
+        BlockPos face = origin.offset(35, 0, 0);
         for (int dx = 0; dx <= 37; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(origin.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         // Canvas rule: ore must be at least y+1 — placing it at ground level (y+0) makes the approach goal (ore.down) land in the void below the single stone-slab layer,
         // so the support check rejects it every time → a cascade of TIMEOUT skips (observed in round 4b). A single stone block is placed as the ore's base.
-        world.setBlockState(face.add(1, 0, 1), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(face.add(1, 0, -1), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(face.add(1, 1, 1), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(face.add(1, 1, -1), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        var mem = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid());
+        world.setBlock(face.offset(1, 0, 1), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(face.offset(1, 0, -1), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(face.offset(1, 1, 1), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(face.offset(1, 1, -1), Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        var mem = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID());
         mem.markPlace("mine_face", world, face);
         mem.remember("mine_face_ores", "minecraft:iron_ore");
         // Recreates resume_mining in body
@@ -2899,24 +2898,24 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoGuard(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos(); // the unified canvas is already high in the air, with zero interference from natural water bodies
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition(); // the unified canvas is already high in the air, with zero interference from natural water bodies
         // Stone-walled water well: 1x1 interior, 4 deep, the bot sinks to the bottom with 3 blocks of water overhead (only truly drowning if it can't surface)
         for (int dy = -1; dy <= 4; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    world.setBlockState(origin.add(dx, dy, dz),
+                    world.setBlock(origin.offset(dx, dy, dz),
                             (dx == 0 && dz == 0 && dy >= 0 && dy <= 3)
-                                    ? Blocks.WATER.getDefaultState()
-                                    : Blocks.STONE.getDefaultState(),
-                            Block.NOTIFY_ALL);
+                                    ? Blocks.WATER.defaultBlockState()
+                                    : Blocks.STONE.defaultBlockState(),
+                            Block.UPDATE_ALL);
                 }
             }
         }
-        bot.teleport(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        bot.teleportTo(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         bot.fallDistance = 0.0F;
-        bot.setAir(120); // compresses the wait: dropping from 120, ~1 second to the threshold (a full 300 would mean wasting 10 seconds waiting)
+        bot.setAirSupply(120); // compresses the wait: dropping from 120, ~1 second to the threshold (a full 300 would mean wasting 10 seconds waiting)
         TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.minecraftai.task.HoldTask(),
                 io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "hold"));
         // Inverted scenario: the guard cutting the task = a clean FAILED counts as a PASS (the detail carries the failure reason so it can be checked as guard_drowning);
@@ -2930,22 +2929,22 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignExploreWood(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // A stone-slab corridor runs 120 blocks out (dy-1 laid with stone, dy0..2 cleared, structurally identical to geo_rich's corridor): guarantees the tree cluster is physically reachable.
         for (int dx = 0; dx <= 124; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(origin.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         // Tree cluster: 3 birch pillars 2 blocks tall (6 logs total, leaving margin over the 4-log target; the corridor is already cleared so the pillars behind it aren't buried).
-        for (BlockPos base : new BlockPos[]{origin.add(120, 0, 0), origin.add(121, 0, 1), origin.add(121, 0, -1)}) {
-            world.setBlockState(base, Blocks.BIRCH_LOG.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(base.up(), Blocks.BIRCH_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos base : new BlockPos[]{origin.offset(120, 0, 0), origin.offset(121, 0, 1), origin.offset(121, 0, -1)}) {
+            world.setBlock(base, Blocks.BIRCH_LOG.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(base.above(), Blocks.BIRCH_LOG.defaultBlockState(), Block.UPDATE_ALL);
         }
         // HaveItem(OAK_LOG) is lenient about the log family: GatherQuotaTask.acceptItemsFor returns the whole family for the LOGS tag
         // (any wood type counts), so birch logs still advance progress — meaning the goal can complete even though BIRCH is gathered while the target says OAK.
@@ -2963,13 +2962,13 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoRecover(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_INGOT, 5));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
         // One-hit kill: goes through the vanilla death flow (drops are spawned); setHealth(0) doesn't trigger onDeath drops, damage must be applied instead.
-        bot.damage(world, world.getDamageSources().generic(), 1000.0F);
+        bot.hurtServer(world, world.damageSources().generic(), 1000.0F);
         return Result.running("geo_recover", 2400,
                 ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.IRON_INGOT) >= 5);
     }
@@ -2996,27 +2995,27 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignKnowledgeSmoke(AIPlayerEntity bot) {
         io.github.zoyluo.minecraftai.memory.KnowledgeBase kb = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE;
         io.github.zoyluo.minecraftai.memory.EpisodeLog log = io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE;
-        BlockPos spot = bot.getBlockPos().add(1000, 0, 1000); // far from the actual activity area, so it doesn't contaminate later scenarios
-        int dangersBefore = kb.dangerCount(bot.getUuid());
+        BlockPos spot = bot.blockPosition().offset(1000, 0, 1000); // far from the actual activity area, so it doesn't contaminate later scenarios
+        int dangersBefore = kb.dangerCount(bot.getUUID());
         log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, spot, "smoke_test");
-        if (kb.dangerCount(bot.getUuid()) != dangersBefore) {
+        if (kb.dangerCount(bot.getUUID()) != dangersBefore) {
             return Result.fail("knowledge_smoke", "single_death_created_zone(should require two before flagging)");
         }
-        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, spot.add(3, 0, 3), "smoke_test");
-        if (!kb.isDanger(bot.getUuid(), spot)) {
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, spot.offset(3, 0, 3), "smoke_test");
+        if (!kb.isDanger(bot.getUUID(), spot)) {
             return Result.fail("knowledge_smoke", "two_deaths_no_zone(cluster distillation did not take effect)");
         }
-        int resBefore = kb.resourceCount(bot.getUuid());
-        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.add(50, 0, 0), "minecraft:iron_ore");
-        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.add(52, 0, 2), "minecraft:iron_ore");
-        if (kb.resourceCount(bot.getUuid()) != resBefore + 1) {
+        int resBefore = kb.resourceCount(bot.getUUID());
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.offset(50, 0, 0), "minecraft:iron_ore");
+        log.record(bot, io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, spot.offset(52, 0, 2), "minecraft:iron_ore");
+        if (kb.resourceCount(bot.getUUID()) != resBefore + 1) {
             return Result.fail("knowledge_smoke", "resource_dedup_failed(the same ore within 8 blocks should dedupe)");
         }
-        if (kb.nearestResource(bot.getUuid(), "minecraft:iron_ore", spot.add(40, 0, 0), 96).isEmpty()) {
+        if (kb.nearestResource(bot.getUUID(), "minecraft:iron_ore", spot.offset(40, 0, 0), 96).isEmpty()) {
             return Result.fail("knowledge_smoke", "nearest_resource_miss");
         }
-        return Result.pass("knowledge_smoke", "distill+dedup+query ok, dangers=" + kb.dangerCount(bot.getUuid())
-                + " resources=" + kb.resourceCount(bot.getUuid()));
+        return Result.pass("knowledge_smoke", "distill+dedup+query ok, dangers=" + kb.dangerCount(bot.getUUID())
+                + " resources=" + kb.resourceCount(bot.getUUID()));
     }
 
     // L1 wiring regression (no key burned): feeds tool calls directly to each high-level tool handler, asserting "the right tool + the right parameters → maps to the right Goal and submits successfully
@@ -3094,12 +3093,12 @@ public final class MinecraftAiVerifySubcommand {
     // Deliberately counts only center.y and above (the "above" baseline): prepareArea's lab-platform floor/foundation (y-1 cobblestone, 16 layers of solid
     // stone below) shares the same family as stone_like building material, and counting it would misjudge "no house built" as meeting the bar; the house's floor layer lands exactly at the anchor foothold y
     // (=origin.y, since SiteFinder's site selection picks a standable cell), so the "above" baseline costs the building itself nothing.
-    private static int countNearbyBlocksAbove(ServerWorld world, BlockPos center, int r, java.util.Set<Block> targets) {
+    private static int countNearbyBlocksAbove(ServerLevel world, BlockPos center, int r, java.util.Set<Block> targets) {
         int count = 0;
         for (int dx = -r; dx <= r; dx++) {
             for (int dy = 0; dy <= 8; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
-                    if (targets.contains(world.getBlockState(center.add(dx, dy, dz)).getBlock())) {
+                    if (targets.contains(world.getBlockState(center.offset(dx, dy, dz)).getBlock())) {
                         count++;
                     }
                 }
@@ -3113,13 +3112,13 @@ public final class MinecraftAiVerifySubcommand {
     // 116/116 with zero deaths gets misjudged as assertion_failed. Under real terrain, the ground below is dirt/stone, not in the same family as planks, so scanning symmetrically around the "actual build spot"
     // (where the bot ends up once the build is done) counts only genuine planks with no fake-platform problem (cannot be used for the lab build scenario: there, the platform floor shares a family with the building material, see
     // the countNearbyBlocksAbove comment). Still requires ≥80 genuine planks + zero deaths + survival, just with the count anchor aimed at the actual build spot.
-    private static int countNearbyBlocks(ServerWorld world, BlockPos center, int r, int yLo, int yHi,
+    private static int countNearbyBlocks(ServerLevel world, BlockPos center, int r, int yLo, int yHi,
                                          java.util.Set<Block> targets) {
         int count = 0;
         for (int dx = -r; dx <= r; dx++) {
             for (int dy = yLo; dy <= yHi; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
-                    if (targets.contains(world.getBlockState(center.add(dx, dy, dz)).getBlock())) {
+                    if (targets.contains(world.getBlockState(center.offset(dx, dy, dz)).getBlock())) {
                         count++;
                     }
                 }
@@ -3129,7 +3128,7 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     // Counts the number of water-source blocks among the four cells of the 2×2 area at center.
-    private static int countWaterSources(ServerWorld world, BlockPos center) {
+    private static int countWaterSources(ServerLevel world, BlockPos center) {
         BlockPos[] cells = {center, center.east(), center.south(), center.east().south()};
         int n = 0;
         for (BlockPos p : cells) {
@@ -3145,10 +3144,10 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_INGOT, 30));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         for (int dy = 0; dy < 6; dy++) {
-            world.setBlockState(origin.offset(Direction.WEST, 2).up(dy), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.relative(Direction.WEST, 2).above(dy), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Armor());
         if (!started) {
@@ -3182,10 +3181,10 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     private static boolean hasBlockNearby(AIPlayerEntity bot, Block block) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        for (BlockPos p : BlockPos.iterate(origin.add(-5, -3, -5), origin.add(5, 3, 5))) {
-            if (world.getBlockState(p).isOf(block)) {
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
+        for (BlockPos p : BlockPos.betweenClosed(origin.offset(-5, -3, -5), origin.offset(5, 3, 5))) {
+            if (world.getBlockState(p).is(block)) {
                 return true;
             }
         }
@@ -3197,14 +3196,14 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        BlockPos chestPos = origin.offset(Direction.EAST, 2);
-        world.setBlockState(chestPos, Blocks.CHEST.getDefaultState(), Block.NOTIFY_ALL);
-        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUuid())
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
+        BlockPos chestPos = origin.relative(Direction.EAST, 2);
+        world.setBlock(chestPos, Blocks.CHEST.defaultBlockState(), Block.UPDATE_ALL);
+        io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE.of(bot.getUUID())
                 .markPlace("base", world, origin);
         for (int dy = 1; dy <= 12; dy++) {
-            world.setBlockState(origin.down(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.below(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Stockpile(Items.COBBLESTONE, 6));
         if (!started) {
@@ -3214,9 +3213,9 @@ public final class MinecraftAiVerifySubcommand {
                 ignored -> bot.isAlive() && io.github.zoyluo.minecraftai.action.ContainerAction.resolve(bot, chestPos)
                         .map(inventory -> {
                             int count = 0;
-                            for (int slot = 0; slot < inventory.size(); slot++) {
-                                if (inventory.getStack(slot).isOf(Items.COBBLESTONE)) {
-                                    count += inventory.getStack(slot).getCount();
+                            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                                if (inventory.getItem(slot).is(Items.COBBLESTONE)) {
+                                    count += inventory.getItem(slot).getCount();
                                 }
                             }
                             return count >= 6;
@@ -3229,16 +3228,16 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         int targetY = origin.getY() - 20;
         for (int dy = 1; dy <= 25; dy++) {
-            world.setBlockState(origin.down(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.below(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         Task task = new DescendToYTask(targetY);
         return assignTask(bot, "descend_to_ore", task,
                 MiningMissionBudget.descendTaskWindowTicks(origin.getY(), targetY),
-                ignored -> bot.isAlive() && bot.getBlockPos().getY() <= targetY);
+                ignored -> bot.isAlive() && bot.blockPosition().getY() <= targetY);
     }
 
     // Digging-based movement: the bot is enclosed by a horizontal stone wall (headroom left open so it doesn't suffocate), with the target outside the wall. Pure pathfinding can't get through → MoveTask should fall back to digging through the wall to reach it.
@@ -3246,17 +3245,17 @@ public final class MinecraftAiVerifySubcommand {
         prepareArea(bot);
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        for (Direction direction : Direction.Type.HORIZONTAL) {
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
             for (int dy = 0; dy <= 1; dy++) {
-                world.setBlockState(origin.offset(direction).up(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.relative(direction).above(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        BlockPos goal = origin.offset(Direction.EAST, 4);
+        BlockPos goal = origin.relative(Direction.EAST, 4);
         Task task = new MoveTask(bot, goal);
         return assignTask(bot, "move_dig_through", task, 4000,
-                ignored -> bot.isAlive() && bot.getBlockPos().getSquaredDistance(goal) <= 9.0D);
+                ignored -> bot.isAlive() && bot.blockPosition().distSqr(goal) <= 9.0D);
     }
 
     /**
@@ -3269,20 +3268,20 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoNightSwarm(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
-        world.setTimeOfDay(13000L); // night: spawned zombies won't burn in sunlight, so the siege is sustained
+        world.setDayTime(13000L); // night: spawned zombies won't burn in sunlight, so the siege is sustained
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 32)); // wall-building material (no weapon forces shelter)
         bot.setHealth(8.0F); // ≤ EMERGENCY_SHELTER_HP, triggers the life-saving wall-off
         for (int i = 0; i < 3; i++) {
-            net.minecraft.entity.mob.ZombieEntity z = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
+            net.minecraft.world.entity.monster.zombie.Zombie z = EntityType.ZOMBIE.create(world, EntitySpawnReason.COMMAND);
             if (z != null) {
-                z.setPersistent();
+                z.setPersistenceRequired();
                 double ang = i * 2.094D;
-                z.refreshPositionAndAngles(bot.getX() + 2.0D * Math.cos(ang), bot.getY(),
+                z.snapTo(bot.getX() + 2.0D * Math.cos(ang), bot.getY(),
                         bot.getZ() + 2.0D * Math.sin(ang), 0.0F, 0.0F);
-                world.spawnEntity(z);
+                world.addFreshEntity(z);
             }
         }
         TaskManager.INSTANCE.assign(bot, new io.github.zoyluo.minecraftai.task.HoldTask(),
@@ -3292,10 +3291,10 @@ public final class MinecraftAiVerifySubcommand {
             if (!bot.isAlive() || deathCount(bot) != deathBase) {
                 return false; // killed = failed to save itself
             }
-            BlockPos h = bot.getBlockPos().up();
+            BlockPos h = bot.blockPosition().above();
             int walls = 0;
-            for (Direction d : Direction.Type.HORIZONTAL) {
-                if (!world.getBlockState(h.offset(d)).isAir()) {
+            for (Direction d : Direction.Plane.HORIZONTAL) {
+                if (!world.getBlockState(h.relative(d)).isAir()) {
                     walls++;
                 }
             }
@@ -3309,22 +3308,22 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoCliffTree(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // Dig a steep pit to the east at dx 4..10: from the rim at y0, clear 6 blocks straight down into a vertical wall, with a stone floor at the bottom, y-7.
         for (int dx = 4; dx <= 10; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 for (int dy = 0; dy >= -6; dy--) {
-                    world.setBlockState(origin.add(dx, dy, dz), Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+                    world.setBlock(origin.offset(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
                 }
-                world.setBlockState(origin.add(dx, -7, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
+                world.setBlock(origin.offset(dx, -7, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
             }
         }
         // Plant 2 oak trees 4 blocks tall (8 log segments total) at the pit bottom; the bot must descend to the bottom to reach them.
         for (int dy = -6; dy <= -3; dy++) {
-            world.setBlockState(origin.add(7, dy, -1), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(origin.add(8, dy, 1), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(origin.offset(7, dy, -1), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(origin.offset(8, dy, 1), Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1)); // give a pickaxe (digging-based approach needs to break stone)
         final int target = 3;
@@ -3343,20 +3342,20 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoObsidianMake(AIPlayerEntity bot) {
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
         // The lava sits one block below ground level with a stone rim kept around it, close to a natural cave floor/surface lava pool. The old canvas placed the source
         // at ground-level footing, where vanilla lava would spread endlessly and swallow the safe standing spot, testing an artificial hazard rather than the pour-water-and-mine capability.
         for (int dx = 4; dx <= 5; dx++) {
             for (int dz = -1; dz <= 0; dz++) {
-                world.setBlockState(origin.add(dx, -1, dz), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -1, dz), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         // Starts working from the stone rim one block up: strict survival can only use information within line of sight, and isn't allowed to scan underground fluids through the floor.
-        world.setBlockState(origin.add(3, 0, 0), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
-        bot.teleport(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        world.setBlock(origin.offset(3, 0, 0), Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
+        bot.teleportTo(world, origin.getX() + 3.5D, origin.getY() + 1.0D, origin.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.WATER_BUCKET, 4));
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 16));
@@ -3387,7 +3386,7 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoReplayOre(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59); // deep environment (the Y-59 band), the bot lands at origin
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
@@ -3401,13 +3400,13 @@ public final class MinecraftAiVerifySubcommand {
                 for (int zi = 0; zi < seg.length(); zi++) {
                     int dz = zi - 3; // char3 = the bot's Z
                     char c = seg.charAt(zi);
-                    BlockPos pos = origin.add(dx, dy, dz);
+                    BlockPos pos = origin.offset(dx, dy, dz);
                     if (c == '#') {
-                        world.setBlockState(pos, Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
+                        world.setBlock(pos, Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
                     } else if (c == '.' || c == 'B') {
-                        world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+                        world.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
                     } else if (c == 'O' || c == 'T') {
-                        world.setBlockState(pos, Blocks.DEEPSLATE_DIAMOND_ORE.getDefaultState(), Block.NOTIFY_LISTENERS);
+                        world.setBlock(pos, Blocks.DEEPSLATE_DIAMOND_ORE.defaultBlockState(), Block.UPDATE_CLIENTS);
                     }
                 }
             }
@@ -3429,16 +3428,16 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignGeoDiamondLava(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
         // 3 diamond ore blocks scattered (spaced apart, forcing a genuine "finish one, move to the next"), each with a lava source on its east side
         int[][] spots = {{3, -1, 0}, {-3, -1, 2}, {0, -2, -3}};
         for (int[] s : spots) {
-            BlockPos ore = origin.add(s[0], s[1], s[2]);
-            world.setBlockState(ore, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(ore.east(), Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos ore = origin.offset(s[0], s[1], s[2]);
+            world.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(ore.east(), Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
         }
         final int deathBase = deathCount(bot);
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.DIAMOND, 3));
@@ -3454,13 +3453,13 @@ public final class MinecraftAiVerifySubcommand {
     private static Result assignAchieveDiamond(AIPlayerEntity bot) {
         clearInventory(bot);
         BlockPos origin = prepareDeepArea(bot, -59);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         giveDeepMineKit(bot);
         giveDeepMineSupplies(bot);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                world.setBlockState(origin.add(dx, -2, dz), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(dx, -2, dz), Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.DIAMOND, 1));
@@ -3480,20 +3479,20 @@ public final class MinecraftAiVerifySubcommand {
         clearInventory(bot);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_HOE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.WHEAT_SEEDS, 8));
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin); // clear skeletons/cows: isolates the harvest logic, avoiding a y6 darkness skeleton preempting and aborting the goal (observed aborted)
-        net.minecraft.block.BlockState matureWheat =
-                Blocks.WHEAT.getDefaultState().with(net.minecraft.state.property.Properties.AGE_7, 7);
+        net.minecraft.world.level.block.state.BlockState matureWheat =
+                Blocks.WHEAT.defaultBlockState().setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_7, 7);
         // Lay a 3×3 patch of ripe wheat (farmland + ripe crop) on the floor layer (y-1) to the bot's north.
         // It must be laid on the floor layer: the original code laid it at origin.y (the bot's body level) → the farmland block blocked body height with wheat overhead at y+1,
         // so the bot couldn't walk over or reach it and only collected 1~2 → timeout (observed done=14 deposit_skipped). The 3×3 patch is entirely within radius 4,
         // far more than the target of 3, for tolerance.
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = 1; dz <= 3; dz++) {
-                BlockPos farmland = origin.add(dx, -1, -dz);
-                world.setBlockState(farmland, Blocks.FARMLAND.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(farmland.up(), matureWheat, Block.NOTIFY_ALL);
+                BlockPos farmland = origin.offset(dx, -1, -dz);
+                world.setBlock(farmland, Blocks.FARMLAND.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(farmland.above(), matureWheat, Block.UPDATE_ALL);
             }
         }
         boolean started = GoalExecutor.INSTANCE.submit(bot,
@@ -3507,17 +3506,17 @@ public final class MinecraftAiVerifySubcommand {
 
     private static Result assignNavDescend(AIPlayerEntity bot) {
         prepareArea(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        BlockPos goal = origin.offset(Direction.NORTH, 3).down(3);
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
+        BlockPos goal = origin.relative(Direction.NORTH, 3).below(3);
         for (int i = 1; i <= 3; i++) {
-            BlockPos step = origin.offset(Direction.NORTH, i).down(i);
-            world.setBlockState(step, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(step.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(step.down(), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos step = origin.relative(Direction.NORTH, i).below(i);
+            world.setBlock(step, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(step.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(step.below(), Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         return assignTask(bot, "nav_descend", new MoveTask(bot, goal), 600,
-                ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
+                ignored -> bot.blockPosition().distSqr(goal) <= 4.0D);
     }
 
     /**
@@ -3529,31 +3528,31 @@ public final class MinecraftAiVerifySubcommand {
         surfaceTeleport(bot); // must be surfaced first: building a wall in the y6 underground darkness would trigger dark_trap_escape's life-saving teleport and override the escape being tested (observed aborted)
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin); // an unequipped bot enclosed by the wall is a death sentence if the y6 mob sea gets in; clear it to isolate the escape logic being tested
         // First clear the activity space wide: 2 more blocks of headroom are needed above the wall top (y+3) to climb over, and there must also be footing from the wall to the target —
         // the dev world's y6 surroundings are native stone, and without clearing this would test "getting toyed with by terrain" rather than "can it save itself".
-        for (BlockPos pos : BlockPos.iterate(origin.add(-6, 0, -6), origin.add(10, 6, 6))) {
-            world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-6, 0, -6), origin.offset(10, 6, 6))) {
+            world.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        for (BlockPos pos : BlockPos.iterate(origin.add(-6, -1, -6), origin.add(10, -1, 6))) {
-            world.setBlockState(pos, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-6, -1, -6), origin.offset(10, -1, 6))) {
+            world.setBlock(pos, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         // A 5×5 ring of stone (4 high) seals the bot in: the inner 3×3 is left as air, and STONE is built along the ring where |dx|==2 or |dz|==2.
         for (int dy = 0; dy <= 3; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
                 for (int dz = -2; dz <= 2; dz++) {
                     if (Math.abs(dx) == 2 || Math.abs(dz) == 2) {
-                        world.setBlockState(origin.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                        world.setBlock(origin.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                     }
                 }
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 32)); // ample pillaring material; no pickaxe given — digging through the wall by hand is also a valid escape
-        BlockPos goal = origin.offset(Direction.EAST, 8);
+        BlockPos goal = origin.relative(Direction.EAST, 8);
         return assignTask(bot, "nav_pillar_out", new MoveTask(bot, goal), 2400,
-                ignored -> bot.isAlive() && bot.getBlockPos().getSquaredDistance(goal) <= 9.0D);
+                ignored -> bot.isAlive() && bot.blockPosition().distSqr(goal) <= 9.0D);
     }
 
     /**
@@ -3566,20 +3565,20 @@ public final class MinecraftAiVerifySubcommand {
         surfaceTeleport(bot); // surface first, to prevent y6 darkness from triggering dark_trap_escape's life-saving teleport and interfering with the escape being tested
         prepareArea(bot);
         clearInventory(bot);
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin); // after escaping the bot is at low health, and a single arrow from the y6 mob sea would derail it; clearing them ensures the escape itself is what's tested
-        world.setBlockState(origin, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(origin.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(origin, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(origin.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         return assignTask(bot, "nav_buried_escape", new MoveTask(bot, origin.north(5)), 1200,
                 ignored -> bot.isAlive() && bodyFree(bot));
     }
 
     // Whether the bot's feet and head positions both have no collision shape (= not stuck in a block). The core check condition for buried-alive escape: only being dug out counts as a genuine escape.
     private static boolean bodyFree(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        BlockPos head = feet.up();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        BlockPos head = feet.above();
         return world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
                 && world.getBlockState(head).getCollisionShape(world, head).isEmpty();
     }
@@ -3593,13 +3592,13 @@ public final class MinecraftAiVerifySubcommand {
         surfaceTeleport(bot); // surface first, to prevent the darkness reflex from interfering with the "clean admission of defeat" judgment
         prepareArea(bot);
         clearInventory(bot);
-        clearNearbyMobs(bot.getEntityWorld(), bot.getBlockPos()); // prevent a mob from killing the bot and producing a "false clean failure" (death-abort ≠ voluntarily admitting defeat)
+        clearNearbyMobs(bot.level(), bot.blockPosition()); // prevent a mob from killing the bot and producing a "false clean failure" (death-abort ≠ voluntarily admitting defeat)
         // Places the target beyond the world's height limit: resolveEndpoint would otherwise downgrade an "unreachable target" to a nearby standable spot (this is a navigation
         // fault-tolerance feature) — up(80) on open surface terrain would get downgraded to right underfoot, a fake 1-tick completion (observed as should_have_failed).
         // A point beyond the build limit has no standable spot anywhere around it, so the downgrade has no fallback either, which is what forces out the "clean admission of defeat" path.
-        ServerWorld unreachableWorld = bot.getEntityWorld();
-        int topLimit = unreachableWorld.getBottomY() + unreachableWorld.getHeight();
-        BlockPos goal = new BlockPos(bot.getBlockPos().getX(), topLimit + 10, bot.getBlockPos().getZ());
+        ServerLevel unreachableWorld = bot.level();
+        int topLimit = unreachableWorld.getMinY() + unreachableWorld.getHeight();
+        BlockPos goal = new BlockPos(bot.blockPosition().getX(), topLimit + 10, bot.blockPosition().getZ());
         // Doesn't go through assignTask (it only ever produces ordinary running semantics): assign directly + an inverted Result, whose meaning is "should fail".
         TaskManager.INSTANCE.assign(bot, new MoveTask(bot, goal),
                 io.github.zoyluo.minecraftai.runtime.TaskOrigin.of(io.github.zoyluo.minecraftai.runtime.TaskOrigin.Kind.VERIFY, "move"));
@@ -3613,8 +3612,8 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     private static void prepareArea(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        world.setTimeOfDay(1000L); // set to daytime: later in a suite it turns to night, and the night lighting reflex would preempt the scenario task (observed farm_irrigate sporadically aborted)
+        ServerLevel world = bot.level();
+        world.setDayTime(1000L); // set to daytime: later in a suite it turns to night, and the night lighting reflex would preempt the scenario task (observed farm_irrigate sporadically aborted)
         // When multiple scenarios run in sequence within a suite, the bot's position carries over from the previous scenario (wandered off hunting, etc.) → a scenario that assumes a "clean spawn point" would be thrown off
         // (observed in food_suite: during farm_wheat the bot had drifted to 9,-2, the pre-placed ripe wheat wasn't surveyed, and was treated as empty ground to plant on → FAIL).
         // Resetting to a fixed origin at the start guarantees determinism; y is taken from the world origin's natural surface — it used to be hardcoded to y=6 (the old test world's spawn point),
@@ -3636,37 +3635,37 @@ public final class MinecraftAiVerifySubcommand {
         // (observed: the stone-mining family drowning by a lake, a mining scenario alternating between need_planks/no_progress). The scenario area is wholesale replaced with an artificial platform:
         // 16 blocks of solid stone below the floor (mining/digging-down always eats artificial stone, never breaking into a natural aquifer), with 8 blocks cleared above.
         // Idealized scenarios run in "the lab"; genuine terrain challenges are the responsibility of real_suite (SEED, multiple terrains) — the layering of responsibilities is explicit.
-        for (BlockPos pos : BlockPos.iterate(origin.add(-16, -16, -16), origin.add(16, -1, 16))) {
-            world.setBlockState(pos, Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-16, -16, -16), origin.offset(16, -1, 16))) {
+            world.setBlock(pos, Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
         }
-        for (BlockPos pos : BlockPos.iterate(origin.add(-16, 0, -16), origin.add(16, 8, 16))) {
-            world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-16, 0, -16), origin.offset(16, 8, 16))) {
+            world.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
         }
-        for (BlockPos pos : BlockPos.iterate(origin.add(-4, -1, -4), origin.add(4, -1, 4))) {
-            world.setBlockState(pos, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-4, -1, -4), origin.offset(4, -1, 4))) {
+            world.setBlock(pos, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         // Guard rail: the canvas is surrounded by void, and a movement-heavy scenario (hunting/foraging/exploring) could carry the bot off the edge and drop it into the natural layer
         // (observed in food_full: y211→65, with a cascade of no_place while trying to place a furnace mid-fall). A 2-block stone wall rings it in; corridor-type scenarios'
         // own clearing setBlockState calls carve doorways in the wall without interfering with each other.
-        for (BlockPos pos : BlockPos.iterate(origin.add(-16, 0, -16), origin.add(16, 1, 16))) {
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-16, 0, -16), origin.offset(16, 1, 16))) {
             if (Math.abs(pos.getX() - origin.getX()) == 16 || Math.abs(pos.getZ() - origin.getZ()) == 16) {
-                world.setBlockState(pos, Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
+                world.setBlock(pos, Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
             }
         }
         // Lay the platform before teleporting: doing it the other way around would give the bot a 1+ tick falling window in the unlaid area (a straight free-fall down the void column).
-        bot.teleport(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
-                java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+        bot.teleportTo(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D,
+                java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
         bot.fallDistance = 0.0F;
         // Memory-layer isolation: episodic stream + semantic knowledge cross-contaminating between scenarios (an earlier mining scenario's resource point could steer geo_rich's rich-area guidance off into a dead zone,
         // or a leftover episode could let the distillation/dedup logic intercept a pre-warmed point). Deterministic tests clear this per scenario; real usage never goes through this path, and knowledge persists as normal.
-        io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.clearFor(bot.getUuid());
-        io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.resetFor(bot.getUuid());
+        io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.clearFor(bot.getUUID());
+        io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.resetFor(bot.getUUID());
         bot.getActionPack().stopAll();
     }
 
     private static void clearInventory(AIPlayerEntity bot) {
-        bot.getInventory().clear();
-        bot.getInventory().markDirty();
+        bot.getInventory().clearContent();
+        bot.getInventory().setChanged();
     }
 
     // Clears animals and hostile mobs within 70 blocks of origin. Dual purpose:
@@ -3674,21 +3673,21 @@ public final class MinecraftAiVerifySubcommand {
     //     also the dev world is contaminated by cows spawned by earlier food scenarios, accumulating more over time);
     // (2) hostiles — the dev test world has skeletons in the y6 darkness, and being attacked during a long farming/mining run would trigger the survival reflex to preempt and abort the goal,
     //     making the deterministic regression test flaky (observed farm_wheat aborted for this reason). Clearing them isolates the logic being tested.
-    private static void clearNearbyMobs(ServerWorld world, BlockPos origin) {
-        net.minecraft.util.math.Box box = new net.minecraft.util.math.Box(origin).expand(70.0D);
-        world.getEntitiesByClass(net.minecraft.entity.passive.AnimalEntity.class, box, e -> true)
-                .forEach(net.minecraft.entity.Entity::discard);
-        world.getEntitiesByClass(net.minecraft.entity.mob.HostileEntity.class, box, e -> true)
-                .forEach(net.minecraft.entity.Entity::discard);
+    private static void clearNearbyMobs(ServerLevel world, BlockPos origin) {
+        net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(origin).inflate(70.0D);
+        world.getEntitiesOfClass(net.minecraft.world.entity.animal.Animal.class, box, e -> true)
+                .forEach(net.minecraft.world.entity.Entity::discard);
+        world.getEntitiesOfClass(net.minecraft.world.entity.monster.Monster.class, box, e -> true)
+                .forEach(net.minecraft.world.entity.Entity::discard);
     }
 
     // Fills a solid stone cube below origin (horizontally ±hr, vertically down 1..depth). Gives mining tasks a deterministic solid environment:
     // covers over pits/leftover blocks dug out by the previous scenario in a suite, and also avoids "the mining task's diagonal shaft walking off a single stone pillar into unlaid terrain". Ore is embedded afterward.
-    private static void fillStoneCube(ServerWorld world, BlockPos origin, int hr, int depth) {
+    private static void fillStoneCube(ServerLevel world, BlockPos origin, int hr, int depth) {
         for (int dx = -hr; dx <= hr; dx++) {
             for (int dz = -hr; dz <= hr; dz++) {
                 for (int dy = 1; dy <= depth; dy++) {
-                    world.setBlockState(origin.add(dx, -dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(origin.offset(dx, -dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
@@ -3707,21 +3706,21 @@ public final class MinecraftAiVerifySubcommand {
     // (slow, and the terrain/lava are uncontrollable), it's simpler to teleport the bot straight to the ore layer and clear + wall off a solid stone cube there: the descend step is skipped since the bot has already reached depth,
     // and the test focuses on "find ore at the ore layer → mine → (smelt)". Also fully provisions rations/torches/armor to skip the deep-mining food/lighting prerequisites. Returns the deep-layer origin.
     private static BlockPos prepareDeepArea(AIPlayerEntity bot, int depthY) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         bot.getActionPack().stopAll();
-        bot.teleport(world, 0.5D, depthY, 0.5D, java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
-        BlockPos origin = bot.getBlockPos();
+        bot.teleportTo(world, 0.5D, depthY, 0.5D, java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+        BlockPos origin = bot.blockPosition();
         clearNearbyMobs(world, origin);
-        for (BlockPos pos : BlockPos.iterate(origin.add(-4, 0, -4), origin.add(4, 3, 4))) {
-            world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-4, 0, -4), origin.offset(4, 3, 4))) {
+            world.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         fillStoneCube(world, origin, 6, 8); // solid stone below (including the floor at y-1)
         for (int dy = 0; dy <= 4; dy++) {   // surrounding vertical walls block deep lava/void/unknown terrain
             for (int d = -6; d <= 6; d++) {
-                world.setBlockState(origin.add(d, dy, -6), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(d, dy, 6), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(-6, dy, d), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(origin.add(6, dy, d), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(origin.offset(d, dy, -6), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(d, dy, 6), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(-6, dy, d), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(origin.offset(6, dy, d), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         return origin;
@@ -3737,7 +3736,7 @@ public final class MinecraftAiVerifySubcommand {
 
     private static void giveItemToAtLeast(AIPlayerEntity bot, Item item, int target) {
         int remaining = Math.max(0, target - InventoryAction.countItem(bot, item));
-        int stackLimit = Math.max(1, new ItemStack(item).getMaxCount());
+        int stackLimit = Math.max(1, new ItemStack(item).getMaxStackSize());
         while (remaining > 0) {
             int batch = Math.min(stackLimit, remaining);
             if (InventoryAction.giveItem(bot, new ItemStack(item, batch)).isFailed()) {
@@ -3750,27 +3749,27 @@ public final class MinecraftAiVerifySubcommand {
 
     // Extreme environment: spawns `count` zombies around the bot (the combat threshold maxEnemiesToFight=2, hence the default of 2 — the bot will fight rather than flee).
     // Tests "fighting while working": the survival reflex pauseFor's the combat, resumes the original task after the fight, and the task must still complete.
-    private static void spawnHostiles(ServerWorld world, BlockPos origin, int count) {
+    private static void spawnHostiles(ServerLevel world, BlockPos origin, int count) {
         for (int i = 0; i < count; i++) {
-            ZombieEntity zombie = EntityType.ZOMBIE.create(world, SpawnReason.COMMAND);
+            Zombie zombie = EntityType.ZOMBIE.create(world, EntitySpawnReason.COMMAND);
             if (zombie != null) {
-                zombie.setPersistent(); // prevent natural despawning
+                zombie.setPersistenceRequired(); // prevent natural despawning
                 double side = (i % 2 == 0) ? 2.5D : -2.5D;
-                zombie.refreshPositionAndAngles(origin.getX() + side, origin.getY(), origin.getZ() + (i - count / 2), 0.0F, 0.0F);
-                world.spawnEntity(zombie);
+                zombie.snapTo(origin.getX() + side, origin.getY(), origin.getZ() + (i - count / 2), 0.0F, 0.0F);
+                world.addFreshEntity(zombie);
             }
         }
     }
 
     private static int countContainer(AIPlayerEntity bot, BlockPos pos, Item item) {
-        Optional<Inventory> inventory = io.github.zoyluo.minecraftai.action.ContainerAction.resolve(bot, pos);
+        Optional<Container> inventory = io.github.zoyluo.minecraftai.action.ContainerAction.resolve(bot, pos);
         if (inventory.isEmpty()) {
             return 0;
         }
         int count = 0;
-        for (int slot = 0; slot < inventory.get().size(); slot++) {
-            ItemStack stack = inventory.get().getStack(slot);
-            if (stack.isOf(item)) {
+        for (int slot = 0; slot < inventory.get().getContainerSize(); slot++) {
+            ItemStack stack = inventory.get().getItem(slot);
+            if (stack.is(item)) {
                 count += stack.getCount();
             }
         }
@@ -3778,13 +3777,13 @@ public final class MinecraftAiVerifySubcommand {
     }
 
     private static final class VerifyRun {
-        private final ServerCommandSource source;
+        private final CommandSourceStack source;
         private final UUID botId;
         private final ArrayDeque<String> queue;
         private final List<Result> results;
         private ActiveScenario active;
 
-        VerifyRun(ServerCommandSource source, UUID botId, List<String> features) {
+        VerifyRun(CommandSourceStack source, UUID botId, List<String> features) {
             this.source = source;
             this.botId = botId;
             this.queue = new ArrayDeque<>(features);
@@ -3822,9 +3821,9 @@ public final class MinecraftAiVerifySubcommand {
                 result = Result.fail(feature, exception.getClass().getSimpleName() + ": " + exception.getMessage());
             }
             if (result.running()) {
-                active = new ActiveScenario(result, server.getTicks(), goalResultSequenceBefore);
+                active = new ActiveScenario(result, server.getTickCount(), goalResultSequenceBefore);
                 String message = "[MinecraftAi Verify] " + result.feature() + " RUNNING timeout=" + result.timeoutTicks();
-                source.sendFeedback(() -> Text.literal(message), false);
+                source.sendSuccess(() -> Component.literal(message), false);
                 return false;
             }
             record(result);
@@ -3843,7 +3842,7 @@ public final class MinecraftAiVerifySubcommand {
                 return;
             }
             running.perTick().accept(bot); // runs the scenario's per-tick world side effect (e.g. forcibly ripening crops), ahead of the state judgment below
-            int elapsedTicks = server.getTicks() - active.startedTick();
+            int elapsedTicks = server.getTickCount() - active.startedTick();
             TaskStatus status = TaskManager.INSTANCE.status(bot);
             // patient (LLM conversation-style) judging: under brain-driven control the bot dispatches multiple tasks in a row, retries with a different approach on failure, and idle-thinks between tasks,
             // so a single task's COMPLETED (the assertion isn't satisfied yet) / FAILED (the brain will still try to recover) is never the scenario's final word — the ordinary final-judgment logic below
@@ -3951,7 +3950,7 @@ public final class MinecraftAiVerifySubcommand {
                     + (effective.pass() ? "PASS" : "FAIL")
                     + " - "
                     + effective.detail();
-            source.sendFeedback(() -> Text.literal(message), false);
+            source.sendSuccess(() -> Component.literal(message), false);
         }
 
         private Result finalizeMiningProvenance(Result result) {
@@ -4031,9 +4030,9 @@ public final class MinecraftAiVerifySubcommand {
             long passed = results.stream().filter(Result::pass).count();
             String summary = "[MinecraftAi Verify] summary " + passed + "/" + results.size() + " PASS: " + summarize(results);
             if (passed == results.size()) {
-                source.sendFeedback(() -> Text.literal(summary), false);
+                source.sendSuccess(() -> Component.literal(summary), false);
             } else {
-                source.sendError(Text.literal(summary));
+                source.sendFailure(Component.literal(summary));
             }
         }
 

@@ -4,8 +4,6 @@ import com.google.gson.Gson;
 import io.github.zoyluo.minecraftai.brain.ChatToolCall;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.util.WorldSavePath;
-
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -19,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.world.level.storage.LevelResource;
 
 public final class ReplayRecorder {
     public static final ReplayRecorder INSTANCE = new ReplayRecorder();
@@ -38,12 +37,12 @@ public final class ReplayRecorder {
         }
         ReplayEvent event = new ReplayEvent(
                 Instant.now().toString(),
-                bot.getUuid().toString(),
+                bot.getUUID().toString(),
                 bot.getGameProfile().name(),
                 trim(perceptionDigest),
                 calls == null ? List.of() : calls.stream().map(Call::from).toList(),
                 trim(result));
-        remember(bot.getUuid(), event);
+        remember(bot.getUUID(), event);
         write(bot, event);
         BotLog.replay(bot, "replay_recorded", "calls", event.calls().size(), "result", event.result());
     }
@@ -81,7 +80,7 @@ public final class ReplayRecorder {
 
     private void write(AIPlayerEntity bot, ReplayEvent event) {
         try {
-            Path dir = bot.getEntityWorld().getServer().getSavePath(WorldSavePath.ROOT).resolve("minecraftai").resolve("replay");
+            Path dir = bot.level().getServer().getWorldPath(LevelResource.ROOT).resolve("minecraftai").resolve("replay");
             Files.createDirectories(dir);
             Path file = dir.resolve(safe(bot.getGameProfile().name()) + "-" + LocalDate.now() + ".jsonl");
             try (Writer writer = Files.newBufferedWriter(file,

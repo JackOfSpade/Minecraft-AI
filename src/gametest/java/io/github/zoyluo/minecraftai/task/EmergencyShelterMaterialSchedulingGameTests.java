@@ -7,26 +7,25 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LazyEntityReference;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.entity.mob.EndermanEntity;
-import net.minecraft.entity.mob.HuskEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.EntityReference;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.zombie.Husk;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import net.minecraft.text.Text;
 
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.isSealed;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.preparePlatform;
@@ -40,8 +39,8 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterS
 public final class EmergencyShelterMaterialSchedulingGameTests {
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_mixed_wood_fallback_builds_holds_and_physically_exits_with_dirt_first", maxTicks = 16000)
     public void mixedWoodFallbackBuildsHoldsAndPhysicallyExitsWithDirtFirst(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         AIPlayerEntity bot = spawn(context, "ShelterMixedWoodGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 2));
@@ -57,9 +56,9 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
         int[] holdStartedElapsed = {-1};
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("mixed-wood shelter ended as "
+                context.fail(Component.nullToEmpty("mixed-wood shelter ended as "
                         + task.state() + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
@@ -88,8 +87,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_emergency_wood_never_authorizes_permanent_mining_barricade", maxTicks = 30)
-    public void emergencyWoodNeverAuthorizesPermanentMiningBarricade(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void emergencyWoodNeverAuthorizesPermanentMiningBarricade(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 3);
         AIPlayerEntity bot = spawn(context, "BarricadeWoodGuardGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_PLANKS, 8));
@@ -110,8 +109,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         .equals(barricade.failureReason()),
                 "wood-only barricade admission did not fail closed: "
                         + barricade.state() + ":" + barricade.failureReason());
-        require(context, context.getWorld().getBlockState(gateFeet).isAir()
-                        && context.getWorld().getBlockState(gateFeet.up()).isAir(),
+        require(context, context.getLevel().getBlockState(gateFeet).isAir()
+                        && context.getLevel().getBlockState(gateFeet.above()).isAir(),
                 "failed wood-only barricade admission mutated its gate");
         require(context, InventoryAction.countItem(bot, Items.OAK_PLANKS) == 8
                         && InventoryAction.countItem(bot, Items.BIRCH_LOG) == 8,
@@ -120,8 +119,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_one_block_cannot_dispatch_doomed_shelter_or_grow_pause_stack", maxTicks = 80)
-    public void oneBlockCannotDispatchDoomedShelterOrGrowPauseStack(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 180, 4));
+    public void oneBlockCannotDispatchDoomedShelterOrGrowPauseStack(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 180, 4));
         prepareEscapeCorridor(context, feet);
         AIPlayerEntity bot = spawn(context, "ShelterOneBlockGateGT", feet);
         bot.setHealth(4.7F);
@@ -131,7 +130,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_one_block_admission"));
-        HuskEntity hostile = spawnDisabledHusk(context, feet.east(3));
+        Husk hostile = spawnDisabledHusk(context, feet.east(3));
 
         require(context, EmergencyShelterTask.hasShelterBlock(bot)
                         && !EmergencyShelterTask.hasMaterialsForCurrentPose(bot),
@@ -140,7 +139,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         && CombatCore.hasLineOfSight(bot, hostile),
                 "one-block fixture hostile was not factually observable");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task firstSafety = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, firstSafety != null
                         && !(firstSafety instanceof EmergencyShelterTask),
@@ -154,7 +153,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                 "fallback hostile response was not owned by SAFETY");
 
         for (int attempt = 0; attempt < 8; attempt++) {
-            DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+            DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
             require(context, !(TaskManager.INSTANCE.getActive(bot).orElse(null)
                             instanceof EmergencyShelterTask),
                     "repeated one-block scan dispatched a doomed shelter");
@@ -170,8 +169,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_emergency_shelter_supersedes_safety_evade_without_nesting_pause_frame", maxTicks = 80)
     public void emergencyShelterSupersedesSafetyEvadeWithoutNestingPauseFrame(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 220, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 220, 4));
         prepareEscapeCorridor(context, feet);
         AIPlayerEntity bot = spawn(context, "ShelterSafetySwapGT", feet);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
@@ -179,13 +178,13 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_shelter_safety_supersede"));
-        EndermanEntity hostile = spawnProvokedEnderman(context, feet.east(8), bot);
+        EnderMan hostile = spawnProvokedEnderman(context, feet.east(8), bot);
 
         require(context, DangerWatcher.isActiveHostileThreat(bot, hostile)
                         && ObservableWorldQuery.canObserveEntity(bot, hostile)
                         && CombatCore.hasLineOfSight(bot, hostile),
                 "safety-swap Enderman was not a factual active threat");
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task firstSafety = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, firstSafety instanceof EvadeTask,
@@ -202,7 +201,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         bot.setHealth(4.7F);
         require(context, EmergencyShelterTask.hasMaterialsForCurrentPose(bot),
                 "adequate shelter inventory failed exact current-pose admission");
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task replacement = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, replacement instanceof EmergencyShelterTask,
@@ -220,7 +219,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "SAFETY-to-SAFETY supersede nested another pause frame");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == replacement
                         && TaskManager.INSTANCE.pausedDepth(bot) == 1,
                 "active shelter scan replaced ownership or grew the pause stack");
@@ -230,8 +229,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_generic_threat_supersedes_non_defense_safety_without_nesting_mission", maxTicks = 80)
     public void genericThreatSupersedesNonDefenseSafetyWithoutNestingMission(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 240, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 240, 4));
         prepareEscapeCorridor(context, feet);
         AIPlayerEntity bot = spawn(context, "ThreatSafetySwapGT", feet);
         HoldingTask mission = new HoldingTask("threat_swap_mission");
@@ -242,7 +241,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         HoldingTask safetyHolder = new HoldingTask("critical_hunt_holder");
         TaskManager.INSTANCE.assign(bot, safetyHolder,
                 TaskOrigin.safety("critical_hunt_for_food"));
-        EndermanEntity hostile = spawnProvokedEnderman(context, feet.east(8), bot);
+        EnderMan hostile = spawnProvokedEnderman(context, feet.east(8), bot);
 
         require(context, mission.state() == TaskState.PAUSED
                         && TaskManager.INSTANCE.peekPaused(bot).orElse(null) == mission
@@ -255,7 +254,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         && CombatCore.hasLineOfSight(bot, hostile),
                 "generic replacement Enderman was not a factual active threat");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task replacement = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, replacement instanceof EvadeTask,
@@ -277,8 +276,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_trapped_fight_back_replaces_non_defense_safety_without_nesting_mission", maxTicks = 16000)
     public void trappedFightBackReplacesNonDefenseSafetyWithoutNestingMission(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 260, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 260, 4));
         prepareIsolatedTrap(context, feet);
         AIPlayerEntity bot = spawn(context, "TrappedFightBackSwapGT", feet);
         bot.setHealth(18.0F);
@@ -286,14 +285,14 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_trapped_fight_back_safety_supersede"));
-        HuskEntity hostile = spawnDisabledHusk(context, feet.east(3));
+        Husk hostile = spawnDisabledHusk(context, feet.east(3));
 
         require(context, EvadeTask.admitBestSurfaceEscapePath(
-                        bot, hostile, hostile.getBlockPos(), 12) == null
+                        bot, hostile, hostile.blockPosition(), 12) == null
                         && bot.getActionPack().isPathExecutorIdle(),
                 "trapped fight-back fixture unexpectedly exposed an escape route");
         require(context, DangerWatcher.INSTANCE.scanBot(
-                        context.getWorld().getServer(), bot),
+                        context.getLevel().getServer(), bot),
                 "first trapped fight-back scan was not handled");
         Task firstEvade = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, firstEvade instanceof EvadeTask,
@@ -307,8 +306,8 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
         HoldingTask[] safetyHolder = {null};
         long[] holderAssignedTick = {-1L};
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
-            require(context, bot.isAlive() && bot.getBlockPos().equals(feet),
+            context.getLevel().setDayTime(1000L);
+            require(context, bot.isAlive() && bot.blockPosition().equals(feet),
                     "trapped fight-back fixture moved or died before replacement");
             require(context, mission.state() == TaskState.PAUSED
                             && TaskManager.INSTANCE.peekPaused(bot).orElse(null) == mission,
@@ -333,7 +332,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
             }
 
             bot.hurtTime = 5;
-            DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+            DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             if (active instanceof CombatTask) {
                 require(context, safetyHolder[0].state() == TaskState.FAILED
@@ -352,7 +351,7 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
             require(context, TaskManager.INSTANCE.pausedDepth(bot) == 1,
                     "waiting for trapped_fight_back grew the mission pause stack");
             if (context.getTick() - holderAssignedTick[0] > 120) {
-                context.throwGameTestException(Text.of(
+                context.fail(Component.nullToEmpty(
                         "trapped_fight_back never replaced non-defense SAFETY: active="
                                 + (active == null ? "idle" : active.name())));
             }
@@ -361,18 +360,18 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_material_scheduling_game_tests_critical_creeper_without_route_or_materials_retains_one_safety_owner", maxTicks = 16000)
     public void criticalCreeperWithoutRouteOrMaterialsRetainsOneSafetyOwner(
-            TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 280, 4));
+            GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 280, 4));
         prepareIsolatedTrap(context, feet);
         AIPlayerEntity bot = spawn(context, "CreeperBackoffOwnerGT", feet);
         bot.setHealth(4.7F);
-        bot.getHungerManager().setFoodLevel(17);
-        bot.getHungerManager().setSaturationLevel(0.0F);
+        bot.getFoodData().setFoodLevel(17);
+        bot.getFoodData().setSaturation(0.0F);
         HoldingTask mission = new HoldingTask("creeper_backoff_mission");
         TaskManager.INSTANCE.assign(bot, mission,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY,
                         "gametest_critical_creeper_backoff"));
-        CreeperEntity hostile = spawnDisabledCreeper(context, feet.east(3));
+        Creeper hostile = spawnDisabledCreeper(context, feet.east(3));
 
         require(context, !EmergencyShelterTask.hasShelterBlock(bot)
                         && !EmergencyShelterTask.hasMaterialsForCurrentPose(bot),
@@ -382,12 +381,12 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
                         && CombatCore.hasLineOfSight(bot, hostile),
                 "critical backoff Creeper was not a factual HIGH hostile");
         require(context, EvadeTask.admitBestSurfaceEscapePath(
-                        bot, hostile, hostile.getBlockPos(), 12) == null
+                        bot, hostile, hostile.blockPosition(), 12) == null
                         && bot.getActionPack().isPathExecutorIdle(),
                 "isolated trap unexpectedly exposed an effective escape landing");
 
         require(context, DangerWatcher.INSTANCE.scanBot(
-                        context.getWorld().getServer(), bot),
+                        context.getLevel().getServer(), bot),
                 "first critical Creeper scan was not handled");
         Task first = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, first instanceof CreeperDefenseTask,
@@ -400,10 +399,10 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
 
         long started = context.getTick();
         runLocked(context, () -> {
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             bot.setHealth(4.7F);
-            bot.getHungerManager().setFoodLevel(17);
-            require(context, bot.isAlive() && bot.getBlockPos().equals(feet),
+            bot.getFoodData().setFoodLevel(17);
+            require(context, bot.isAlive() && bot.blockPosition().equals(feet),
                     "critical backoff fixture moved or died before the fourth decision");
             require(context, mission.state() == TaskState.PAUSED
                             && TaskManager.INSTANCE.peekPaused(bot).orElse(null) == mission
@@ -433,139 +432,139 @@ public final class EmergencyShelterMaterialSchedulingGameTests {
     private static List<BlockPos> shelterOwnedEnvelope(BlockPos feet) {
         List<BlockPos> result = new ArrayList<>(10);
         result.addAll(shelterShell(feet));
-        result.add(feet.up(2).north());
+        result.add(feet.above(2).north());
         return List.copyOf(result);
     }
 
-    private static long countBlock(TestContext context,
+    private static long countBlock(GameTestHelper context,
                                    List<BlockPos> positions,
                                    Block block) {
         return positions.stream()
-                .filter(pos -> context.getWorld().getBlockState(pos).isOf(block))
+                .filter(pos -> context.getLevel().getBlockState(pos).is(block))
                 .count();
     }
 
-    private static void assertOwnedNorthExit(TestContext context,
+    private static void assertOwnedNorthExit(GameTestHelper context,
                                              AIPlayerEntity bot,
                                              BlockPos shelterFeet) {
         BlockPos exit = shelterFeet.north();
-        require(context, bot.getBlockPos().equals(exit),
+        require(context, bot.blockPosition().equals(exit),
                 "shelter did not physically step through its planned north exit: "
                         + shelterFeet.toShortString() + " -> "
-                        + bot.getBlockPos().toShortString());
-        require(context, Standability.isStandable(context.getWorld(), exit),
+                        + bot.blockPosition().toShortString());
+        require(context, Standability.isStandable(context.getLevel(), exit),
                 "opened shelter exit was not a standable landing");
-        require(context, context.getWorld().getBlockState(exit).isAir()
-                        && context.getWorld().getBlockState(exit.up()).isAir(),
+        require(context, context.getLevel().getBlockState(exit).isAir()
+                        && context.getLevel().getBlockState(exit.above()).isAir(),
                 "shelter completed without reopening its owned two-block north doorway");
     }
 
-    private static void prepareEscapeCorridor(TestContext context, BlockPos feet) {
-        context.getWorld().setTimeOfDay(18000L);
+    private static void prepareEscapeCorridor(GameTestHelper context, BlockPos feet) {
+        context.getLevel().setDayTime(18000L);
         for (int dx = -24; dx <= 12; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                context.getWorld().setBlockState(
-                        cell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        cell.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos cell = feet.offset(dx, 0, dz);
+                context.getLevel().setBlock(
+                        cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(
+                        cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(
+                        cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(
+                        cell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
     }
 
-    private static void prepareIsolatedTrap(TestContext context, BlockPos feet) {
-        context.getWorld().setTimeOfDay(1000L);
+    private static void prepareIsolatedTrap(GameTestHelper context, BlockPos feet) {
+        context.getLevel().setDayTime(1000L);
         for (int dx = -18; dx <= 18; dx++) {
             for (int dz = -18; dz <= 18; dz++) {
                 for (int dy = -1; dy <= 2; dy++) {
-                    context.getWorld().setBlockState(
-                            feet.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(
+                            feet.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        context.getWorld().setBlockState(
-                feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(
-                feet.east(3).down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(
+                feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(
+                feet.east(3).below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
     }
 
-    private static AIPlayerEntity spawn(TestContext context, String name, BlockPos feet) {
+    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(),
-                        Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(context.getWorld(),
+        bot.teleportTo(context.getLevel(),
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         return bot;
     }
 
-    private static HuskEntity spawnDisabledHusk(TestContext context, BlockPos feet) {
-        HuskEntity hostile = EntityType.HUSK.create(
-                context.getWorld(), SpawnReason.COMMAND);
+    private static Husk spawnDisabledHusk(GameTestHelper context, BlockPos feet) {
+        Husk hostile = EntityType.HUSK.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (hostile == null) {
             throw new IllegalStateException("failed to create one-block shelter hostile");
         }
-        hostile.setPersistent();
-        hostile.setAiDisabled(true);
-        hostile.refreshPositionAndAngles(
+        hostile.setPersistenceRequired();
+        hostile.setNoAi(true);
+        hostile.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 90.0F, 0.0F);
-        require(context, context.getWorld().spawnEntity(hostile),
+        require(context, context.getLevel().addFreshEntity(hostile),
                 "failed to spawn one-block shelter hostile");
         return hostile;
     }
 
-    private static EndermanEntity spawnProvokedEnderman(TestContext context,
+    private static EnderMan spawnProvokedEnderman(GameTestHelper context,
                                                          BlockPos feet,
                                                          AIPlayerEntity target) {
-        EndermanEntity hostile = EntityType.ENDERMAN.create(
-                context.getWorld(), SpawnReason.COMMAND);
+        EnderMan hostile = EntityType.ENDERMAN.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (hostile == null) {
             throw new IllegalStateException("failed to create safety-swap Enderman");
         }
-        hostile.setPersistent();
-        hostile.setAiDisabled(true);
-        hostile.refreshPositionAndAngles(
+        hostile.setPersistenceRequired();
+        hostile.setNoAi(true);
+        hostile.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 90.0F, 0.0F);
-        hostile.setAngerEndTime(hostile.getEntityWorld().getTime() + 600L);
-        hostile.setAngryAt(LazyEntityReference.ofUUID(target.getUuid()));
+        hostile.setPersistentAngerEndTime(hostile.level().getGameTime() + 600L);
+        hostile.setPersistentAngerTarget(EntityReference.of(target.getUUID()));
         hostile.setTarget(target);
-        require(context, context.getWorld().spawnEntity(hostile),
+        require(context, context.getLevel().addFreshEntity(hostile),
                 "failed to spawn safety-swap Enderman");
         return hostile;
     }
 
-    private static CreeperEntity spawnDisabledCreeper(TestContext context, BlockPos feet) {
-        CreeperEntity hostile = EntityType.CREEPER.create(
-                context.getWorld(), SpawnReason.COMMAND);
+    private static Creeper spawnDisabledCreeper(GameTestHelper context, BlockPos feet) {
+        Creeper hostile = EntityType.CREEPER.create(
+                context.getLevel(), EntitySpawnReason.COMMAND);
         if (hostile == null) {
             throw new IllegalStateException("failed to create critical backoff Creeper");
         }
-        hostile.setPersistent();
-        hostile.setAiDisabled(true);
-        hostile.refreshPositionAndAngles(
+        hostile.setPersistenceRequired();
+        hostile.setNoAi(true);
+        hostile.snapTo(
                 feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 90.0F, 0.0F);
-        require(context, context.getWorld().spawnEntity(hostile),
+        require(context, context.getLevel().addFreshEntity(hostile),
                 "failed to spawn critical backoff Creeper");
         return hostile;
     }
 
-    private static void finish(TestContext context, AIPlayerEntity bot, String name) {
+    private static void finish(GameTestHelper context, AIPlayerEntity bot, String name) {
         DangerWatcher.INSTANCE.clear(bot);
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     private static final class HoldingTask extends AbstractTask {

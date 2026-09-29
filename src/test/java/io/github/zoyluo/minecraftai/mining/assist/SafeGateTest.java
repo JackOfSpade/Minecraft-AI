@@ -1,12 +1,14 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static io.github.zoyluo.minecraftai.mining.assist.SafeGate.Stage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.github.zoyluo.minecraftai.mining.assist.SafeGate.Stage;
+import net.minecraft.core.BlockPos;
 
 /**
  * Pins the design 4.4 SAFE gate truth table and ordering (P1 contract section D, G.3): every

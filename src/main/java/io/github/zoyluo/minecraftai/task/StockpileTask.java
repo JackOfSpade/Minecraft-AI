@@ -5,18 +5,17 @@ import io.github.zoyluo.minecraftai.action.ContainerAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 public final class StockpileTask extends AbstractTask {
     private static final int BASE_RADIUS = 8;
@@ -92,8 +91,8 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private void findBase(AIPlayerEntity bot) {
-        basePos = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "base")
+        basePos = BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "base")
                 .orElse(null);
         if (basePos == null) {
             fail("no_base");
@@ -105,14 +104,14 @@ public final class StockpileTask extends AbstractTask {
     private void findContainer(AIPlayerEntity bot) {
         containers.clear();
         Item preferred = nextDepositItem(bot);
-        BlockPos.stream(basePos.add(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.add(BASE_RADIUS, 4, BASE_RADIUS))
-                .map(BlockPos::toImmutable)
+        BlockPos.betweenClosedStream(basePos.offset(-BASE_RADIUS, -3, -BASE_RADIUS), basePos.offset(BASE_RADIUS, 4, BASE_RADIUS))
+                .map(BlockPos::immutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(containers::add);
         containers.sort(Comparator
                 .comparing((BlockPos pos) -> !ContainerSupport.containsItem(bot, pos, preferred))
-                .thenComparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())));
+                .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())));
         if (containers.isEmpty()) {
             fail("no_base_container");
             return;
@@ -131,7 +130,7 @@ public final class StockpileTask extends AbstractTask {
             return;
         }
         containerPos = containers.get(containerIndex++);
-        if (bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
             phase = Phase.TRANSFERRING;
             return;
         }
@@ -154,7 +153,7 @@ public final class StockpileTask extends AbstractTask {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        if (bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
             bot.getActionPack().stopAll();
             phase = Phase.TRANSFERRING;
             return;
@@ -166,12 +165,12 @@ public final class StockpileTask extends AbstractTask {
 
     private void transfer(AIPlayerEntity bot) {
         if (containerPos == null
-                || bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) > REACH_SQUARED
+                || bot.getEyePosition().distanceToSqr(containerPos.getCenter()) > REACH_SQUARED
                 || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
             phase = Phase.FIND_CONTAINER;
             return;
         }
-        Inventory container = ContainerAction.resolve(bot, containerPos).orElse(null);
+        Container container = ContainerAction.resolve(bot, containerPos).orElse(null);
         if (container == null) {
             selectNextContainer(bot);
             return;
@@ -179,7 +178,7 @@ public final class StockpileTask extends AbstractTask {
         ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, depositFilter(), 64);
         if (result.movedAny()) {
             transferred += result.count();
-            depositedContainers.add(containerPos.toImmutable());
+            depositedContainers.add(containerPos.immutable());
             return;
         }
         if ("nothing_to_deposit".equals(result.reason())) {
@@ -195,12 +194,12 @@ public final class StockpileTask extends AbstractTask {
     }
 
     private Item nextDepositItem(AIPlayerEntity bot) {
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty() && depositFilter().test(stack)) {
                 return stack.getItem();
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (!offHandStack.isEmpty() && depositFilter().test(offHandStack)) {
             return offHandStack.getItem();
         }

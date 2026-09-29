@@ -1,8 +1,7 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
 
 public final class Node {
     private final BlockPos pos;
@@ -12,7 +11,7 @@ public final class Node {
     private final Node parent;
 
     public Node(BlockPos pos, double gCost, double hCost, MoveType moveType, Node parent) {
-        this.pos = pos.toImmutable();
+        this.pos = pos.immutable();
         this.gCost = gCost;
         this.hCost = hCost;
         this.moveType = moveType;

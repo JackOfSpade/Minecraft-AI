@@ -1,11 +1,11 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.LongPredicate;
+import net.minecraft.core.BlockPos;
 
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.BOT;
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.NOT_PLACED;
@@ -514,8 +514,8 @@ class SweepEngineTest {
         for (int i = 0; i < steps; i++) {
             SweepEngine.step(state, context(TICK, NOT_PLACED), world, 32);
             for (long packed : remembered) {
-                assertTrue(state.hazards().isLava(BlockPos.fromLong(packed)),
-                        "lava cell " + BlockPos.fromLong(packed) + " was forgotten while the lava is still there (step " + i + ")");
+                assertTrue(state.hazards().isLava(BlockPos.of(packed)),
+                        "lava cell " + BlockPos.of(packed) + " was forgotten while the lava is still there (step " + i + ")");
             }
             for (HazardField.Cell cell : state.hazards().snapshot()) {
                 remembered.add(cell.pos().asLong());

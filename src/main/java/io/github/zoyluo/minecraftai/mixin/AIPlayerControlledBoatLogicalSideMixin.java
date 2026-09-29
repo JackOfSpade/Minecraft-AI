@@ -1,8 +1,8 @@
 package io.github.zoyluo.minecraftai.mixin;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -29,12 +29,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(Entity.class)
 abstract class AIPlayerControlledBoatLogicalSideMixin {
-    @Inject(method = "isLogicalSideForUpdatingMovement", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "isLocalInstanceAuthoritative", at = @At("HEAD"), cancellable = true)
     private void minecraftai$aiPlayerBoatIsServerAuthoritative(CallbackInfoReturnable<Boolean> cir) {
-        if (!(((Object) this) instanceof AbstractBoatEntity boat)) {
+        if (!(((Object) this) instanceof AbstractBoat boat)) {
             return;
         }
-        if (boat.getEntityWorld().isClient()) {
+        if (boat.level().isClientSide()) {
             return;
         }
         if (boat.getControllingPassenger() instanceof AIPlayerEntity) {

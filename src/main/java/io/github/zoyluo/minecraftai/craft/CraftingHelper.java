@@ -1,17 +1,16 @@
 package io.github.zoyluo.minecraftai.craft;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 public final class CraftingHelper {
     private CraftingHelper() {
@@ -25,7 +24,7 @@ public final class CraftingHelper {
 
     public record Missing(Item item, int count) {
         public String describe() {
-            return Registries.ITEM.getId(item) + " x" + count;
+            return BuiltInRegistries.ITEM.getKey(item) + " x" + count;
         }
     }
 
@@ -49,7 +48,7 @@ public final class CraftingHelper {
     public static CraftPlan plan(AIPlayerEntity bot, Item target, int targetCount) {
         Map<Item, Integer> counts = inventoryCounts(bot);
         return planFromCounts(counts, target, targetCount,
-                counts.getOrDefault(net.minecraft.item.Items.CRAFTING_TABLE, 0) > 0);
+                counts.getOrDefault(net.minecraft.world.item.Items.CRAFTING_TABLE, 0) > 0);
     }
 
     /**
@@ -84,7 +83,7 @@ public final class CraftingHelper {
         boolean tableNeeded = directPlanner.needsCraftingTable || targetRecipeNeedsTable;
 
         if (craftingTableAvailable
-                || target == net.minecraft.item.Items.CRAFTING_TABLE
+                || target == net.minecraft.world.item.Items.CRAFTING_TABLE
                 || !tableNeeded) {
             return directPlanner.toPlan();
         }
@@ -92,7 +91,7 @@ public final class CraftingHelper {
         // A table was required but is neither nearby nor carried.  Re-plan from the untouched
         // inventory, reserving materials for the table before attempting the requested recipe.
         Planner combinedPlanner = new Planner(new HashMap<>(initialCounts), target, requiredCount);
-        if (!combinedPlanner.ensureItem(net.minecraft.item.Items.CRAFTING_TABLE, 1, new HashSet<>())) {
+        if (!combinedPlanner.ensureItem(net.minecraft.world.item.Items.CRAFTING_TABLE, 1, new HashSet<>())) {
             return combinedPlanner.toPlan();
         }
         combinedPlanner.ensureItem(target, requiredCount, new HashSet<>());
@@ -101,10 +100,10 @@ public final class CraftingHelper {
 
     private static Map<Item, Integer> inventoryCounts(AIPlayerEntity bot) {
         Map<Item, Integer> counts = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             add(counts, stack);
         }
-        add(counts, bot.getEquippedStack(EquipmentSlot.OFFHAND));
+        add(counts, bot.getItemBySlot(EquipmentSlot.OFFHAND));
         return counts;
     }
 

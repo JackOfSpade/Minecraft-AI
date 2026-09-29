@@ -1,7 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -10,6 +8,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
 
 /**
  * Per-bot memory of observed lava, water and trap cells (mining-assist design 3.3, invariant I15).
@@ -37,7 +36,7 @@ public final class HazardField {
     /** Snapshot view of one stored cell. */
     public record Cell(BlockPos pos, Kind kind, int lastTick) {
         public Cell {
-            pos = Objects.requireNonNull(pos, "pos").toImmutable();
+            pos = Objects.requireNonNull(pos, "pos").immutable();
             Objects.requireNonNull(kind, "kind");
         }
     }
@@ -299,9 +298,9 @@ public final class HazardField {
                 int local = Long.numberOfTrailingZeros(remaining);
                 remaining &= remaining - 1L;
                 long world = decodeWorld(bucket, local);
-                int x = BlockPos.unpackLongX(world);
-                int y = BlockPos.unpackLongY(world);
-                int z = BlockPos.unpackLongZ(world);
+                int x = BlockPos.getX(world);
+                int y = BlockPos.getY(world);
+                int z = BlockPos.getZ(world);
                 victims.add(new Victim(x, y, z, bucket.kinds[local] == LAVA, distSq(x, y, z, rx, ry, rz)));
             }
         }
@@ -453,9 +452,9 @@ public final class HazardField {
                 int local = Long.numberOfTrailingZeros(remaining);
                 remaining &= remaining - 1L;
                 long world = decodeWorld(bucket, local);
-                int x = BlockPos.unpackLongX(world);
-                int y = BlockPos.unpackLongY(world);
-                int z = BlockPos.unpackLongZ(world);
+                int x = BlockPos.getX(world);
+                int y = BlockPos.getY(world);
+                int z = BlockPos.getZ(world);
                 cells.add(new Cell(new BlockPos(x, y, z), KINDS[bucket.kinds[local]], bucket.ticks[local]));
             }
         }
@@ -529,9 +528,9 @@ public final class HazardField {
                 continue;
             }
             long world = decodeWorld(bucket, local);
-            int x = BlockPos.unpackLongX(world);
-            int y = BlockPos.unpackLongY(world);
-            int z = BlockPos.unpackLongZ(world);
+            int x = BlockPos.getX(world);
+            int y = BlockPos.getY(world);
+            int z = BlockPos.getZ(world);
             if (x < minX || x > maxX || y < minY || y > maxY || z < minZ || z > maxZ) {
                 continue;
             }
@@ -552,7 +551,7 @@ public final class HazardField {
 
     /**
      * Decodes a bucket-local index back to the world position it was packed from by {@link
-     * #localIndex}, as {@link BlockPos#asLong()}; callers unpack with {@link BlockPos#unpackLongX}/
+     * #localIndex}, as {@link BlockPos#asLong()}; callers unpack with {@link BlockPos#getX}/
      * {@code unpackLongY}/{@code unpackLongZ}. The exact inverse of {@link #localIndex}.
      */
     private static long decodeWorld(Bucket bucket, int local) {

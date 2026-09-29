@@ -1,7 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -11,6 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 /**
  * Per-bot, static, TTL-pruned dedupe registry of point-of-interest sites (mining-assist design 6.4), plus the
@@ -54,7 +53,7 @@ public final class PoiRegistry {
     public record Entry(String dimensionKey, BlockPos anchor, String label, State state, double score, int recordedTick) {
         public Entry {
             dimensionKey = Objects.requireNonNull(dimensionKey, "dimensionKey");
-            anchor = Objects.requireNonNull(anchor, "anchor").toImmutable();
+            anchor = Objects.requireNonNull(anchor, "anchor").immutable();
             label = Objects.requireNonNull(label, "label");
             state = Objects.requireNonNull(state, "state");
         }
@@ -68,7 +67,7 @@ public final class PoiRegistry {
             label = Objects.requireNonNull(label, "label");
             source = Objects.requireNonNull(source, "source");
             dimensionKey = Objects.requireNonNull(dimensionKey, "dimensionKey");
-            anchor = Objects.requireNonNull(anchor, "anchor").toImmutable();
+            anchor = Objects.requireNonNull(anchor, "anchor").immutable();
         }
     }
 

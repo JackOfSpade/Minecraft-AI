@@ -2,7 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 
 /** Stops the current boat and asks vanilla to perform its ordinary passenger dismount. */
 public final class DismountBoatTask extends AbstractTask {
@@ -29,13 +29,13 @@ public final class DismountBoatTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (!(bot.getVehicle() instanceof AbstractBoatEntity boat)) {
+        if (!(bot.getVehicle() instanceof AbstractBoat boat)) {
             complete();
             return;
         }
         BoatAction.stopBoat(boat);
-        bot.dismountVehicle();
-        if (!(bot.getVehicle() instanceof AbstractBoatEntity)) {
+        bot.removeVehicle();
+        if (!(bot.getVehicle() instanceof AbstractBoat)) {
             complete();
             return;
         }

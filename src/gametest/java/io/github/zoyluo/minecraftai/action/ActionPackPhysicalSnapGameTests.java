@@ -9,106 +9,105 @@ import io.github.zoyluo.minecraftai.pathfinding.Node;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
 import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.stat.Stats;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import net.minecraft.text.Text;
 
 /** Strict-survival regression for a one-cell physical recovery from an invalid A* start. */
 public final class ActionPackPhysicalSnapGameTests {
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_center_return_clears_residual_walk_velocity_before_next_server_tick", maxTicks = 20)
     public void centerReturnClearsResidualWalkVelocityBeforeNextServerTick(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos anchor = context.getAbsolutePos(new BlockPos(3, 3, 3));
-        world.setBlockState(anchor.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.south(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.south().up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos anchor = context.absolutePos(new BlockPos(3, 3, 3));
+        world.setBlock(anchor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.south(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.south().above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "CenterReturnVelocityGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(anchor),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(anchor),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, anchor.getX() + 0.5D, anchor.getY(), anchor.getZ() + 0.95D,
+        bot.teleportTo(world, anchor.getX() + 0.5D, anchor.getY(), anchor.getZ() + 0.95D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
-        bot.setVelocity(0.0D, 0.0D, 0.85D);
+        bot.setDeltaMovement(0.0D, 0.0D, 0.85D);
 
         require(context, FakePlayerMotion.returnToBlockCenter(
                         bot, anchor, "gametest_residual_walk_velocity"),
                 "supported same-cell return was rejected");
-        require(context, bot.getVelocity().lengthSquared() == 0.0D && bot.isOnGround(),
+        require(context, bot.getDeltaMovement().lengthSqr() == 0.0D && bot.onGround(),
                 "center return did not publish a stationary grounded pose");
         AtomicInteger observedTicks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (observedTicks.incrementAndGet() < 3) {
                 return;
             }
-            require(context, bot.getBlockPos().equals(anchor),
+            require(context, bot.blockPosition().equals(anchor),
                     "residual walk velocity moved the centered player to "
-                            + bot.getBlockPos().toShortString());
-            require(context, bot.getEntityPos().squaredDistanceTo(Vec3d.ofBottomCenter(anchor))
+                            + bot.blockPosition().toShortString());
+            require(context, bot.position().distanceToSqr(Vec3.atBottomCenterOf(anchor))
                             < 1.0E-6D,
                     "centered player drifted before the next service transaction");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(maxTicks = 20)
     public void standableBodySnapPreservesSafeOffsetAndRecentersRealCornerOverlap(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos anchor = context.getAbsolutePos(new BlockPos(7, 3, 7));
-        world.setBlockState(anchor.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.north(),
-                Blocks.GRASS_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.north().west(),
-                Blocks.GRASS_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos anchor = context.absolutePos(new BlockPos(7, 3, 7));
+        world.setBlock(anchor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.north(),
+                Blocks.GRASS_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.north().west(),
+                Blocks.GRASS_BLOCK.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "BodySnapCornerGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(anchor),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(anchor),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
 
         // A collision-free fractional pose is legitimate physical state and must not be
         // normalized merely because it is off centre.
-        bot.teleport(world, anchor.getX() + 0.65D, anchor.getY(),
+        bot.teleportTo(world, anchor.getX() + 0.65D, anchor.getY(),
                 anchor.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
-        Vec3d safeOffset = bot.getEntityPos();
+        Vec3 safeOffset = bot.position();
         require(context, FakePlayerMotion.isBlockCollisionFree(bot),
                 "safe-offset fixture unexpectedly collided");
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_safe_fractional_pose"),
                 "safe fractional stand was rejected");
-        require(context, bot.getEntityPos().squaredDistanceTo(safeOffset) < 1.0E-12D,
+        require(context, bot.position().distanceToSqr(safeOffset) < 1.0E-12D,
                 "safe fractional stand was unnecessarily recentered");
 
         // Seed-3000 equivalent: the lower corner still floors to the standable anchor column, but
         // the player's width crosses north/west into raised full blocks.
-        bot.teleport(world, anchor.getX(), anchor.getY(), anchor.getZ(),
+        bot.teleportTo(world, anchor.getX(), anchor.getY(), anchor.getZ(),
                 Set.of(), 0.0F, 0.0F, true);
         Standability.clearCache();
         require(context, Standability.isStandable(world, anchor),
@@ -118,198 +117,198 @@ public final class ActionPackPhysicalSnapGameTests {
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_corner_overlap"),
                 "standable corner overlap did not recover physically");
-        Vec3d centered = Vec3d.ofBottomCenter(anchor);
-        require(context, bot.getEntityPos().squaredDistanceTo(centered) < 1.0E-12D
+        Vec3 centered = Vec3.atBottomCenterOf(anchor);
+        require(context, bot.position().distanceToSqr(centered) < 1.0E-12D
                         && FakePlayerMotion.isBlockCollisionFree(bot),
                 "corner snap returned before reaching a collision-free centre");
 
-        Vec3d after = bot.getEntityPos();
+        Vec3 after = bot.position();
         require(context, bot.getActionPack().snapPlayerToNearestStandable(
                         "gametest_corner_overlap_idempotent"),
                 "already-cleared centre was rejected");
-        require(context, bot.getEntityPos().squaredDistanceTo(after) < 1.0E-12D,
+        require(context, bot.position().distanceToSqr(after) < 1.0E-12D,
                 "idempotent snap moved an already-cleared centre");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void centerReturnRejectsLivingEntityOccupyingLanding(TestContext context) {
-        var world = context.getWorld();
-        BlockPos anchor = context.getAbsolutePos(new BlockPos(12, 3, 12));
-        world.setBlockState(anchor.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(anchor.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    public void centerReturnRejectsLivingEntityOccupyingLanding(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos anchor = context.absolutePos(new BlockPos(12, 3, 12));
+        world.setBlock(anchor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(anchor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "CenterOccupiedGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(anchor),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(anchor),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, anchor.getX() + 0.95D, anchor.getY(),
+        bot.teleportTo(world, anchor.getX() + 0.95D, anchor.getY(),
                 anchor.getZ() + 0.95D, Set.of(), 0.0F, 0.0F, true);
-        Vec3d before = bot.getEntityPos();
+        Vec3 before = bot.position();
 
-        var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
+        var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
         require(context, cow != null, "failed to create centre-occupying cow");
-        cow.refreshPositionAndAngles(
+        cow.snapTo(
                 anchor.getX(), anchor.getY(), anchor.getZ(), 0.0F, 0.0F);
-        require(context, world.spawnEntity(cow), "failed to spawn centre-occupying cow");
+        require(context, world.addFreshEntity(cow), "failed to spawn centre-occupying cow");
         require(context, !bot.getBoundingBox().intersects(cow.getBoundingBox()),
                 "fixture cow already overlapped the off-centre bot");
 
         require(context, !FakePlayerMotion.returnToBlockCenter(
                         bot, anchor, "gametest_occupied_center"),
                 "centre return entered a living entity");
-        require(context, bot.getEntityPos().squaredDistanceTo(before) < 1.0E-12D,
+        require(context, bot.position().distanceToSqr(before) < 1.0E-12D,
                 "rejected occupied centre return still moved the bot");
         require(context, cow.isAlive(),
                 "rejected centre return removed the occupying entity");
 
         cow.discard();
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void consecutiveHorizontalJumpsPublishEachVerifiedLanding(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
-        BlockPos first = start.east().up();
-        BlockPos second = first.east().up();
-        BlockPos third = second.east().up();
+    public void consecutiveHorizontalJumpsPublishEachVerifiedLanding(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
+        BlockPos first = start.east().above();
+        BlockPos second = first.east().above();
+        BlockPos third = second.east().above();
         for (BlockPos feet : new BlockPos[]{start, first, second, third}) {
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         String name = "HorizontalJumpGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
 
         require(context, FakePlayerMotion.jumpTo(bot, first, "gametest_first_natural_jump"),
                 "first horizontal jump was rejected");
-        require(context, bot.getBlockPos().equals(first) && bot.isOnGround(),
+        require(context, bot.blockPosition().equals(first) && bot.onGround(),
                 "first verified landing was not published as grounded");
         // Reproduce the server tick that overwrites a clientless player's grounded flag even
         // though its collision box is still resting exactly on the verified first landing.
         bot.setOnGround(false);
         require(context, FakePlayerMotion.jumpTo(bot, second, "gametest_second_natural_jump"),
                 "second supported jump was rejected because onGround was stale");
-        require(context, bot.getBlockPos().equals(second) && bot.isOnGround(),
+        require(context, bot.blockPosition().equals(second) && bot.onGround(),
                 "second verified landing was not published as grounded");
 
         // A standable block below is not enough: lift the same collision box 2.5 cm so the
         // vanilla support probe no longer touches it. This must remain a real airborne rejection.
-        bot.teleport(world, second.getX() + 0.5D, second.getY() + 0.025D,
+        bot.teleportTo(world, second.getX() + 0.5D, second.getY() + 0.025D,
                 second.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, false);
         bot.setOnGround(false);
         require(context, !FakePlayerMotion.jumpTo(bot, third, "gametest_airborne_jump_rejected"),
                 "airborne fake player was accepted as a stale-grounded landing");
-        require(context, bot.getBlockPos().equals(second)
+        require(context, bot.blockPosition().equals(second)
                         && Math.abs(bot.getY() - (second.getY() + 0.025D)) < 1.0E-6D,
                 "rejected airborne jump still changed the player pose");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void horizontalJumpRejectsLivingEntityOnLanding(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(9, 3, 3));
-        BlockPos landing = start.east().up();
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(landing.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(landing, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(landing.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    public void horizontalJumpRejectsLivingEntityOnLanding(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(9, 3, 3));
+        BlockPos landing = start.east().above();
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(landing, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(landing.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "OccupiedJumpGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
-        var cow = EntityType.COW.create(world, SpawnReason.COMMAND);
+        var cow = EntityType.COW.create(world, EntitySpawnReason.COMMAND);
         require(context, cow != null, "failed to create occupied-jump cow");
-        cow.refreshPositionAndAngles(Vec3d.ofBottomCenter(landing), 0.0F, 0.0F);
-        require(context, world.spawnEntity(cow), "failed to spawn occupied-jump cow");
+        cow.snapTo(Vec3.atBottomCenterOf(landing), 0.0F, 0.0F);
+        require(context, world.addFreshEntity(cow), "failed to spawn occupied-jump cow");
 
         require(context, !FakePlayerMotion.jumpTo(bot, landing, "gametest_occupied_landing"),
                 "horizontal jump entered a living entity's landing box");
-        require(context, bot.getBlockPos().equals(start) && bot.isOnGround(),
+        require(context, bot.blockPosition().equals(start) && bot.onGround(),
                 "rejected occupied jump changed the player pose");
-        require(context, world.getBlockState(landing.down()).isOf(Blocks.STONE),
+        require(context, world.getBlockState(landing.below()).is(Blocks.STONE),
                 "rejected occupied jump changed its natural support");
 
         cow.discard();
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(maxTicks = 20)
-    public void sameLevelPickupPrefersExactDropCellOverCurrentNeighbour(TestContext context) {
-        var world = context.getWorld();
-        BlockPos current = context.getAbsolutePos(new BlockPos(4, 5, 4));
+    public void sameLevelPickupPrefersExactDropCellOverCurrentNeighbour(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos current = context.absolutePos(new BlockPos(4, 5, 4));
         BlockPos drop = current.south();
         for (BlockPos feet : new BlockPos[]{current, drop}) {
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         String name = "PickupStandGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(current),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(current),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, current.getX() + 0.5D, current.getY(), current.getZ() + 0.5D,
+        bot.teleportTo(world, current.getX() + 0.5D, current.getY(), current.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
 
         require(context, HarvestCore.pickupStandPos(bot, drop).equals(drop),
                 "same-level pickup did not select the exact drop cell");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_edge_perched_observed_drop_uses_physical_support_instead_of_on_ground_flag", maxTicks = 160)
-    public void edgePerchedObservedDropUsesPhysicalSupportInsteadOfOnGroundFlag(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 4));
+    public void edgePerchedObservedDropUsesPhysicalSupportInsteadOfOnGroundFlag(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(3, 4, 4));
         BlockPos pickupStand = start.east();
         BlockPos unsupportedDropCell = pickupStand.east();
         for (int dx = 0; dx <= 1; dx++) {
             BlockPos feet = start.east(dx);
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        world.setBlockState(unsupportedDropCell.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(unsupportedDropCell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(unsupportedDropCell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(unsupportedDropCell.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(unsupportedDropCell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(unsupportedDropCell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "PickupEdgeSupportGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        Vec3d startPose = bot.getEntityPos();
-        int pickupBaseline = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.BEEF);
+        Vec3 startPose = bot.position();
+        int pickupBaseline = bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.BEEF);
 
         // Reproduce the failed narrow-ridge loot pose: the 0.25-wide item is mostly over an
         // unsupported cell, with only 0.025 blocks of its AABB still resting over pickupStand's
@@ -320,112 +319,112 @@ public final class ActionPackPhysicalSnapGameTests {
                 unsupportedDropCell.getY() + 0.24D,
                 unsupportedDropCell.getZ() + 0.5D,
                 new ItemStack(Items.BEEF));
-        drop.setVelocity(Vec3d.ZERO);
+        drop.setDeltaMovement(Vec3.ZERO);
         drop.setNoGravity(true);
         drop.setOnGround(false);
-        drop.resetPickupDelay();
-        require(context, world.spawnEntity(drop), "failed to spawn edge-perched beef");
-        require(context, !drop.isOnGround(), "fixture unexpectedly published onGround");
+        drop.setNoPickUpDelay();
+        require(context, world.addFreshEntity(drop), "failed to spawn edge-perched beef");
+        require(context, !drop.onGround(), "fixture unexpectedly published onGround");
         require(context, HarvestCore.isDropPhysicallySupported(bot, drop),
                 "collision-supported edge drop was classified as airborne");
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (InventoryAction.countItem(bot, Items.BEEF) < 1) {
                 HarvestCore.approachDropPhysically(bot, drop);
                 return;
             }
-            require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.BEEF)
+            require(context, bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.BEEF)
                             > pickupBaseline,
                     "edge drop entered inventory without vanilla pickup credit");
-            require(context, bot.getEntityPos().squaredDistanceTo(startPose) > 0.01D,
+            require(context, bot.position().distanceToSqr(startPose) > 0.01D,
                     "edge drop was collected without at least 0.1 blocks of physical movement");
-            require(context, !bot.getBlockPos().equals(unsupportedDropCell),
+            require(context, !bot.blockPosition().equals(unsupportedDropCell),
                     "edge pickup entered the unsupported drop cell: "
-                            + bot.getBlockPos().toShortString());
-            require(context, world.getBlockState(unsupportedDropCell.down()).isAir(),
+                            + bot.blockPosition().toShortString());
+            require(context, world.getBlockState(unsupportedDropCell.below()).isAir(),
                     "edge pickup manufactured support beneath the drop");
             require(context, !drop.isAlive(), "picked beef entity remained in the world");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_same_cell_edge_drop_requires_physical_nudge_before_vanilla_pickup", maxTicks = 100)
-    public void sameCellEdgeDropRequiresPhysicalNudgeBeforeVanillaPickup(TestContext context) {
-        var world = context.getWorld();
-        BlockPos stand = context.getAbsolutePos(new BlockPos(7, 4, 4));
-        world.setBlockState(stand.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(stand, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(stand.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    public void sameCellEdgeDropRequiresPhysicalNudgeBeforeVanillaPickup(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos stand = context.absolutePos(new BlockPos(7, 4, 4));
+        world.setBlock(stand.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(stand, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(stand.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "PickupSameCellEdgeGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(stand),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(stand),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, stand.getX() + 0.5D, stand.getY(), stand.getZ() + 0.5D,
+        bot.teleportTo(world, stand.getX() + 0.5D, stand.getY(), stand.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        Vec3d startPose = bot.getEntityPos();
-        int pickupBaseline = bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OAK_LOG);
+        Vec3 startPose = bot.position();
+        int pickupBaseline = bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.OAK_LOG);
 
         ItemEntity drop = new ItemEntity(world,
                 stand.getX() + 0.96D,
                 stand.getY() + 0.20D,
                 stand.getZ() + 0.5D,
                 new ItemStack(Items.OAK_LOG));
-        drop.setVelocity(Vec3d.ZERO);
+        drop.setDeltaMovement(Vec3.ZERO);
         drop.setNoGravity(true);
         drop.setOnGround(true);
-        drop.setPickupDelayInfinite();
-        require(context, world.spawnEntity(drop), "failed to spawn same-cell edge drop");
-        require(context, bot.getBlockPos().equals(drop.getBlockPos()),
+        drop.setNeverPickUp();
+        require(context, world.addFreshEntity(drop), "failed to spawn same-cell edge drop");
+        require(context, bot.blockPosition().equals(drop.blockPosition()),
                 "fixture did not place player and drop in the same block cell");
         require(context, !bot.getBoundingBox().intersects(drop.getBoundingBox()),
                 "fixture edge drop already intersected the player");
 
         AtomicBoolean nudgeObserved = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (InventoryAction.countItem(bot, Items.OAK_LOG) < 1) {
                 HarvestCore.approachDropPhysically(bot, drop);
                 if (!nudgeObserved.get()
-                        && bot.getEntityPos().squaredDistanceTo(startPose) > 0.01D) {
+                        && bot.position().distanceToSqr(startPose) > 0.01D) {
                     nudgeObserved.set(true);
-                    drop.resetPickupDelay();
+                    drop.setNoPickUpDelay();
                 }
                 return;
             }
-            require(context, bot.getBlockPos().equals(stand),
+            require(context, bot.blockPosition().equals(stand),
                     "same-cell pickup left its verified support cell");
             require(context, nudgeObserved.get(),
                     "same-cell edge drop was collected without a physical nudge");
-            require(context, bot.getStatHandler().getStat(Stats.PICKED_UP, Items.OAK_LOG)
+            require(context, bot.getStats().getValue(Stats.ITEM_PICKED_UP, Items.OAK_LOG)
                             > pickupBaseline,
                     "same-cell edge pickup did not publish vanilla pickup credit");
             require(context, !drop.isAlive(), "picked same-cell edge drop remained alive");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_surface_path_replan_cannot_escalate_into_dig_or_pillar", maxTicks = 400)
-    public void surfacePathReplanCannotEscalateIntoDigOrPillar(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 4));
+    public void surfacePathReplanCannotEscalateIntoDigOrPillar(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(3, 4, 4));
         BlockPos blocked = start.east();
         BlockPos goal = blocked.east();
         for (BlockPos feet : new BlockPos[]{start, blocked, goal}) {
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             for (int dy = 0; dy <= 4; dy++) {
-                world.setBlockState(feet.up(dy), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(feet.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
 
         String name = "SurfaceReplanPolicyGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        270.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        270.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 270.0F, 0.0F, true);
         bot.setOnGround(true);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE));
@@ -442,21 +441,21 @@ public final class ActionPackPhysicalSnapGameTests {
         // Invalidate the already planned corridor after startup. A permissive internal replan can
         // escape this two-high stone wall by mining it or by spending dirt pillars; a walking-only
         // replan must instead fail closed and leave both the world and mission inventory untouched.
-        world.setBlockState(blocked, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(blocked.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(blocked, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(blocked.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         AStarPathfinder.invalidateCache("gametest_surface_replan_dynamic_wall");
         AtomicInteger ticks = new AtomicInteger();
 
-        context.runAtEveryTick(() -> {
-            require(context, world.getBlockState(blocked).isOf(Blocks.STONE)
-                            && world.getBlockState(blocked.up()).isOf(Blocks.STONE),
+        context.failIfEver(() -> {
+            require(context, world.getBlockState(blocked).is(Blocks.STONE)
+                            && world.getBlockState(blocked.above()).is(Blocks.STONE),
                     "surface replan broke the dynamic wall");
             require(context, world.getBlockState(start).isAir()
-                            && world.getBlockState(start.up()).isAir(),
+                            && world.getBlockState(start.above()).isAir(),
                     "surface replan manufactured a pillar at the route origin");
             require(context, InventoryAction.countItem(bot, Items.DIRT) == 4,
                     "surface replan consumed disposable support material");
-            require(context, !bot.getBlockPos().equals(goal),
+            require(context, !bot.blockPosition().equals(goal),
                     "walking-only replan crossed an impassable dynamic wall");
 
             int elapsed = ticks.incrementAndGet();
@@ -472,35 +471,35 @@ public final class ActionPackPhysicalSnapGameTests {
                     "fixture never exercised the active route before failing");
             require(context, bot.getActionPack().isMiningIdle(),
                     "failed-closed surface replan left a mining action active");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_constrained_invalid_start_fails_without_cross_cell_snap", maxTicks = 20)
-    public void constrainedInvalidStartFailsWithoutCrossCellSnap(TestContext context) {
-        var world = context.getWorld();
-        BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 7, 5));
-        BlockPos lowerLanding = invalid.add(1, -1, 0);
+    public void constrainedInvalidStartFailsWithoutCrossCellSnap(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos invalid = context.absolutePos(new BlockPos(5, 7, 5));
+        BlockPos lowerLanding = invalid.offset(1, -1, 0);
         BlockPos goal = invalid.east(3);
-        world.setBlockState(invalid.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(invalid, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(invalid.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(invalid.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(invalid, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(invalid.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         for (BlockPos feet : new BlockPos[]{lowerLanding, goal}) {
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         String name = "ConstrainedNoSnapGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(invalid),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(invalid),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world,
+        bot.teleportTo(world,
                 invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, false);
-        BlockPos before = bot.getBlockPos().toImmutable();
+        BlockPos before = bot.blockPosition().immutable();
 
         ActionResult result =
                 bot.getActionPack().startSurfacePathTo(goal, invalid.getY());
@@ -509,37 +508,37 @@ public final class ActionPackPhysicalSnapGameTests {
                 "constrained invalid start unexpectedly installed a path");
         require(context, result.reason().contains("NO_START"),
                 "constrained invalid start produced wrong reason: " + result.reason());
-        require(context, bot.getBlockPos().equals(before),
+        require(context, bot.blockPosition().equals(before),
                 "constrained admission moved before contract proof: from="
                         + before.toShortString() + " to="
-                        + bot.getBlockPos().toShortString());
-        require(context, bot.getBlockPos().getY() >= invalid.getY(),
+                        + bot.blockPosition().toShortString());
+        require(context, bot.blockPosition().getY() >= invalid.getY(),
                 "constrained admission crossed its minimumY");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_same_goal_different_return_anchor_replaces_instead_of_throttling", maxTicks = 20)
     public void sameGoalDifferentReturnAnchorReplacesInsteadOfThrottling(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(4, 4, 4));
         BlockPos goal = start.east(4);
         BlockPos secondAnchor = start.south();
         for (int dx = 0; dx <= 4; dx++) {
             for (int dz = 0; dz <= 1; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(
-                        feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(
+                        feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
 
         String name = "ConstrainedIdentityGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         ActionResult first =
                 bot.getActionPack().startSurfacePathTo(goal, start.getY(), start);
@@ -555,26 +554,26 @@ public final class ActionPackPhysicalSnapGameTests {
                 "goal-only cooldown retained the old route contract");
         require(context, goal.equals(bot.getActionPack().activePathGoal()),
                 "replacement did not own the exact active goal");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_constrained_empty_and_singleton_executors_require_exact_terminal", maxTicks = 20)
     public void constrainedEmptyAndSingletonExecutorsRequireExactTerminal(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos current = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos current = context.absolutePos(new BlockPos(4, 4, 4));
         BlockPos goal = current.east();
         for (BlockPos feet : new BlockPos[]{current, goal}) {
-            world.setBlockState(
-                    feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(
+                    feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         String name = "ConstrainedExactTerminalGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(current),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(current),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
         PathExecutor.RouteContract contract =
                 PathExecutor.RouteContract.constrainedSurface(current.getY(), null);
@@ -595,44 +594,44 @@ public final class ActionPackPhysicalSnapGameTests {
                         && singletonResult.reason().contains("terminal_goal_not_exact"),
                 "singleton constrained path accepted adjacent terminal: "
                         + singletonResult.reason());
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_minimum_y_search_finds_long_safe_route_instead_of_short_descent", maxTicks = 20)
     public void minimumYSearchFindsLongSafeRouteInsteadOfShortDescent(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(4, 7, 4));
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(4, 7, 4));
         BlockPos goal = start.east(4);
         for (int dx = -1; dx <= 5; dx++) {
             for (int dz = -1; dz <= 3; dz++) {
-                BlockPos column = start.add(dx, 0, dz);
+                BlockPos column = start.offset(dx, 0, dz);
                 for (int dy = -2; dy <= 2; dy++) {
-                    world.setBlockState(
-                            column.add(0, dy, 0),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(
+                            column.offset(0, dy, 0),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         // Short route: one block below the contract floor.
         for (int dx = 1; dx <= 3; dx++) {
-            BlockPos lowerFeet = start.add(dx, -1, 0);
-            world.setBlockState(
-                    lowerFeet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos lowerFeet = start.offset(dx, -1, 0);
+            world.setBlock(
+                    lowerFeet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         // Longer route: a supported U-shaped detour that remains on the start/goal Y.
         for (int dz = 0; dz <= 2; dz++) {
             for (int dx : new int[]{0, 4}) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(
-                        feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(
+                        feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         for (int dx = 0; dx <= 4; dx++) {
-            BlockPos feet = start.add(dx, 0, 2);
-            world.setBlockState(
-                    feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos feet = start.offset(dx, 0, 2);
+            world.setBlock(
+                    feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         PathfindingResult ordinary = new AStarPathfinder(
@@ -656,41 +655,41 @@ public final class ActionPackPhysicalSnapGameTests {
                 "minimumY search expanded into the forbidden descent");
         require(context, constrained.path().size() > ordinary.path().size(),
                 "minimumY route did not take the longer safe detour");
-        context.complete();
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_dynamic_rear_closure_fails_before_constrained_terminal_success", maxTicks = 300)
     public void dynamicRearClosureFailsBeforeConstrainedTerminalSuccess(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(4, 4, 4));
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(4, 4, 4));
         BlockPos goal = start.east(7);
         for (int dx = -1; dx <= 8; dx++) {
-            BlockPos corridor = start.add(dx, 0, 0);
-            world.setBlockState(
-                    corridor.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(
-                    corridor, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(
-                    corridor.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos corridor = start.offset(dx, 0, 0);
+            world.setBlock(
+                    corridor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(
+                    corridor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(
+                    corridor.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             for (int dz : new int[]{-1, 1}) {
-                BlockPos wall = corridor.add(0, 0, dz);
-                world.setBlockState(
-                        wall, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(
-                        wall.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos wall = corridor.offset(0, 0, dz);
+                world.setBlock(
+                        wall, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(
+                        wall.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
-        world.setBlockState(
-                goal.east(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(
-                goal.east().up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(
+                goal.east(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(
+                goal.east().above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         String name = "ConstrainedReturnLeaseGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        270.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        270.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world,
+        bot.teleportTo(world,
                 start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 270.0F, 0.0F, true);
         PathfindingResult outbound = new AStarPathfinder(
@@ -714,18 +713,18 @@ public final class ActionPackPhysicalSnapGameTests {
         AtomicBoolean sealed = new AtomicBoolean();
         AtomicReference<ActionResult> terminal = new AtomicReference<>();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             ActionResult result = executor.tick(bot.getActionPack());
             if (!result.isInProgress()) {
                 terminal.compareAndSet(null, result);
             }
-            if (!sealed.get() && bot.getBlockPos().equals(goal)
+            if (!sealed.get() && bot.blockPosition().equals(goal)
                     && result.isInProgress()) {
                 BlockPos rear = goal.west();
-                world.setBlockState(
-                        rear, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(
-                        rear.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(
+                        rear, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(
+                        rear.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 sealed.set(true);
                 return;
             }
@@ -738,49 +737,49 @@ public final class ActionPackPhysicalSnapGameTests {
                             && finished.reason().startsWith("route_contract_lost:"),
                     "rear closure did not produce typed contract loss: "
                             + finished.reason());
-            require(context, bot.getBlockPos().equals(goal),
+            require(context, bot.blockPosition().equals(goal),
                     "terminal return lease was not exercised at the exact goal");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(maxTicks = 20)
-    public void invalidStartUsesAdjacentPhysicalLandingBeforePrivilegedSnap(TestContext context) {
-        var world = context.getWorld();
-        BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 6, 5));
-        BlockPos landing = invalid.add(1, -1, 0);
-        BlockPos goal = landing.add(2, 0, 0);
+    public void invalidStartUsesAdjacentPhysicalLandingBeforePrivilegedSnap(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos invalid = context.absolutePos(new BlockPos(5, 6, 5));
+        BlockPos landing = invalid.offset(1, -1, 0);
+        BlockPos goal = landing.offset(2, 0, 0);
 
         for (int x = landing.getX(); x <= goal.getX(); x++) {
             BlockPos feet = new BlockPos(x, landing.getY(), landing.getZ());
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        world.setBlockState(invalid.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(invalid, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(invalid.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(invalid.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(invalid, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(invalid.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "PhysicalSnapGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(invalid),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(invalid),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
+        bot.teleportTo(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, false);
 
         require(context, !Standability.isStandable(world, invalid),
                 "fixture start unexpectedly standable");
         ActionResult result = bot.getActionPack().startPathTo(goal);
         require(context, !result.isFailed(), "strict physical start recovery failed: " + result.reason());
-        require(context, bot.getBlockPos().equals(landing),
-                "recovery was not the adjacent physical landing: " + bot.getBlockPos().toShortString());
-        require(context, Standability.isStandable(world, bot.getBlockPos()),
+        require(context, bot.blockPosition().equals(landing),
+                "recovery was not the adjacent physical landing: " + bot.blockPosition().toShortString());
+        require(context, Standability.isStandable(world, bot.blockPosition()),
                 "physical recovery ended on a non-standable cell");
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     /**
@@ -790,58 +789,58 @@ public final class ActionPackPhysicalSnapGameTests {
      * stall window must be refused (strict survival then reports NO_START) instead of repeating.
      */
     @GameTest(maxTicks = 20)
-    public void secondPhysicalSnapOutOfTheSameCellIsRefusedInsteadOfYoYoing(TestContext context) {
-        var world = context.getWorld();
-        BlockPos invalid = context.getAbsolutePos(new BlockPos(5, 6, 5));
-        BlockPos landing = invalid.add(1, -1, 0);
-        BlockPos goal = landing.add(2, 0, 0);
+    public void secondPhysicalSnapOutOfTheSameCellIsRefusedInsteadOfYoYoing(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos invalid = context.absolutePos(new BlockPos(5, 6, 5));
+        BlockPos landing = invalid.offset(1, -1, 0);
+        BlockPos goal = landing.offset(2, 0, 0);
 
         for (int x = landing.getX(); x <= goal.getX(); x++) {
             BlockPos feet = new BlockPos(x, landing.getY(), landing.getZ());
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        world.setBlockState(invalid.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(invalid, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(invalid.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(invalid.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(invalid, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(invalid.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         String name = "SnapYoYoGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(invalid),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(invalid),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
+        bot.teleportTo(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, false);
         require(context, bot.getActionPack().snapPlayerToNearestStandable("gametest_first_snap")
-                        && bot.getBlockPos().equals(landing),
+                        && bot.blockPosition().equals(landing),
                 "the first snap out of the invalid start did not land on the adjacent cell: "
-                        + bot.getBlockPos().toShortString());
+                        + bot.blockPosition().toShortString());
 
         // Something (the old straight-line walk fallback) carries the bot back into the same cell.
-        bot.teleport(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
+        bot.teleportTo(world, invalid.getX() + 0.5D, invalid.getY(), invalid.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, false);
         require(context, !bot.getActionPack().snapPlayerToNearestStandable("gametest_second_snap"),
                 "a second snap out of the same cell inside the stall window was not refused");
-        require(context, bot.getBlockPos().equals(invalid),
-                "the refused snap still moved the bot to " + bot.getBlockPos().toShortString());
+        require(context, bot.blockPosition().equals(invalid),
+                "the refused snap still moved the bot to " + bot.blockPosition().toShortString());
 
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve76_rejects76_and_pillar_spends77th_stone", maxTicks = 200)
-    public void reserve76Rejects76AndPillarSpends77thStone(TestContext context) {
+    public void reserve76Rejects76AndPillarSpends77thStone(GameTestHelper context) {
         verifyStoneReserveBoundary(context, 76);
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve37_rejects37_and_pillar_spends38th_stone", maxTicks = 200)
-    public void reserve37Rejects37AndPillarSpends38thStone(TestContext context) {
+    public void reserve37Rejects37AndPillarSpends38thStone(GameTestHelper context) {
         verifyStoneReserveBoundary(context, 37);
     }
 
     @GameTest(environment = "minecraftai-gametest:action_pack_physical_snap_game_tests_reserve16_rejects16_and_pillar_spends17th_stone", maxTicks = 200)
-    public void reserve16Rejects16AndPillarSpends17thStone(TestContext context) {
+    public void reserve16Rejects16AndPillarSpends17thStone(GameTestHelper context) {
         verifyStoneReserveBoundary(context, 16);
     }
 
@@ -850,10 +849,10 @@ public final class ActionPackPhysicalSnapGameTests {
      * PILLAR_UP followed by an ordinary jump. This exercises reserve-aware ActionPack planning and
      * the PathExecutor's vanilla block placement, rather than only calling the palette selector.
      */
-    private static void verifyStoneReserveBoundary(TestContext context, int reserve) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(4, 3, 4));
-        BlockPos goal = start.east().up(2);
+    private static void verifyStoneReserveBoundary(GameTestHelper context, int reserve) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(4, 3, 4));
+        BlockPos goal = start.east().above(2);
         prepareOnePillarExit(world, start);
 
         String exactName = "R" + reserve + "Exact";
@@ -869,7 +868,7 @@ public final class ActionPackPhysicalSnapGameTests {
                 "failed exact-reserve planning changed mission inventory");
         require(context, world.getBlockState(start).isAir(),
                 "failed exact-reserve planning placed a support block");
-        AIPlayerManager.INSTANCE.despawn(exact.getEntityWorld().getServer(), exactName);
+        AIPlayerManager.INSTANCE.despawn(exact.level().getServer(), exactName);
 
         prepareOnePillarExit(world, start);
         String surplusName = "R" + reserve + "Plus";
@@ -893,35 +892,35 @@ public final class ActionPackPhysicalSnapGameTests {
         require(context, started.isInProgress(),
                 "reserve-aware ActionPack rejected one surplus stone: " + started.reason());
         AtomicInteger ticks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             ticks.incrementAndGet();
-            if (!surplus.getBlockPos().equals(goal)
+            if (!surplus.blockPosition().equals(goal)
                     || !surplus.getActionPack().isPathExecutorIdle()) {
                 require(context, !surplus.getActionPack().isPathExecutorIdle()
-                                || surplus.getBlockPos().equals(goal),
+                                || surplus.blockPosition().equals(goal),
                         "reserve-aware path terminated before its exact goal at "
-                                + surplus.getBlockPos().toShortString());
+                                + surplus.blockPosition().toShortString());
                 return;
             }
-            require(context, world.getBlockState(start).isOf(Blocks.COBBLESTONE),
+            require(context, world.getBlockState(start).is(Blocks.COBBLESTONE),
                     "PILLAR_UP did not place the factual surplus support");
             require(context, InventoryAction.countItem(surplus, Items.COBBLESTONE) == reserve,
                     "PILLAR_UP crossed the protected reserve boundary: expected=" + reserve
                             + " actual=" + InventoryAction.countItem(surplus, Items.COBBLESTONE));
             require(context, ticks.get() > 1,
                     "path completed without executing the planned physical pillar");
-            AIPlayerManager.INSTANCE.despawn(surplus.getEntityWorld().getServer(), surplusName);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(surplus.level().getServer(), surplusName);
+            context.succeed();
         });
     }
 
-    private static void prepareOnePillarExit(net.minecraft.server.world.ServerWorld world,
+    private static void prepareOnePillarExit(net.minecraft.server.level.ServerLevel world,
                                              BlockPos start) {
-        for (BlockPos pos : BlockPos.iterate(start.add(-3, 0, -3), start.add(3, 5, 3))) {
-            world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos pos : BlockPos.betweenClosed(start.offset(-3, 0, -3), start.offset(3, 5, 3))) {
+            world.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        for (BlockPos pos : BlockPos.iterate(start.add(-3, -1, -3), start.add(3, -1, 3))) {
-            world.setBlockState(pos, Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+        for (BlockPos pos : BlockPos.betweenClosed(start.offset(-3, -1, -3), start.offset(3, -1, 3))) {
+            world.setBlock(pos, Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
         }
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
@@ -929,32 +928,32 @@ public final class ActionPackPhysicalSnapGameTests {
                     continue;
                 }
                 for (int dy = 0; dy <= 1; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         Standability.clearCache();
     }
 
-    private static AIPlayerEntity spawnReserveBot(TestContext context, String name,
+    private static AIPlayerEntity spawnReserveBot(GameTestHelper context, String name,
                                                    BlockPos start) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(),
-                        Vec3d.ofBottomCenter(start), 0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(start), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(context.getWorld(), start.getX() + 0.5D, start.getY(),
+        bot.teleportTo(context.getLevel(), start.getX() + 0.5D, start.getY(),
                 start.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
         bot.setOnGround(true);
-        bot.getInventory().clear();
-        bot.getInventory().markDirty();
+        bot.getInventory().clearContent();
+        bot.getInventory().setChanged();
         return bot;
     }
 
-    private static void giveCobblestone(TestContext context, AIPlayerEntity bot, int count) {
+    private static void giveCobblestone(GameTestHelper context, AIPlayerEntity bot, int count) {
         int remaining = count;
         while (remaining > 0) {
-            int stackSize = Math.min(remaining, Items.COBBLESTONE.getMaxCount());
+            int stackSize = Math.min(remaining, Items.COBBLESTONE.getDefaultMaxStackSize());
             ActionResult given = InventoryAction.giveItem(
                     bot, new ItemStack(Items.COBBLESTONE, stackSize));
             require(context, given.isSuccess(),
@@ -965,9 +964,9 @@ public final class ActionPackPhysicalSnapGameTests {
                 "fixture cobblestone count mismatch: expected=" + count);
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

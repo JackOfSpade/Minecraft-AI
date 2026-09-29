@@ -4,12 +4,12 @@ import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import io.github.zoyluo.minecraftai.mining.MiningMissionBudget;
 import io.github.zoyluo.minecraftai.task.OreDigTask;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -376,7 +376,7 @@ class GoalExecutorMiningCheckpointPolicyTest {
                 0,
                 rareMissionTarget,
                 batchOpen,
-                MiningCursor.initial(BlockPos.ORIGIN, 48),
+                MiningCursor.initial(BlockPos.ZERO, 48),
                 budgetUsed,
                 40,
                 0,

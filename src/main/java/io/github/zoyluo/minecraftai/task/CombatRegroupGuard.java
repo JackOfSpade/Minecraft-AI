@@ -2,9 +2,8 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.Optional;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * Decides the per-bot squad-regroup policy, purely in terms of the bot's current distance from its
@@ -42,14 +41,14 @@ final class CombatRegroupGuard {
         return CombatCore.countAggroedHostiles(bot, AGGRO_SCAN_DISTANCE);
     }
 
-    static Optional<ServerPlayerEntity> resolveOwner(AIPlayerEntity bot) {
+    static Optional<ServerPlayer> resolveOwner(AIPlayerEntity bot) {
         return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(ownerId -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(ownerId))
-                .filter(player -> player.isAlive() && player.getEntityWorld() == bot.getEntityWorld());
+                .map(ownerId -> bot.level().getServer().getPlayerList().getPlayer(ownerId))
+                .filter(player -> player.isAlive() && player.level() == bot.level());
     }
 
     static boolean shouldRegroup(AIPlayerEntity bot, boolean currentlyRegrouping) {
-        Optional<ServerPlayerEntity> owner = resolveOwner(bot);
+        Optional<ServerPlayer> owner = resolveOwner(bot);
         if (owner.isEmpty()) {
             return false;
         }

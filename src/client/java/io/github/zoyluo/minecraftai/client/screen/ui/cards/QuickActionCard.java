@@ -4,30 +4,29 @@ import io.github.zoyluo.minecraftai.client.BotCommandBridge;
 import io.github.zoyluo.minecraftai.client.screen.ui.Theme;
 import io.github.zoyluo.minecraftai.client.BotClientState;
 import io.github.zoyluo.minecraftai.network.payload.BotSnapshotS2C;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.text.Text;
-
 import java.util.function.Consumer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
 import java.util.List;
 
 public final class QuickActionCard extends PanelCard {
     private static final int INPUT_H = 18;
 
     private final String target;
-    private TextFieldWidget idField;
-    private TextFieldWidget countField;
-    private ButtonWidget comeButton;
-    private ButtonWidget pauseButton;
-    private ButtonWidget stopButton;
-    private ButtonWidget eatButton;
-    private ButtonWidget mineButton;
-    private ButtonWidget craftButton;
-    private ButtonWidget smeltButton;
+    private EditBox idField;
+    private EditBox countField;
+    private Button comeButton;
+    private Button pauseButton;
+    private Button stopButton;
+    private Button eatButton;
+    private Button mineButton;
+    private Button craftButton;
+    private Button smeltButton;
 
     public QuickActionCard(String target) {
         this.target = target == null ? "" : target;
@@ -50,30 +49,30 @@ public final class QuickActionCard extends PanelCard {
     }
 
     @Override
-    public void addWidgets(Consumer<ClickableWidget> sink) {
-        TextRenderer renderer = MinecraftClient.getInstance().textRenderer;
-        idField = new TextFieldWidget(renderer, 0, 0, 84, INPUT_H, Text.translatable("quick.minecraftai.id"));
-        idField.setText("minecraft:stone");
+    public void addWidgets(Consumer<AbstractWidget> sink) {
+        Font renderer = Minecraft.getInstance().font;
+        idField = new EditBox(renderer, 0, 0, 84, INPUT_H, Component.translatable("quick.minecraftai.id"));
+        idField.setValue("minecraft:stone");
         idField.setMaxLength(128);
         idField.setSuggestion(Theme.tr("quick.minecraftai.id"));
-        countField = new TextFieldWidget(renderer, 0, 0, 36, INPUT_H, Text.translatable("quick.minecraftai.count"));
-        countField.setText("1");
+        countField = new EditBox(renderer, 0, 0, 36, INPUT_H, Component.translatable("quick.minecraftai.count"));
+        countField.setValue("1");
         countField.setMaxLength(3);
         countField.setSuggestion(Theme.tr("quick.minecraftai.count"));
 
         comeButton = button("btn.minecraftai.come", () -> {
-            MinecraftClient client = MinecraftClient.getInstance();
+            Minecraft client = Minecraft.getInstance();
             if (client.player != null) {
-                BotCommandBridge.command(target, "move", client.player.getBlockPos().toShortString().replace(",", ""), "", 1);
+                BotCommandBridge.command(target, "move", client.player.blockPosition().toShortString().replace(",", ""), "", 1);
             }
         });
         pauseButton = button("btn.minecraftai.pause", () -> BotCommandBridge.command(
                 target, snapshot != null && snapshot.missionPaused() ? "resume" : "pause", "", "", 1));
         stopButton = button("btn.minecraftai.stop", () -> BotCommandBridge.command(target, "abort", "", "", 1));
         eatButton = button("btn.minecraftai.eat", () -> BotCommandBridge.command(target, "eat", "", "", 1));
-        mineButton = button("btn.minecraftai.mine", () -> BotCommandBridge.command(target, "mine", idField.getText(), "", count()));
-        craftButton = button("btn.minecraftai.craft", () -> BotCommandBridge.command(target, "craft", idField.getText(), "", count()));
-        smeltButton = button("btn.minecraftai.smelt", () -> BotCommandBridge.command(target, "smelt", idField.getText(), "minecraft:iron_ingot", count()));
+        mineButton = button("btn.minecraftai.mine", () -> BotCommandBridge.command(target, "mine", idField.getValue(), "", count()));
+        craftButton = button("btn.minecraftai.craft", () -> BotCommandBridge.command(target, "craft", idField.getValue(), "", count()));
+        smeltButton = button("btn.minecraftai.smelt", () -> BotCommandBridge.command(target, "smelt", idField.getValue(), "minecraft:iron_ingot", count()));
 
         layoutWidgets();
         sink.accept(idField);
@@ -91,18 +90,18 @@ public final class QuickActionCard extends PanelCard {
     public void refresh(BotSnapshotS2C snapshot, List<BotClientState.ChatLine> chat) {
         super.refresh(snapshot, chat);
         if (pauseButton != null) {
-            pauseButton.setMessage(Text.translatable(snapshot != null && snapshot.missionPaused()
+            pauseButton.setMessage(Component.translatable(snapshot != null && snapshot.missionPaused()
                     ? "btn.minecraftai.resume" : "btn.minecraftai.pause"));
         }
     }
 
     @Override
-    protected void renderBody(DrawContext context, int mouseX, int mouseY, float delta, TextRenderer renderer, int bx, int by, int bw, int bh) {
-        context.drawTextWithShadow(renderer, Theme.tr("quick.minecraftai.input_hint"), bx, by, Theme.TEXT_DIM);
+    protected void renderBody(GuiGraphics context, int mouseX, int mouseY, float delta, Font renderer, int bx, int by, int bw, int bh) {
+        context.drawString(renderer, Theme.tr("quick.minecraftai.input_hint"), bx, by, Theme.TEXT_DIM);
     }
 
-    private ButtonWidget button(String key, Runnable action) {
-        return ButtonWidget.builder(Text.translatable(key), button -> action.run()).dimensions(0, 0, 38, INPUT_H).build();
+    private Button button(String key, Runnable action) {
+        return Button.builder(Component.translatable(key), button -> action.run()).bounds(0, 0, 38, INPUT_H).build();
     }
 
     private void layoutWidgets() {
@@ -114,29 +113,29 @@ public final class QuickActionCard extends PanelCard {
         int bw = w - Theme.PAD * 2;
         int quarter = Math.max(24, (bw - 9) / 4);
         comeButton.setPosition(bx, by);
-        comeButton.setDimensions(quarter, INPUT_H);
+        comeButton.setSize(quarter, INPUT_H);
         pauseButton.setPosition(bx + quarter + 3, by);
-        pauseButton.setDimensions(quarter, INPUT_H);
+        pauseButton.setSize(quarter, INPUT_H);
         stopButton.setPosition(bx + quarter * 2 + 6, by);
-        stopButton.setDimensions(quarter, INPUT_H);
+        stopButton.setSize(quarter, INPUT_H);
         eatButton.setPosition(bx + quarter * 3 + 9, by);
-        eatButton.setDimensions(Math.max(24, bw - quarter * 3 - 9), INPUT_H);
+        eatButton.setSize(Math.max(24, bw - quarter * 3 - 9), INPUT_H);
         idField.setPosition(bx, by + 22);
-        idField.setDimensions(Math.max(76, bw - 42), INPUT_H);
+        idField.setSize(Math.max(76, bw - 42), INPUT_H);
         countField.setPosition(bx + bw - 36, by + 22);
-        countField.setDimensions(36, INPUT_H);
+        countField.setSize(36, INPUT_H);
         int third = Math.max(34, (bw - 8) / 3);
         mineButton.setPosition(bx, by + 44);
-        mineButton.setDimensions(third, INPUT_H);
+        mineButton.setSize(third, INPUT_H);
         craftButton.setPosition(bx + third + 4, by + 44);
-        craftButton.setDimensions(third, INPUT_H);
+        craftButton.setSize(third, INPUT_H);
         smeltButton.setPosition(bx + third * 2 + 8, by + 44);
-        smeltButton.setDimensions(bw - third * 2 - 8, INPUT_H);
+        smeltButton.setSize(bw - third * 2 - 8, INPUT_H);
     }
 
     private int count() {
         try {
-            return Math.max(1, Integer.parseInt(countField.getText().trim()));
+            return Math.max(1, Integer.parseInt(countField.getValue().trim()));
         } catch (NumberFormatException ignored) {
             return 1;
         }

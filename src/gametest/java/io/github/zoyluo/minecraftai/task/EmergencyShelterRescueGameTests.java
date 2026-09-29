@@ -4,17 +4,16 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.Set;
-import net.minecraft.text.Text;
 
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.assertPhysicalExit;
 import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.finish;
@@ -32,8 +31,8 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.shelterS
  */
 public final class EmergencyShelterRescueGameTests {
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_rescue_game_tests_below_half_health_without_food_waits_and_cries_for_help_once", maxTicks = 16000)
-    public void belowHalfHealthWithoutFoodWaitsAndCriesForHelpOnce(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void belowHalfHealthWithoutFoodWaitsAndCriesForHelpOnce(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
         AIPlayerEntity bot = spawn(context, "ShelterRescueWaitGT", feet);
@@ -49,12 +48,12 @@ public final class EmergencyShelterRescueGameTests {
         int[] firstCriedForHelpTick = {-1};
 
         boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
+        context.succeedIf(() -> {
             if (timeLockAcquired[0]) {
                 io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
             }
         });
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!timeLockAcquired[0]) {
                 if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
                     return;
@@ -62,9 +61,9 @@ public final class EmergencyShelterRescueGameTests {
                 timeLockAcquired[0] = true;
             }
 
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("rescue-wait shelter ended as "
+                context.fail(Component.nullToEmpty("rescue-wait shelter ended as "
                         + task.state() + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
@@ -110,8 +109,8 @@ public final class EmergencyShelterRescueGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_rescue_game_tests_food_delivered_while_waiting_resumes_healing_and_exits_safely", maxTicks = 16000)
-    public void foodDeliveredWhileWaitingResumesHealingAndExitsSafely(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void foodDeliveredWhileWaitingResumesHealingAndExitsSafely(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
         AIPlayerEntity bot = spawn(context, "ShelterRescuedGT", feet);
@@ -126,12 +125,12 @@ public final class EmergencyShelterRescueGameTests {
         boolean[] sawRescuedResumeHealing = {false};
 
         boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
+        context.succeedIf(() -> {
             if (timeLockAcquired[0]) {
                 io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
             }
         });
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!timeLockAcquired[0]) {
                 if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
                     return;
@@ -139,9 +138,9 @@ public final class EmergencyShelterRescueGameTests {
                 timeLockAcquired[0] = true;
             }
 
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("rescue-delivery shelter ended as "
+                context.fail(Component.nullToEmpty("rescue-delivery shelter ended as "
                         + task.state() + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
@@ -188,8 +187,8 @@ public final class EmergencyShelterRescueGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_rescue_game_tests_half_health_without_food_gives_up_waiting_and_exits_to_fight", maxTicks = 16000)
-    public void halfHealthWithoutFoodGivesUpWaitingAndExitsToFight(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void halfHealthWithoutFoodGivesUpWaitingAndExitsToFight(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
         AIPlayerEntity bot = spawn(context, "ShelterGiveUpFightGT", feet);
@@ -201,12 +200,12 @@ public final class EmergencyShelterRescueGameTests {
         boolean[] healthInjected = {false};
 
         boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
+        context.succeedIf(() -> {
             if (timeLockAcquired[0]) {
                 io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
             }
         });
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!timeLockAcquired[0]) {
                 if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
                     return;
@@ -214,9 +213,9 @@ public final class EmergencyShelterRescueGameTests {
                 timeLockAcquired[0] = true;
             }
 
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("give-up-and-fight shelter ended as "
+                context.fail(Component.nullToEmpty("give-up-and-fight shelter ended as "
                         + task.state() + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
@@ -246,8 +245,8 @@ public final class EmergencyShelterRescueGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:emergency_shelter_rescue_game_tests_full_health_out_of_food_exits_without_crying_for_help", maxTicks = 16000)
-    public void fullHealthOutOfFoodExitsWithoutCryingForHelp(TestContext context) {
-        BlockPos feet = context.getAbsolutePos(new BlockPos(4, 4, 4));
+    public void fullHealthOutOfFoodExitsWithoutCryingForHelp(GameTestHelper context) {
+        BlockPos feet = context.absolutePos(new BlockPos(4, 4, 4));
         preparePlatform(context, feet, 4);
         List<BlockPos> shell = shelterShell(feet);
         AIPlayerEntity bot = spawn(context, "ShelterFullNoFoodGT", feet);
@@ -259,12 +258,12 @@ public final class EmergencyShelterRescueGameTests {
         boolean[] stateInjected = {false};
 
         boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
+        context.succeedIf(() -> {
             if (timeLockAcquired[0]) {
                 io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.release();
             }
         });
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!timeLockAcquired[0]) {
                 if (!io.github.zoyluo.minecraftai.gametest.GameTestTimeLock.tryAcquire()) {
                     return;
@@ -272,9 +271,9 @@ public final class EmergencyShelterRescueGameTests {
                 timeLockAcquired[0] = true;
             }
 
-            context.getWorld().setTimeOfDay(1000L);
+            context.getLevel().setDayTime(1000L);
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("full-health-no-food shelter ended as "
+                context.fail(Component.nullToEmpty("full-health-no-food shelter ended as "
                         + task.state() + ":" + task.failureReason() + " " + task.describe()));
                 return;
             }
@@ -283,8 +282,8 @@ public final class EmergencyShelterRescueGameTests {
                 // Point 6a: already at full health, hunger short of twenty, and nothing left to
                 // eat -- the ordinary "food ran out right around when healing finished" case.
                 bot.setHealth(bot.getMaxHealth());
-                bot.getHungerManager().setFoodLevel(15);
-                bot.getHungerManager().setSaturationLevel(0.0F);
+                bot.getFoodData().setFoodLevel(15);
+                bot.getFoodData().setSaturation(0.0F);
                 stateInjected[0] = true;
                 return;
             }
@@ -304,17 +303,17 @@ public final class EmergencyShelterRescueGameTests {
         });
     }
 
-    private static AIPlayerEntity spawn(TestContext context, String name, BlockPos feet) {
-        context.getWorld().setTimeOfDay(1000L);
+    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
+        context.getLevel().setDayTime(1000L);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(),
-                        Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(context.getWorld(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(context.getLevel(), feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         return bot;
     }
 }

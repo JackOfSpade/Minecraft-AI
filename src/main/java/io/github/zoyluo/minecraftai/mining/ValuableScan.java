@@ -1,11 +1,10 @@
 package io.github.zoyluo.minecraftai.mining;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-
 import java.util.LinkedHashSet;
 import java.util.Set;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * "Valuable" superset for the player-facing "mine all valuables" command: every vanilla ore

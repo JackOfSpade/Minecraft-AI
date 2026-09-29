@@ -15,7 +15,7 @@ public final class BotTickCoordinator {
     }
 
     public void tick(MinecraftServer server) {
-        int tick = server.getTicks();
+        int tick = server.getTickCount();
         TpsGuard guard = TpsGuard.INSTANCE;
         boolean runDanger = tick % guard.dangerScanInterval() == 0;
         boolean runBackground = tick % guard.scanInterval() == 0;

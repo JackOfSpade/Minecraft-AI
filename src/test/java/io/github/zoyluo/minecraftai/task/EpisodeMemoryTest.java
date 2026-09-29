@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

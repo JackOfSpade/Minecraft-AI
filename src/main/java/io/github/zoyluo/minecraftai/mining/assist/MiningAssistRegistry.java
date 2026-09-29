@@ -28,7 +28,7 @@ public final class MiningAssistRegistry {
     }
 
     public static MiningAssistState getOrCreate(AIPlayerEntity bot) {
-        return getOrCreate(bot.getUuid());
+        return getOrCreate(bot.getUUID());
     }
 
     public static MiningAssistState getOrCreate(UUID botId) {
@@ -37,7 +37,7 @@ public final class MiningAssistRegistry {
 
     /** Drops one bot's state and its dug-cells ring. */
     public static void clear(AIPlayerEntity bot) {
-        clear(bot.getUuid());
+        clear(bot.getUUID());
     }
 
     public static void clear(UUID botId) {

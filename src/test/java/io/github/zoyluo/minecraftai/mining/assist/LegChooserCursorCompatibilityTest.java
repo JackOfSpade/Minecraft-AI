@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

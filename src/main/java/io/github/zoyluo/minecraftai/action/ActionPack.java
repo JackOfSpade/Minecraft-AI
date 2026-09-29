@@ -10,16 +10,15 @@ import io.github.zoyluo.minecraftai.pathfinding.FailureReason;
 import io.github.zoyluo.minecraftai.pathfinding.PathExecutor;
 import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.BlockState;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Collections;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 public final class ActionPack {
     /** Failure reason of a request identical to the previous one still inside its cooldown. */
@@ -75,7 +74,7 @@ public final class ActionPack {
 
     public void setSneaking(boolean sneaking) {
         this.sneaking = sneaking;
-        player.setSneaking(sneaking);
+        player.setShiftKeyDown(sneaking);
         if (sneaking && sprinting) {
             setSprinting(false);
         }
@@ -97,12 +96,12 @@ public final class ActionPack {
         this.jumpTicks = 2;
     }
 
-    public ActionResult startWalkTo(Vec3d target) {
+    public ActionResult startWalkTo(Vec3 target) {
         return startWalkTo(target, 0.6D);
     }
 
     /** Starts a direct walk with a caller-defined horizontal arrival tolerance. */
-    public ActionResult startWalkTo(Vec3d target, double arrivalThreshold) {
+    public ActionResult startWalkTo(Vec3 target, double arrivalThreshold) {
         clearActivePathExecutor();
         this.walkTo = new WalkToController(target, arrivalThreshold);
         this.mining = null;
@@ -124,8 +123,8 @@ public final class ActionPack {
      */
     public ActionResult startDigPathTo(BlockPos goal, int protectedStoneLikeReserve) {
         int reserve = Math.max(0, protectedStoneLikeReserve);
-        int now = player.getEntityWorld().getServer().getTicks();
-        BlockPos immutableGoal = goal.toImmutable();
+        int now = player.level().getServer().getTickCount();
+        BlockPos immutableGoal = goal.immutable();
         boolean canPillar = PathExecutor.hasPlaceableBlock(player, reserve);
         PathRequestIdentity request = new PathRequestIdentity(
                 immutableGoal, canPillar, true, reserve,
@@ -138,7 +137,7 @@ public final class ActionPack {
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
-        PathfindingResult result = new AStarPathfinder(player, player.getEntityWorld(), player.getBlockPos(), goal,
+        PathfindingResult result = new AStarPathfinder(player, player.level(), player.blockPosition(), goal,
                 DIG_APPROACH_MAX_NODES, PATHFIND_MAX_MILLIS, canPillar, true, 10.0D).findPath();
         if (!result.success()) {
             lastPathRequest = request;
@@ -225,15 +224,15 @@ public final class ActionPack {
                                      int protectedStoneLikeReserve,
                                      PathExecutor.RouteContract routeContract) {
         int reserve = Math.max(0, protectedStoneLikeReserve);
-        int now = player.getEntityWorld().getServer().getTicks();
-        BlockPos immutableGoal = goal.toImmutable();
+        int now = player.level().getServer().getTickCount();
+        BlockPos immutableGoal = goal.immutable();
         PathRequestIdentity request = new PathRequestIdentity(
                 immutableGoal, canPillar, allowDigFallback, reserve, routeContract);
         if (preparePathRequest(request, now)) {
             return ActionResult.failed(PATHFINDING_THROTTLED);
         }
         if (routeContract.constrained()
-                && player.getBlockPos().getY() < routeContract.minimumY()) {
+                && player.blockPosition().getY() < routeContract.minimumY()) {
             lastPathRequest = request;
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("path_contract_failed: start_below_minimum_y");
@@ -246,8 +245,8 @@ public final class ActionPack {
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: NO_START");
         }
-        ServerWorld world = player.getEntityWorld();
-        BlockPos from = player.getBlockPos();
+        ServerLevel world = player.level();
+        BlockPos from = player.blockPosition();
         // NAV-OPT two-phase pathfinding: try pure walking first (no digging allowed, search
         // space = air cells, so it converges fast and won't be blown out to SEARCH_LIMIT by
         // dig-through neighbors); only if pure walking has no solution do we allow the dig-through
@@ -327,8 +326,8 @@ public final class ActionPack {
      * Constrained routes must never relocate to another block before their full contract is proven.
      */
     public boolean recenterPlayerInCurrentStandableCell(String reason) {
-        ServerWorld world = player.getEntityWorld();
-        BlockPos current = player.getBlockPos();
+        ServerLevel world = player.level();
+        BlockPos current = player.blockPosition();
         Standability.clearCache();
         if (!Standability.isStandable(world, current)) {
             return false;
@@ -341,14 +340,14 @@ public final class ActionPack {
             return false;
         }
         Standability.clearCache();
-        return player.getBlockPos().equals(current)
+        return player.blockPosition().equals(current)
                 && Standability.isStandable(world, current)
                 && FakePlayerMotion.isBlockCollisionFree(player);
     }
 
     public boolean snapPlayerToNearestStandable(String reason) {
-        ServerWorld world = player.getEntityWorld();
-        BlockPos current = player.getBlockPos();
+        ServerLevel world = player.level();
+        BlockPos current = player.blockPosition();
         Standability.clearCache();
         boolean currentCellStandable = Standability.isStandable(world, current);
         if (currentCellStandable && FakePlayerMotion.isBlockCollisionFree(player)) {
@@ -394,20 +393,20 @@ public final class ActionPack {
         }
         BlockPos safe = snapped.get();
         stopMovement();
-        player.teleport(world,
+        player.teleportTo(world,
                 safe.getX() + 0.5D,
                 safe.getY(),
                 safe.getZ() + 0.5D,
                 Collections.emptySet(),
-                player.getYaw(),
-                player.getPitch(),
+                player.getYRot(),
+                player.getXRot(),
                 true);
         // findNearestStandable only just verified a solid landing at `safe`; this can relocate the
         // player up to 128 blocks vertically (e.g. away from a genuine, in-progress vanilla fall),
         // so any real fallDistance/velocity carried into the jump must be cleared here too, or a
         // later unrelated on-ground transition applies stale fall damage for a fall that this exact
         // teleport already resolved.
-        player.setVelocity(Vec3d.ZERO);
+        player.setDeltaMovement(Vec3.ZERO);
         player.fallDistance = 0.0F;
         player.setOnGround(true);
         Standability.clearCache();
@@ -424,7 +423,7 @@ public final class ActionPack {
      * per stall.
      */
     private boolean physicalSnapSuppressed(BlockPos current, String reason) {
-        int nowTick = player.getEntityWorld().getServer().getTicks();
+        int nowTick = player.level().getServer().getTickCount();
         if (physicalSnapGuard.allows(current, nowTick)) {
             return false;
         }
@@ -433,8 +432,8 @@ public final class ActionPack {
         return true;
     }
 
-    private boolean tryPhysicalSnap(ServerWorld world, BlockPos current, String reason) {
-        int nowTick = player.getEntityWorld().getServer().getTicks();
+    private boolean tryPhysicalSnap(ServerLevel world, BlockPos current, String reason) {
+        int nowTick = player.level().getServer().getTickCount();
         // Same-level steps first, then a one-block drop, finally a vanilla-style jump. A vertical
         // move may include one horizontal axis; three-axis corner jumps are never legitimate.
         int[][] horizontalOffsets = {
@@ -449,7 +448,7 @@ public final class ActionPack {
                         || (dy != 0 && Math.abs(dx) + Math.abs(dz) > 1)) {
                     continue;
                 }
-                BlockPos candidate = current.add(dx, dy, dz);
+                BlockPos candidate = current.offset(dx, dy, dz);
                 if (!Standability.isStandable(world, candidate)) {
                     continue;
                 }
@@ -484,8 +483,8 @@ public final class ActionPack {
      * fallDistance, so no fall damage is taken.
      */
     public boolean descendInto(BlockPos target) {
-        if (player.getBlockPos().getY() <= target.getY()) {
-            return player.getBlockPos().equals(target);
+        if (player.blockPosition().getY() <= target.getY()) {
+            return player.blockPosition().equals(target);
         }
         return io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                 player, target, "descend_into");
@@ -533,7 +532,7 @@ public final class ActionPack {
         stopMining();
         this.walkTo = null;
         stopMovement();
-        player.stopUsingItem();
+        player.releaseUsingItem();
     }
 
     public boolean hasActiveActions() {
@@ -567,8 +566,8 @@ public final class ActionPack {
         tickMining();
 
         float velocity = sneaking ? 0.3F : 1.0F;
-        player.forwardSpeed = forward * velocity;
-        player.sidewaysSpeed = strafing * velocity;
+        player.zza = forward * velocity;
+        player.xxa = strafing * velocity;
         boolean jumpNow = jumping || jumpTicks > 0;
         player.setJumping(jumpNow);
         if (jumpTicks > 0) {
@@ -637,11 +636,11 @@ public final class ActionPack {
             // BEFORE the break by MiningController, so this reports what was actually destroyed
             // even though the world cell is air by now.
             BlockState brokenState = mining.brokenBlockState();
-            ItemStack tool = player.getMainHandStack();
+            ItemStack tool = player.getMainHandItem();
             BotLog.action(player, "mine_complete",
-                    "block", brokenState == null ? "unknown" : Registries.BLOCK.getId(brokenState.getBlock()).toString(),
+                    "block", brokenState == null ? "unknown" : BuiltInRegistries.BLOCK.getKey(brokenState.getBlock()).toString(),
                     "pos", LogFields.pos(mining.pos()),
-                    "tool", tool.isEmpty() ? "empty" : Registries.ITEM.getId(tool.getItem()).toString(),
+                    "tool", tool.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(tool.getItem()).toString(),
                     "ticks", mining.elapsedTicks());
         } else {
             BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
@@ -682,7 +681,7 @@ public final class ActionPack {
             int protectedStoneLikeReserve,
             PathExecutor.RouteContract routeContract) {
         private PathRequestIdentity {
-            goal = goal.toImmutable();
+            goal = goal.immutable();
             protectedStoneLikeReserve = Math.max(0, protectedStoneLikeReserve);
             routeContract = java.util.Objects.requireNonNull(routeContract, "routeContract");
         }

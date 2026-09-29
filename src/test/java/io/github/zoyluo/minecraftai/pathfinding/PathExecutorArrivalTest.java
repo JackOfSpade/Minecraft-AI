@@ -1,10 +1,11 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.core.BlockPos;
 
 class PathExecutorArrivalTest {
     @Test

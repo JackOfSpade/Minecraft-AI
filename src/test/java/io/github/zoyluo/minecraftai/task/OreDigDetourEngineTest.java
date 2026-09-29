@@ -5,11 +5,11 @@ import io.github.zoyluo.minecraftai.mining.assist.MiningAssistConfig;
 import io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -396,7 +396,7 @@ class OreDigDetourEngineTest {
         FakeDetourHost host = new FakeDetourHost();
         BlockPos seed = new BlockPos(1, 40, 0);
         java.util.ArrayDeque<DetourHost.FluidProbe> fluid = new java.util.ArrayDeque<>();
-        BlockPos wet = seed.down();
+        BlockPos wet = seed.below();
         fluid.add(DetourHost.FluidProbe.CLEAR); // the pre-swing fluid_adjacent gate must pass
         for (int i = 0; i < 4; i++) {
             fluid.add(new DetourHost.FluidProbe(wet, false));

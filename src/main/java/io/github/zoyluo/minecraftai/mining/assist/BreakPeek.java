@@ -3,12 +3,11 @@ package io.github.zoyluo.minecraftai.mining.assist;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.function.LongPredicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * The exact, cheap peek after a block break (mining-assist design 3.3). A break exposes up to six
@@ -48,9 +47,9 @@ public final class BreakPeek {
             return 0;
         }
         long started = System.nanoTime();
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         ObservedOccupancy occupancy = state.occupancy(feet.getX(), feet.getY(), feet.getZ());
-        String dimension = BotEdits.dimensionKey(bot.getEntityWorld());
+        String dimension = BotEdits.dimensionKey(bot.level());
         state.enterDimension(dimension);
         LongPredicate placed = packed -> BotEdits.wasPlaced(dimension, packed);
         boolean lush = state.lush();
@@ -63,7 +62,7 @@ public final class BreakPeek {
                 break;
             }
             processed++;
-            peekOne(bot, state, occupancy, placed, lush, seen, BlockPos.fromLong(packed), serverTick);
+            peekOne(bot, state, occupancy, placed, lush, seen, BlockPos.of(packed), serverTick);
         }
         state.counters().peekedBreaks += processed;
         BotProfiler.INSTANCE.record(bot, ViewSweeper.SECTION_FOLD, System.nanoTime() - started);
@@ -77,7 +76,7 @@ public final class BreakPeek {
 
         boolean breakthrough = false;
         for (Direction direction : Direction.values()) {
-            BlockPos neighbour = broken.offset(direction);
+            BlockPos neighbour = broken.relative(direction);
             seen[0] = null;
             OreScan.Observation observation = OreScan.observe(bot, neighbour, candidate -> {
                 seen[0] = candidate;
@@ -126,7 +125,7 @@ public final class BreakPeek {
     }
 
     private static boolean isOpenSpace(BlockState state) {
-        return state.isAir() || state.getBlock() instanceof FluidBlock;
+        return state.isAir() || state.getBlock() instanceof LiquidBlock;
     }
 
     /** Space a ray or an earlier peek already saw as open (air or fluid) is not new. */
@@ -139,7 +138,7 @@ public final class BreakPeek {
             occupancy.markAir(pos);
         } else if (BlockFactsAdapter.holdsFluid(observed)) {
             occupancy.markFluid(pos);
-        } else if (observed.isOpaque()) {
+        } else if (observed.canOcclude()) {
             occupancy.markSolid(pos);
         }
     }

@@ -4,19 +4,18 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkSectionPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.ChunkSection;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.WorldChunk;
-
 import java.util.Set;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Ore prospector (ported from the player-side magic mod's HelmetOreLocator): scans chunk by chunk / section
@@ -24,7 +23,7 @@ import java.util.function.Predicate;
  * for long-range ore vein location, GatherQuotaTask for long-range tree location (across elevations / off
  * the plateau), and similar callers.
  *
- * Performance key (same as the reference): uses {@link ChunkSection#hasAny} (palette-level, not per-block)
+ * Performance key (same as the reference): uses {@link LevelChunkSection#maybeHas} (palette-level, not per-block)
  * to quickly skip sections that don't contain the target, and only deep-scans sections that do; so even
  * 64~128 blocks doesn't lag. Only scans **already-loaded chunks** (getChunk FULL, create=false); callers
  * rate-limit calls to protect TPS.
@@ -91,7 +90,7 @@ public final class OreProspector {
         private static final int CLOCK_CHECK_MASK = 7; // read the clock every 8 candidate positions
 
         private final AIPlayerEntity bot;
-        private final ServerWorld world;
+        private final ServerLevel world;
         private final BlockPos origin;
         private final Predicate<BlockState> match;
         private final Predicate<BlockPos> posFilter;
@@ -131,12 +130,12 @@ public final class OreProspector {
         private Scan(AIPlayerEntity bot, int requestedRange, Predicate<BlockState> match,
                      Predicate<BlockPos> posFilter, boolean hiddenScanAllowed) {
             this.bot = bot;
-            this.world = bot.getEntityWorld();
-            this.origin = bot.getBlockPos();
+            this.world = bot.level();
+            this.origin = bot.blockPosition();
             this.match = match;
             this.posFilter = posFilter;
             this.raw = hiddenScanAllowed;
-            this.startTick = world.getServer() == null ? 0 : world.getServer().getTicks();
+            this.startTick = world.getServer() == null ? 0 : world.getServer().getTickCount();
             if (raw) {
                 initRaw(requestedRange);
             } else {
@@ -200,8 +199,8 @@ public final class OreProspector {
         private void initObservable(int requestedRange) {
             int radius = Math.max(1, io.github.zoyluo.minecraftai.MinecraftAiConfig.get().perception().radius());
             int range = Math.min(Math.max(1, requestedRange), radius);
-            minY = Math.max(world.getBottomY(), origin.getY() - range);
-            maxY = Math.min(world.getBottomY() + world.getHeight() - 1, origin.getY() + range);
+            minY = Math.max(world.getMinY(), origin.getY() - range);
+            maxY = Math.min(world.getMinY() + world.getHeight() - 1, origin.getY() + range);
             minX = origin.getX() - range;
             maxX = origin.getX() + range;
             minZ = origin.getZ() - range;
@@ -219,8 +218,8 @@ public final class OreProspector {
          * visible face, so it is skipped without a ray or a state read (about half of the search cube's volume).
          */
         private void stepObservable(long deadline) {
-            Vec3d eye = bot.getEyePos();
-            BlockPos.Mutable pos = new BlockPos.Mutable();
+            Vec3 eye = bot.getEyePosition();
+            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
             int counter = 0;
             while (cursorX <= maxX) {
                 double dx = cursorX + 0.5D - eye.x;
@@ -239,10 +238,10 @@ public final class OreProspector {
                                 && ObservableWorldQuery.canObserveBlock(bot, pos)) {
                             BlockState state = world.getBlockState(pos);
                             if (match.test(state)) {
-                                double distance = origin.getSquaredDistance(pos);
+                                double distance = origin.distSqr(pos);
                                 if (distance < bestDist) {
                                     bestDist = distance;
-                                    best = pos.toImmutable();
+                                    best = pos.immutable();
                                 }
                             }
                         }
@@ -262,16 +261,16 @@ public final class OreProspector {
         private void initRaw(int range) {
             minX = origin.getX() - range;
             maxX = origin.getX() + range;
-            minY = Math.max(world.getBottomY(), origin.getY() - range);
-            maxY = Math.min(world.getBottomY() + world.getHeight() - 1, origin.getY() + range);
+            minY = Math.max(world.getMinY(), origin.getY() - range);
+            maxY = Math.min(world.getMinY() + world.getHeight() - 1, origin.getY() + range);
             minZ = origin.getZ() - range;
             maxZ = origin.getZ() + range;
-            minCX = ChunkSectionPos.getSectionCoord(minX);
-            maxCX = ChunkSectionPos.getSectionCoord(maxX);
-            minCZ = ChunkSectionPos.getSectionCoord(minZ);
-            maxCZ = ChunkSectionPos.getSectionCoord(maxZ);
-            minSY = ChunkSectionPos.getSectionCoord(minY);
-            maxSY = ChunkSectionPos.getSectionCoord(maxY);
+            minCX = SectionPos.blockToSectionCoord(minX);
+            maxCX = SectionPos.blockToSectionCoord(maxX);
+            minCZ = SectionPos.blockToSectionCoord(minZ);
+            maxCZ = SectionPos.blockToSectionCoord(maxZ);
+            minSY = SectionPos.blockToSectionCoord(minY);
+            maxSY = SectionPos.blockToSectionCoord(maxY);
             cursorCX = minCX;
             cursorCZ = minCZ;
             cursorSY = minSY;
@@ -281,8 +280,8 @@ public final class OreProspector {
         private void stepRaw(long deadline) {
             while (cursorCX <= maxCX) {
                 while (cursorCZ <= maxCZ) {
-                    Chunk rawChunk = world.getChunkManager().getChunk(cursorCX, cursorCZ, ChunkStatus.FULL, false);
-                    if (!(rawChunk instanceof WorldChunk chunk)) {
+                    ChunkAccess rawChunk = world.getChunkSource().getChunk(cursorCX, cursorCZ, ChunkStatus.FULL, false);
+                    if (!(rawChunk instanceof LevelChunk chunk)) {
                         cursorCZ++;
                         cursorSY = minSY;
                         continue; // not loaded, skip
@@ -306,22 +305,22 @@ public final class OreProspector {
             done = true;
         }
 
-        private void scanRawSection(WorldChunk chunk, int sy) {
-            int startX = chunk.getPos().getStartX();
-            int startZ = chunk.getPos().getStartZ();
+        private void scanRawSection(LevelChunk chunk, int sy) {
+            int startX = chunk.getPos().getMinBlockX();
+            int startZ = chunk.getPos().getMinBlockZ();
             int lMinX = Math.max(minX, startX) - startX;
             int lMaxX = Math.min(maxX, startX + 15) - startX;
             int lMinZ = Math.max(minZ, startZ) - startZ;
             int lMaxZ = Math.min(maxZ, startZ + 15) - startZ;
-            int idx = world.sectionCoordToIndex(sy);
-            if (idx < 0 || idx >= chunk.getSectionArray().length) {
+            int idx = world.getSectionIndexFromSectionY(sy);
+            if (idx < 0 || idx >= chunk.getSections().length) {
                 return;
             }
-            ChunkSection section = chunk.getSection(idx);
-            if (section == null || section.isEmpty() || !section.hasAny(match)) {
+            LevelChunkSection section = chunk.getSection(idx);
+            if (section == null || section.hasOnlyAir() || !section.maybeHas(match)) {
                 return; // palette-level fast skip of sections that don't contain the target
             }
-            int startY = ChunkSectionPos.getBlockCoord(sy);
+            int startY = SectionPos.sectionToBlockCoord(sy);
             int lMinY = Math.max(minY, startY) - startY;
             int lMaxY = Math.min(maxY, startY + 15) - startY;
             for (int ly = lMinY; ly <= lMaxY; ly++) {
@@ -334,7 +333,7 @@ public final class OreProspector {
                         if (!match.test(state)) {
                             continue;
                         }
-                        double d = origin.getSquaredDistance(x, y, z);
+                        double d = origin.distToLowCornerSqr(x, y, z);
                         if (d >= bestDist) {
                             continue;
                         }

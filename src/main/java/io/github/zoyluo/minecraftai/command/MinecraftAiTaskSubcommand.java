@@ -23,7 +23,6 @@ import io.github.zoyluo.minecraftai.task.ContainerTask;
 import io.github.zoyluo.minecraftai.task.CraftTask;
 import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.FarmTask;
-import net.minecraft.item.Items;
 import io.github.zoyluo.minecraftai.task.GatherQuotaTask;
 import io.github.zoyluo.minecraftai.task.LightAreaTask;
 import io.github.zoyluo.minecraftai.task.MineTask;
@@ -35,28 +34,28 @@ import io.github.zoyluo.minecraftai.task.StripMineTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
-import net.minecraft.block.Block;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.io.IOException;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiTaskSubcommand {
     private MinecraftAiTaskSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         return literal("task")
                 .then(literal("assign")
                         .then(botName()
@@ -67,17 +66,17 @@ public final class MinecraftAiTaskSubcommand {
                                         .then(argument("count", IntegerArgumentType.integer(1))
                                                 .executes(context -> assignForage(context, IntegerArgumentType.getInteger(context, "count")))))
                                 .then(literal("attack")
-                                        .then(argument("entity_type", IdentifierArgumentType.identifier())
+                                        .then(argument("entity_type", IdentifierArgument.id())
                                                 .executes(context -> assignAttack(context, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignAttack(context, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("mine")
-                                        .then(argument("block", IdentifierArgumentType.identifier())
+                                        .then(argument("block", IdentifierArgument.id())
                                                 .executes(context -> assignMine(context, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignMine(context, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("gather")
-                                        .then(argument("item", IdentifierArgumentType.identifier())
+                                        .then(argument("item", IdentifierArgument.id())
                                                 .executes(context -> assignGather(context, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignGather(context, IntegerArgumentType.getInteger(context, "count"))))))
@@ -98,10 +97,10 @@ public final class MinecraftAiTaskSubcommand {
                                                                                 getBlockPos(context)))))))))
                                 .then(literal("mine_vein")
                                         .executes(context -> assignMineVein(context, null))
-                                        .then(argument("ore", IdentifierArgumentType.identifier())
-                                                .executes(context -> assignMineVein(context, Registries.BLOCK.get(IdentifierArgumentType.getIdentifier(context, "ore"))))))
+                                        .then(argument("ore", IdentifierArgument.id())
+                                                .executes(context -> assignMineVein(context, BuiltInRegistries.BLOCK.getValue(IdentifierArgument.getId(context, "ore"))))))
                                 .then(literal("craft")
-                                        .then(argument("item", IdentifierArgumentType.identifier())
+                                        .then(argument("item", IdentifierArgument.id())
                                                 .executes(context -> assignCraft(context, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignCraft(context, IntegerArgumentType.getInteger(context, "count"))))))
@@ -120,7 +119,7 @@ public final class MinecraftAiTaskSubcommand {
                                                 .then(argument("y", IntegerArgumentType.integer())
                                                         .then(argument("z", IntegerArgumentType.integer())
                                                                 .then(argument("radius", IntegerArgumentType.integer(1))
-                                                                        .then(argument("crop", IdentifierArgumentType.identifier())
+                                                                        .then(argument("crop", IdentifierArgument.id())
                                                                                 .executes(context -> assignFarm(context, IntegerArgumentType.getInteger(context, "radius"), false))
                                                                                 .then(literal("keep_tending")
                                                                                         .executes(context -> assignFarm(context, IntegerArgumentType.getInteger(context, "radius"), true)))))))))
@@ -129,16 +128,16 @@ public final class MinecraftAiTaskSubcommand {
                                                 .then(argument("y", IntegerArgumentType.integer())
                                                         .then(argument("z", IntegerArgumentType.integer())
                                                                 .then(argument("radius", IntegerArgumentType.integer(1))
-                                                                        .then(argument("crop", IdentifierArgumentType.identifier())
+                                                                        .then(argument("crop", IdentifierArgument.id())
                                                                                 .executes(context -> assignHarvest(context, IntegerArgumentType.getInteger(context, "radius")))))))))
                                 .then(literal("breed")
-                                        .then(argument("entity_type", IdentifierArgumentType.identifier())
+                                        .then(argument("entity_type", IdentifierArgument.id())
                                                 .executes(context -> assignBreed(context, 1))
                                                 .then(argument("pairs", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignBreed(context, IntegerArgumentType.getInteger(context, "pairs"))))))
                                 .then(literal("smelt")
-                                        .then(argument("input_item", IdentifierArgumentType.identifier())
-                                                .then(argument("output_item", IdentifierArgumentType.identifier())
+                                        .then(argument("input_item", IdentifierArgument.id())
+                                                .then(argument("output_item", IdentifierArgument.id())
                                                         .executes(context -> assignSmelt(context, 1))
                                                         .then(argument("count", IntegerArgumentType.integer(1))
                                                                 .executes(context -> assignSmelt(context, IntegerArgumentType.getInteger(context, "count")))))))
@@ -147,7 +146,7 @@ public final class MinecraftAiTaskSubcommand {
                                         .then(literal("all_except_tools")
                                                 .executes(context -> assignDeposit(context, null, 0, true, null)))
                                         .then(literal("item")
-                                                .then(argument("item", IdentifierArgumentType.identifier())
+                                                .then(argument("item", IdentifierArgument.id())
                                                         .executes(context -> assignDeposit(context, requiredItem(context, "item"), 0, false, null))
                                                         .then(argument("count", IntegerArgumentType.integer(1))
                                                                 .executes(context -> assignDeposit(context, requiredItem(context, "item"), IntegerArgumentType.getInteger(context, "count"), false, null)))))
@@ -159,7 +158,7 @@ public final class MinecraftAiTaskSubcommand {
                                                                         .then(literal("all_except_tools")
                                                                                 .executes(context -> assignDeposit(context, null, 0, true, getBlockPos(context))))
                                                                         .then(literal("item")
-                                                                                .then(argument("item", IdentifierArgumentType.identifier())
+                                                                                .then(argument("item", IdentifierArgument.id())
                                                                                         .executes(context -> assignDeposit(context, requiredItem(context, "item"), 0, false, getBlockPos(context)))
                                                                                         .then(argument("count", IntegerArgumentType.integer(1))
                                                                                                 .executes(context -> assignDeposit(context, requiredItem(context, "item"), IntegerArgumentType.getInteger(context, "count"), false, getBlockPos(context)))))))))))
@@ -168,7 +167,7 @@ public final class MinecraftAiTaskSubcommand {
                                         .then(literal("include_tools")
                                                 .executes(context -> assignStockpile(context, false))))
                                 .then(literal("withdraw")
-                                        .then(argument("item", IdentifierArgumentType.identifier())
+                                        .then(argument("item", IdentifierArgument.id())
                                                 .executes(context -> assignWithdraw(context, null, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignWithdraw(context, null, IntegerArgumentType.getInteger(context, "count")))))
@@ -176,7 +175,7 @@ public final class MinecraftAiTaskSubcommand {
                                                 .then(argument("x", IntegerArgumentType.integer())
                                                         .then(argument("y", IntegerArgumentType.integer())
                                                                 .then(argument("z", IntegerArgumentType.integer())
-                                                                        .then(argument("item", IdentifierArgumentType.identifier())
+                                                                        .then(argument("item", IdentifierArgument.id())
                                                                                 .executes(context -> assignWithdraw(context, getBlockPos(context), 1))
                                                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                                                         .executes(context -> assignWithdraw(context, getBlockPos(context), IntegerArgumentType.getInteger(context, "count"))))))))))
@@ -206,53 +205,53 @@ public final class MinecraftAiTaskSubcommand {
                                 .executes(MinecraftAiTaskSubcommand::abort)));
     }
 
-    private static RequiredArgumentBuilder<ServerCommandSource, String> botName() {
+    private static RequiredArgumentBuilder<CommandSourceStack, String> botName() {
         return argument("name", StringArgumentType.word());
     }
 
-    private static RequiredArgumentBuilder<ServerCommandSource, Integer> blockPosArgs(Command<ServerCommandSource> command) {
+    private static RequiredArgumentBuilder<CommandSourceStack, Integer> blockPosArgs(Command<CommandSourceStack> command) {
         return argument("x", IntegerArgumentType.integer())
                 .then(argument("y", IntegerArgumentType.integer())
                         .then(argument("z", IntegerArgumentType.integer())
                                 .executes(command)));
     }
 
-    private static int assignMove(CommandContext<ServerCommandSource> context) {
+    private static int assignMove(CommandContext<CommandSourceStack> context) {
         return assign(context, bot -> new MoveTask(bot, getBlockPos(context)));
     }
 
-    private static int assignForage(CommandContext<ServerCommandSource> context, int count) {
+    private static int assignForage(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> GatherQuotaTask.collectAdditional(Items.SWEET_BERRIES, count));
     }
 
-    private static int assignAttack(CommandContext<ServerCommandSource> context, int count) {
+    private static int assignAttack(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> new CombatTask(
-                Registries.ENTITY_TYPE.get(IdentifierArgumentType.getIdentifier(context, "entity_type")),
+                BuiltInRegistries.ENTITY_TYPE.getValue(IdentifierArgument.getId(context, "entity_type")),
                 count,
                 io.github.zoyluo.minecraftai.MinecraftAiConfig.get().combat().retreatHp()));
     }
 
-    private static int assignMine(CommandContext<ServerCommandSource> context, int count) {
+    private static int assignMine(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> {
-            Block block = Registries.BLOCK.get(IdentifierArgumentType.getIdentifier(context, "block"));
+            Block block = BuiltInRegistries.BLOCK.getValue(IdentifierArgument.getId(context, "block"));
             return OreScan.isOreBlock(block) ? new OreDigTask(OreScan.oreFamily(block), count) : new MineTask(block, count);
         });
     }
 
-    private static int assignGather(CommandContext<ServerCommandSource> context, int count) {
+    private static int assignGather(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> GatherQuotaTask.collectAdditional(
-                Registries.ITEM.get(IdentifierArgumentType.getIdentifier(context, "item")),
+                BuiltInRegistries.ITEM.getValue(IdentifierArgument.getId(context, "item")),
                 count));
     }
 
-    private static int assignStripMine(CommandContext<ServerCommandSource> context, int length, int spacing, BlockPos depot) {
+    private static int assignStripMine(CommandContext<CommandSourceStack> context, int length, int spacing, BlockPos depot) {
         return assign(context, bot -> {
             requireLegacyMiningProfile();
             return new StripMineTask(direction(context), length, spacing, depot, Set.of());
         });
     }
 
-    private static int assignMineVein(CommandContext<ServerCommandSource> context, Block ore) {
+    private static int assignMineVein(CommandContext<CommandSourceStack> context, Block ore) {
         return assign(context, bot -> {
             requireLegacyMiningProfile();
             return StripMineTask.mineNearbyVein(ore == null ? Set.of() : Set.of(ore));
@@ -266,50 +265,50 @@ public final class MinecraftAiTaskSubcommand {
                 });
     }
 
-    private static int assignCraft(CommandContext<ServerCommandSource> context, int count) {
+    private static int assignCraft(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> new CraftTask(requiredItem(context, "item"), count));
     }
 
-    private static int assignEat(CommandContext<ServerCommandSource> context) {
+    private static int assignEat(CommandContext<CommandSourceStack> context) {
         return assign(context, bot -> new EatTask());
     }
 
-    private static int assignLightArea(CommandContext<ServerCommandSource> context, int radius, int maxTorches) {
+    private static int assignLightArea(CommandContext<CommandSourceStack> context, int radius, int maxTorches) {
         return assign(context, bot -> new LightAreaTask(radius, maxTorches));
     }
 
-    private static int assignFarm(CommandContext<ServerCommandSource> context, int radius, boolean keepTending) {
+    private static int assignFarm(CommandContext<CommandSourceStack> context, int radius, boolean keepTending) {
         return assign(context, bot -> {
             FarmAction.CropSpec spec = cropSpec(context);
             return new FarmTask(getBlockPos(context), radius, spec.seed(), spec.crop(), keepTending, false);
         });
     }
 
-    private static int assignHarvest(CommandContext<ServerCommandSource> context, int radius) {
+    private static int assignHarvest(CommandContext<CommandSourceStack> context, int radius) {
         return assign(context, bot -> {
             FarmAction.CropSpec spec = cropSpec(context);
             return new FarmTask(getBlockPos(context), radius, spec.seed(), spec.crop(), false, true);
         });
     }
 
-    private static int assignBreed(CommandContext<ServerCommandSource> context, int pairs) {
+    private static int assignBreed(CommandContext<CommandSourceStack> context, int pairs) {
         return assign(context, bot -> new BreedTask(
-                Registries.ENTITY_TYPE.get(IdentifierArgumentType.getIdentifier(context, "entity_type")),
+                BuiltInRegistries.ENTITY_TYPE.getValue(IdentifierArgument.getId(context, "entity_type")),
                 pairs));
     }
 
-    private static int assignSmelt(CommandContext<ServerCommandSource> context, int count) {
+    private static int assignSmelt(CommandContext<CommandSourceStack> context, int count) {
         return assign(context, bot -> new SmeltTask(
                 requiredItem(context, "input_item"),
                 requiredItem(context, "output_item"),
                 count));
     }
 
-    private static int assignDepositAt(CommandContext<ServerCommandSource> context, Item item, int count, boolean allExceptTools) {
+    private static int assignDepositAt(CommandContext<CommandSourceStack> context, Item item, int count, boolean allExceptTools) {
         return assignDeposit(context, item, count, allExceptTools, getBlockPos(context));
     }
 
-    private static int assignDeposit(CommandContext<ServerCommandSource> context,
+    private static int assignDeposit(CommandContext<CommandSourceStack> context,
                                      Item item,
                                      int count,
                                      boolean allExceptTools,
@@ -317,15 +316,15 @@ public final class MinecraftAiTaskSubcommand {
         return assign(context, bot -> ContainerTask.deposit(pos, item, count, allExceptTools));
     }
 
-    private static int assignWithdraw(CommandContext<ServerCommandSource> context, BlockPos pos, int count) {
+    private static int assignWithdraw(CommandContext<CommandSourceStack> context, BlockPos pos, int count) {
         return assign(context, bot -> ContainerTask.withdraw(pos, requiredItem(context, "item"), count));
     }
 
-    private static int assignStockpile(CommandContext<ServerCommandSource> context, boolean allExceptTools) {
+    private static int assignStockpile(CommandContext<CommandSourceStack> context, boolean allExceptTools) {
         return assign(context, bot -> new StockpileTask(allExceptTools));
     }
 
-    private static int assignBuild(CommandContext<ServerCommandSource> context, boolean autoSite, boolean flatten) {
+    private static int assignBuild(CommandContext<CommandSourceStack> context, boolean autoSite, boolean flatten) {
         return assign(context, bot -> {
             try {
                 return new BuildTask(
@@ -339,13 +338,13 @@ public final class MinecraftAiTaskSubcommand {
         });
     }
 
-    private static int status(CommandContext<ServerCommandSource> context) {
+    private static int status(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context, BotAuthorizationPolicy.Operation.VIEW, "status");
         if (bot.isEmpty()) {
             return 0;
         }
         TaskStatus status = TaskManager.INSTANCE.status(bot.get());
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] task "
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] task "
                 + status.name()
                 + " state=" + status.state()
                 + " progress=" + String.format(java.util.Locale.ROOT, "%.2f", status.progress())
@@ -355,18 +354,18 @@ public final class MinecraftAiTaskSubcommand {
         return 1;
     }
 
-    private static int abort(CommandContext<ServerCommandSource> context) {
+    private static int abort(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context, BotAuthorizationPolicy.Operation.COMMAND, "abort");
         if (bot.isEmpty()) {
             return 0;
         }
         IntentController.INSTANCE.cancelAll(
                 bot.get(), IntentController.ControlOrigin.PLAYER_COMMAND, "command_task_abort");
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] task aborted"), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] task aborted"), false);
         return 1;
     }
 
-    private static int pause(CommandContext<ServerCommandSource> context) {
+    private static int pause(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context, BotAuthorizationPolicy.Operation.COMMAND, "pause");
         if (bot.isEmpty()) {
             return 0;
@@ -376,7 +375,7 @@ public final class MinecraftAiTaskSubcommand {
         return 1;
     }
 
-    private static int resume(CommandContext<ServerCommandSource> context) {
+    private static int resume(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context, BotAuthorizationPolicy.Operation.COMMAND, "resume");
         if (bot.isEmpty()) {
             return 0;
@@ -386,7 +385,7 @@ public final class MinecraftAiTaskSubcommand {
         return 1;
     }
 
-    private static int assign(CommandContext<ServerCommandSource> context, TaskFactory factory) {
+    private static int assign(CommandContext<CommandSourceStack> context, TaskFactory factory) {
         Optional<AIPlayerEntity> bot = getBot(context, BotAuthorizationPolicy.Operation.COMMAND, "assign");
         if (bot.isEmpty()) {
             return 0;
@@ -402,15 +401,15 @@ public final class MinecraftAiTaskSubcommand {
                                 TaskOrigin.of(TaskOrigin.Kind.PLAYER_COMMAND, "command_task_assign"));
                         return true;
                     });
-            context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] task assigned: " + task.name()), false);
+            context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] task assigned: " + task.name()), false);
             return 1;
         } catch (RuntimeException exception) {
-            context.getSource().sendError(Text.literal("[Minecraft-AI] task assign failed: " + exception.getMessage()));
+            context.getSource().sendFailure(Component.literal("[Minecraft-AI] task assign failed: " + exception.getMessage()));
             return 0;
         }
     }
 
-    private static Optional<AIPlayerEntity> getBot(CommandContext<ServerCommandSource> context,
+    private static Optional<AIPlayerEntity> getBot(CommandContext<CommandSourceStack> context,
                                                    BotAuthorizationPolicy.Operation operation,
                                                    String action) {
         String name = StringArgumentType.getString(context, "name");
@@ -418,25 +417,25 @@ public final class MinecraftAiTaskSubcommand {
                 context.getSource(), name, operation, "command:task_" + action);
     }
 
-    private static BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
+    private static BlockPos getBlockPos(CommandContext<CommandSourceStack> context) {
         return new BlockPos(
                 IntegerArgumentType.getInteger(context, "x"),
                 IntegerArgumentType.getInteger(context, "y"),
                 IntegerArgumentType.getInteger(context, "z"));
     }
 
-    private static Item requiredItem(CommandContext<ServerCommandSource> context, String name) {
-        Identifier id = IdentifierArgumentType.getIdentifier(context, name);
-        return Registries.ITEM.getOptionalValue(id)
+    private static Item requiredItem(CommandContext<CommandSourceStack> context, String name) {
+        Identifier id = IdentifierArgument.getId(context, name);
+        return BuiltInRegistries.ITEM.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_item: " + id));
     }
 
-    private static FarmAction.CropSpec cropSpec(CommandContext<ServerCommandSource> context) {
-        Identifier id = IdentifierArgumentType.getIdentifier(context, "crop");
+    private static FarmAction.CropSpec cropSpec(CommandContext<CommandSourceStack> context) {
+        Identifier id = IdentifierArgument.getId(context, "crop");
         return FarmAction.cropSpec(id.toString());
     }
 
-    private static Direction direction(CommandContext<ServerCommandSource> context) {
+    private static Direction direction(CommandContext<CommandSourceStack> context) {
         String value = StringArgumentType.getString(context, "direction").toLowerCase(java.util.Locale.ROOT);
         return switch (value) {
             case "north", "n" -> Direction.NORTH;

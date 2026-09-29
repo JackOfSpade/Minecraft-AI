@@ -7,9 +7,6 @@ import io.github.zoyluo.minecraftai.mining.assist.ObservedReach;
 import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -19,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Scripted, deterministic {@link DetourHost} for the JUnit tests of the detour engine and its start selector
@@ -191,12 +190,12 @@ class FakeDetourHost implements DetourHost {
         int dz = Integer.compare(to.getZ(), from.getZ());
         int dy = Integer.compare(to.getY(), from.getY());
         if (dx != 0) {
-            return from.add(dx, 0, 0);
+            return from.offset(dx, 0, 0);
         }
         if (dz != 0) {
-            return from.add(0, 0, dz);
+            return from.offset(0, 0, dz);
         }
-        return from.add(0, dy, 0);
+        return from.offset(0, dy, 0);
     }
 
     /** The largest distance between two consecutive beats in {@code [fromTick, toTick]}, counting the interval edges as beats. */
@@ -256,8 +255,8 @@ class FakeDetourHost implements DetourHost {
     }
 
     @Override
-    public Vec3d eyePos() {
-        return new Vec3d(feet.getX() + 0.5D, feet.getY() + 1.62D, feet.getZ() + 0.5D);
+    public Vec3 eyePos() {
+        return new Vec3(feet.getX() + 0.5D, feet.getY() + 1.62D, feet.getZ() + 0.5D);
     }
 
     @Override
@@ -320,7 +319,7 @@ class FakeDetourHost implements DetourHost {
 
     @Override
     public void forgetSighting(BlockPos pos) {
-        forgotten.add(pos.toImmutable());
+        forgotten.add(pos.immutable());
         sightings.removeIf(s -> s.pos().equals(pos));
         calls.add("forget:" + fmt(pos));
     }
@@ -338,13 +337,13 @@ class FakeDetourHost implements DetourHost {
 
     @Override
     public void exclude(BlockPos pos, int ttlServerTicks) {
-        excludedUntil.merge(pos.toImmutable(), serverTick + ttlServerTicks, Math::max);
+        excludedUntil.merge(pos.immutable(), serverTick + ttlServerTicks, Math::max);
         calls.add("exclude:" + fmt(pos) + ":" + ttlServerTicks);
     }
 
     @Override
     public boolean shouldLogSkip(BlockPos pos) {
-        return skipLogged.add(pos.toImmutable());
+        return skipLogged.add(pos.immutable());
     }
 
     @Override
@@ -358,7 +357,7 @@ class FakeDetourHost implements DetourHost {
         if (claimedByOthers.contains(pos)) {
             return false;
         }
-        myClaims.add(pos.toImmutable());
+        myClaims.add(pos.immutable());
         return true;
     }
 
@@ -451,7 +450,7 @@ class FakeDetourHost implements DetourHost {
 
     @Override
     public boolean isCurrentSupport(BlockPos ore) {
-        return ore.equals(feet.down());
+        return ore.equals(feet.below());
     }
 
     @Override
@@ -510,7 +509,7 @@ class FakeDetourHost implements DetourHost {
         calls.add("route:" + fmt(stand) + ":" + result + ":" + anchorTag);
         if (result == RouteResult.OK) {
             pathActive = true;
-            routeGoal = stand.toImmutable();
+            routeGoal = stand.immutable();
             moveAccumulator = 0;
             routeSteps = 0;
         } else if (result == RouteResult.FAILED) {
@@ -560,7 +559,7 @@ class FakeDetourHost implements DetourHost {
             }
             return step;
         }
-        int count = mineCalls.merge(pos.toImmutable(), 1, Integer::sum);
+        int count = mineCalls.merge(pos.immutable(), 1, Integer::sum);
         if (count >= mineTicks) {
             mineCalls.remove(pos);
             onBroken(pos);
@@ -570,8 +569,8 @@ class FakeDetourHost implements DetourHost {
     }
 
     private void onBroken(BlockPos pos) {
-        broken.add(pos.toImmutable());
-        lastBrokenCell = pos.toImmutable();
+        broken.add(pos.immutable());
+        lastBrokenCell = pos.immutable();
         pickupCountdown = pickupDelay;
     }
 

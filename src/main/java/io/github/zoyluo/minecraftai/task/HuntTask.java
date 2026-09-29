@@ -6,19 +6,6 @@ import io.github.zoyluo.minecraftai.goal.GoalPlanner;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.stat.Stats;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -27,6 +14,18 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * HUNT (tier-2 food self-sufficiency): actively hunts nearby edible animals and picks up raw
@@ -54,7 +53,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             BlockPos pose, BlockPos preyCell, SurfaceRouteProof proof) {
         private static AttackPoseSelection safe(BlockPos pose, BlockPos preyCell) {
             return new AttackPoseSelection(
-                    pose.toImmutable(), preyCell.toImmutable(), SurfaceRouteProof.SAFE);
+                    pose.immutable(), preyCell.immutable(), SurfaceRouteProof.SAFE);
         }
 
         private static AttackPoseSelection failed(SurfaceRouteProof proof) {
@@ -304,9 +303,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
 
-        BlockPos feet = bot.getBlockPos();
+        BlockPos feet = bot.blockPosition();
         String dimension = dimension(bot);
-        EpisodeMemory.INSTANCE.recordTrail(bot.getUuid(), "hunt", feet);
+        EpisodeMemory.INSTANCE.recordTrail(bot.getUUID(), "hunt", feet);
         if (!searchCursor.markVisited(dimension, feet.getX(), feet.getZ())
                 && searchCursor.isFull()
                 && !searchCursor.contains(dimension, feet.getX(), feet.getZ())) {
@@ -359,7 +358,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         if (persisted.isEmpty()) {
-            BlockPos feet = bot.getBlockPos();
+            BlockPos feet = bot.blockPosition();
             Standability.clearCache();
             if (!isFactualSurfaceAnchor(bot, feet)) {
                 fail("hunt_surface_anchor_unavailable at=" + feet.toShortString());
@@ -374,7 +373,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private static boolean isFactualSurfaceAnchor(AIPlayerEntity bot, BlockPos feet) {
-        return Standability.isStandable(bot.getEntityWorld(), feet)
+        return Standability.isStandable(bot.level(), feet)
                 && GoalPlanner.canAcquireSurfaceResources(bot);
     }
 
@@ -401,8 +400,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     : new BlockPos(anchor.x(), anchor.y(), anchor.z()).toShortString()));
             return;
         }
-        if (bot.isTouchingWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
-            fail("hunt_water_rescue_timeout at=" + bot.getBlockPos().toShortString());
+        if (bot.isInWater() || NavSafetyNet.INSTANCE.isWaterRescueActive(bot)) {
+            fail("hunt_water_rescue_timeout at=" + bot.blockPosition().toShortString());
             return;
         }
         fail("hunt_timeout collected=" + collected);
@@ -433,7 +432,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (anchor == null) {
             return true;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         return current.getY() < anchor.y() - MAX_SURFACE_DESCENT;
     }
 
@@ -451,17 +450,17 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         surfaceReturnStartTick = elapsed;
         BlockPos destination = new BlockPos(anchor.x(), anchor.y(), anchor.z());
         int returnFloor = Math.min(
-                bot.getBlockPos().getY(), surfaceFloorY(anchor));
+                bot.blockPosition().getY(), surfaceFloorY(anchor));
         SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
                 bot, destination, returnFloor, null);
         if (start == SurfacePathStart.UNREACHABLE) {
             fail("hunt_surface_return_unreachable anchor=" + destination.toShortString()
-                    + " from=" + bot.getBlockPos().toShortString());
+                    + " from=" + bot.blockPosition().toShortString());
             return;
         }
         if (start == SurfacePathStart.STARTED) {
             BotLog.action(bot, "hunt_surface_return_started",
-                    "from", bot.getBlockPos().toShortString(),
+                    "from", bot.blockPosition().toShortString(),
                     "to", destination.toShortString());
         }
     }
@@ -475,13 +474,13 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         BlockPos destination = new BlockPos(anchor.x(), anchor.y(), anchor.z());
         Standability.clearCache();
-        if (bot.getBlockPos().getSquaredDistance(destination) <= 4.0D
-                && Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())) {
+        if (bot.blockPosition().distSqr(destination) <= 4.0D
+                && Standability.isStandable(bot.level(), bot.blockPosition())) {
             bot.getActionPack().stopAll();
             phase = Phase.ACQUIRE;
             lastProgressTick = elapsed;
             BotLog.action(bot, "hunt_surface_return_completed",
-                    "at", bot.getBlockPos().toShortString());
+                    "at", bot.blockPosition().toShortString());
             return;
         }
         if (elapsed - surfaceReturnStartTick > SURFACE_RETURN_LIMIT) {
@@ -491,22 +490,22 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
             int returnFloor = Math.min(
-                    bot.getBlockPos().getY(), surfaceFloorY(anchor));
+                    bot.blockPosition().getY(), surfaceFloorY(anchor));
             SurfacePathStart start = HuntSurfaceRoutes.startExactSurfacePath(
                     bot, destination, returnFloor, null);
             if (start == SurfacePathStart.UNREACHABLE) {
                 fail("hunt_surface_return_unreachable anchor=" + destination.toShortString()
-                        + " from=" + bot.getBlockPos().toShortString());
+                        + " from=" + bot.blockPosition().toShortString());
             } else if (start == SurfacePathStart.STARTED) {
                 BotLog.action(bot, "hunt_surface_return_started",
-                        "from", bot.getBlockPos().toShortString(),
+                        "from", bot.blockPosition().toShortString(),
                         "to", destination.toShortString());
             }
         }
     }
 
     private static String dimension(AIPlayerEntity bot) {
-        return bot.getEntityWorld().getRegistryKey().getValue().toString();
+        return bot.level().dimension().identifier().toString();
     }
 
     private int surfaceFloorY(AIPlayerEntity bot) {
@@ -544,7 +543,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private SurfacePathStart startSafePreyApproach(
             AIPlayerEntity bot, LivingEntity prey) {
-        BlockPos returnAnchor = bot.getBlockPos().toImmutable();
+        BlockPos returnAnchor = bot.blockPosition().immutable();
         if (!isSafePreyPose(bot, prey)) {
             return SurfacePathStart.UNREACHABLE;
         }
@@ -557,12 +556,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         }
         attackPose = selection.pose();
         attackPreyCell = selection.preyCell();
-        if (bot.getBlockPos().equals(attackPose)) {
+        if (bot.blockPosition().equals(attackPose)) {
             return SurfacePathStart.STARTED;
         }
         return HuntSurfaceRoutes.startExactSurfacePath(
                 bot, attackPose,
-                HuntSurfaceRoutes.digBreakthroughFloor(bot.getBlockPos(), attackPose, surfaceFloorY(bot)),
+                HuntSurfaceRoutes.digBreakthroughFloor(bot.blockPosition(), attackPose, surfaceFloorY(bot)),
                 returnAnchor, true);
     }
 
@@ -571,15 +570,15 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 || !ObservableWorldQuery.canObserveEntityWithin(bot, prey, PREY_SIGHT_RANGE)) {
             return false;
         }
-        BlockPos feet = prey.getBlockPos();
-        ServerWorld world = bot.getEntityWorld();
+        BlockPos feet = prey.blockPosition();
+        ServerLevel world = bot.level();
         // Prey-cell validation uses the same range as prey sight: if you can see the animal but not
         // the cell it's standing on, a far-away target would be rejected as no_round_trip on the very
         // first step, contradicting the sight/safety chain.
         if (feet.getY() < surfaceFloorY(bot)
                 || !ObservableWorldQuery.canObserveCellWithin(bot, feet, PREY_SIGHT_RANGE)
-                || !ObservableWorldQuery.canObserveCellWithin(bot, feet.up(), PREY_SIGHT_RANGE)
-                || !ObservableWorldQuery.canObserveBlockWithin(bot, feet.down(), PREY_SIGHT_RANGE)) {
+                || !ObservableWorldQuery.canObserveCellWithin(bot, feet.above(), PREY_SIGHT_RANGE)
+                || !ObservableWorldQuery.canObserveBlockWithin(bot, feet.below(), PREY_SIGHT_RANGE)) {
             return false;
         }
         Standability.clearCache();
@@ -595,24 +594,24 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
      */
     private AttackPoseSelection selectSafeAttackPose(
             AIPlayerEntity bot, LivingEntity prey) {
-        BlockPos current = bot.getBlockPos();
-        BlockPos preyCell = prey.getBlockPos();
+        BlockPos current = bot.blockPosition();
+        BlockPos preyCell = prey.blockPosition();
         int floorY = surfaceFloorY(bot);
         List<BlockPos> candidates = new ArrayList<>();
         if (withinAttackPoseRange(current, prey)) {
-            candidates.add(current.toImmutable());
+            candidates.add(current.immutable());
         }
         for (int dy : new int[]{0, -1, 1}) {
             for (int[] offset : ATTACK_POSE_OFFSETS) {
-                BlockPos candidate = preyCell.add(offset[0], dy, offset[1]);
+                BlockPos candidate = preyCell.offset(offset[0], dy, offset[1]);
                 if (withinAttackPoseRange(candidate, prey)
                         && !candidates.contains(candidate)) {
-                    candidates.add(candidate.toImmutable());
+                    candidates.add(candidate.immutable());
                 }
             }
         }
         candidates.sort(Comparator.comparingDouble(
-                candidate -> candidate.getSquaredDistance(current)));
+                candidate -> candidate.distSqr(current)));
 
         boolean retryObserved = false;
         for (BlockPos candidate : candidates) {
@@ -622,7 +621,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 continue;
             }
             SurfaceRouteProof outbound = HuntSurfaceRoutes.provePreyApproachRoute(
-                    bot, bot.getEntityWorld(), current, candidate, floorY, null);
+                    bot, bot.level(), current, candidate, floorY, null);
             if (outbound == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -631,7 +630,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 continue;
             }
             SurfaceRouteProof dropRecovery = HuntSurfaceRoutes.proveRoundTripSurfaceRoute(
-                    bot.getEntityWorld(), candidate, preyCell, floorY);
+                    bot.level(), candidate, preyCell, floorY);
             if (dropRecovery == SurfaceRouteProof.RETRY) {
                 retryObserved = true;
                 continue;
@@ -646,7 +645,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private static boolean candidatePoseIntersectsPrey(
             AIPlayerEntity bot, BlockPos candidate, LivingEntity prey) {
-        Box candidateBody = bot.getDimensions(bot.getPose()).getBoxAt(
+        AABB candidateBody = bot.getDimensions(bot.getPose()).makeBoundingBox(
                 candidate.getX() + 0.5D,
                 candidate.getY(),
                 candidate.getZ() + 0.5D);
@@ -655,11 +654,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private static boolean withinAttackPoseRange(
             BlockPos candidate, LivingEntity prey) {
-        Vec3d pose = new Vec3d(
+        Vec3 pose = new Vec3(
                 candidate.getX() + 0.5D,
                 candidate.getY(),
                 candidate.getZ() + 0.5D);
-        return pose.squaredDistanceTo(prey.getEntityPos())
+        return pose.distanceToSqr(prey.position())
                 <= ATTACK_POSE_RANGE * ATTACK_POSE_RANGE;
     }
 
@@ -673,19 +672,19 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         // GameTest then only passed when a roam happened to close the distance first.
         if (!candidate.equals(current)
                 && (!ObservableWorldQuery.canObserveCellWithin(bot, candidate, PREY_SIGHT_RANGE)
-                || !ObservableWorldQuery.canObserveCellWithin(bot, candidate.up(), PREY_SIGHT_RANGE)
-                || !ObservableWorldQuery.canObserveBlockWithin(bot, candidate.down(), PREY_SIGHT_RANGE))) {
+                || !ObservableWorldQuery.canObserveCellWithin(bot, candidate.above(), PREY_SIGHT_RANGE)
+                || !ObservableWorldQuery.canObserveBlockWithin(bot, candidate.below(), PREY_SIGHT_RANGE))) {
             return false;
         }
         Standability.clearCache();
-        return Standability.isStandable(bot.getEntityWorld(), candidate);
+        return Standability.isStandable(bot.level(), candidate);
     }
 
     private boolean attackPoseMatchesTarget(AIPlayerEntity bot, LivingEntity prey) {
         return attackPose != null
                 && attackPreyCell != null
                 && prey != null
-                && attackPreyCell.equals(prey.getBlockPos())
+                && attackPreyCell.equals(prey.blockPosition())
                 && withinAttackPoseRange(attackPose, prey)
                 && !candidatePoseIntersectsPrey(bot, attackPose, prey);
     }
@@ -720,11 +719,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         targetKillStatBaseline =
-                bot.getStatHandler().getStat(Stats.KILLED, targetPreyType);
+                bot.getStats().getValue(Stats.ENTITY_KILLED, targetPreyType);
         targetExpectedMeatBaseline =
                 HarvestCore.countInventoryItems(bot, Set.of(targetExpectedRawMeat));
         targetExpectedMeatPickupBaseline =
-                bot.getStatHandler().getStat(Stats.PICKED_UP, targetExpectedRawMeat);
+                bot.getStats().getValue(Stats.ITEM_PICKED_UP, targetExpectedRawMeat);
         targetAuxiliaryBaseline =
                 HarvestCore.countInventoryItems(bot, PREY_AUXILIARY_DROPS);
         targetAuxiliaryPickupBaseline = pickedUpAuxiliary(bot);
@@ -736,13 +735,13 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         int rejectedUntil = elapsed + WET_PREY_REJECTION_TICKS;
-        unsafePreyRejectedUntil.put(prey.getUuid(), rejectedUntil);
+        unsafePreyRejectedUntil.put(prey.getUUID(), rejectedUntil);
         EpisodeMemory.INSTANCE.exclude(
-                bot.getUuid(), prey.getBlockPos(),
-                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                bot.getUUID(), prey.blockPosition(),
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         BotLog.action(bot, "hunt_unsafe_prey_rejected",
-                "prey", prey.getUuid(),
-                "at", prey.getBlockPos().toShortString(),
+                "prey", prey.getUUID(),
+                "at", prey.blockPosition().toShortString(),
                 "reason", reason,
                 "until", rejectedUntil);
         clearAttackIntent();
@@ -774,23 +773,23 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private boolean waitForDryGround(AIPlayerEntity bot) {
         boolean active = NavSafetyNet.INSTANCE.isWaterRescueActive(bot);
-        if (!bot.isTouchingWater() && !active) {
+        if (!bot.isInWater() && !active) {
             return false;
         }
         bot.getActionPack().stopAll();
         boolean preservePhysicalDebt =
                 phase == Phase.PICKUP || phase == Phase.RETURN_SURFACE;
         if (roamTarget != null) {
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), roamTarget,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), roamTarget,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         }
         if (target != null && target.isAlive()) {
             int rejectedUntil = elapsed + WET_PREY_REJECTION_TICKS;
-            wetPreyRejectedUntil.put(target.getUuid(), rejectedUntil);
+            wetPreyRejectedUntil.put(target.getUUID(), rejectedUntil);
             BotLog.action(bot, "hunt_wet_prey_rejected",
-                    "prey", target.getUuid(),
+                    "prey", target.getUUID(),
                     "until", rejectedUntil,
-                    "at", target.getBlockPos().toShortString());
+                    "at", target.blockPosition().toShortString());
         }
         if (!preservePhysicalDebt) {
             clearRoamIntent();
@@ -816,8 +815,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             fail("hunt_search_capacity_exhausted sectors=" + searchCursor.visitedCount());
             return RoamResult.RETRY;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         String dimension = dimension(bot);
         long claimedOrdinal;
         try {
@@ -843,9 +842,9 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                         || searchCursor.contains(
                         dimension, ground.getX(), ground.getZ())
                         || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), ground, bot.getEntityWorld().getServer().getTicks())
+                        bot.getUUID(), ground, bot.level().getServer().getTickCount())
                         || EpisodeMemory.INSTANCE.nearTrail(
-                                bot.getUuid(), "hunt", ground, 10.0D)) {
+                                bot.getUUID(), "hunt", ground, 10.0D)) {
                     continue;
                 }
                 // Surface exploration is a sequence of waypoints, not a one-way cave descent.
@@ -854,8 +853,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 // Y=53 pocket whose only reverse path consumed pillar blocks and stranded the bot.
                 if (!HuntSurfaceRoutes.hasRoundTripSurfaceRoute(
                         world, feet, ground, surfaceFloorY(bot))) {
-                    EpisodeMemory.INSTANCE.exclude(bot.getUuid(), ground,
-                            bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                    EpisodeMemory.INSTANCE.exclude(bot.getUUID(), ground,
+                            bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
                     BotLog.action(bot, "hunt_roam_one_way_rejected",
                             "from", feet.toShortString(), "to", ground.toShortString());
                     continue;
@@ -877,7 +876,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     continue;
                 }
                 roamTarget = ground;
-                roamOrigin = feet.toImmutable();
+                roamOrigin = feet.immutable();
                 roamStartTick = elapsed;
                 roamOrdinal = nextRoam;
                 roamCredited = false;
@@ -916,7 +915,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         double advance = roamOrigin == null
-                ? 0.0D : bot.getBlockPos().getSquaredDistance(roamOrigin);
+                ? 0.0D : bot.blockPosition().distSqr(roamOrigin);
         if (!roamCredited && advance >= MIN_ROAM_ADVANCE_SQUARED) {
             roamCount = Math.max(roamCount, roamOrdinal);
             roamCredited = true;
@@ -925,7 +924,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                     "n", roamCount, "advance", (int) Math.sqrt(advance));
         }
         boolean arrived = roamTarget == null
-                || bot.getBlockPos().getSquaredDistance(roamTarget) <= 9.0D;
+                || bot.blockPosition().distSqr(roamTarget) <= 9.0D;
         // 20t startup grace period: after startPathTo, the asynchronous A* computation needs a few
         // ticks, during which the executor is still idle; judging "can't move" immediately would
         // cause an instant fallback (making roam pointless). Idle after the grace period means it
@@ -946,8 +945,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private void excludeRoamTarget(AIPlayerEntity bot) {
         if (roamTarget != null) {
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), roamTarget,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), roamTarget,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         }
     }
 
@@ -959,7 +958,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     // In the (x,z) column, scan top-down for the first open-air standable spot (a surface landing point).
-    private static BlockPos findGround(ServerWorld world, int x, int z) {
+    private static BlockPos findGround(ServerLevel world, int x, int z) {
         // Use the heightmap to read that column's surface directly, so this holds at any altitude.
         // The old hard cap of y=110 meant a bot standing on terrain/hills above y=110 could never
         // find a landing point -> roaming was completely broken -> hunt_stuck_no_escape even with
@@ -970,8 +969,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         // roam gets rejected, a quick death (observed: spawning in a spruce forest).
         // The fix: the MOTION_BLOCKING_NO_LEAVES heightmap natively skips leaves, so its top surface
         // is terrain/trunk; then descend a few more blocks to reach the ground.
-        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
-        for (int y = surfaceY; y >= surfaceY - 24 && y > world.getBottomY() + 1; y--) {
+        int surfaceY = world.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        for (int y = surfaceY; y >= surfaceY - 24 && y > world.getMinY() + 1; y--) {
             BlockPos p = new BlockPos(x, y, z);
             if (Standability.isStandable(world, p)) {
                 return p;
@@ -1011,7 +1010,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             phase = Phase.STRIKE;
             return;
         }
-        BlockPos at = bot.getBlockPos();
+        BlockPos at = bot.blockPosition();
         BlockPos activeGoal = bot.getActionPack().activePathGoal();
         boolean staleGoal = activeGoal != null && !activeGoal.equals(attackPose);
         if (staleGoal) {
@@ -1059,11 +1058,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private boolean readyToStrikeFromProvenPose(AIPlayerEntity bot) {
         return attackPoseMatchesTarget(bot, target)
-                && (bot.getBlockPos().equals(attackPose)
+                && (bot.blockPosition().equals(attackPose)
                 // PathExecutor can physically overshoot an adjacent pose into the factual prey
                 // cell. selectSafeAttackPose already proved this exact cell reversible for drop
                 // recovery, so stop there instead of letting a live controller drift farther.
-                || bot.getBlockPos().equals(attackPreyCell))
+                || bot.blockPosition().equals(attackPreyCell))
                 && CombatCore.inMeleeRange(bot, target)
                 && CombatCore.hasLineOfSight(bot, target);
     }
@@ -1100,7 +1099,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (struck && target != null
                 && (target.getHealth() <= 0.0F
                 || target.getRemovalReason()
-                == net.minecraft.entity.Entity.RemovalReason.KILLED)) {
+                == net.minecraft.world.entity.Entity.RemovalReason.KILLED)) {
             captureFreshTargetRawDropIds(bot);
         }
         // Only refresh lastProgressTick when a swing actually deals damage. Real damage means the
@@ -1124,16 +1123,16 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
      */
     private boolean resolveUnavailableTarget(AIPlayerEntity bot) {
         if (target != null && (target.getHealth() <= 0.0F
-                || target.getRemovalReason() == net.minecraft.entity.Entity.RemovalReason.KILLED)) {
+                || target.getRemovalReason() == net.minecraft.world.entity.Entity.RemovalReason.KILLED)) {
             boolean creditedKill = targetPreyType != null
                     && targetExpectedRawMeat != null
-                    && bot.getStatHandler().getStat(Stats.KILLED, targetPreyType)
+                    && bot.getStats().getValue(Stats.ENTITY_KILLED, targetPreyType)
                     > targetKillStatBaseline;
             if (creditedKill) {
                 beginPickup(bot);
             } else {
-                UUID lostId = target.getUuid();
-                BlockPos lostAt = target.getBlockPos().toImmutable();
+                UUID lostId = target.getUUID();
+                BlockPos lostAt = target.blockPosition().immutable();
                 bot.getActionPack().stopAll();
                 clearTargetIntent();
                 lastProgressTick = elapsed;
@@ -1148,7 +1147,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return false;
         }
 
-        UUID lostId = target == null ? null : target.getUuid();
+        UUID lostId = target == null ? null : target.getUUID();
         Object removal = target == null ? "missing" : target.getRemovalReason();
         bot.getActionPack().stopAll();
         clearTargetIntent();
@@ -1160,13 +1159,13 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
 
     private void beginPickup(AIPlayerEntity bot) {
         Map<UUID, Integer> creditedDropUnits = Map.copyOf(targetFreshRawDropUnits);
-        pickupOrigin = target == null ? bot.getBlockPos().toImmutable()
-                : target.getBlockPos().toImmutable();
-        pickupReturnAnchor = bot.getBlockPos().toImmutable();
+        pickupOrigin = target == null ? bot.blockPosition().immutable()
+                : target.blockPosition().immutable();
+        pickupReturnAnchor = bot.blockPosition().immutable();
         pickupExpectedRawMeat = targetExpectedRawMeat;
         pickupInventoryBaseline = targetExpectedMeatBaseline;
         pickupRawMeatStatBaseline = targetExpectedMeatPickupBaseline;
-        pickupStartedWorldTime = bot.getEntityWorld().getTime();
+        pickupStartedWorldTime = bot.level().getGameTime();
         pickupDimension = dimension(bot);
         pickupDropUnits.clear();
         pickupDropUnits.putAll(creditedDropUnits);
@@ -1189,27 +1188,27 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (target == null || targetExpectedRawMeat == null) {
             return;
         }
-        BlockPos killOrigin = target.getBlockPos().toImmutable();
-        List<ItemEntity> freshDrops = bot.getEntityWorld().getEntitiesByClass(
+        BlockPos killOrigin = target.blockPosition().immutable();
+        List<ItemEntity> freshDrops = bot.level().getEntitiesOfClass(
                 ItemEntity.class,
-                bot.getBoundingBox().expand(16.0D),
+                bot.getBoundingBox().inflate(16.0D),
                 entity -> entity.isAlive()
-                        && !entity.getStack().isEmpty()
-                        && entity.getStack().isOf(targetExpectedRawMeat)
-                        && entity.getItemAge() >= 0
-                        && entity.getItemAge() <= 3
-                        && entity.getEntityPos().squaredDistanceTo(Vec3d.ofCenter(killOrigin))
+                        && !entity.getItem().isEmpty()
+                        && entity.getItem().is(targetExpectedRawMeat)
+                        && entity.getAge() >= 0
+                        && entity.getAge() <= 3
+                        && entity.position().distanceToSqr(Vec3.atCenterOf(killOrigin))
                         <= PICKUP_DROP_ORIGIN_RADIUS_SQUARED
                         && ObservableWorldQuery.canObserveEntity(bot, entity));
         for (ItemEntity drop : freshDrops) {
-            int units = drop.getStack().getCount();
+            int units = drop.getItem().getCount();
             if (units > 0 && HuntPickupCheckpoint.bindDropUnits(
-                    targetFreshRawDropUnits, drop.getUuid(), units)) {
+                    targetFreshRawDropUnits, drop.getUUID(), units)) {
                 BotLog.action(bot, "hunt_kill_drop_identity_bound",
-                        "drop", drop.getUuid(),
+                        "drop", drop.getUUID(),
                         "item", targetExpectedRawMeat,
                         "origin", killOrigin.toShortString(),
-                        "age", drop.getItemAge(),
+                        "age", drop.getAge(),
                         "units", units);
             }
         }
@@ -1226,7 +1225,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (age < 0L) {
             checkpointDirty = true;
             fail("hunt_pickup_time_rollback:started=" + pickupStartedWorldTime
-                    + ":current=" + bot.getEntityWorld().getTime());
+                    + ":current=" + bot.level().getGameTime());
             return;
         }
         pickupGrace = (int) Math.min(Integer.MAX_VALUE, age);
@@ -1242,14 +1241,14 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             // A delayed ItemEntity remains a factual unresolved debt, but cannot make physical
             // pickup progress yet. Let remembered-cell/auxiliary sweep recover sibling loot
             // instead of allowing this entity to monopolize the controller indefinitely.
-            if (!drop.cannotPickup()) {
+            if (!drop.hasPickUpDelay()) {
                 BlockPos stand = safeObservedDropStand(bot, drop);
                 if (stand != null) {
                     pickupMovementActive = approachPickupStand(
-                            bot, stand, drop.getEntityPos());
+                            bot, stand, drop.position());
                 } else if (pickupGrace == 3 || pickupGrace % 40 == 0) {
                     BotLog.action(bot, "hunt_drop_one_way_rejected",
-                            "drop", drop.getBlockPos().toShortString(),
+                            "drop", drop.blockPosition().toShortString(),
                             "anchor", pickupReturnAnchor == null
                                     ? "unknown" : pickupReturnAnchor.toShortString());
                 }
@@ -1258,7 +1257,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         int currentMeat = pickupExpectedRawMeat == null ? 0
                 : HarvestCore.countInventoryItems(bot, Set.of(pickupExpectedRawMeat));
         int currentPickupStat = pickupExpectedRawMeat == null ? 0
-                : bot.getStatHandler().getStat(Stats.PICKED_UP, pickupExpectedRawMeat);
+                : bot.getStats().getValue(Stats.ITEM_PICKED_UP, pickupExpectedRawMeat);
         int requiredUnits = Math.max(1,
                 HuntPickupCheckpoint.boundDropUnitCount(pickupDropUnits));
         boolean collectionConfirmed = pickupExpectedRawMeat != null
@@ -1337,28 +1336,28 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (pickupExpectedRawMeat == null || pickupOrigin == null) {
             return Optional.empty();
         }
-        List<ItemEntity> observed = bot.getEntityWorld().getEntitiesByClass(
+        List<ItemEntity> observed = bot.level().getEntitiesOfClass(
                 ItemEntity.class,
-                bot.getBoundingBox().expand(16.0D),
+                bot.getBoundingBox().inflate(16.0D),
                 entity -> entity.isAlive()
-                        && !entity.getStack().isEmpty()
-                        && entity.getStack().isOf(pickupExpectedRawMeat)
+                        && !entity.getItem().isEmpty()
+                        && entity.getItem().is(pickupExpectedRawMeat)
                         && ObservableWorldQuery.canObserveEntity(bot, entity));
         ItemEntity nearest = null;
         double nearestDistance = Double.MAX_VALUE;
         for (ItemEntity drop : observed) {
-            boolean bound = pickupDropUnits.containsKey(drop.getUuid());
+            boolean bound = pickupDropUnits.containsKey(drop.getUUID());
             if (!bound && isFreshTransactionDrop(drop, transactionAge)) {
-                int units = drop.getStack().getCount();
+                int units = drop.getItem().getCount();
                 if (units > 0 && HuntPickupCheckpoint.bindDropUnits(
-                        pickupDropUnits, drop.getUuid(), units)) {
+                        pickupDropUnits, drop.getUUID(), units)) {
                     checkpointDirty = true;
                     bound = true;
                     BotLog.action(bot, "hunt_pickup_drop_bound",
-                            "drop", drop.getUuid(),
+                            "drop", drop.getUUID(),
                             "item", pickupExpectedRawMeat,
                             "origin", pickupOrigin.toShortString(),
-                            "age", drop.getItemAge(),
+                            "age", drop.getAge(),
                             "units", units);
                 } else if (units > 0) {
                     checkpointDirty = true;
@@ -1371,7 +1370,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             if (!bound) {
                 continue;
             }
-            double distance = drop.squaredDistanceTo(bot);
+            double distance = drop.distanceToSqr(bot);
             if (distance < nearestDistance) {
                 nearest = drop;
                 nearestDistance = distance;
@@ -1384,16 +1383,16 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (!HuntPickupCheckpoint.canBindFreshDropAtAge(transactionAge)) {
             return false;
         }
-        int itemAge = drop.getItemAge();
+        int itemAge = drop.getAge();
         if (itemAge < 0 || itemAge > transactionAge + 3) {
             return false;
         }
-        return drop.getEntityPos().squaredDistanceTo(Vec3d.ofCenter(pickupOrigin))
+        return drop.position().distanceToSqr(Vec3.atCenterOf(pickupOrigin))
                 <= PICKUP_DROP_ORIGIN_RADIUS_SQUARED;
     }
 
     private long pickupAge(AIPlayerEntity bot) {
-        return pickupAgeAt(pickupStartedWorldTime, bot.getEntityWorld().getTime());
+        return pickupAgeAt(pickupStartedWorldTime, bot.level().getGameTime());
     }
 
     static long pickupAgeAt(long startedWorldTime, long currentWorldTime) {
@@ -1406,7 +1405,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             return null;
         }
         Standability.clearCache();
-        BlockPos stand = HarvestCore.pickupStandPos(bot, drop.getBlockPos());
+        BlockPos stand = HarvestCore.pickupStandPos(bot, drop.blockPosition());
         if (stand == null || !isObservablePickupStand(bot, stand)) {
             return null;
         }
@@ -1414,12 +1413,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private static boolean isObservablePickupStand(AIPlayerEntity bot, BlockPos stand) {
-        if (stand.equals(bot.getBlockPos())) {
+        if (stand.equals(bot.blockPosition())) {
             return true;
         }
         return ObservableWorldQuery.canObserveCell(bot, stand)
-                && ObservableWorldQuery.canObserveCell(bot, stand.up())
-                && ObservableWorldQuery.canObserveBlock(bot, stand.down());
+                && ObservableWorldQuery.canObserveCell(bot, stand.above())
+                && ObservableWorldQuery.canObserveBlock(bot, stand.below());
     }
 
     private boolean safePickupCellRoute(AIPlayerEntity bot, BlockPos destination) {
@@ -1427,12 +1426,12 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
                 || destination.getY() < surfaceFloorY(bot)) {
             return false;
         }
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         Standability.clearCache();
         if (!Standability.isStandable(world, destination)) {
             return false;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         if (!HuntSurfaceRoutes.hasExactSurfaceRoute(world, current, destination, surfaceFloorY(bot))) {
             return false;
         }
@@ -1449,11 +1448,11 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     }
 
     private boolean approachPickupStand(
-            AIPlayerEntity bot, BlockPos stand, Vec3d observedDropPosition) {
+            AIPlayerEntity bot, BlockPos stand, Vec3 observedDropPosition) {
         if (pickupReturnAnchor == null || stand == null) {
             return false;
         }
-        if (bot.getBlockPos().equals(stand)) {
+        if (bot.blockPosition().equals(stand)) {
             if (observedDropPosition == null) {
                 bot.getActionPack().stopMovement();
             } else {
@@ -1473,24 +1472,24 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     // explicit config.
     private static boolean isHuntable(LivingEntity entity) {
         return PREY.contains(entity.getType())
-                && entity instanceof net.minecraft.entity.passive.AnimalEntity animal
+                && entity instanceof net.minecraft.world.entity.animal.Animal animal
                 && !animal.isBaby();
     }
 
     private LivingEntity nearestPrey(AIPlayerEntity bot) {
         wetPreyRejectedUntil.entrySet().removeIf(entry -> entry.getValue() <= elapsed);
         unsafePreyRejectedUntil.entrySet().removeIf(entry -> entry.getValue() <= elapsed);
-        Box box = bot.getBoundingBox().expand(SEARCH_RANGE);
-        return bot.getEntityWorld()
-                .getEntitiesByClass(LivingEntity.class, box,
+        AABB box = bot.getBoundingBox().inflate(SEARCH_RANGE);
+        return bot.level()
+                .getEntitiesOfClass(LivingEntity.class, box,
                         entity -> entity.isAlive() && entity != bot && isHuntable(entity))
                 .stream()
                 .filter(entity -> ObservableWorldQuery.canObserveEntityWithin(
                         bot, entity, PREY_SIGHT_RANGE))
-                .filter(entity -> !wetPreyRejectedUntil.containsKey(entity.getUuid()))
-                .filter(entity -> !unsafePreyRejectedUntil.containsKey(entity.getUuid()))
+                .filter(entity -> !wetPreyRejectedUntil.containsKey(entity.getUUID()))
+                .filter(entity -> !unsafePreyRejectedUntil.containsKey(entity.getUUID()))
                 .filter(entity -> !EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), entity.getBlockPos(), bot.getEntityWorld().getServer().getTicks()))
+                        bot.getUUID(), entity.blockPosition(), bot.level().getServer().getTickCount()))
                 .min(Comparator.comparingDouble(bot::distanceTo))
                 .orElse(null);
     }
@@ -1503,16 +1502,16 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         if (pickupOrigin == null) {
             return false;
         }
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         for (int checked = 0; checked < PICKUP_SWEEP_OFFSETS.length; checked++) {
             int[] offset = PICKUP_SWEEP_OFFSETS[
                     Math.floorMod(pickupSweepCursor++, PICKUP_SWEEP_OFFSETS.length)];
-            BlockPos candidate = pickupOrigin.add(offset[0], 0, offset[1]);
+            BlockPos candidate = pickupOrigin.offset(offset[0], 0, offset[1]);
             Standability.clearCache();
-            if (candidate.equals(bot.getBlockPos())
+            if (candidate.equals(bot.blockPosition())
                     || !ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())
+                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())
                     || !Standability.isStandable(world, candidate)
                     || !safePickupCellRoute(bot, candidate)) {
                 continue;
@@ -1534,7 +1533,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     private static long pickedUpAuxiliary(AIPlayerEntity bot) {
         long count = 0L;
         for (Item item : PREY_AUXILIARY_DROPS) {
-            count += bot.getStatHandler().getStat(Stats.PICKED_UP, item);
+            count += bot.getStats().getValue(Stats.ITEM_PICKED_UP, item);
         }
         return count;
     }
@@ -1572,7 +1571,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             checkpointDirty = true;
             return;
         }
-        long now = bot.getEntityWorld().getTime();
+        long now = bot.level().getGameTime();
         if (now < restored.pickupStartedWorldTime()) {
             fail("hunt_pickup_time_rollback:started=" + restored.pickupStartedWorldTime()
                     + ":current=" + now);
@@ -1636,7 +1635,7 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
         HuntPickupCheckpoint.Metadata metadata = new HuntPickupCheckpoint.Metadata(
                 HuntPickupCheckpoint.State.valueOf(pickupTransactionState.name()),
                 targetMeat, requireFullQuota, pickupDimension,
-                Registries.ITEM.getId(pickupExpectedRawMeat).toString(),
+                BuiltInRegistries.ITEM.getKey(pickupExpectedRawMeat).toString(),
                 toCheckpointPosition(pickupOrigin), toCheckpointPosition(pickupReturnAnchor),
                 pickupInventoryBaseline, pickupRawMeatStatBaseline,
                 targetAuxiliaryBaseline, targetAuxiliaryPickupBaseline,
@@ -1657,8 +1656,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     // items, so this can only reject an already-invalid checkpoint, never a valid one).
     private static Optional<RestoreMetadata> toRestoreMetadata(
             HuntPickupCheckpoint.Metadata metadata) {
-        Item expectedRaw = Registries.ITEM.getOptionalValue(
-                Identifier.of(metadata.expectedRawItemId())).orElse(null);
+        Item expectedRaw = BuiltInRegistries.ITEM.getOptional(
+                Identifier.parse(metadata.expectedRawItemId())).orElse(null);
         if (expectedRaw == null || !RAW_MEATS.contains(expectedRaw)) {
             return Optional.empty();
         }
@@ -1687,8 +1686,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
             long pickupStartedWorldTime,
             Map<UUID, Integer> boundDropUnits) {
         public RestoreMetadata {
-            pickupOrigin = pickupOrigin.toImmutable();
-            pickupReturnAnchor = pickupReturnAnchor.toImmutable();
+            pickupOrigin = pickupOrigin.immutable();
+            pickupReturnAnchor = pickupReturnAnchor.immutable();
             boundDropUnits = Map.copyOf(boundDropUnits);
         }
 
@@ -1717,8 +1716,8 @@ public final class HuntTask extends AbstractTask implements CheckpointableTask {
     /** Whether huntable animals are nearby -- used by the hunger chain to decide whether it's worth
      * dispatching a hunt task, avoiding a guaranteed failure when dispatched with no animals around. */
     public static boolean hasPreyNearby(AIPlayerEntity bot) {
-        return !bot.getEntityWorld()
-                .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(SEARCH_RANGE),
+        return !bot.level()
+                .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(SEARCH_RANGE),
                         entity -> entity.isAlive() && entity != bot && isHuntable(entity))
                 .stream()
                 .filter(entity -> ObservableWorldQuery.canObserveEntityWithin(

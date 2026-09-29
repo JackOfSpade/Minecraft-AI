@@ -3,8 +3,8 @@ package io.github.zoyluo.minecraftai.action;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 public final class MovementAction {
     private MovementAction() {
@@ -36,7 +36,7 @@ public final class MovementAction {
         return ActionResult.SUCCESS;
     }
 
-    public static ActionResult startWalkTo(AIPlayerEntity player, Vec3d target) {
+    public static ActionResult startWalkTo(AIPlayerEntity player, Vec3 target) {
         BotLog.action(player, "walk_to", "target", target);
         return player.getActionPack().startWalkTo(target);
     }

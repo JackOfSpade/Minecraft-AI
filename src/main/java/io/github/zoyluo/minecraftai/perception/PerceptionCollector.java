@@ -10,19 +10,6 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.Monster;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
 import org.slf4j.event.Level;
 
 import java.util.ArrayList;
@@ -30,6 +17,19 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class PerceptionCollector {
     // 12-26ms is a normal snapshot cost (see the call site below); only flag a real regression.
@@ -55,8 +55,8 @@ public final class PerceptionCollector {
     public static PerceptionSnapshot collect(AIPlayerEntity bot) {
         long started = System.currentTimeMillis();
         MinecraftAiConfig.Perception config = MinecraftAiConfig.get().perception();
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos center = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos center = bot.blockPosition();
         PerceptionSnapshot.SelfState self = collectSelfState(bot);
 
         CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "perception_snapshot");
@@ -71,13 +71,13 @@ public final class PerceptionCollector {
         long elapsed = System.currentTimeMillis() - started;
         BotLog.perception(bot, "snapshot",
                 "hp", bot.getHealth(),
-                "hunger", bot.getHungerManager().getFoodLevel(),
+                "hunger", bot.getFoodData().getFoodLevel(),
                 "pos", LogFields.pos(center),
-                "holding", Registries.ITEM.getId(bot.getMainHandStack().getItem()),
+                "holding", BuiltInRegistries.ITEM.getKey(bot.getMainHandItem().getItem()),
                 "blocks_n", blockScan.blocks().size(),
                 "entities_n", entities.size(),
                 "items_n", items.size(),
-                "light", world.getLightLevel(center));
+                "light", world.getMaxLocalRawBrightness(center));
         Level slowLevel = slowSnapshotLevel(elapsed);
         if (slowLevel == Level.WARN) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.PERCEPTION, bot, "snapshot_slow", "elapsed_ms", elapsed);
@@ -93,7 +93,7 @@ public final class PerceptionCollector {
                 blocks,
                 rawEntities,
                 rawItems,
-                new PerceptionSnapshot.TimeInfo(world.getTimeOfDay() % 24000L, world.isDay(), world.getLightLevel(center),
+                new PerceptionSnapshot.TimeInfo(world.getDayTime() % 24000L, world.isBrightOutside(), world.getMaxLocalRawBrightness(center),
                         world.isRaining(), world.isThundering()));
     }
 
@@ -103,11 +103,11 @@ public final class PerceptionCollector {
                 bot.getX(),
                 bot.getY(),
                 bot.getZ(),
-                bot.getYaw(),
-                bot.getPitch(),
+                bot.getYRot(),
+                bot.getXRot(),
                 bot.getHealth(),
-                bot.getHungerManager().getFoodLevel(),
-                Registries.ITEM.getId(bot.getMainHandStack().getItem()).toString(),
+                bot.getFoodData().getFoodLevel(),
+                BuiltInRegistries.ITEM.getKey(bot.getMainHandItem().getItem()).toString(),
                 InventoryAction.summarize(bot),
                 equipment(bot));
     }
@@ -126,43 +126,43 @@ public final class PerceptionCollector {
 
     private static PerceptionSnapshot.Equipment equipment(AIPlayerEntity bot) {
         return new PerceptionSnapshot.Equipment(
-                equippedItem(bot.getMainHandStack()),
-                equippedItem(bot.getOffHandStack()),
-                equippedItem(bot.getEquippedStack(EquipmentSlot.HEAD)),
-                equippedItem(bot.getEquippedStack(EquipmentSlot.CHEST)),
-                equippedItem(bot.getEquippedStack(EquipmentSlot.LEGS)),
-                equippedItem(bot.getEquippedStack(EquipmentSlot.FEET)));
+                equippedItem(bot.getMainHandItem()),
+                equippedItem(bot.getOffhandItem()),
+                equippedItem(bot.getItemBySlot(EquipmentSlot.HEAD)),
+                equippedItem(bot.getItemBySlot(EquipmentSlot.CHEST)),
+                equippedItem(bot.getItemBySlot(EquipmentSlot.LEGS)),
+                equippedItem(bot.getItemBySlot(EquipmentSlot.FEET)));
     }
 
     private static PerceptionSnapshot.EquippedItem equippedItem(ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return new PerceptionSnapshot.EquippedItem("minecraft:air", 0, -1);
         }
-        int remainingDurability = stack.isDamageable()
-                ? Math.max(0, stack.getMaxDamage() - stack.getDamage())
+        int remainingDurability = stack.isDamageableItem()
+                ? Math.max(0, stack.getMaxDamage() - stack.getDamageValue())
                 : -1;
         return new PerceptionSnapshot.EquippedItem(
-                Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), remainingDurability);
+                BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), remainingDurability);
     }
 
-    private static BlockScan collectBlocks(AIPlayerEntity bot, ServerWorld world, BlockPos center, int radius, int limit) {
+    private static BlockScan collectBlocks(AIPlayerEntity bot, ServerLevel world, BlockPos center, int radius, int limit) {
         List<PerceptionSnapshot.NearbyBlock> blocks = new ArrayList<>();
         Map<String, List<PerceptionSnapshot.NearbyBlock>> highlights = new HashMap<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dy = -radius; dy <= radius; dy++) {
                 for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos pos = center.add(dx, dy, dz);
+                    BlockPos pos = center.offset(dx, dy, dz);
                     BlockState state = world.getBlockState(pos);
-                    boolean water = state.getFluidState().isIn(FluidTags.WATER);
+                    boolean water = state.getFluidState().is(FluidTags.WATER);
                     if (state.isAir() && !water) {
                         continue;
                     }
                     if (!ObservableWorldQuery.canObserveBlock(bot, pos)) {
                         continue;
                     }
-                    double distance = Math.sqrt(center.getSquaredDistance(pos));
+                    double distance = Math.sqrt(center.distSqr(pos));
                     blocks.add(new PerceptionSnapshot.NearbyBlock(
-                            Registries.BLOCK.getId(state.getBlock()).toString(),
+                            BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
                             pos.getX(),
                             pos.getY(),
                             pos.getZ(),
@@ -179,8 +179,8 @@ public final class PerceptionCollector {
         return new BlockScan(blocks.stream().limit(limit).toList(), highlights);
     }
 
-    private static List<PerceptionSnapshot.NearbyEntity> collectEntities(AIPlayerEntity bot, ServerWorld world, int radius, int limit) {
-        return world.getOtherEntities(bot, bot.getBoundingBox().expand(radius), entity -> entity instanceof LivingEntity)
+    private static List<PerceptionSnapshot.NearbyEntity> collectEntities(AIPlayerEntity bot, ServerLevel world, int radius, int limit) {
+        return world.getEntities(bot, bot.getBoundingBox().inflate(radius), entity -> entity instanceof LivingEntity)
                 .stream()
                 .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
                 .sorted(Comparator.comparingDouble(bot::distanceTo))
@@ -192,17 +192,17 @@ public final class PerceptionCollector {
     private static PerceptionSnapshot.NearbyEntity toNearbyEntity(AIPlayerEntity bot, Entity entity) {
         float hp = entity instanceof LivingEntity living ? living.getHealth() : 0.0F;
         return new PerceptionSnapshot.NearbyEntity(
-                Registries.ENTITY_TYPE.getId(entity.getType()).toString(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
                 round(entity.getX()),
                 round(entity.getY()),
                 round(entity.getZ()),
                 round(bot.distanceTo(entity)),
-                entity instanceof Monster,
+                entity instanceof Enemy,
                 hp);
     }
 
-    private static List<PerceptionSnapshot.NearbyItem> collectItems(AIPlayerEntity bot, ServerWorld world, int radius, int limit) {
-        return world.getOtherEntities(bot, bot.getBoundingBox().expand(radius), entity -> entity instanceof ItemEntity)
+    private static List<PerceptionSnapshot.NearbyItem> collectItems(AIPlayerEntity bot, ServerLevel world, int radius, int limit) {
+        return world.getEntities(bot, bot.getBoundingBox().inflate(radius), entity -> entity instanceof ItemEntity)
                 .stream()
                 .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
                 .sorted(Comparator.comparingDouble(bot::distanceTo))
@@ -210,7 +210,7 @@ public final class PerceptionCollector {
                 .map(entity -> {
                     ItemEntity item = (ItemEntity) entity;
                     return new PerceptionSnapshot.NearbyItem(
-                            Registries.ITEM.getId(item.getStack().getItem()).toString(),
+                            BuiltInRegistries.ITEM.getKey(item.getItem().getItem()).toString(),
                             round(item.getX()),
                             round(item.getY()),
                             round(item.getZ()));
@@ -226,26 +226,26 @@ public final class PerceptionCollector {
         if (water) {
             addHighlight(highlights, "nearest_water", "minecraft:water", pos, distance);
         }
-        if (state.isIn(BlockTags.LOGS)) {
-            addHighlight(highlights, "nearest_tree", Registries.BLOCK.getId(state.getBlock()).toString(), pos, distance);
+        if (state.is(BlockTags.LOGS)) {
+            addHighlight(highlights, "nearest_tree", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos, distance);
         }
-        if (state.isOf(Blocks.STONE) || state.isOf(Blocks.COBBLESTONE) || state.isOf(Blocks.DEEPSLATE)) {
-            addHighlight(highlights, "nearest_stone", Registries.BLOCK.getId(state.getBlock()).toString(), pos, distance);
+        if (state.is(Blocks.STONE) || state.is(Blocks.COBBLESTONE) || state.is(Blocks.DEEPSLATE)) {
+            addHighlight(highlights, "nearest_stone", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), pos, distance);
         }
-        String id = Registries.BLOCK.getId(state.getBlock()).toString();
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
         if (id.endsWith("_ore")) {
             addHighlight(highlights, "nearest_ore", id, pos, distance);
         }
-        if (state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE) || state.isOf(Blocks.SMOKER)) {
+        if (state.is(Blocks.FURNACE) || state.is(Blocks.BLAST_FURNACE) || state.is(Blocks.SMOKER)) {
             addHighlight(highlights, "nearest_furnace", id, pos, distance);
         }
-        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
+        if (state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL)) {
             addHighlight(highlights, "nearest_chest", id, pos, distance);
         }
-        if (state.isIn(BlockTags.BEDS)) {
+        if (state.is(BlockTags.BEDS)) {
             addHighlight(highlights, "nearest_bed", id, pos, distance);
         }
-        if (state.isOf(Blocks.CRAFTING_TABLE)) {
+        if (state.is(Blocks.CRAFTING_TABLE)) {
             addHighlight(highlights, "nearest_crafting_table", id, pos, distance);
         }
     }

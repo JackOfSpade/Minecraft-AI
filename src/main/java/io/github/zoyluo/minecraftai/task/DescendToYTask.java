@@ -17,16 +17,6 @@ import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -35,6 +25,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * DESCEND_TO_Y (deep-ore digging rework, P1): continuously digs a vertical shaft **down to a
@@ -210,11 +209,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                             Integer.parseInt(coordinates[0]),
                             Integer.parseInt(coordinates[1]),
                             Integer.parseInt(coordinates[2]));
-                    Block sealBlock = Registries.BLOCK
-                            .getOptionalValue(Identifier.of(coordinates[3])).orElse(null);
+                    Block sealBlock = BuiltInRegistries.BLOCK
+                            .getOptional(Identifier.parse(coordinates[3])).orElse(null);
                     if (sealBlock == null || !MaterialPalette.isSacrificialBlock(sealBlock)
-                            || sealBlock.getDefaultState().isAir()
-                            || !sealBlock.getDefaultState().getFluidState().isEmpty()
+                            || sealBlock.defaultBlockState().isAir()
+                            || !sealBlock.defaultBlockState().getFluidState().isEmpty()
                             || seals.putIfAbsent(seal, sealBlock) != null) {
                         return Optional.empty();
                     }
@@ -224,7 +223,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     && ((pendingOrigin == null && pendingDirection == -1)
                     || (pendingOrigin != null
                     && pendingDirection >= 0 && pendingDirection < HORIZONTAL.length
-                    && pendingTarget.equals(pendingOrigin.offset(HORIZONTAL[pendingDirection]).down())));
+                    && pendingTarget.equals(pendingOrigin.relative(HORIZONTAL[pendingDirection]).below())));
             boolean rejectedShape = rejectedDirections >= 0
                     && rejectedDirections < (1 << HORIZONTAL.length)
                     && (rejectedDirections == 0 || rejectedOrigin != null);
@@ -293,11 +292,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                                   Set<DetourEdge> traversedDetourEdges) {
         public RestoreMetadata {
             pendingLandingOrigin = pendingLandingOrigin == null
-                    ? null : pendingLandingOrigin.toImmutable();
+                    ? null : pendingLandingOrigin.immutable();
             pendingLandingTarget = pendingLandingTarget == null
-                    ? null : pendingLandingTarget.toImmutable();
+                    ? null : pendingLandingTarget.immutable();
             rejectedLandingOrigin = rejectedLandingOrigin == null
-                    ? null : rejectedLandingOrigin.toImmutable();
+                    ? null : rejectedLandingOrigin.immutable();
             ownedWaterSeals = ownedWaterSeals == null ? Map.of() : Map.copyOf(ownedWaterSeals);
             traversedDetourEdges = traversedDetourEdges == null
                     ? Set.of()
@@ -310,8 +309,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             if (origin == null || target == null) {
                 throw new IllegalArgumentException("detour edge positions are required");
             }
-            origin = origin.toImmutable();
-            target = target.toImmutable();
+            origin = origin.immutable();
+            target = target.immutable();
         }
     }
 
@@ -340,7 +339,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     protected void onStart(AIPlayerEntity bot) {
         if (restoredCheckpoint == null) {
             budgetOffset = 0;
-            budgetLimit = budgetLimitFor(bot.getBlockPos().getY(), targetY);
+            budgetLimit = budgetLimitFor(bot.blockPosition().getY(), targetY);
             lastProgressTick = 0;
             lateralDetours = 0;
             landingDriftRecoveries = 0;
@@ -356,7 +355,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     : budgetOffset >= MiningMissionBudget.DESCEND_MIN_HARD_WINDOW_TICKS
                     ? MiningMissionBudget.DESCEND_MIN_HARD_WINDOW_TICKS
                     : migratedLegacyBudgetLimit(
-                            budgetOffset, bot.getBlockPos().getY(), targetY);
+                            budgetOffset, bot.blockPosition().getY(), targetY);
             lastProgressTick = restoredCheckpoint.lastProgressBudget();
             stairDirIndex = restoredCheckpoint.stairDirection();
             lateralDetours = restoredCheckpoint.lateralDetours();
@@ -382,7 +381,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // server stopped after descendInto but before the landing was accepted, an entity back
             // at the origin cannot safely retry that same edge. Preserve the physical debt by
             // rejecting the direction; a bot already at the target is validated by onTick.
-            BlockPos feet = bot.getBlockPos();
+            BlockPos feet = bot.blockPosition();
             if (pendingLandingOrigin != null && feet.equals(pendingLandingOrigin)) {
                 int interruptedDirection = pendingLandingDirection;
                 pendingLandingOrigin = null;
@@ -426,12 +425,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // record the threat rejection against the new factual origin. onPause() will subsequently
         // no-op and therefore preserve this newly recorded rejection.
         settlePendingLandingAtCurrentPose(bot);
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         miner.cancel(bot);
         rejectLandingDirection(origin, stairDirIndex);
         BotLog.danger(bot, "descend_threat_direction_rejected",
                 "from", origin.toShortString(),
-                "direction", HORIZONTAL[stairDirIndex].asString(),
+                "direction", HORIZONTAL[stairDirIndex].getSerializedName(),
                 "threat", threatPos == null ? "unknown" : threatPos.toShortString());
     }
 
@@ -441,8 +440,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             fail("descend_invalid_checkpoint");
             return;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         // Vanilla falling-block updates run after task decisions. A stair that was clear when the
         // bot entered it can therefore become occupied before the next task tick. Resolve the
         // current collision first; continuing to mine the next stair leaves the bot suffocating,
@@ -452,7 +451,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         rememberSafeLanding(world, feet);
         if (totalBudget() > budgetLimit) {
-            fail("descend_timeout at_y=" + bot.getBlockPos().getY());
+            fail("descend_timeout at_y=" + bot.blockPosition().getY());
             return;
         }
         if (feet.getY() < targetY) {
@@ -499,10 +498,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // OreDig; otherwise a just-sealed flow can still be present for one fluid tick and
             // Descend reports success from inside it.
             Standability.clearCache();
-            boolean wet = bot.isSubmergedInWater()
-                    || bot.isTouchingWater()
-                    || world.getFluidState(feet).isIn(FluidTags.WATER)
-                    || world.getFluidState(feet.up()).isIn(FluidTags.WATER);
+            boolean wet = bot.isUnderWater()
+                    || bot.isInWater()
+                    || world.getFluidState(feet).is(FluidTags.WATER)
+                    || world.getFluidState(feet.above()).is(FluidTags.WATER);
             if (wet || !Standability.isStandable(world, feet)) {
                 NavSafetyNet.INSTANCE.requestWaterRescue(bot);
                 lastProgressTick = totalBudget();
@@ -514,7 +513,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
         maybePlaceTorch(bot, world, feet); // P1: place torches at fixed intervals while descending so a deep shaft is no longer pitch black and mob-spawning (observed: descending to Y-58 stayed light=0 throughout and the bot was swarmed by skeletons)
-        BlockPos below = feet.down();
+        BlockPos below = feet.below();
         if (below.getY() <= MIN_Y) {
             fail("descend_reached_min_y");
             return;
@@ -557,9 +556,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
         Direction dir = HORIZONTAL[stairDirIndex];
-        BlockPos ahead = feet.offset(dir);   // next step's head cell (x+d, y)
-        BlockPos next = ahead.down();         // next step's standing cell (x+d, y-1)
-        if (containsOwnedWaterSeal(world, ahead, ahead.up(), next)
+        BlockPos ahead = feet.relative(dir);   // next step's head cell (x+d, y)
+        BlockPos next = ahead.below();         // next step's standing cell (x+d, y-1)
+        if (containsOwnedWaterSeal(world, ahead, ahead.above(), next)
                 || !isViableDescentDirection(bot, world, feet, stairDirIndex)) {
             // Mining next's tread can reveal that its own support is an already-mined cavity or a
             // natural cave rather than solid ground -- an unexpectedly opened void, not a hazard
@@ -590,7 +589,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // physically could not pass through the descent shaft). After adding ahead.up(), the descent
         // tunnel has a genuine 2-cell-high clearance along the diagonal and is passable. firstSolid3
         // skips fluids to avoid a lava/water collapse.
-        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.up(), next);
+        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.above(), next);
         DetourEdge flatLandingEdge = new DetourEdge(feet, ahead);
         if (solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
                 && !feet.equals(selfCarvedAheadAt)
@@ -628,12 +627,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 return;
             }
         }
-        BlockPos climbTarget = ahead.up();
+        BlockPos climbTarget = ahead.above();
         DetourEdge climbEdge = new DetourEdge(feet, climbTarget);
         if (solid != null && solid.equals(ahead)
-                && !(canObservePosition(bot, next.down()) && hasSafeSupport(world, next))
+                && !(canObservePosition(bot, next.below()) && hasSafeSupport(world, next))
                 && !Standability.isDangerous(world.getBlockState(ahead))
-                && isObservedDryPassableColumn(bot, world, ahead.up())
+                && isObservedDryPassableColumn(bot, world, ahead.above())
                 && lateralDetours < MAX_LATERAL
                 && !traversedDetourEdges.contains(climbEdge)) {
             // `ahead` is solid and would have to be mined to make any progress this direction at
@@ -675,10 +674,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                         world.getBlockState(solid).getBlock()));
                 return;
             }
-            if (solid.equals(ahead) || solid.equals(ahead.up())) {
+            if (solid.equals(ahead) || solid.equals(ahead.above())) {
                 // Remember that THIS task, from THIS `feet`, is the one clearing the headroom --
                 // see the flat-landing shortcut's guard above.
-                selfCarvedAheadAt = feet.toImmutable();
+                selfCarvedAheadAt = feet.immutable();
             }
             miner.begin(bot, solid);
             miner.tick(bot);
@@ -686,11 +685,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return;
         }
         // Body space is now clear -> step diagonally down onto the next stair step (the bot has no passive gravity, so it still needs to actively move one cell; the diagonal move approximates stepping down one stair).
-        BlockPos origin = feet.toImmutable();
+        BlockPos origin = feet.immutable();
         boolean descended = bot.getActionPack().descendInto(next);
-        if (descended && bot.getBlockPos().equals(next)) {
+        if (descended && bot.blockPosition().equals(next)) {
             pendingLandingOrigin = origin;
-            pendingLandingTarget = next.toImmutable();
+            pendingLandingTarget = next.immutable();
             pendingLandingDirection = stairDirIndex;
         } else {
             rejectLandingDirection(origin, stairDirIndex);
@@ -707,7 +706,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * reject the collapsed edge, while NavSafetyNet has no such history and its long-range
      * suffocation snap is correctly denied by strict_survival.
      */
-    private boolean recoverBlockedBody(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean recoverBlockedBody(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         BlockPos blocked = firstBodyCollision(world, feet);
         if (blocked == null) {
             if (blockedBodyRecoveryTarget == null) {
@@ -731,7 +730,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // mined, and ordinary landing proof still runs after it becomes air.
             if (!isAdjacentSameLevel(feet, recoveryTarget)
                     || !canObservePosition(bot, recoveryTarget)
-                    || recoveryState.getFluidState().isIn(FluidTags.LAVA)) {
+                    || recoveryState.getFluidState().is(FluidTags.LAVA)) {
                 miner.cancel(bot);
                 blockedBodyRecoveryTarget = null;
                 return true;
@@ -757,21 +756,21 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             markStarted(bot, feet);
             miner.cancel(bot);
             boolean rolledBackDetour = rollbackCollapsedDetourEdge(bot, retreat, feet);
-            blockedBodyRecoveryTarget = rolledBackDetour ? blocked.toImmutable() : null;
+            blockedBodyRecoveryTarget = rolledBackDetour ? blocked.immutable() : null;
             if (!rolledBackDetour) {
                 rejectCollapsedEdge(retreat, feet);
             }
             pendingLandingOrigin = null;
             pendingLandingTarget = null;
             pendingLandingDirection = -1;
-            latestSafeLanding = retreat.toImmutable();
+            latestSafeLanding = retreat.immutable();
             previousSafeLanding = null;
             lastProgressTick = totalBudget();
             BotLog.danger(bot, "descend_blocked_body_retreat",
                     "from", feet.toShortString(),
                     "to", retreat.toShortString(),
                     "blocked", blocked.toShortString(),
-                    "block", Registries.BLOCK.getId(obstruction.getBlock()),
+                    "block", BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()),
                     "detour_rolled_back", rolledBackDetour);
             return true;
         }
@@ -782,11 +781,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (!blocked.equals(blockedBodyRecoveryTarget)
                 || miner.target() == null || !miner.target().equals(blocked)) {
             miner.begin(bot, blocked);
-            blockedBodyRecoveryTarget = blocked.toImmutable();
+            blockedBodyRecoveryTarget = blocked.immutable();
             BotLog.danger(bot, "descend_blocked_body_clear",
                     "at", feet.toShortString(),
                     "blocked", blocked.toShortString(),
-                    "block", Registries.BLOCK.getId(obstruction.getBlock()));
+                    "block", BuiltInRegistries.BLOCK.getKey(obstruction.getBlock()));
         }
         BlockMiner.Status status = miner.tick(bot);
         markStarted(bot, feet);
@@ -804,22 +803,22 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     private void initializeSafeLandingHistory(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         if (!isDryStandable(world, feet)) {
             return;
         }
-        latestSafeLanding = feet.toImmutable();
+        latestSafeLanding = feet.immutable();
         if (pendingLandingOrigin != null && feet.equals(pendingLandingTarget)) {
-            previousSafeLanding = pendingLandingOrigin.toImmutable();
+            previousSafeLanding = pendingLandingOrigin.immutable();
         }
     }
 
-    private void rememberSafeLanding(ServerWorld world, BlockPos feet) {
+    private void rememberSafeLanding(ServerLevel world, BlockPos feet) {
         if (!isDryStandable(world, feet)) {
             return;
         }
-        BlockPos immutable = feet.toImmutable();
+        BlockPos immutable = feet.immutable();
         if (latestSafeLanding == null) {
             latestSafeLanding = immutable;
         } else if (!latestSafeLanding.equals(immutable)) {
@@ -828,7 +827,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
     }
 
-    private BlockPos findRecentPhysicalRetreat(ServerWorld world, BlockPos feet) {
+    private BlockPos findRecentPhysicalRetreat(ServerLevel world, BlockPos feet) {
         BlockPos detourOrigin = lastDetourOriginFor(feet);
         for (BlockPos candidate : new BlockPos[]{
                 detourOrigin, pendingLandingOrigin, previousSafeLanding, latestSafeLanding}) {
@@ -838,7 +837,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
             Standability.clearCache();
             if (isDryStandable(world, candidate)) {
-                return candidate.toImmutable();
+                return candidate.immutable();
             }
         }
         return null;
@@ -855,7 +854,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     private void rejectCollapsedEdge(BlockPos retreat, BlockPos buried) {
         for (int i = 0; i < HORIZONTAL.length; i++) {
-            if (buried.equals(retreat.offset(HORIZONTAL[i]).down())) {
+            if (buried.equals(retreat.relative(HORIZONTAL[i]).below())) {
                 stairDirIndex = i;
                 rejectLandingDirection(retreat, i);
                 return;
@@ -899,7 +898,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             return null;
         }
         DetourEdge edge = lastEdge(traversedDetourEdges);
-        return edge.target().equals(target) ? edge.origin().toImmutable() : null;
+        return edge.target().equals(target) ? edge.origin().immutable() : null;
     }
 
     private static boolean isPhysicalRetreatStep(BlockPos from, BlockPos to) {
@@ -918,25 +917,25 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 + Math.abs(origin.getZ() - target.getZ()) == 1;
     }
 
-    private static boolean isDryStandable(ServerWorld world, BlockPos feet) {
+    private static boolean isDryStandable(ServerLevel world, BlockPos feet) {
         Standability.clearCache();
         return world.getFluidState(feet).isEmpty()
-                && world.getFluidState(feet.up()).isEmpty()
+                && world.getFluidState(feet.above()).isEmpty()
                 && Standability.isStandable(world, feet);
     }
 
-    private static BlockPos firstBodyCollision(ServerWorld world, BlockPos feet) {
-        BlockPos head = feet.up();
+    private static BlockPos firstBodyCollision(ServerLevel world, BlockPos feet) {
+        BlockPos head = feet.above();
         if (!world.getBlockState(head).getCollisionShape(world, head).isEmpty()) {
-            return head.toImmutable();
+            return head.immutable();
         }
         if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()) {
-            return feet.toImmutable();
+            return feet.immutable();
         }
         return null;
     }
 
-    private boolean handleRejectedLanding(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean handleRejectedLanding(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         if (pendingLandingOrigin == null || pendingLandingTarget == null) {
             return false;
         }
@@ -1004,16 +1003,16 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * resumes.
      */
     private boolean settlePendingLandingAtCurrentPose(AIPlayerEntity bot) {
-        if (pendingLandingTarget == null || !bot.getBlockPos().equals(pendingLandingTarget)) {
+        if (pendingLandingTarget == null || !bot.blockPosition().equals(pendingLandingTarget)) {
             return false;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         Standability.clearCache();
-        boolean wet = bot.isSubmergedInWater()
-                || bot.isTouchingWater()
-                || world.getFluidState(feet).isIn(FluidTags.WATER)
-                || world.getFluidState(feet.up()).isIn(FluidTags.WATER);
+        boolean wet = bot.isUnderWater()
+                || bot.isInWater()
+                || world.getFluidState(feet).is(FluidTags.WATER)
+                || world.getFluidState(feet.above()).is(FluidTags.WATER);
         if (NavSafetyNet.INSTANCE.isWaterRescueActive(bot) || wet
                 || !Standability.isStandable(world, feet)) {
             return false;
@@ -1071,7 +1070,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * resumes from the factual destination and cannot refund or replay this preflight.</p>
      */
     private boolean tryFreshEntryRelocation(AIPlayerEntity bot,
-                                            ServerWorld world,
+                                            ServerLevel world,
                                             BlockPos feet) {
         if (started || feet.getY() <= targetY || !isDryStandable(world, feet)
                 || hasObservedSafeStairDirection(bot, world, feet)) {
@@ -1084,9 +1083,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 {Direction.SOUTH, Direction.WEST}
         };
         for (Direction[] pair : diagonals) {
-            BlockPos firstCorner = feet.offset(pair[0]);
-            BlockPos secondCorner = feet.offset(pair[1]);
-            BlockPos candidate = firstCorner.offset(pair[1]);
+            BlockPos firstCorner = feet.relative(pair[0]);
+            BlockPos secondCorner = feet.relative(pair[1]);
+            BlockPos candidate = firstCorner.relative(pair[1]);
             if (!isObservedDryPassableColumn(bot, world, firstCorner)
                     || !isObservedDryPassableColumn(bot, world, secondCorner)
                     || !isObservedDryStandable(bot, world, candidate)) {
@@ -1107,14 +1106,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             BotLog.action(bot, "descend_entry_relocated",
                     "from", feet.toShortString(),
                     "to", candidate.toShortString(),
-                    "stair_direction", HORIZONTAL[safeDirection].asString());
+                    "stair_direction", HORIZONTAL[safeDirection].getSerializedName());
             return true;
         }
         return false;
     }
 
     private boolean hasObservedSafeStairDirection(AIPlayerEntity bot,
-                                                  ServerWorld world,
+                                                  ServerLevel world,
                                                   BlockPos feet) {
         for (int direction = 0; direction < HORIZONTAL.length; direction++) {
             if (!canObserveStairEnvelope(bot, feet, direction)) {
@@ -1128,7 +1127,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     private int observedSafeStairDirection(AIPlayerEntity bot,
-                                           ServerWorld world,
+                                           ServerLevel world,
                                            BlockPos feet) {
         for (int direction = 0; direction < HORIZONTAL.length; direction++) {
             if (!canObserveStairEnvelope(bot, feet, direction)) {
@@ -1144,45 +1143,45 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     private static boolean canObserveStairEnvelope(AIPlayerEntity bot,
                                                    BlockPos feet,
                                                    int direction) {
-        BlockPos ahead = feet.offset(HORIZONTAL[direction]);
-        BlockPos landing = ahead.down();
+        BlockPos ahead = feet.relative(HORIZONTAL[direction]);
+        BlockPos landing = ahead.below();
         return canObservePosition(bot, ahead)
-                && canObservePosition(bot, ahead.up())
+                && canObservePosition(bot, ahead.above())
                 && canObservePosition(bot, landing)
-                && canObservePosition(bot, landing.down());
+                && canObservePosition(bot, landing.below());
     }
 
-    private boolean isSafeStairDirection(ServerWorld world,
+    private boolean isSafeStairDirection(ServerLevel world,
                                          BlockPos feet,
                                          int direction) {
-        BlockPos ahead = feet.offset(HORIZONTAL[direction]);
-        BlockPos landing = ahead.down();
-        return !containsOwnedWaterSeal(world, ahead, ahead.up(), landing)
+        BlockPos ahead = feet.relative(HORIZONTAL[direction]);
+        BlockPos landing = ahead.below();
+        return !containsOwnedWaterSeal(world, ahead, ahead.above(), landing)
                 && !isLava(world, landing)
-                && !isLava(world, landing.down())
+                && !isLava(world, landing.below())
                 && !isLava(world, ahead)
                 && !isWater(world, landing)
-                && !isWater(world, landing.down())
+                && !isWater(world, landing.below())
                 && hasSafeSupport(world, landing);
     }
 
     private static boolean isObservedDryPassableColumn(AIPlayerEntity bot,
-                                                       ServerWorld world,
+                                                       ServerLevel world,
                                                        BlockPos feet) {
-        if (!canObservePosition(bot, feet) || !canObservePosition(bot, feet.up())) {
+        if (!canObservePosition(bot, feet) || !canObservePosition(bot, feet.above())) {
             return false;
         }
         return world.getFluidState(feet).isEmpty()
-                && world.getFluidState(feet.up()).isEmpty()
+                && world.getFluidState(feet.above()).isEmpty()
                 && world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
-                && world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty();
+                && world.getBlockState(feet.above()).getCollisionShape(world, feet.above()).isEmpty();
     }
 
     private static boolean isObservedDryStandable(AIPlayerEntity bot,
-                                                   ServerWorld world,
+                                                   ServerLevel world,
                                                    BlockPos feet) {
         return isObservedDryPassableColumn(bot, world, feet)
-                && canObservePosition(bot, feet.down())
+                && canObservePosition(bot, feet.below())
                 && isDryStandable(world, feet);
     }
 
@@ -1197,7 +1196,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // lava-collapse flood); once it's open, move over via an adjacent physical step/jump. If all
     // four sides are infeasible -> return false, letting the caller judge failure (the evasion
     // layer's "trapped -- evacuate" logic is the backstop).
-    private boolean tryLateralDetour(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean tryLateralDetour(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         // First look for a lava-free side column to detour through on the current level; when the
         // current level is sealed on all four sides by lava (a large lava lake -- observed at
         // at_y=50: the feet and all four side.down cells were lava -> no solution on the current
@@ -1205,11 +1204,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // surface -- this usually lets the bot climb out past the lake's rim and keep descending.
         int[] directionOrder = detourDirectionOrder();
         for (int dy = 0; dy <= 1; dy++) {
-            BlockPos base = feet.up(dy);
+            BlockPos base = feet.above(dy);
             for (int directionIndex : directionOrder) {
                 Direction dir = HORIZONTAL[directionIndex];
-                BlockPos side = base.offset(dir);
-                BlockPos support = side.down();
+                BlockPos side = base.relative(dir);
+                BlockPos support = side.below();
                 DetourEdge edge = new DetourEdge(feet, side);
                 if (traversedDetourEdges.contains(edge)) {
                     continue;
@@ -1218,17 +1217,17 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 // can currently see.  In particular, never read a hidden floor merely because a
                 // horizontal fallback is otherwise out of graph edges.
                 if (!canObservePosition(bot, side)
-                        || !canObservePosition(bot, side.up())
+                        || !canObservePosition(bot, side.above())
                         || !canObservePosition(bot, support)) {
                     continue;
                 }
                 // A seal in the body column is an obstruction Descend must never mine through.
                 // A seal used only as the landing's solid floor is safe to stand on and is not a
                 // placement target; rejecting it here would erase the bounded upper escape route.
-                if (containsOwnedWaterSeal(world, side, side.up())) {
+                if (containsOwnedWaterSeal(world, side, side.above())) {
                     continue;
                 }
-                if (isLava(world, side) || isLava(world, side.up()) || isLava(world, support)) {
+                if (isLava(world, side) || isLava(world, side.above()) || isLava(world, support)) {
                     continue; // don't move laterally toward lava
                 }
                 // Verify the factual landing before clearing its body column. A solid side block
@@ -1247,7 +1246,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                     }
                     continue;
                 }
-                BlockPos solid = TerrainProbe.firstSolid(world, side, side.up());
+                BlockPos solid = TerrainProbe.firstSolid(world, side, side.above());
                 if (solid != null) {
                     // Only a genuinely visible neighbouring lava source (through an already open
                     // gap elsewhere) may reject this block; unmined rock beyond it stays UNKNOWN.
@@ -1293,7 +1292,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                             side, (directionIndex + HORIZONTAL.length / 2) % HORIZONTAL.length);
                 }
                 BotLog.action(bot, "descend_lava_detour",
-                        "dir", dir.asString(),
+                        "dir", dir.getSerializedName(),
                         "at_y", side.getY(),
                         "up", dy,
                         "used", lateralDetours,
@@ -1307,35 +1306,35 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     /**
      * Builds one same-level floor edge using an ordinary strict-survival block interaction.
      * Successful placement always yields; movement is forbidden until a later tick observes the
-     * resulting collision shape through {@link #hasSafeSupport(ServerWorld, BlockPos)}.
+     * resulting collision shape through {@link #hasSafeSupport(ServerLevel, BlockPos)}.
      */
     private boolean tryPlaceDetourSupport(AIPlayerEntity bot,
-                                          ServerWorld world,
+                                          ServerLevel world,
                                           BlockPos origin,
                                           BlockPos landing,
                                           BlockPos support,
                                           int directionIndex) {
-        if (!origin.equals(bot.getBlockPos())
+        if (!origin.equals(bot.blockPosition())
                 || landing.getY() != origin.getY()
-                || !landing.equals(origin.offset(HORIZONTAL[directionIndex]))
-                || containsOwnedWaterSeal(world, landing, landing.up(), support)) {
+                || !landing.equals(origin.relative(HORIZONTAL[directionIndex]))
+                || containsOwnedWaterSeal(world, landing, landing.above(), support)) {
             return false;
         }
 
         BlockState feetState = world.getBlockState(landing);
-        BlockState headState = world.getBlockState(landing.up());
+        BlockState headState = world.getBlockState(landing.above());
         BlockState supportState = world.getBlockState(support);
         if (!feetState.getFluidState().isEmpty()
                 || !headState.getFluidState().isEmpty()
                 || !supportState.getFluidState().isEmpty()
                 || !feetState.getCollisionShape(world, landing).isEmpty()
-                || !headState.getCollisionShape(world, landing.up()).isEmpty()
+                || !headState.getCollisionShape(world, landing.above()).isEmpty()
                 || !supportState.getCollisionShape(world, support).isEmpty()
-                || !supportState.isReplaceable()
+                || !supportState.canBeReplaced()
                 || Standability.isDangerous(feetState)
                 || Standability.isDangerous(headState)
                 || Standability.isDangerous(supportState)
-                || hasObservedAdjacentLava(bot, world, landing, landing.up(), support)) {
+                || hasObservedAdjacentLava(bot, world, landing, landing.above(), support)) {
             return false;
         }
 
@@ -1344,7 +1343,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (blockSlot.isEmpty()) {
             return false;
         }
-        String item = String.valueOf(bot.getInventory().getMainStacks()
+        String item = String.valueOf(bot.getInventory().getNonEquipmentItems()
                 .get(blockSlot.getAsInt()).getItem());
         miner.cancel(bot);
         bot.getActionPack().stopAll();
@@ -1355,7 +1354,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // sneak-bridge transaction: expose the support's side, click that exact visible face, and
         // always settle back on the original center before any receipt or movement decision.
         Standability.clearCache();
-        if (!bot.isOnGround() && Standability.isStandable(world, origin)) {
+        if (!bot.onGround() && Standability.isStandable(world, origin)) {
             bot.setOnGround(true);
         }
         Direction direction = HORIZONTAL[directionIndex];
@@ -1372,7 +1371,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         boolean returned;
         try {
             placed = BuildAction.placeBlock(
-                    bot, origin.down(), direction, Hand.MAIN_HAND);
+                    bot, origin.below(), direction, InteractionHand.MAIN_HAND);
         } finally {
             returned = FakePlayerMotion.returnToBlockCenter(
                     bot, origin, "descend_detour_support");
@@ -1423,11 +1422,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     /** Reads only visible neighbours; hidden cells never become implicit lava-scan authority. */
     private static boolean hasObservedAdjacentLava(AIPlayerEntity bot,
-                                                    ServerWorld world,
+                                                    ServerLevel world,
                                                     BlockPos... positions) {
         for (BlockPos position : positions) {
             for (Direction direction : Direction.values()) {
-                BlockPos adjacent = position.offset(direction);
+                BlockPos adjacent = position.relative(direction);
                 if (canObservePosition(bot, adjacent) && isLava(world, adjacent)) {
                     return true;
                 }
@@ -1452,28 +1451,28 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         };
     }
 
-    private static boolean isLava(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.LAVA);
+    private static boolean isLava(ServerLevel world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().is(FluidTags.LAVA);
     }
 
-    private static boolean isWater(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.WATER);
+    private static boolean isWater(ServerLevel world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().is(FluidTags.WATER);
     }
 
     /** Seals one observable water/lava ingress cell and yields until the next tick. */
-    private boolean sealLateralWater(AIPlayerEntity bot, ServerWorld world) {
-        BlockPos feet = bot.getBlockPos();
-        for (BlockPos level : new BlockPos[]{feet, feet.up()}) {
+    private boolean sealLateralWater(AIPlayerEntity bot, ServerLevel world) {
+        BlockPos feet = bot.blockPosition();
+        for (BlockPos level : new BlockPos[]{feet, feet.above()}) {
             for (Direction direction : HORIZONTAL) {
-                if (trySealWater(bot, world, level.offset(direction))) {
+                if (trySealWater(bot, world, level.relative(direction))) {
                     return true;
                 }
             }
         }
-        return trySealWater(bot, world, feet.up(2));
+        return trySealWater(bot, world, feet.above(2));
     }
 
-    private boolean trySealWater(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
+    private boolean trySealWater(AIPlayerEntity bot, ServerLevel world, BlockPos pos) {
         boolean lava = isLava(world, pos);
         if (!lava && !isWater(world, pos)) {
             return false;
@@ -1499,10 +1498,10 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         if (sealState.isAir() || !sealState.getFluidState().isEmpty()) {
             return false;
         }
-        ownedWaterSeals.put(pos.toImmutable(), sealState.getBlock());
+        ownedWaterSeals.put(pos.immutable(), sealState.getBlock());
         miner.cancel(bot);
-        markStarted(bot, bot.getBlockPos());
-        rejectSealedStairDirection(bot.getBlockPos(), pos);
+        markStarted(bot, bot.blockPosition());
+        rejectSealedStairDirection(bot.blockPosition(), pos);
         lastProgressTick = totalBudget();
         String fluidName = lava ? "lava" : "water";
         BotLog.action(bot, "descend_seal_water", "fluid", fluidName, "at", pos.toShortString());
@@ -1519,9 +1518,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * direction for one). Returns true only after an actual seal, so the caller can yield the tick
      * and let the already-issued rejectLandingDirection route around it next tick.
      */
-    private boolean trySealOpenCavityLanding(AIPlayerEntity bot, ServerWorld world,
+    private boolean trySealOpenCavityLanding(AIPlayerEntity bot, ServerLevel world,
                                               BlockPos feet, BlockPos next, int directionIndex) {
-        BlockPos hole = next.down();
+        BlockPos hole = next.below();
         if (!canObservePosition(bot, hole)) {
             return false;
         }
@@ -1553,8 +1552,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     private void rejectSealedStairDirection(BlockPos feet, BlockPos sealed) {
         for (int i = 0; i < HORIZONTAL.length; i++) {
-            BlockPos side = feet.offset(HORIZONTAL[i]);
-            if (sealed.equals(side) || sealed.equals(side.up())) {
+            BlockPos side = feet.relative(HORIZONTAL[i]);
+            if (sealed.equals(side) || sealed.equals(side.above())) {
                 rejectLandingDirection(feet, i);
                 return;
             }
@@ -1569,7 +1568,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // "viable" too -- but that is only the origin just left. Walking straight into the two new side
     // directions is genuine exploration; reversing course should be the last option tried, otherwise
     // the bot would oscillate back and forth between two cells until the budget is exhausted.
-    private boolean rotateStair(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean rotateStair(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         int forward = stairDirIndex;
         int[] candidates = {
@@ -1581,9 +1580,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             if ((rejectedLandingDirections & 1 << candidate) != 0) {
                 continue;
             }
-            BlockPos ahead = feet.offset(HORIZONTAL[candidate]);
-            BlockPos next = ahead.down();
-            if (!containsOwnedWaterSeal(world, ahead, ahead.up(), next)
+            BlockPos ahead = feet.relative(HORIZONTAL[candidate]);
+            BlockPos next = ahead.below();
+            if (!containsOwnedWaterSeal(world, ahead, ahead.above(), next)
                     && isViableDescentDirection(bot, world, feet, candidate)) {
                 stairDirIndex = candidate;
                 return true;
@@ -1605,12 +1604,12 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * happens by rejecting the direction and rotating away.
      */
     private boolean isViableDescentDirection(AIPlayerEntity bot,
-                                              ServerWorld world,
+                                              ServerLevel world,
                                               BlockPos feet,
                                               int directionIndex) {
-        BlockPos ahead = feet.offset(HORIZONTAL[directionIndex]);
-        BlockPos next = ahead.down();
-        BlockPos support = next.down();
+        BlockPos ahead = feet.relative(HORIZONTAL[directionIndex]);
+        BlockPos next = ahead.below();
+        BlockPos support = next.below();
         // An edge already recorded as traversed (in either direction) was explicitly explored and
         // backed out of by the lateral detour -- most tellingly when BOTH directions of the same
         // edge are present, a round trip that found nothing useful. The primary stair flow must
@@ -1626,11 +1625,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // whatever might be hidden behind it. This does not depend on what is behind it because
         // there is no confirmed benefit to ever risk touching it in the first place.
         if ((canObservePosition(bot, ahead) && Standability.isDangerous(world.getBlockState(ahead)))
-                || (canObservePosition(bot, ahead.up())
-                        && Standability.isDangerous(world.getBlockState(ahead.up())))) {
+                || (canObservePosition(bot, ahead.above())
+                        && Standability.isDangerous(world.getBlockState(ahead.above())))) {
             return false;
         }
-        if (isObservedHazardFluid(bot, ahead) || isObservedHazardFluid(bot, ahead.up())) {
+        if (isObservedHazardFluid(bot, ahead) || isObservedHazardFluid(bot, ahead.above())) {
             return false;
         }
         if (isObservedHazardFluid(bot, next) || isObservedHazardFluid(bot, support)) {
@@ -1652,11 +1651,11 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
      * True when a landing's support is either not yet honestly knowable (still hidden behind
      * unmined rock, so it may not be treated as unsafe) or is genuinely observable and solid.
      */
-    private static boolean isAcceptableLanding(AIPlayerEntity bot, ServerWorld world, BlockPos landing) {
-        return !canObservePosition(bot, landing.down()) || hasSafeSupport(world, landing);
+    private static boolean isAcceptableLanding(AIPlayerEntity bot, ServerLevel world, BlockPos landing) {
+        return !canObservePosition(bot, landing.below()) || hasSafeSupport(world, landing);
     }
 
-    private boolean containsOwnedWaterSeal(ServerWorld world, BlockPos... positions) {
+    private boolean containsOwnedWaterSeal(ServerLevel world, BlockPos... positions) {
         for (BlockPos position : positions) {
             Block owned = ownedWaterSeals.get(position);
             if (owned == null) {
@@ -1671,7 +1670,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 ownedWaterSeals.remove(position);
                 continue;
             }
-            if (live.isOf(owned)) {
+            if (live.is(owned)) {
                 return true;
             }
             // A different solid is not task-owned, but it is still a deliberate wall. Keep the
@@ -1681,7 +1680,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         return false;
     }
 
-    private void pruneStaleWaterSeals(ServerWorld world) {
+    private void pruneStaleWaterSeals(ServerLevel world) {
         ownedWaterSeals.entrySet().removeIf(entry -> {
             BlockState live = world.getBlockState(entry.getKey());
             return live.isAir() || !live.getFluidState().isEmpty();
@@ -1697,7 +1696,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
 
     private void ensureRejectedLandingOrigin(BlockPos origin) {
         if (rejectedLandingOrigin == null || !rejectedLandingOrigin.equals(origin)) {
-            rejectedLandingOrigin = origin.toImmutable();
+            rejectedLandingOrigin = origin.immutable();
             rejectedLandingDirections = 0;
         }
     }
@@ -1707,8 +1706,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         rejectedLandingDirections = 0;
     }
 
-    private static boolean hasSafeSupport(ServerWorld world, BlockPos landing) {
-        BlockPos supportPos = landing.down();
+    private static boolean hasSafeSupport(ServerLevel world, BlockPos landing) {
+        BlockPos supportPos = landing.below();
         var support = world.getBlockState(supportPos);
         return support.getFluidState().isEmpty()
                 && !support.getCollisionShape(world, supportPos).isEmpty()
@@ -1721,15 +1720,15 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     // and swarm the bot" (observed: real_diamond descending to Y-58 stayed light=0 throughout and
     // was swarmed by 5 skeletons). Lighting is a nice-to-have, not a prerequisite: lacking torches
     // never blocks the descent.
-    private void maybePlaceTorch(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private void maybePlaceTorch(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         if (lastTorchY != Integer.MAX_VALUE && lastTorchY - feet.getY() < TORCH_EVERY) {
             return;
         }
-        if (world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) >= 8) {
+        if (world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) >= 8) {
             lastTorchY = feet.getY(); // already bright enough -- advance the baseline too, to avoid re-checking every tick
             return;
         }
-        var torchSlot = InventoryAction.findItem(bot, net.minecraft.item.Items.TORCH);
+        var torchSlot = InventoryAction.findItem(bot, net.minecraft.world.item.Items.TORCH);
         if (torchSlot.isPresent()) {
             InventoryAction.equipFromSlot(bot, torchSlot.getAsInt());
             if (!BuildAction.placeBlockAt(bot, feet).isFailed()) {
@@ -1745,7 +1744,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
     }
 
     static void restoreActiveMiningTool(AIPlayerEntity bot,
-                                        ServerWorld world,
+                                        ServerLevel world,
                                         BlockMiner activeMiner) {
         if (activeMiner.target() != null) {
             ToolSelector.equipBestTool(bot, world.getBlockState(activeMiner.target()));
@@ -1770,7 +1769,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             encoded.append(seal.getX()).append(',')
                     .append(seal.getY()).append(',')
                     .append(seal.getZ()).append(',')
-                    .append(Registries.BLOCK.getId(entry.getValue()));
+                    .append(BuiltInRegistries.BLOCK.getKey(entry.getValue()));
         }
         Map<String, String> values = new LinkedHashMap<>();
         values.put("task_schema", String.valueOf(CHECKPOINT_SCHEMA));
@@ -1889,7 +1888,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         int dz = edge.target().getZ() - edge.origin().getZ();
         for (int index = 0; index < HORIZONTAL.length; index++) {
             Direction direction = HORIZONTAL[index];
-            if (direction.getOffsetX() == dx && direction.getOffsetZ() == dz) {
+            if (direction.getStepX() == dx && direction.getStepZ() == dz) {
                 return index;
             }
         }

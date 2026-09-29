@@ -3,13 +3,12 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.task.CreateObsidianTask.Phase;
 import io.github.zoyluo.minecraftai.task.CreateObsidianTask.PourPlan;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 /**
  * Durable, self-verifying restart snapshot for {@link CreateObsidianTask}: the checkpoint's own
@@ -342,7 +341,7 @@ record ObsidianCheckpoint(int targetCount,
     }
 
     private static BlockPos immutable(BlockPos pos) {
-        return pos == null ? null : pos.toImmutable();
+        return pos == null ? null : pos.immutable();
     }
 
     private static String encodeCheckpointPos(BlockPos pos) {

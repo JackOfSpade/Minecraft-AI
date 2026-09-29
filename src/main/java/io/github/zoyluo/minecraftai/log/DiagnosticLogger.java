@@ -8,16 +8,15 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.passive.PassiveEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-
+import net.minecraft.world.entity.AgeableMob;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +42,8 @@ public final class DiagnosticLogger {
     }
 
     public void clear(AIPlayerEntity bot) {
-        last.remove(bot.getUuid());
-        snapshotGate.clear(bot.getUuid());
+        last.remove(bot.getUUID());
+        snapshotGate.clear(bot.getUUID());
     }
 
     public void clearAll() {
@@ -58,15 +57,15 @@ public final class DiagnosticLogger {
         }
         // While the server is stopping, entities get unloaded normally (isAlive flips to false, removed from all()),
         // so skip death/vanish detection here to avoid misreporting a "server shutdown unload" as diag_bot_died / diag_bot_vanished.
-        if (server.isStopping()) {
+        if (server.isShutdown()) {
             last.clear();
             return;
         }
-        int tick = server.getTicks();
+        int tick = server.getTickCount();
 
         Map<UUID, Sample> current = new LinkedHashMap<>();
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            UUID id = bot.getUuid();
+            UUID id = bot.getUUID();
             Sample now = sampleOf(bot);
             current.put(id, now);
 
@@ -159,7 +158,7 @@ public final class DiagnosticLogger {
     private void snapshot(AIPlayerEntity bot, Sample s, int tick) {
         String goal = GoalExecutor.INSTANCE.describeActiveGoal(bot);
         String step = GoalExecutor.INSTANCE.describeActiveStep(bot);
-        DiagnosticSnapshotGate.Decision decision = snapshotGate.decide(bot.getUuid(), readingOf(s, goal, step), tick);
+        DiagnosticSnapshotGate.Decision decision = snapshotGate.decide(bot.getUUID(), readingOf(s, goal, step), tick);
         if (!decision.emit()) {
             return;
         }
@@ -207,8 +206,8 @@ public final class DiagnosticLogger {
     private static String scanNearby(AIPlayerEntity bot) {
         try {
             CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "diagnostic_nearby");
-            Box box = bot.getBoundingBox().expand(24.0D);
-            List<LivingEntity> ents = bot.getEntityWorld().getEntitiesByClass(
+            AABB box = bot.getBoundingBox().inflate(24.0D);
+            List<LivingEntity> ents = bot.level().getEntitiesOfClass(
                     LivingEntity.class, box,
                     e -> e.isAlive() && e != bot && ObservableWorldQuery.canObserveEntity(bot, e));
             int animals = 0;
@@ -219,13 +218,13 @@ public final class DiagnosticLogger {
             double dh = Double.MAX_VALUE;
             for (LivingEntity e : ents) {
                 double d = bot.distanceTo(e);
-                if (e instanceof HostileEntity) {
+                if (e instanceof Monster) {
                     hostiles++;
                     if (d < dh) {
                         dh = d;
                         nearHostile = e;
                     }
-                } else if (e instanceof PassiveEntity) {
+                } else if (e instanceof AgeableMob) {
                     animals++;
                     if (d < da) {
                         da = d;
@@ -249,7 +248,7 @@ public final class DiagnosticLogger {
     }
 
     private static String typeId(LivingEntity e) {
-        return Registries.ENTITY_TYPE.getId(e.getType()).getPath();
+        return BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath();
     }
 
     private Sample sampleOf(AIPlayerEntity bot) {
@@ -258,27 +257,27 @@ public final class DiagnosticLogger {
         s.x = (int) Math.floor(bot.getX());
         s.y = (int) Math.floor(bot.getY());
         s.z = (int) Math.floor(bot.getZ());
-        s.yaw = bot.getYaw();
+        s.yaw = bot.getYRot();
         s.health = bot.getHealth();
         s.maxHealth = bot.getMaxHealth();
-        s.food = bot.getHungerManager().getFoodLevel();
-        s.air = bot.getAir();
-        s.onGround = bot.isOnGround();
+        s.food = bot.getFoodData().getFoodLevel();
+        s.air = bot.getAirSupply();
+        s.onGround = bot.onGround();
         s.fallDistance = (float) bot.fallDistance;
         s.alive = bot.isAlive();
         s.removed = bot.isRemoved();
         s.removalReason = bot.getRemovalReason();
         try {
-            s.mode = bot.interactionManager.getGameMode().asString();
+            s.mode = bot.gameMode.getGameModeForPlayer().getSerializedName();
         } catch (RuntimeException ignored) {
             s.mode = "?";
         }
         try {
-            s.submerged = bot.isSubmergedInWater();
-            BlockPos at = bot.getBlockPos();
-            s.inLava = bot.getEntityWorld().getBlockState(at).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)
-                    || bot.getEntityWorld().getBlockState(at.down()).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA);
-            s.light = bot.getEntityWorld().getLightLevel(at);
+            s.submerged = bot.isUnderWater();
+            BlockPos at = bot.blockPosition();
+            s.inLava = bot.level().getBlockState(at).getFluidState().is(net.minecraft.tags.FluidTags.LAVA)
+                    || bot.level().getBlockState(at.below()).getFluidState().is(net.minecraft.tags.FluidTags.LAVA);
+            s.light = bot.level().getMaxLocalRawBrightness(at);
         } catch (RuntimeException ignored) {
             // Keep defaults if world access fails; other fields are unaffected
         }
@@ -296,17 +295,17 @@ public final class DiagnosticLogger {
             // ignore
         }
 
-        ItemStack main = bot.getMainHandStack();
-        s.held = main.isEmpty() ? "empty" : Registries.ITEM.getId(main.getItem()) + "x" + main.getCount();
+        ItemStack main = bot.getMainHandItem();
+        s.held = main.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(main.getItem()) + "x" + main.getCount();
         s.inventory = inventorySummary(bot);
         return s;
     }
 
     private static String inventorySummary(AIPlayerEntity bot) {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty()) {
-                counts.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+                counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
             }
         }
         if (counts.isEmpty()) {

@@ -2,9 +2,8 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.Optional;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * Shared target lookup for the follow task family: an explicit player-manager lookup by name, or
@@ -20,11 +19,11 @@ final class FollowTargetResolver {
         return targetName == null ? "" : targetName.trim();
     }
 
-    static Optional<ServerPlayerEntity> resolve(AIPlayerEntity bot, String targetName) {
+    static Optional<ServerPlayer> resolve(AIPlayerEntity bot, String targetName) {
         if (!targetName.isBlank()) {
-            return Optional.ofNullable(bot.getEntityWorld().getServer().getPlayerManager().getPlayer(targetName));
+            return Optional.ofNullable(bot.level().getServer().getPlayerList().getPlayerByName(targetName));
         }
         return AIPlayerManager.INSTANCE.ownerOf(bot)
-                .map(uuid -> bot.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid));
+                .map(uuid -> bot.level().getServer().getPlayerList().getPlayer(uuid));
     }
 }

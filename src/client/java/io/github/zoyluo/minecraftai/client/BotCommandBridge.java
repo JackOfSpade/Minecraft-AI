@@ -6,14 +6,14 @@ import io.github.zoyluo.minecraftai.network.payload.BotTeleportC2S;
 import io.github.zoyluo.minecraftai.network.payload.SetOptionC2S;
 import io.github.zoyluo.minecraftai.network.payload.SubscribeBotC2S;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 
 public final class BotCommandBridge {
     private BotCommandBridge() {
     }
 
     public static boolean hasPermission() {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         // Owner authorization is server-side and depends on the selected Bot; the client cannot
         // infer it from OP level. This probe only means that a player connection exists.
         return client.player != null;
@@ -61,9 +61,9 @@ public final class BotCommandBridge {
     }
 
     private static void sendCommand(String command) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.getNetworkHandler() != null) {
-            client.getNetworkHandler().sendChatCommand(command);
+        Minecraft client = Minecraft.getInstance();
+        if (client.getConnection() != null) {
+            client.getConnection().sendCommand(command);
         }
     }
 
@@ -88,9 +88,9 @@ public final class BotCommandBridge {
     }
 
     private static void sendChatMessage(String message) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.getNetworkHandler() != null) {
-            client.getNetworkHandler().sendChatMessage(message);
+        Minecraft client = Minecraft.getInstance();
+        if (client.getConnection() != null) {
+            client.getConnection().sendChat(message);
         }
     }
 

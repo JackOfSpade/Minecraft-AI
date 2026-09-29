@@ -1,11 +1,10 @@
 package io.github.zoyluo.minecraftai.mining;
 
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
 
 /** Durable branch-mining cursor shared by mining batches and JVM restart recovery. */
 public record MiningCursor(
@@ -22,8 +21,8 @@ public record MiningCursor(
 
     public MiningCursor {
         schema = schema <= 0 ? CURRENT_SCHEMA : schema;
-        origin = origin == null ? null : origin.toImmutable();
-        face = face == null ? null : face.toImmutable();
+        origin = origin == null ? null : origin.immutable();
+        face = face == null ? null : face.immutable();
         // -1 is a semantic sentinel: the first branch leg has not started yet. Converting it to 3
         // makes a pre-first-tick restore take the "completed leg" path and incorrectly advance to leg 1.
         directionIndex = directionIndex == -1 ? -1 : Math.floorMod(directionIndex, 4);
@@ -34,7 +33,7 @@ public record MiningCursor(
     }
 
     public static MiningCursor initial(BlockPos origin, int baseLegLength) {
-        BlockPos safeOrigin = origin == null ? BlockPos.ORIGIN : origin.toImmutable();
+        BlockPos safeOrigin = origin == null ? BlockPos.ZERO : origin.immutable();
         return new MiningCursor(CURRENT_SCHEMA, safeOrigin, safeOrigin, -1, 0,
                 0, Math.max(1, baseLegLength), 0);
     }

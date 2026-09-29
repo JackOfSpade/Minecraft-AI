@@ -61,17 +61,6 @@ import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import io.github.zoyluo.minecraftai.task.TradeTask;
-import net.minecraft.block.Block;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -80,6 +69,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.Vec3;
 
 public final class ToolRegistry {
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
@@ -144,7 +143,7 @@ public final class ToolRegistry {
         });
 
         register("look_at", "Turn the bot's head toward a coordinate", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
-            LookAction.lookAt(bot, new Vec3d(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z")));
+            LookAction.lookAt(bot, new Vec3(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z")));
             return ok("looked");
         });
 
@@ -154,7 +153,7 @@ public final class ToolRegistry {
             if (pathResult.isInProgress() || pathResult.isSuccess()) {
                 return ok("pathfinding_started");
             }
-            io.github.zoyluo.minecraftai.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
+            io.github.zoyluo.minecraftai.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3.atCenterOf(goal));
             if (fallback.isInProgress() || fallback.isSuccess()) {
                 return ok("fallback_walk_started: " + pathResult.reason());
             }
@@ -163,7 +162,7 @@ public final class ToolRegistry {
 
         register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos pos = blockPos(args);
-            MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
+            MiningAction.startMining(bot, pos, Direction.getApproximateNearest(bot.getEyePosition().subtract(pos.getCenter())));
             return ok("started");
         });
 
@@ -184,7 +183,7 @@ public final class ToolRegistry {
                 .required("block")
                 .build(), (bot, args) -> {
             Block block = requiredBlock(args, "block");
-            ToolSelector.Selection selection = ToolSelector.equipBestTool(bot, block.getDefaultState());
+            ToolSelector.Selection selection = ToolSelector.equipBestTool(bot, block.defaultBlockState());
             return ok(selection.describe());
         });
 
@@ -279,8 +278,8 @@ public final class ToolRegistry {
     /** Goal-driven high-level actions: gather/break/fish/trade plus every deterministic-goal task. */
     private void registerGoalTools() {
         register("set_base", "Remember the bot's current position as the base for stockpiling and resupply tasks.", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace("base", bot.getEntityWorld(), bot.getBlockPos());
-            return ok("marked_base: " + bot.getBlockPos().toShortString());
+            BotMemoryStore.INSTANCE.of(bot.getUUID()).markPlace("base", bot.level(), bot.blockPosition());
+            return ok("marked_base: " + bot.blockPosition().toShortString());
         });
 
         register("deposit_all", "Deposit carried items into containers near the remembered base. Same items prefer containers that already contain them; all_except_tools defaults true.", objectSchema()
@@ -343,7 +342,7 @@ public final class ToolRegistry {
             if ("vein".equals(mineOreMode)) {
                 Set<Block> veinOres = oreTargetsFrom(requiredString(args, "ore"));
                 if (veinOres.stream().noneMatch(ore -> io.github.zoyluo.minecraftai.mining.ToolTier
-                        .canHarvestWithInventory(bot, ore.getDefaultState()))) {
+                        .canHarvestWithInventory(bot, ore.defaultBlockState()))) {
                     return fail("need_better_tool: vein mode needs "
                             + io.github.zoyluo.minecraftai.mining.ToolTier.requiredPickaxeItemId(veinOres)
                             + " in the inventory; use achieve_goal for that pickaxe first, then retry mine_ore mode=vein");
@@ -387,8 +386,8 @@ public final class ToolRegistry {
                 .required("crop")
                 .build(), (bot, args) -> {
             FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
-            net.minecraft.item.Item produce = spec.crop() == net.minecraft.block.Blocks.WHEAT
-                    ? net.minecraft.item.Items.WHEAT
+            net.minecraft.world.item.Item produce = spec.crop() == net.minecraft.world.level.block.Blocks.WHEAT
+                    ? net.minecraft.world.item.Items.WHEAT
                     : spec.seed(); // carrot/potato: the produce item is the same as the seed item
             boolean started = GoalExecutor.INSTANCE.submit(bot,
                     new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
@@ -411,7 +410,7 @@ public final class ToolRegistry {
                 .property("count", integerSchema("how many wild food to gather (default 4)"))
                 .build(), (bot, args) -> {
             boolean started = GoalExecutor.INSTANCE.submit(bot,
-                    new Goal.HaveItem(net.minecraft.item.Items.SWEET_BERRIES, optionalInt(args, "count", 4)));
+                    new Goal.HaveItem(net.minecraft.world.item.Items.SWEET_BERRIES, optionalInt(args, "count", 4)));
             return started ? ok("goal_assigned: forage") : fail("goal_plan_failed");
         });
 
@@ -596,7 +595,7 @@ public final class ToolRegistry {
             String playerName = optionalString(args, "player_name", "");
             BlockPos point = optionalBlockPos(args, "x", "y", "z");
             Task task = playerName.isBlank()
-                    ? GuardTask.point(point == null ? bot.getBlockPos() : point)
+                    ? GuardTask.point(point == null ? bot.blockPosition() : point)
                     : GuardTask.player(playerName);
             assignLlm(bot, task);
             return ok("assigned: " + task.name());
@@ -653,11 +652,11 @@ public final class ToolRegistry {
                 .required("entity_type")
                 .build(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             String entityType = requiredString(args, "entity_type");
-            Identifier id = Identifier.of(entityType);
+            Identifier id = Identifier.parse(entityType);
             CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "tool_attack_entity");
-            Optional<Entity> target = bot.getEntityWorld()
-                    .getOtherEntities(bot, bot.getBoundingBox().expand(4.5D),
-                            entity -> Registries.ENTITY_TYPE.getId(entity.getType()).equals(id)
+            Optional<Entity> target = bot.level()
+                    .getEntities(bot, bot.getBoundingBox().inflate(4.5D),
+                            entity -> BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).equals(id)
                                     && ObservableWorldQuery.canObserveEntity(bot, entity))
                     .stream()
                     .min(Comparator.comparingDouble(bot::distanceTo));
@@ -710,7 +709,7 @@ public final class ToolRegistry {
             }
             UUID id = TaskBoard.INSTANCE.postForOwner(ownerUuid.get(), requiredString(args, "kind"),
                     paramsObject(args, "params"));
-            io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+            io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.level().getServer());
             return ok("job_posted: " + id);
         });
 
@@ -767,14 +766,14 @@ public final class ToolRegistry {
                 .required("key")
                 .required("value")
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            BotMemoryStore.INSTANCE.of(bot.getUuid()).remember(requiredString(args, "key"), requiredString(args, "value"));
+            BotMemoryStore.INSTANCE.of(bot.getUUID()).remember(requiredString(args, "key"), requiredString(args, "value"));
             return ok("remembered");
         });
 
         register("recall", "Recall a persistent fact by key", objectSchema()
                 .property("key", stringSchema("memory key"))
                 .required("key")
-                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> BotMemoryStore.INSTANCE.of(bot.getUuid())
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> BotMemoryStore.INSTANCE.of(bot.getUUID())
                 .recall(requiredString(args, "key"))
                 .map(ToolRegistry::ok)
                 .orElseGet(() -> fail("missing_memory: " + requiredString(args, "key"))));
@@ -783,7 +782,7 @@ public final class ToolRegistry {
                 .property("key", stringSchema("memory key"))
                 .required("key")
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            boolean removed = BotMemoryStore.INSTANCE.of(bot.getUuid()).forget(requiredString(args, "key"));
+            boolean removed = BotMemoryStore.INSTANCE.of(bot.getUUID()).forget(requiredString(args, "key"));
             return ok("forgotten: " + removed);
         });
 
@@ -791,19 +790,19 @@ public final class ToolRegistry {
                 .property("name", stringSchema("place name, for example home"))
                 .required("name")
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(requiredString(args, "name"), bot.getEntityWorld(), bot.getBlockPos());
-            return ok("marked_place: " + requiredString(args, "name") + " at " + bot.getBlockPos().toShortString());
+            BotMemoryStore.INSTANCE.of(bot.getUUID()).markPlace(requiredString(args, "name"), bot.level(), bot.blockPosition());
+            return ok("marked_place: " + requiredString(args, "name") + " at " + bot.blockPosition().toShortString());
         });
 
         register("goto_place", "Assign a move task to a remembered named place in the current dimension", objectSchema()
                 .property("name", stringSchema("place name"))
                 .required("name")
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUuid()).place(requiredString(args, "name"));
+            Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUUID()).place(requiredString(args, "name"));
             if (place.isEmpty()) {
                 return fail("unknown_place: " + requiredString(args, "name"));
             }
-            if (!bot.getEntityWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) {
+            if (!bot.level().dimension().identifier().toString().equals(place.get().dimension())) {
                 return fail("place_in_other_dimension: " + place.get().dimension());
             }
             Task task = new MoveTask(bot, place.get().pos());
@@ -814,20 +813,20 @@ public final class ToolRegistry {
         register("resume_mining", "Continue mining where the last mining session left off: walks back to the remembered mine face and mines the same ore kinds. Use when the player says things like 'continue mining'/'keep digging'.", objectSchema()
                 .property("count", integerSchema("how many more ore blocks to mine, default 8"))
                 .build(), (bot, args) -> {
-            var mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
+            var mem = BotMemoryStore.INSTANCE.of(bot.getUUID());
             var face = mem.place("mine_face");
             if (face.isEmpty()) {
                 return fail("no_mine_face: no recorded mining face from the previous task");
             }
-            if (!bot.getEntityWorld().getRegistryKey().getValue().toString().equals(face.get().dimension())) {
+            if (!bot.level().dimension().identifier().toString().equals(face.get().dimension())) {
                 return fail("mine_face_in_other_dimension");
             }
-            java.util.Set<net.minecraft.block.Block> ores = new java.util.HashSet<>();
+            java.util.Set<net.minecraft.world.level.block.Block> ores = new java.util.HashSet<>();
             mem.recall("mine_face_ores").ifPresent(csv -> {
                 for (String id : csv.split(",")) {
-                    var block = net.minecraft.registry.Registries.BLOCK
-                            .get(net.minecraft.util.Identifier.of(id.trim()));
-                    if (block != net.minecraft.block.Blocks.AIR) {
+                    var block = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                            .getValue(net.minecraft.resources.Identifier.parse(id.trim()));
+                    if (block != net.minecraft.world.level.block.Blocks.AIR) {
                         ores.add(block);
                     }
                 }
@@ -836,7 +835,7 @@ public final class ToolRegistry {
             Task back = new MoveTask(bot, face.get().pos());
             assignLlm(bot, back);
             GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(
-                    ores.isEmpty() ? java.util.Set.of(net.minecraft.block.Blocks.IRON_ORE) : ores,
+                    ores.isEmpty() ? java.util.Set.of(net.minecraft.world.level.block.Blocks.IRON_ORE) : ores,
                     optionalInt(args, "count", 8)));
             return ok("resuming at " + face.get().pos().toShortString());
         });
@@ -864,7 +863,7 @@ public final class ToolRegistry {
         register("recover_drops", "Run back to the most recent death location and pick up dropped items before they despawn (5 min)", objectSchema()
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             var deaths = io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE
-                    .recentOfType(bot.getUuid(), io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, 1);
+                    .recentOfType(bot.getUUID(), io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, 1);
             if (deaths.isEmpty()) {
                 return fail("no_recent_death");
             }
@@ -881,16 +880,16 @@ public final class ToolRegistry {
                 .required("steps")
                 .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             List<String> steps = stringArray(args, "steps");
-            BotMemoryStore.INSTANCE.of(bot.getUuid()).setGoal(requiredString(args, "title"), steps);
-            return ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus(""));
+            BotMemoryStore.INSTANCE.of(bot.getUUID()).setGoal(requiredString(args, "title"), steps);
+            return ok(BotMemoryStore.INSTANCE.of(bot.getUUID()).goalStatus(""));
         });
 
         register("advance_goal", "Advance the current persistent long-term goal by one step", objectSchema()
                 .property("result", stringSchema("short result of the completed step"))
-                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).advanceGoal(optionalString(args, "result", ""))));
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> ok(BotMemoryStore.INSTANCE.of(bot.getUUID()).advanceGoal(optionalString(args, "result", ""))));
 
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
-                ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
+                ok(BotMemoryStore.INSTANCE.of(bot.getUUID()).goalStatus("")));
     }
 
     /** assign_task and the task lifecycle tools it shares status/cancellation with. */
@@ -965,7 +964,7 @@ public final class ToolRegistry {
         return switch (taskType) {
             case "move" -> new MoveTask(bot, new BlockPos(requiredInt(params, "x"), requiredInt(params, "y"), requiredInt(params, "z")));
             case "forage" -> GatherQuotaTask.collectAdditional(
-                    net.minecraft.item.Items.SWEET_BERRIES, optionalInt(params, "count", 4));
+                    net.minecraft.world.item.Items.SWEET_BERRIES, optionalInt(params, "count", 4));
             case "attack" -> new CombatTask(
                     requiredEntityType(params, "entity_type"),
                     optionalInt(params, "count", 1),
@@ -983,7 +982,7 @@ public final class ToolRegistry {
             case "break_blocks" -> GatherQuotaTask.breakBlocks(
                     requiredBreakableBlock(bot, params, "block"), requiredPositiveInt(params, "count"));
             case "irrigate" -> new io.github.zoyluo.minecraftai.task.IrrigateTask(
-                    bot.getBlockPos().offset(bot.getHorizontalFacing(), 2).down()); // dig a 2x2 infinite water source in the floor layer, 2 blocks in front of the bot
+                    bot.blockPosition().relative(bot.getDirection(), 2).below()); // dig a 2x2 infinite water source in the floor layer, 2 blocks in front of the bot
             case "milk_cow" -> new io.github.zoyluo.minecraftai.task.MilkCowTask(optionalInt(params, "count", 1)); // milk `count` buckets of milk (requires empty buckets)
             case "raid_crops" -> new io.github.zoyluo.minecraftai.task.RaidCropsTask(optionalInt(params, "count", 8)); // harvest nearby mature crops (village or wild)
             case "fish" -> new FishTask(optionalInt(params, "max_catches", 1), optionalInt(params, "max_ticks", 6000));
@@ -1061,14 +1060,14 @@ public final class ToolRegistry {
     private static String craftPlanJson(CraftingHelper.CraftPlan plan) {
         JsonObject root = new JsonObject();
         root.addProperty("feasible", plan.success());
-        root.addProperty("target", Registries.ITEM.getId(plan.target()).toString());
+        root.addProperty("target", BuiltInRegistries.ITEM.getKey(plan.target()).toString());
         root.addProperty("count", plan.targetCount());
         root.addProperty("needs_crafting_table", plan.needsCraftingTable());
 
         com.google.gson.JsonArray steps = new com.google.gson.JsonArray();
         for (CraftingHelper.CraftStep step : plan.steps()) {
             JsonObject json = new JsonObject();
-            json.addProperty("output", Registries.ITEM.getId(step.recipe().output()).toString());
+            json.addProperty("output", BuiltInRegistries.ITEM.getKey(step.recipe().output()).toString());
             json.addProperty("crafts", step.crafts());
             json.addProperty("output_count", step.outputCount());
             json.addProperty("needs_crafting_table", step.recipe().needsCraftingTable());
@@ -1078,7 +1077,7 @@ public final class ToolRegistry {
                 ingredientJson.addProperty("count", ingredient.count() * step.crafts());
                 com.google.gson.JsonArray anyOf = new com.google.gson.JsonArray();
                 for (Item item : ingredient.anyOf()) {
-                    anyOf.add(Registries.ITEM.getId(item).toString());
+                    anyOf.add(BuiltInRegistries.ITEM.getKey(item).toString());
                 }
                 ingredientJson.add("any_of", anyOf);
                 ingredients.add(ingredientJson);
@@ -1091,7 +1090,7 @@ public final class ToolRegistry {
         com.google.gson.JsonArray missing = new com.google.gson.JsonArray();
         for (CraftingHelper.Missing item : plan.missing()) {
             JsonObject json = new JsonObject();
-            json.addProperty("item", Registries.ITEM.getId(item.item()).toString());
+            json.addProperty("item", BuiltInRegistries.ITEM.getKey(item.item()).toString());
             json.addProperty("count", item.count());
             json.addProperty("source", AcquisitionHints.source(item.item()));
             missing.add(json);
@@ -1241,17 +1240,17 @@ public final class ToolRegistry {
     }
 
     private static Block requiredBlock(JsonObject args, String name) {
-        Identifier id = Identifier.of(requiredString(args, name));
-        return Registries.BLOCK.getOptionalValue(id)
+        Identifier id = Identifier.parse(requiredString(args, name));
+        return BuiltInRegistries.BLOCK.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id));
     }
 
     private static Block requiredBreakableBlock(AIPlayerEntity bot, JsonObject args, String name) {
         Block block = requiredBlock(args, name);
-        var state = block.getDefaultState();
+        var state = block.defaultBlockState();
         if (state.isAir() || !state.getFluidState().isEmpty() || block.asItem() == Items.AIR
-                || state.getHardness(bot.getEntityWorld(), bot.getBlockPos()) < 0.0F) {
-            throw new IllegalArgumentException("not_a_breakable_block: " + Registries.BLOCK.getId(block));
+                || state.getDestroySpeed(bot.level(), bot.blockPosition()) < 0.0F) {
+            throw new IllegalArgumentException("not_a_breakable_block: " + BuiltInRegistries.BLOCK.getKey(block));
         }
         return block;
     }
@@ -1267,8 +1266,8 @@ public final class ToolRegistry {
     }
 
     private static Item requiredItem(JsonObject args, String name) {
-        Identifier id = Identifier.of(requiredString(args, name));
-        return Registries.ITEM.getOptionalValue(id)
+        Identifier id = Identifier.parse(requiredString(args, name));
+        return BuiltInRegistries.ITEM.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_item: " + id));
     }
 
@@ -1280,8 +1279,8 @@ public final class ToolRegistry {
     }
 
     private static EntityType<?> requiredEntityType(JsonObject args, String name) {
-        Identifier id = Identifier.of(requiredString(args, name));
-        return Registries.ENTITY_TYPE.getOptionalValue(id)
+        Identifier id = Identifier.parse(requiredString(args, name));
+        return BuiltInRegistries.ENTITY_TYPE.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_entity_type: " + id));
     }
 
@@ -1308,8 +1307,8 @@ public final class ToolRegistry {
             if (trimmed.isEmpty()) {
                 continue;
             }
-            Identifier id = Identifier.of(trimmed);
-            blocks.add(Registries.BLOCK.getOptionalValue(id)
+            Identifier id = Identifier.parse(trimmed);
+            blocks.add(BuiltInRegistries.BLOCK.getOptional(id)
                     .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id)));
         }
         return blocks;
@@ -1317,19 +1316,19 @@ public final class ToolRegistry {
 
     // Resolve an "ore block id" or "raw ore item (raw_iron/iron_ore, etc.)" into the target ore family (including deepslate variants).
     static java.util.Set<Block> oreTargetsFrom(String oreOrItem) {
-        Identifier id = Identifier.of(oreOrItem.trim());
-        Block block = Registries.BLOCK.getOptionalValue(id).orElse(null);
+        Identifier id = Identifier.parse(oreOrItem.trim());
+        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
         if (block != null && OreScan.isOreBlock(block)) {
             return OreScan.oreFamily(block);
         }
         String path = id.getPath().replace("raw_", "");
         for (String cand : new String[]{"minecraft:" + path + "_ore", "minecraft:" + path}) {
-            Block b = Registries.BLOCK.getOptionalValue(Identifier.of(cand)).orElse(null);
+            Block b = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(cand)).orElse(null);
             if (b != null && OreScan.isOreBlock(b)) {
                 return OreScan.oreFamily(b);
             }
         }
-        Item item = Registries.ITEM.getOptionalValue(id).orElse(null);
+        Item item = BuiltInRegistries.ITEM.getOptional(id).orElse(null);
         String correction = item == null ? "" : "; use achieve_goal with item=" + id;
         throw new IllegalArgumentException("unsupported_mine_ore_target: " + id + correction);
     }

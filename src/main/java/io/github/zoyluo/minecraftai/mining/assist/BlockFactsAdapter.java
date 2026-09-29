@@ -1,17 +1,16 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.FallingBlock;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Identifier;
-
 import java.util.IdentityHashMap;
 import java.util.Map;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Minecraft adapter that turns a {@link BlockState} the sensor has ALREADY observed into the pure
@@ -31,8 +30,8 @@ import java.util.Map;
  * {@link #fluidKind(BlockState)} per hit.</p>
  */
 public final class BlockFactsAdapter {
-    private static final TagKey<Block> COMMON_ORES = TagKey.of(RegistryKeys.BLOCK, Identifier.of("c", "ores"));
-    private static final TagKey<Block> COMMON_STONES = TagKey.of(RegistryKeys.BLOCK, Identifier.of("c", "stones"));
+    private static final TagKey<Block> COMMON_ORES = TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("c", "ores"));
+    private static final TagKey<Block> COMMON_STONES = TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("c", "stones"));
 
     /** Per block: index 0 is the ordinary classification, index 1 the lush-caves one. */
     private static final Map<Block, BlockFacts[]> CACHE = new IdentityHashMap<>();
@@ -75,10 +74,10 @@ public final class BlockFactsAdapter {
         if (fluid.isEmpty()) {
             return null;
         }
-        if (fluid.isIn(FluidTags.LAVA)) {
+        if (fluid.is(FluidTags.LAVA)) {
             return HazardField.Kind.LAVA;
         }
-        if (fluid.isIn(FluidTags.WATER)) {
+        if (fluid.is(FluidTags.WATER)) {
             return HazardField.Kind.WATER;
         }
         return null;
@@ -95,7 +94,7 @@ public final class BlockFactsAdapter {
     }
 
     private static BlockFacts compute(Block block, BlockState state, boolean lush) {
-        Identifier id = Registries.BLOCK.getId(block);
+        Identifier id = BuiltInRegistries.BLOCK.getKey(block);
         String namespace = id.getNamespace();
         String path = id.getPath();
         boolean hasBlockEntity = state.hasBlockEntity();
@@ -105,16 +104,16 @@ public final class BlockFactsAdapter {
     }
 
     private static boolean inNaturalTerrainTag(BlockState state) {
-        return state.isIn(BlockTags.BASE_STONE_OVERWORLD)
-                || state.isIn(BlockTags.BASE_STONE_NETHER)
-                || state.isIn(BlockTags.DIRT)
-                || state.isIn(BlockTags.SAND)
-                || state.isIn(BlockTags.TERRACOTTA)
-                || state.isIn(BlockTags.ICE)
-                || state.isIn(BlockTags.SNOW)
-                || state.isIn(BlockTags.NYLIUM)
-                || state.isIn(BlockTags.MOSS_REPLACEABLE)
-                || state.isIn(COMMON_ORES)
-                || state.isIn(COMMON_STONES);
+        return state.is(BlockTags.BASE_STONE_OVERWORLD)
+                || state.is(BlockTags.BASE_STONE_NETHER)
+                || state.is(BlockTags.DIRT)
+                || state.is(BlockTags.SAND)
+                || state.is(BlockTags.TERRACOTTA)
+                || state.is(BlockTags.ICE)
+                || state.is(BlockTags.SNOW)
+                || state.is(BlockTags.NYLIUM)
+                || state.is(BlockTags.MOSS_REPLACEABLE)
+                || state.is(COMMON_ORES)
+                || state.is(COMMON_STONES);
     }
 }

@@ -1,14 +1,14 @@
 package io.github.zoyluo.minecraftai.mixin;
 
-import net.minecraft.entity.Entity;
-import net.minecraft.server.world.ServerEntityManager;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.entity.PersistentEntitySectionManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
 /** Exposes the server's complete section cache for collision checks during HIDDEN-section ticks. */
-@Mixin(ServerWorld.class)
+@Mixin(ServerLevel.class)
 public interface ServerWorldEntityManagerAccessorMixin {
     @Accessor("entityManager")
-    ServerEntityManager<Entity> minecraftai$getEntityManager();
+    PersistentEntitySectionManager<Entity> minecraftai$getEntityManager();
 }

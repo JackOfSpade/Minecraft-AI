@@ -1,6 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -8,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.SplittableRandom;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -69,7 +69,7 @@ class BotEditsLedgerTest {
 
         assertTrue(ledger.wasPlaced(OVERWORLD, pos));
         assertTrue(ledger.wasPlaced(OVERWORLD, pos.asLong()));
-        assertFalse(ledger.wasPlaced(OVERWORLD, pos.up()));
+        assertFalse(ledger.wasPlaced(OVERWORLD, pos.above()));
     }
 
     @Test

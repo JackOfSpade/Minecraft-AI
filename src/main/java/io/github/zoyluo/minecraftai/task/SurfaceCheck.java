@@ -1,14 +1,13 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
-
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+import net.minecraft.core.BlockPos;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Is a spot on the surface (open to the sky) rather than underground or indoors?
@@ -48,12 +47,12 @@ public final class SurfaceCheck {
         if (state.isAir() || !state.getFluidState().isEmpty()) {
             return SurfaceColumn.Cell.OPEN;
         }
-        if (state.isIn(BlockTags.LOGS)
-                || state.isIn(BlockTags.LEAVES)
-                || state.isIn(BlockTags.WART_BLOCKS)
-                || state.isIn(BlockTags.REPLACEABLE)
-                || state.isIn(BlockTags.FLOWERS)
-                || state.isIn(BlockTags.SAPLINGS)
+        if (state.is(BlockTags.LOGS)
+                || state.is(BlockTags.LEAVES)
+                || state.is(BlockTags.WART_BLOCKS)
+                || state.is(BlockTags.REPLACEABLE)
+                || state.is(BlockTags.FLOWERS)
+                || state.is(BlockTags.SAPLINGS)
                 || isNaturalGrowth(state.getBlock())) {
             return SurfaceColumn.Cell.CANOPY;
         }
@@ -92,10 +91,10 @@ public final class SurfaceCheck {
      * no roof. {@code pos} is a bot's feet cell or a candidate torch cell; either way the cell above it
      * is the head/ceiling cell that decides.
      */
-    public static boolean isOnSurface(World world, BlockPos pos) {
-        int top = world.getBottomY() + world.getHeight();
+    public static boolean isOnSurface(Level world, BlockPos pos) {
+        int top = world.getMinY() + world.getHeight();
         Iterator<SurfaceColumn.Cell> column = new Iterator<>() {
-            private final BlockPos.Mutable cursor = pos.mutableCopy();
+            private final BlockPos.MutableBlockPos cursor = pos.mutable();
             private int y = pos.getY() + 1;
 
             @Override

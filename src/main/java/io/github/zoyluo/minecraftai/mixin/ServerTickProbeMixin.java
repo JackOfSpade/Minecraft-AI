@@ -16,7 +16,7 @@ public abstract class ServerTickProbeMixin {
     @Unique
     private long minecraftai$tickCount;
 
-    @Inject(method = "tick(Ljava/util/function/BooleanSupplier;)V", at = @At("HEAD"))
+    @Inject(method = "tickServer(Ljava/util/function/BooleanSupplier;)V", at = @At("HEAD"))
     private void minecraftai$onTick(BooleanSupplier shouldKeepTicking, CallbackInfo ci) {
         if (++minecraftai$tickCount % 1200L == 0L) {
             BotLog.lifecycle("mixin_alive", "server_tick", minecraftai$tickCount);

@@ -1,11 +1,10 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Pure scoring of a point-of-interest candidate (design 6.2 and 6.3). Deterministic: the result
@@ -127,7 +126,7 @@ public final class PoiScorer {
             Band band,
             boolean downgradedByHabitation,
             String mandatoryTrigger,
-            Vec3d centroid,
+            Vec3 centroid,
             boolean weakCounted,
             boolean clusterBonus,
             boolean cavernActive,
@@ -378,7 +377,7 @@ public final class PoiScorer {
         return false;
     }
 
-    private static Vec3d centroid(List<BlockPos> cells) {
+    private static Vec3 centroid(List<BlockPos> cells) {
         if (cells.isEmpty()) {
             return null;
         }
@@ -391,7 +390,7 @@ public final class PoiScorer {
             sz += p.getZ();
         }
         double n = cells.size();
-        return new Vec3d(sx / n + 0.5D, sy / n + 0.5D, sz / n + 0.5D);
+        return new Vec3(sx / n + 0.5D, sy / n + 0.5D, sz / n + 0.5D);
     }
 
     private static boolean ge(double value, double threshold) {

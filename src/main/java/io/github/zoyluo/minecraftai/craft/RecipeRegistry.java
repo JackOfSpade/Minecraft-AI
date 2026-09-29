@@ -1,12 +1,11 @@
 package io.github.zoyluo.minecraftai.craft;
 
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 public final class RecipeRegistry {
     public record Ingredient(List<Item> anyOf, int count) {

@@ -10,22 +10,21 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
 
 public final class HarvestCore {
     // NAV-OPT (layer 0B): reachability that's actually reachable -- verify only the nearest N candidates,
@@ -43,14 +42,14 @@ public final class HarvestCore {
 
     public static TargetChoice nearestReachableBlock(AIPlayerEntity bot, Block targetBlock, int horizontalRadius, int down, int up) {
         CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_block");
-        CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
-        BlockPos origin = bot.getBlockPos();
+        CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
+        BlockPos origin = bot.blockPosition();
         return firstWalkReachable(bot, origin,
-                BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
+                BlockPos.betweenClosedStream(origin.offset(-horizontalRadius, -down, -horizontalRadius), origin.offset(horizontalRadius, up, horizontalRadius))
                         .filter(pos -> scanDecision.allowed() || withinObservationReach(bot, pos))
                         .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                        .filter(pos -> bot.getEntityWorld().getBlockState(pos).isOf(targetBlock))
-                        .map(BlockPos::toImmutable)
+                        .filter(pos -> bot.level().getBlockState(pos).is(targetBlock))
+                        .map(BlockPos::immutable)
                         .map(pos -> targetChoice(bot, pos))
                         .filter(choice -> choice != null));
     }
@@ -98,7 +97,7 @@ public final class HarvestCore {
                                                Predicate<BlockPos> posFilter,
                                                boolean allowObservableCellFallback) {
         CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_blocks");
-        CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
+        CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
         return new NearestScan(bot, targetBlocks, horizontalRadius, down, up, posFilter,
                 allowObservableCellFallback, scanDecision.allowed());
     }
@@ -147,8 +146,8 @@ public final class HarvestCore {
             this.posFilter = posFilter;
             this.allowObservableCellFallback = allowObservableCellFallback;
             this.hiddenScanAllowed = hiddenScanAllowed;
-            this.origin = bot.getBlockPos();
-            this.startTick = bot.getEntityWorld().getServer() == null ? 0 : bot.getEntityWorld().getServer().getTicks();
+            this.origin = bot.blockPosition();
+            this.startTick = bot.level().getServer() == null ? 0 : bot.level().getServer().getTickCount();
             this.minX = origin.getX() - horizontalRadius;
             this.minY = origin.getY() - down;
             this.minZ = origin.getZ() - horizontalRadius;
@@ -205,7 +204,7 @@ public final class HarvestCore {
                     if (!enumerated) {
                         return false;
                     }
-                    candidates.sort(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));                }
+                    candidates.sort(Comparator.comparingDouble(pos -> pos.distSqr(origin)));                }
                 verify(deadline);
                 return done;
             } finally {
@@ -216,8 +215,8 @@ public final class HarvestCore {
         }
 
         private void enumerate(long deadline) {
-            var world = bot.getEntityWorld();
-            BlockPos.Mutable cursor = new BlockPos.Mutable();
+            var world = bot.level();
+            BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
             int visited = 0;
             while (index < total) {
                 long i = index++;
@@ -230,7 +229,7 @@ public final class HarvestCore {
                         && canObserveHarvestTarget(bot, cursor, allowObservableCellFallback)
                         && targetBlocks.contains(world.getBlockState(cursor).getBlock())
                         && (posFilter == null || posFilter.test(cursor))) {
-                    candidates.add(cursor.toImmutable());
+                    candidates.add(cursor.immutable());
                 }
                 if ((++visited & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
                     return;
@@ -263,8 +262,8 @@ public final class HarvestCore {
     }
 
     public static void startMining(AIPlayerEntity bot, BlockPos targetPos) {
-        ToolSelector.equipBestTool(bot, bot.getEntityWorld().getBlockState(targetPos));
-        MiningAction.startMining(bot, targetPos, Direction.getFacing(bot.getEyePos().subtract(targetPos.toCenterPos())));
+        ToolSelector.equipBestTool(bot, bot.level().getBlockState(targetPos));
+        MiningAction.startMining(bot, targetPos, Direction.getApproximateNearest(bot.getEyePosition().subtract(targetPos.getCenter())));
     }
 
     public static Optional<ItemEntity> nearestDrop(AIPlayerEntity bot, Item item, double radius) {
@@ -272,9 +271,9 @@ public final class HarvestCore {
     }
 
     public static Optional<ItemEntity> nearestDropAnyOf(AIPlayerEntity bot, Set<Item> items, double radius) {
-        return bot.getEntityWorld()
-                .getEntitiesByClass(ItemEntity.class, bot.getBoundingBox().expand(radius),
-                        entity -> !entity.getStack().isEmpty() && matches(entity.getStack(), items)
+        return bot.level()
+                .getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(radius),
+                        entity -> !entity.getItem().isEmpty() && matches(entity.getItem(), items)
                                 && ObservableWorldQuery.canObserveEntity(bot, entity))
                 .stream()
                 .min(Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
@@ -286,19 +285,19 @@ public final class HarvestCore {
 
     public static boolean forcePickupNearbyAnyOf(AIPlayerEntity bot, Set<Item> items, double maxH, double maxV) {
         CapabilityDecision pickupDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.FORCED_PICKUP, "harvest_force_pickup");
-        CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.FORCED_PICKUP, pickupDecision.allowed());
+        CapabilityTally.INSTANCE.record(bot.getUUID(), PrivilegedCapability.FORCED_PICKUP, pickupDecision.allowed());
         if (!pickupDecision.allowed()) {
             return false;
         }
-        Box box = bot.getBoundingBox().expand(maxH, maxV, maxH);
-        List<ItemEntity> drops = bot.getEntityWorld().getEntitiesByClass(ItemEntity.class, box,
-                entity -> !entity.getStack().isEmpty()
-                        && matches(entity.getStack(), items)
+        AABB box = bot.getBoundingBox().inflate(maxH, maxV, maxH);
+        List<ItemEntity> drops = bot.level().getEntitiesOfClass(ItemEntity.class, box,
+                entity -> !entity.getItem().isEmpty()
+                        && matches(entity.getItem(), items)
                         && ObservableWorldQuery.canObserveEntity(bot, entity)
                         && canForcePickup(bot, entity, maxH, maxV));
         boolean picked = false;
         for (ItemEntity drop : drops) {
-            ItemStack remaining = drop.getStack().copy();
+            ItemStack remaining = drop.getItem().copy();
             int before = remaining.getCount();
             ActionResult result = InventoryAction.giveItem(bot, remaining);
             int inserted = before - remaining.getCount();
@@ -307,13 +306,13 @@ public final class HarvestCore {
             }
             picked = true;
             BotLog.action(bot, "pickup_forced",
-                    "item", drop.getStack().getItem(),
+                    "item", drop.getItem().getItem(),
                     "count", inserted,
                     "result", result.isSuccess() ? "all" : result.reason());
             if (remaining.isEmpty()) {
                 drop.discard();
             } else {
-                drop.setStack(remaining);
+                drop.setItem(remaining);
             }
         }
         return picked;
@@ -378,7 +377,7 @@ public final class HarvestCore {
         if (!isDropPhysicallySupported(bot, drop)) {
             return false;
         }
-        return approachKnownPickupCell(bot, drop.getBlockPos(), drop.getEntityPos(), false);
+        return approachKnownPickupCell(bot, drop.blockPosition(), drop.position(), false);
     }
 
     /**
@@ -390,11 +389,11 @@ public final class HarvestCore {
         if (bot == null || drop == null || !drop.isAlive()) {
             return false;
         }
-        BlockPos shaftBase = observableDryPickupShaftBase(bot, drop.getBlockPos());
+        BlockPos shaftBase = observableDryPickupShaftBase(bot, drop.blockPosition());
         if (shaftBase == null) {
             return false;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         if (current.equals(shaftBase)) {
             bot.getActionPack().stopMovement();
             return true;
@@ -403,7 +402,7 @@ public final class HarvestCore {
         int horizontal = Math.abs(shaftBase.getX() - current.getX())
                 + Math.abs(shaftBase.getZ() - current.getZ());
         if (vertical == -1 && horizontal == 0
-                && Standability.isStandable(bot.getEntityWorld(), shaftBase)) {
+                && Standability.isStandable(bot.level(), shaftBase)) {
             bot.getActionPack().descendInto(shaftBase);
             return true;
         }
@@ -421,18 +420,18 @@ public final class HarvestCore {
         if (bot == null || drop == null || !drop.isAlive()) {
             return false;
         }
-        if (drop.isOnGround() || drop.isTouchingWater()) {
+        if (drop.onGround() || drop.isInWater()) {
             return true;
         }
-        Box bounds = drop.getBoundingBox();
-        Box supportProbe = new Box(
+        AABB bounds = drop.getBoundingBox();
+        AABB supportProbe = new AABB(
                 bounds.minX,
                 bounds.minY - PICKUP_SUPPORT_PROBE_DEPTH,
                 bounds.minZ,
                 bounds.maxX,
                 bounds.minY,
                 bounds.maxZ);
-        return bot.getEntityWorld().findSupportingBlockPos(drop, supportProbe).isPresent();
+        return bot.level().findSupportingBlock(drop, supportProbe).isPresent();
     }
 
     /**
@@ -442,14 +441,14 @@ public final class HarvestCore {
      * entity scan, and no digging or pillaring is allowed while recovering it.
      */
     public static boolean approachKnownPickupCell(AIPlayerEntity bot, BlockPos itemPos) {
-        return approachKnownPickupCell(bot, itemPos, itemPos.toCenterPos(), true);
+        return approachKnownPickupCell(bot, itemPos, itemPos.getCenter(), true);
     }
 
     private static boolean approachKnownPickupCell(AIPlayerEntity bot,
                                                     BlockPos itemPos,
-                                                    net.minecraft.util.math.Vec3d target,
+                                                    net.minecraft.world.phys.Vec3 target,
                                                     boolean requireExactRoute) {
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         Standability.clearCache();
         BlockPos stand = pickupStandPos(bot, itemPos);
         // A freshly broken item keeps its launch velocity for several ticks.  Its current block
@@ -465,7 +464,7 @@ public final class HarvestCore {
                 + Math.abs(stand.getZ() - current.getZ());
 
         if (vertical == -1 && horizontal == 0
-                && Standability.isStandable(bot.getEntityWorld(), stand)) {
+                && Standability.isStandable(bot.level(), stand)) {
             // Server-side fake players receive no client gravity. Enter the adjacent open cell
             // explicitly; ActionPack validates this as a single physical fake-client step.
             bot.getActionPack().descendInto(stand);
@@ -531,12 +530,12 @@ public final class HarvestCore {
 
     public static int totalInventoryCount(AIPlayerEntity bot) {
         int count = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty()) {
                 count += stack.getCount();
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (!offHandStack.isEmpty()) {
             count += offHandStack.getCount();
         }
@@ -545,12 +544,12 @@ public final class HarvestCore {
 
     public static int countInventoryItems(AIPlayerEntity bot, Set<Item> items) {
         int count = 0;
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty() && matches(stack, items)) {
                 count += stack.getCount();
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (!offHandStack.isEmpty() && matches(offHandStack, items)) {
             count += offHandStack.getCount();
         }
@@ -604,7 +603,7 @@ public final class HarvestCore {
     }
 
     public static boolean isInventoryFull(AIPlayerEntity bot) {
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 return false;
             }
@@ -614,24 +613,24 @@ public final class HarvestCore {
 
     /** Returns a real standable pickup pose, or {@code null} while a drop is still unsupported. */
     public static BlockPos pickupStandPos(AIPlayerEntity bot, BlockPos itemPos) {
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         // A grounded drop on the bot's current level must be collected by entering its exact
         // cell. Choosing the already occupied neighbouring cell merely causes a bounded nudge;
         // that is useful for an elevated drop on a pedestal, but it cannot close an ordinary
         // one-block horizontal gap reliably under vanilla pickup collision.
         if (itemPos.getY() == current.getY()
-                && Standability.isStandable(bot.getEntityWorld(), itemPos)) {
-            return itemPos.toImmutable();
+                && Standability.isStandable(bot.level(), itemPos)) {
+            return itemPos.immutable();
         }
-        BlockPos below = itemPos.down();
+        BlockPos below = itemPos.below();
         if (itemPos.getY() == current.getY() + 1
-                && Standability.isStandable(bot.getEntityWorld(), below)) {
+                && Standability.isStandable(bot.level(), below)) {
             // A launch-drifted drop one block above and one block sideways can be visible while
             // the nearest generic candidate is the current lower-ring cell. Nudging inside that
             // cell never crosses the horizontal block boundary, so the item can survive until the
             // recovery deadline. Walk to the factual stand directly beneath it; the player's
             // ordinary collision box then overlaps the elevated ItemEntity without a jump/pillar.
-            return below.toImmutable();
+            return below.immutable();
         }
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
@@ -649,17 +648,17 @@ public final class HarvestCore {
                 below.west()
         };
         for (BlockPos candidate : candidates) {
-            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            if (!Standability.isStandable(bot.level(), candidate)) {
                 continue;
             }
-            double distance = candidate.getSquaredDistance(current);
+            double distance = candidate.distSqr(current);
             if (distance < bestDistance) {
                 best = candidate;
                 bestDistance = distance;
             }
         }
         if (shaftBase != null) {
-            double distance = shaftBase.getSquaredDistance(current);
+            double distance = shaftBase.distSqr(current);
             if (distance < bestDistance) {
                 best = shaftBase;
             }
@@ -677,23 +676,23 @@ public final class HarvestCore {
         if (bot == null || itemPos == null) {
             return null;
         }
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         for (int depth = 0; depth <= PICKUP_DRY_SHAFT_DEPTH; depth++) {
-            BlockPos cell = itemPos.down(depth);
+            BlockPos cell = itemPos.below(depth);
             if (!ObservableWorldQuery.canObserveCell(bot, cell)
                     || !world.getFluidState(cell).isEmpty()
                     || !world.getBlockState(cell).getCollisionShape(world, cell).isEmpty()) {
                 return null;
             }
             if (depth >= 2 && Standability.isStandable(world, cell)) {
-                return cell.toImmutable();
+                return cell.immutable();
             }
         }
         return null;
     }
 
     public static boolean canReach(AIPlayerEntity bot, BlockPos target) {
-        return bot.getEyePos().distanceTo(target.toCenterPos()) <= 4.5D;
+        return bot.getEyePosition().distanceTo(target.getCenter()) <= 4.5D;
     }
 
     public static boolean canDirectMine(AIPlayerEntity bot, BlockPos target) {
@@ -711,7 +710,7 @@ public final class HarvestCore {
      */
     private static boolean withinObservationReach(AIPlayerEntity bot, BlockPos pos) {
         double reach = Math.max(1, io.github.zoyluo.minecraftai.MinecraftAiConfig.get().perception().radius()) + 0.87D;
-        return bot.getEyePos().squaredDistanceTo(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) <= reach * reach;
+        return bot.getEyePosition().distanceToSqr(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) <= reach * reach;
     }
 
     private static boolean canObserveHarvestTarget(AIPlayerEntity bot,
@@ -732,7 +731,7 @@ public final class HarvestCore {
     // GOTO to repeatedly fail and get stuck.
     private static TargetChoice firstWalkReachable(AIPlayerEntity bot, BlockPos origin, java.util.stream.Stream<TargetChoice> candidates) {
         return candidates
-                .sorted(Comparator.comparingDouble(choice -> choice.pos().getSquaredDistance(origin)))
+                .sorted(Comparator.comparingDouble(choice -> choice.pos().distSqr(origin)))
                 .limit(REACH_VERIFY_LIMIT)
                 .filter(choice -> isWalkReachable(bot, choice))
                 .findFirst()
@@ -741,10 +740,10 @@ public final class HarvestCore {
 
     public static boolean isWalkReachable(AIPlayerEntity bot, TargetChoice choice) {
         BlockPos stand = choice.stand();
-        if (stand == null || bot.getBlockPos().equals(stand)) {
+        if (stand == null || bot.blockPosition().equals(stand)) {
             return true; // Within reach, mine directly / already at the stand position, no pathfinding needed
         }
-        return new AStarPathfinder(bot, bot.getEntityWorld(), bot.getBlockPos(), stand,
+        return new AStarPathfinder(bot, bot.level(), bot.blockPosition(), stand,
                 REACH_MAX_NODES, REACH_MAX_MILLIS, false, false).findPath().success();
     }
 
@@ -763,9 +762,9 @@ public final class HarvestCore {
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = target.offset(direction);
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = target.relative(direction);
+            if (Standability.isStandable(bot.level(), candidate)) {
                 return candidate;
             }
         }
@@ -773,7 +772,7 @@ public final class HarvestCore {
     }
 
     private static boolean canForcePickup(AIPlayerEntity bot, ItemEntity drop, double maxH, double maxV) {
-        if (drop.cannotPickup()) {
+        if (drop.hasPickUpDelay()) {
             return false;
         }
         double dx = drop.getX() - bot.getX();

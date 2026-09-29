@@ -2,14 +2,14 @@ package io.github.zoyluo.minecraftai.mode;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 /** Strict-survival perception filter: nearby, exposed, and actually on the Bot's line of sight. */
 public final class ObservableWorldQuery {
@@ -53,10 +53,10 @@ public final class ObservableWorldQuery {
             // Keep the endpoint just inside the target block. Stopping just outside the face
             // lets the ray end before entering the collision shape and produces MISS for an
             // otherwise visible floor block.
-            var face = pos.toCenterPos().add(
-                    direction.getOffsetX() * 0.499D,
-                    direction.getOffsetY() * 0.499D,
-                    direction.getOffsetZ() * 0.499D);
+            var face = pos.getCenter().add(
+                    direction.getStepX() * 0.499D,
+                    direction.getStepY() * 0.499D,
+                    direction.getStepZ() * 0.499D);
             if (canObserveFaceAfterPolicy(bot, pos, direction, face, range)) {
                 return true;
             }
@@ -77,23 +77,23 @@ public final class ObservableWorldQuery {
         }
         double observationRange = Math.min(
                 Math.max(1, MinecraftAiConfig.get().perception().radius()),
-                bot.getBlockInteractionRange());
+                bot.blockInteractionRange());
         double observationRangeSquared = observationRange * observationRange;
-        Vec3d eye = bot.getEyePos();
+        Vec3 eye = bot.getEyePosition();
         for (Direction direction : Direction.values()) {
             for (double[] offset : FACE_SAMPLE_OFFSETS) {
-                Vec3d endpoint = insetFaceEndpoint(pos, direction, offset[0], offset[1]);
-                if (eye.squaredDistanceTo(endpoint) > observationRangeSquared) {
+                Vec3 endpoint = insetFaceEndpoint(pos, direction, offset[0], offset[1]);
+                if (eye.distanceToSqr(endpoint) > observationRangeSquared) {
                     continue;
                 }
-                BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
+                BlockHitResult hit = bot.level().clip(new ClipContext(
                         eye, endpoint,
-                        RaycastContext.ShapeType.COLLIDER,
-                        RaycastContext.FluidHandling.ANY,
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.ANY,
                         bot));
                 if (hit.getType() == HitResult.Type.BLOCK
                         && hit.getBlockPos().equals(pos)
-                        && hit.getSide() == direction) {
+                        && hit.getDirection() == direction) {
                     return true;
                 }
             }
@@ -101,14 +101,14 @@ public final class ObservableWorldQuery {
         return false;
     }
 
-    static Vec3d insetFaceEndpoint(BlockPos pos,
+    static Vec3 insetFaceEndpoint(BlockPos pos,
                                    Direction face,
                                    double firstTangent,
                                    double secondTangent) {
-        Vec3d center = pos.toCenterPos().add(
-                face.getOffsetX() * FACE_ENDPOINT_DEPTH,
-                face.getOffsetY() * FACE_ENDPOINT_DEPTH,
-                face.getOffsetZ() * FACE_ENDPOINT_DEPTH);
+        Vec3 center = pos.getCenter().add(
+                face.getStepX() * FACE_ENDPOINT_DEPTH,
+                face.getStepY() * FACE_ENDPOINT_DEPTH,
+                face.getStepZ() * FACE_ENDPOINT_DEPTH);
         return switch (face.getAxis()) {
             case X -> center.add(0.0D, firstTangent, secondTangent);
             case Y -> center.add(firstTangent, 0.0D, secondTangent);
@@ -119,18 +119,18 @@ public final class ObservableWorldQuery {
     private static boolean canObserveFaceAfterPolicy(AIPlayerEntity bot,
                                                       BlockPos pos,
                                                       Direction face,
-                                                      net.minecraft.util.math.Vec3d endpoint,
+                                                      net.minecraft.world.phys.Vec3 endpoint,
                                                       int range) {
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
-        if (bot.getEyePos().squaredDistanceTo(endpoint) > (double) radius * radius) {
+        if (bot.getEyePosition().distanceToSqr(endpoint) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
-                bot.getEyePos(), endpoint,
-                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, bot));
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                bot.getEyePosition(), endpoint,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
         return hit.getType() == HitResult.Type.BLOCK
                 && hit.getBlockPos().equals(pos)
-                && hit.getSide() == face;
+                && hit.getDirection() == face;
     }
 
     /**
@@ -160,12 +160,12 @@ public final class ObservableWorldQuery {
 
     private static boolean canObserveCellWithinAfterPolicy(AIPlayerEntity bot, BlockPos pos, int range) {
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
-        if (bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) > (double) radius * radius) {
+        if (bot.getEyePosition().distanceToSqr(pos.getCenter()) > (double) radius * radius) {
             return false;
         }
-        BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
-                bot.getEyePos(), pos.toCenterPos(),
-                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, bot));
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                bot.getEyePosition(), pos.getCenter(),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, bot));
         return hit.getType() == HitResult.Type.MISS
                 || (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos));
     }
@@ -176,7 +176,7 @@ public final class ObservableWorldQuery {
             return true;
         }
         int radius = Math.max(1, MinecraftAiConfig.get().perception().radius());
-        return bot.squaredDistanceTo(entity) <= (double) radius * radius && bot.canSee(entity);
+        return bot.distanceToSqr(entity) <= (double) radius * radius && bot.hasLineOfSight(entity);
     }
 
     /**
@@ -192,7 +192,7 @@ public final class ObservableWorldQuery {
             return true;
         }
         int radius = Math.max(Math.max(1, MinecraftAiConfig.get().perception().radius()), range);
-        return bot.squaredDistanceTo(entity) <= (double) radius * radius && bot.canSee(entity);
+        return bot.distanceToSqr(entity) <= (double) radius * radius && bot.hasLineOfSight(entity);
     }
 
     /** Which shape a view ray tests against. */
@@ -238,24 +238,24 @@ public final class ObservableWorldQuery {
         if (!(limit > 0.0D) || !(length > 1.0E-9D)) {
             return ViewHit.unknown();
         }
-        Vec3d eye = bot.getEyePos();
-        Vec3d end = eye.add(dx / length * limit, dy / length * limit, dz / length * limit);
-        var world = bot.getEntityWorld();
+        Vec3 eye = bot.getEyePosition();
+        Vec3 end = eye.add(dx / length * limit, dy / length * limit, dz / length * limit);
+        var world = bot.level();
         // Chunk coordinate is the block coordinate shifted right by four bits.
-        if (!world.getChunkManager().isChunkLoaded(
+        if (!world.getChunkSource().hasChunk(
                 (int) Math.floor(end.x) >> 4, (int) Math.floor(end.z) >> 4)) {
             return ViewHit.unknown();
         }
-        BlockHitResult hit = world.raycast(new RaycastContext(
+        BlockHitResult hit = world.clip(new ClipContext(
                 eye, end,
                 shape == ViewShape.OUTLINE
-                        ? RaycastContext.ShapeType.OUTLINE : RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.ANY,
+                        ? ClipContext.Block.OUTLINE : ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.ANY,
                 bot));
         if (hit.getType() != HitResult.Type.BLOCK) {
             return new ViewHit(false, null, null, limit, null);
         }
         BlockPos pos = hit.getBlockPos();
-        return new ViewHit(true, pos, hit.getSide(), eye.distanceTo(hit.getPos()), world.getBlockState(pos));
+        return new ViewHit(true, pos, hit.getDirection(), eye.distanceTo(hit.getLocation()), world.getBlockState(pos));
     }
 }

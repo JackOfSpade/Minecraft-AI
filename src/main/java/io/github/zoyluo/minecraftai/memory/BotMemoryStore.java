@@ -1,12 +1,11 @@
 package io.github.zoyluo.minecraftai.memory;
 
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.StringNbtReader;
-
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.TagParser;
 
 public final class BotMemoryStore {
     public static final BotMemoryStore INSTANCE = new BotMemoryStore();
@@ -29,7 +28,7 @@ public final class BotMemoryStore {
             return;
         }
         try {
-            NbtCompound root = StringNbtReader.readCompound(snbt);
+            CompoundTag root = TagParser.parseCompoundFully(snbt);
             of(botId).load(root);
             BotLog.comm(null, "bot_memory_loaded", "bot_uuid", botId);
         } catch (Exception exception) {

@@ -18,17 +18,17 @@ import io.github.zoyluo.minecraftai.persist.MissionRecord;
 import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.persist.MissionSpec;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,41 +36,40 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import net.minecraft.text.Text;
 
 /** Strict-survival regression for the stone bootstrap's factual staircase return. */
 public final class DigDownReturnGameTests {
     @GameTest(maxTicks = 900)
-    public void unsupportedNaturalSlopeRotatesToSupportedStoneStair(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 6, -28));
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(start.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    public void unsupportedNaturalSlopeRotatesToSupportedStoneStair(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(6, 6, -28));
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(start.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
 
         // Default NORTH is a natural air slope ending above a void: next and next.down have no
         // support. EAST is a conventional mineable stone staircase. The task must rotate instead
         // of retrying the rejected NORTH landing until its no-progress deadline.
-        BlockPos northNext = start.north().down();
-        world.setBlockState(start.north(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(northNext, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(northNext.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos northNext = start.north().below();
+        world.setBlock(start.north(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(northNext, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(northNext.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         for (int dx = 1; dx <= 5; dx++) {
             for (int dy = -6; dy <= 0; dy++) {
-                world.setBlockState(start.add(dx, dy, 0),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(start.offset(dx, dy, 0),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
-            world.setBlockState(start.add(dx, 1, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(start.add(dx, 2, 0), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(start.offset(dx, 1, 0), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(start.offset(dx, 2, 0), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         // isViableStairDirection now takes the bot (strict-survival observation is gated on its
         // eye position/profile), so it must be spawned before these fixture assertions run.
         AIPlayerEntity bot = spawn(context, "DigDownRotateGT", start);
         require(context, !DigDownTask.isViableStairDirection(
-                        bot, start, net.minecraft.util.math.Direction.NORTH),
+                        bot, start, net.minecraft.core.Direction.NORTH),
                 "fixture's unsupported north stair was accepted");
         require(context, DigDownTask.isViableStairDirection(
-                        bot, start, net.minecraft.util.math.Direction.EAST),
+                        bot, start, net.minecraft.core.Direction.EAST),
                 "fixture's supported east stair was rejected");
 
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
@@ -79,12 +78,12 @@ public final class DigDownReturnGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_rotate_stair"));
         AtomicBoolean usedEastStair = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
-            if (bot.getBlockPos().getX() > start.getX()) {
+        context.failIfEver(() -> {
+            if (bot.blockPosition().getX() > start.getX()) {
                 usedEastStair.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("rotating DigDown ended as " + task.state()
+                context.fail(Component.nullToEmpty("rotating DigDown ended as " + task.state()
                         + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -92,7 +91,7 @@ public final class DigDownReturnGameTests {
             }
             require(context, usedEastStair.get(),
                     "DigDown never used the supported alternative staircase");
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "rotating DigDown did not return to its exact origin");
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 3,
                     "rotating DigDown did not collect the stone quota");
@@ -101,23 +100,23 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(maxTicks = 900)
-    public void movedDescendCheckpointStartsFreshAtCurrentPose(TestContext context) {
-        var world = context.getWorld();
-        BlockPos oldStart = context.getAbsolutePos(new BlockPos(3, 6, -48));
+    public void movedDescendCheckpointStartsFreshAtCurrentPose(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos oldStart = context.absolutePos(new BlockPos(3, 6, -48));
         List<BlockPos> oldTrail = List.of(
                 oldStart,
-                oldStart.add(0, -1, -1),
-                oldStart.add(0, -2, -2));
-        BlockPos current = oldStart.add(12, 0, 0);
+                oldStart.offset(0, -1, -1),
+                oldStart.offset(0, -2, -2));
+        BlockPos current = oldStart.offset(12, 0, 0);
         for (int dx = -2; dx <= 5; dx++) {
             for (int dz = -5; dz <= 2; dz++) {
                 for (int dy = -7; dy <= -1; dy++) {
-                    world.setBlockState(current.add(dx, dy, dz),
-                            Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(current.offset(dx, dy, dz),
+                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(current.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(current.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
@@ -134,17 +133,17 @@ public final class DigDownReturnGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_moved_checkpoint"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("moved-checkpoint DigDown ended as " + task.state()
+                context.fail(Component.nullToEmpty("moved-checkpoint DigDown ended as " + task.state()
                         + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, bot.getBlockPos().equals(current),
+            require(context, bot.blockPosition().equals(current),
                     "fresh DigDown returned to the stale checkpoint origin: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 3,
                     "fresh DigDown did not satisfy the stone quota");
             finish(context, bot, "DigDownMovedCheckpointGT");
@@ -152,15 +151,15 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_safety_pause_rejoins_trusted_tail_and_fails_only_after_exact_return", maxTicks = 320)
-    public void safetyPauseRejoinsTrustedTailAndFailsOnlyAfterExactReturn(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void safetyPauseRejoinsTrustedTailAndFailsOnlyAfterExactReturn(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
         BlockPos pauseAnchor = middle.east();
         BlockPos displaced = pauseAnchor.east(5);
         BlockPos forbiddenRemoteMine = displaced.north();
         preparePlatform(context, start, 12);
-        context.getWorld().setBlockState(forbiddenRemoteMine,
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(forbiddenRemoteMine,
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DigDownSafetyPauseGT", middle);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 2));
@@ -192,14 +191,14 @@ public final class DigDownReturnGameTests {
                             bot, safetyStep, "gametest_dig_down_safety_displacement"),
                     "fixture could not apply safety displacement step " + step);
         }
-        require(context, bot.getBlockPos().equals(displaced),
+        require(context, bot.blockPosition().equals(displaced),
                 "fixture did not end at the non-adjacent safety pose");
         task.resume(bot);
 
         AtomicBoolean rejoinedPauseAnchor = new AtomicBoolean();
         AtomicBoolean followedOlderTrail = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
-            BlockPos before = bot.getBlockPos();
+        context.failIfEver(() -> {
+            BlockPos before = bot.blockPosition();
             if (before.equals(pauseAnchor)) {
                 rejoinedPauseAnchor.set(true);
             }
@@ -209,14 +208,14 @@ public final class DigDownReturnGameTests {
 
             task.tick(bot);
 
-            BlockPos after = bot.getBlockPos();
+            BlockPos after = bot.blockPosition();
             if (after.equals(pauseAnchor)) {
                 rejoinedPauseAnchor.set(true);
             }
             if (rejoinedPauseAnchor.get() && after.equals(middle)) {
                 followedOlderTrail.set(true);
             }
-            require(context, context.getWorld().getBlockState(forbiddenRemoteMine).isOf(Blocks.STONE),
+            require(context, context.getLevel().getBlockState(forbiddenRemoteMine).is(Blocks.STONE),
                     "resumed DigDown mined at the displaced safety pose");
             if (!after.equals(start)) {
                 require(context, task.state() == TaskState.RUNNING,
@@ -246,11 +245,11 @@ public final class DigDownReturnGameTests {
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_safety_interrupted_goal_replan_quarantines_old_entry_and_relocates_physically", maxTicks = 500)
     public void safetyInterruptedGoalReplanQuarantinesOldEntryAndRelocatesPhysically(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 7, 3));
-        BlockPos middle = start.north().down();
-        BlockPos tail = middle.north().down();
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(3, 7, 3));
+        BlockPos middle = start.north().below();
+        BlockPos tail = middle.north().below();
         BlockPos oldFrontier = tail.north();
         BlockPos nextEntry = start.east(4);
 
@@ -258,16 +257,16 @@ public final class DigDownReturnGameTests {
         // column is four blocks east, so the successor must visibly walk there; without quarantine
         // its default NORTH descent immediately steps back into middle and replays this same tunnel.
         for (BlockPos landing : List.of(start, middle, tail)) {
-            world.setBlockState(landing.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(landing, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(landing.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(landing.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(landing, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(landing.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        world.setBlockState(oldFrontier, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(oldFrontier, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         for (int step = 0; step <= 4; step++) {
             BlockPos surface = start.east(step);
-            world.setBlockState(surface.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(surface, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(surface.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(surface.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(surface, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(surface.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         String name = "DigDownSafetyReplanGT";
@@ -282,7 +281,7 @@ public final class DigDownReturnGameTests {
                 start, List.of(start, middle, tail), 8, 2);
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(start));
-        missionCheckpoint.put("started_tick", String.valueOf(bot.getEntityWorld().getServer().getTicks()));
+        missionCheckpoint.put("started_tick", String.valueOf(bot.level().getServer().getTickCount()));
         missionCheckpoint.put("revision", "0");
         missionCheckpoint.put("task_kind", GoalStep.Kind.MINE.name());
         taskCheckpoint.forEach((key, value) ->
@@ -297,7 +296,7 @@ public final class DigDownReturnGameTests {
                 "fixture did not restore the interrupted MINE cursor: "
                         + (restored == null ? "none" : restored.getClass().getSimpleName()));
         DigDownTask first = (DigDownTask) restored;
-        require(context, first.state() == TaskState.RUNNING && bot.getBlockPos().equals(tail),
+        require(context, first.state() == TaskState.RUNNING && bot.blockPosition().equals(tail),
                 "restored DigDown did not own the exact old trail tail");
 
         TaskManager.INSTANCE.pauseFor(bot, "gametest_hostile_interrupt");
@@ -308,7 +307,7 @@ public final class DigDownReturnGameTests {
                         && paused.returnOutcome() == DigDownTask.ReturnOutcome.SAFETY_INTERRUPTED,
                 "pause did not publish the typed safety return debt: " + first.checkpoint());
         require(context, !EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), start, bot.getEntityWorld().getServer().getTicks()),
+                        bot.getUUID(), start, bot.level().getServer().getTickCount()),
                 "safety entry TTL started before its exact return debt was paid");
         TaskManager.INSTANCE.resumeFromPause(bot);
         require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == first
@@ -319,18 +318,18 @@ public final class DigDownReturnGameTests {
         AtomicReference<Integer> replacementArrivalTick = new AtomicReference<>();
         AtomicBoolean observedExactFailedReturn = new AtomicBoolean();
         AtomicBoolean observedPhysicalSurfaceStep = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (first.state() == TaskState.FAILED) {
                 observedExactFailedReturn.set(true);
-                require(context, bot.getBlockPos().equals(start)
+                require(context, bot.blockPosition().equals(start)
                                 || successor.get() != null,
                         "safety interruption failed away from the exact old entry: "
-                                + bot.getBlockPos().toShortString());
+                                + bot.blockPosition().toShortString());
                 require(context, first.failureReason().equals(
                                 "dig_down_safety_interrupted collected=2"),
                         "safety return lost its typed reason: " + first.failureReason());
                 require(context, EpisodeMemory.INSTANCE.isExcluded(
-                                bot.getUuid(), start, bot.getEntityWorld().getServer().getTicks()),
+                                bot.getUUID(), start, bot.level().getServer().getTickCount()),
                         "exact safety settlement did not quarantine the old entry");
             } else {
                 require(context, first.state() == TaskState.RUNNING,
@@ -355,7 +354,7 @@ public final class DigDownReturnGameTests {
             if (next == null) {
                 return;
             }
-            BlockPos current = bot.getBlockPos();
+            BlockPos current = bot.blockPosition();
             require(context, !current.equals(middle) && !current.equals(tail),
                     "successor re-entered the quarantined factual trail at "
                             + current.toShortString());
@@ -369,14 +368,14 @@ public final class DigDownReturnGameTests {
             Map<String, String> checkpoint = next.checkpoint();
             if (checkpoint.isEmpty()) {
                 if (current.equals(nextEntry)) {
-                    int now = bot.getEntityWorld().getServer().getTicks();
+                    int now = bot.level().getServer().getTickCount();
                     replacementArrivalTick.compareAndSet(null, now);
                     // Path execution can land after this task's tick, so exactly this arrival
                     // observation may still see the empty relocation cursor. The next observation
                     // must see initializeFreshDescent's exact start_pos anchor.
                     require(context, now == replacementArrivalTick.get(),
                             "successor did not anchor on the tick after replacement arrival");
-                    require(context, world.getBlockState(oldFrontier).isOf(Blocks.STONE),
+                    require(context, world.getBlockState(oldFrontier).is(Blocks.STONE),
                             "successor mutated the old tunnel while awaiting replacement anchoring");
                 } else {
                     require(context, replacementArrivalTick.get() == null,
@@ -392,7 +391,7 @@ public final class DigDownReturnGameTests {
                             + current.toShortString());
             require(context, observedPhysicalSurfaceStep.get(),
                     "successor reached the replacement entry without observable surface travel");
-            require(context, world.getBlockState(oldFrontier).isOf(Blocks.STONE),
+            require(context, world.getBlockState(oldFrontier).is(Blocks.STONE),
                     "successor mutated the old tunnel frontier before relocating");
             require(context, GoalExecutor.INSTANCE.isActiveGoal(bot, goal),
                     "remaining cobblestone goal terminated during safe relocation");
@@ -401,8 +400,8 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_paused_checkpoint_restart_keeps_old_entry_return_debt", maxTicks = 260)
-    public void pausedCheckpointRestartKeepsOldEntryReturnDebt(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void pausedCheckpointRestartKeepsOldEntryReturnDebt(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
         BlockPos displaced = tail.east(4);
         preparePlatform(context, start, 10);
@@ -444,15 +443,15 @@ public final class DigDownReturnGameTests {
                 "restart lost the old entry/tail return debt: " + restoredTask.checkpoint());
 
         AtomicBoolean rejoinedTail = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
-            if (bot.getBlockPos().equals(tail)) {
+        context.failIfEver(() -> {
+            if (bot.blockPosition().equals(tail)) {
                 rejoinedTail.set(true);
             }
             restoredTask.tick(bot);
-            if (bot.getBlockPos().equals(tail)) {
+            if (bot.blockPosition().equals(tail)) {
                 rejoinedTail.set(true);
             }
-            if (!bot.getBlockPos().equals(start)) {
+            if (!bot.blockPosition().equals(start)) {
                 require(context, restoredTask.state() == TaskState.RUNNING,
                         "restored interruption failed before exact return: "
                                 + restoredTask.state() + ":" + restoredTask.failureReason());
@@ -465,15 +464,15 @@ public final class DigDownReturnGameTests {
                             "dig_down_safety_interrupted collected=1"),
                     "restored return lost its typed terminal outcome: "
                             + restoredTask.state() + ":" + restoredTask.failureReason());
-            require(context, rejoinedTail.get() && bot.getBlockPos().equals(start),
+            require(context, rejoinedTail.get() && bot.blockPosition().equals(start),
                     "restored task did not repay the old factual trail and exact entry");
             finish(context, bot, "DigDownPausedRestartGT");
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_return_pause_reanchors_the_current_factual_cell", maxTicks = 220)
-    public void returnPauseReanchorsTheCurrentFactualCell(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void returnPauseReanchorsTheCurrentFactualCell(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos middle = start.east();
         BlockPos tail = middle.east();
         BlockPos displaced = middle.east(4);
@@ -490,7 +489,7 @@ public final class DigDownReturnGameTests {
         DigDownTask task = new DigDownTask(Blocks.STONE, 8, returnDebt);
         task.start(bot);
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(middle),
+        require(context, bot.blockPosition().equals(middle),
                 "fixture did not settle the next factual return cell");
         DigDownTask.DigDownCheckpoint beforePause = DigDownTask.DigDownCheckpoint
                 .decode(task.checkpoint()).orElse(null);
@@ -512,17 +511,17 @@ public final class DigDownReturnGameTests {
                             bot, middle.east(step), "gametest_dig_down_return_repause_displacement"),
                     "fixture could not apply RETURN displacement step " + step);
         }
-        require(context, bot.getBlockPos().equals(displaced),
+        require(context, bot.blockPosition().equals(displaced),
                 "fixture did not end away from the repaused return trail");
         task.resume(bot);
 
         AtomicBoolean rejoinedMiddle = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
-            if (bot.getBlockPos().equals(middle)) {
+        context.failIfEver(() -> {
+            if (bot.blockPosition().equals(middle)) {
                 rejoinedMiddle.set(true);
             }
             task.tick(bot);
-            if (bot.getBlockPos().equals(middle)) {
+            if (bot.blockPosition().equals(middle)) {
                 rejoinedMiddle.set(true);
             }
             if (task.state() == TaskState.RUNNING) {
@@ -533,21 +532,21 @@ public final class DigDownReturnGameTests {
                             "dig_down_safety_interrupted collected=1"),
                     "repaused return lost its terminal safety outcome: "
                             + task.state() + ":" + task.failureReason());
-            require(context, rejoinedMiddle.get() && bot.getBlockPos().equals(start),
+            require(context, rejoinedMiddle.get() && bot.blockPosition().equals(start),
                     "repaused return skipped the current factual cell or exact origin");
             finish(context, bot, "DigDownReturnRepauseGT");
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_disconnected_descent_immediately_becomes_safety_return", maxTicks = 40)
-    public void disconnectedDescentImmediatelyBecomesSafetyReturn(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void disconnectedDescentImmediatelyBecomesSafetyReturn(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
         BlockPos displaced = tail.east(4);
         BlockPos forbiddenRemoteMine = displaced.north();
         preparePlatform(context, start, 10);
-        context.getWorld().setBlockState(forbiddenRemoteMine,
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(forbiddenRemoteMine,
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DigDownDisconnectedGT", tail);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE));
@@ -573,35 +572,35 @@ public final class DigDownReturnGameTests {
         require(context, interrupted.trail().equals(List.of(start, tail))
                         && interrupted.returnTrailIndex() == 1,
                 "disconnected pose was forged into the factual trail: " + task.checkpoint());
-        require(context, context.getWorld().getBlockState(forbiddenRemoteMine).isOf(Blocks.STONE),
+        require(context, context.getLevel().getBlockState(forbiddenRemoteMine).is(Blocks.STONE),
                 "disconnected DESCEND mined at the untrusted remote pose");
         task.cancel(bot, "gametest_complete");
         finish(context, bot, "DigDownDisconnectedGT");
     }
 
     @GameTest(maxTicks = 800)
-    public void minedStoneReturnsAlongRecordedStaircaseBeforeCompleting(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 8));
+    public void minedStoneReturnsAlongRecordedStaircaseBeforeCompleting(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(6, 5, 8));
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -8; dz <= 4; dz++) {
                 for (int dy = -8; dy <= -1; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 for (int dy = 0; dy <= 2; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
 
         String name = "DigDownReturnGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        180.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        180.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 180.0F, 0.0F, true);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
 
@@ -610,48 +609,48 @@ public final class DigDownReturnGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_return"));
         AtomicBoolean descended = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
-            if (bot.getBlockPos().getY() < start.getY()) {
+        context.failIfEver(() -> {
+            if (bot.blockPosition().getY() < start.getY()) {
                 descended.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("DigDown return task ended as " + task.state()
+                context.fail(Component.nullToEmpty("DigDown return task ended as " + task.state()
                         + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
             require(context, descended.get(), "fixture never exercised a lower staircase cell");
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "DigDown completed away from its exact surface origin: start=" + start.toShortString()
-                            + " end=" + bot.getBlockPos().toShortString());
+                            + " end=" + bot.blockPosition().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 3,
                     "DigDown returned without the requested physical stone drops");
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+            context.succeed();
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_remembered_walled_entry_physically_relocates_before_mining", maxTicks = 900)
-    public void rememberedWalledEntryPhysicallyRelocatesBeforeMining(TestContext context) {
-        var world = context.getWorld();
-        BlockPos failedEntry = context.getAbsolutePos(new BlockPos(1, 6, 3));
-        BlockPos nextEntry = context.getAbsolutePos(new BlockPos(5, 6, 3));
+    public void rememberedWalledEntryPhysicallyRelocatesBeforeMining(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos failedEntry = context.absolutePos(new BlockPos(1, 6, 3));
+        BlockPos nextEntry = context.absolutePos(new BlockPos(5, 6, 3));
         for (int x = 0; x <= 7; x++) {
             for (int z = 0; z <= 7; z++) {
                 for (int y = 1; y <= 5; y++) {
-                    world.setBlockState(context.getAbsolutePos(new BlockPos(x, y, z)),
-                            Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(context.absolutePos(new BlockPos(x, y, z)),
+                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 for (int y = 6; y <= 7; y++) {
-                    world.setBlockState(context.getAbsolutePos(new BlockPos(x, y, z)),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(context.absolutePos(new BlockPos(x, y, z)),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         // Buried water is intentionally unobservable here. Relocation is triggered solely by the
         // prior factual WALLED memory below, never by scanning this hidden block.
-        world.setBlockState(failedEntry.down(2), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(failedEntry.below(2), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DigDownEntryRelocationGT", failedEntry);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
@@ -661,24 +660,24 @@ public final class DigDownReturnGameTests {
                         PrivilegedCapability.EMERGENCY_TELEPORT,
                         "dig_down_entry_relocation_gametest").allowed(),
                 "strict GameTest unexpectedly allowed emergency teleport");
-        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), failedEntry,
-                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), failedEntry,
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         require(context, EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), failedEntry, bot.getEntityWorld().getServer().getTicks()),
+                        bot.getUUID(), failedEntry, bot.level().getServer().getTickCount()),
                 "fixture did not remember the observed WALLED entry");
 
         DigDownTask task = new DigDownTask(Blocks.STONE, 1);
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_entry_relocation"));
-        require(context, bot.getBlockPos().equals(failedEntry),
+        require(context, bot.blockPosition().equals(failedEntry),
                 "DigDown teleported while starting entry relocation");
         require(context, task.checkpoint().isEmpty(),
                 "entry relocation started a mining transaction before arrival");
 
         AtomicBoolean observedPhysicalStep = new AtomicBoolean();
         AtomicBoolean reachedNextEntry = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
-            BlockPos current = bot.getBlockPos();
+        context.failIfEver(() -> {
+            BlockPos current = bot.blockPosition();
             if (current.getY() == failedEntry.getY()
                     && current.getX() > failedEntry.getX()
                     && current.getX() < nextEntry.getX()
@@ -697,7 +696,7 @@ public final class DigDownReturnGameTests {
                         "mining transaction anchored somewhere other than the replacement entry");
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("entry relocation DigDown ended as " + task.state()
+                context.fail(Component.nullToEmpty("entry relocation DigDown ended as " + task.state()
                         + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -707,32 +706,32 @@ public final class DigDownReturnGameTests {
                     "DigDown reached the replacement entry without observable surface movement");
             require(context, reachedNextEntry.get(),
                     "DigDown never reached the replacement entry");
-            require(context, bot.getBlockPos().equals(nextEntry),
+            require(context, bot.blockPosition().equals(nextEntry),
                     "DigDown did not return exactly to its replacement entry: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) >= 1,
                     "DigDown returned without a physical stone drop");
-            require(context, world.getBlockState(failedEntry.down(2)).isOf(Blocks.WATER),
+            require(context, world.getBlockState(failedEntry.below(2)).is(Blocks.WATER),
                     "DigDown inspected by mutating the hidden fixture block");
             finish(context, bot, "DigDownEntryRelocationGT");
         });
     }
 
     @GameTest(maxTicks = 300)
-    public void satisfiedMissionStillRestoresReturnDebtBeforeCompleting(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void satisfiedMissionStillRestoresReturnDebtBeforeCompleting(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 8);
-        BlockPos far = start.add(4, 0, 0);
+        BlockPos far = start.offset(4, 0, 0);
         AIPlayerEntity bot = spawn(context, "DigDownMissionReturnGT", far);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
 
-        List<BlockPos> trail = List.of(start, start.add(1, 0, 0), start.add(2, 0, 0),
-                start.add(3, 0, 0), far);
+        List<BlockPos> trail = List.of(start, start.offset(1, 0, 0), start.offset(2, 0, 0),
+                start.offset(3, 0, 0), far);
         Map<String, String> taskCheckpoint = returnCheckpoint(start, trail, 3, 0, false);
         Goal goal = new Goal.HaveItem(Items.COBBLESTONE, 3);
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(start));
-        missionCheckpoint.put("started_tick", String.valueOf(bot.getEntityWorld().getServer().getTicks()));
+        missionCheckpoint.put("started_tick", String.valueOf(bot.level().getServer().getTickCount()));
         missionCheckpoint.put("revision", "0");
         missionCheckpoint.put("task_kind", GoalStep.Kind.MINE.name());
         taskCheckpoint.forEach((key, value) -> missionCheckpoint.put("task." + key, value));
@@ -746,37 +745,37 @@ public final class DigDownReturnGameTests {
                         + (active == null ? "none" : active.getClass().getSimpleName()));
         require(context, active.state() == TaskState.RUNNING,
                 "restored DigDown did not start: " + active.state() + ":" + active.failureReason());
-        require(context, !bot.getBlockPos().equals(start), "fixture did not start away from the origin");
+        require(context, !bot.blockPosition().equals(start), "fixture did not start away from the origin");
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (active.state() == TaskState.FAILED || active.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("restored return failed: " + active.failureReason()));
+                context.fail(Component.nullToEmpty("restored return failed: " + active.failureReason()));
             }
             if (GoalExecutor.INSTANCE.isActiveGoal(bot, goal)) {
-                require(context, active.state() != TaskState.COMPLETED || bot.getBlockPos().equals(start),
+                require(context, active.state() != TaskState.COMPLETED || bot.blockPosition().equals(start),
                         "same-Y return published completion away from start");
                 return;
             }
-            require(context, bot.getBlockPos().equals(start),
-                    "Mission settled before exact return: " + bot.getBlockPos().toShortString());
+            require(context, bot.blockPosition().equals(start),
+                    "Mission settled before exact return: " + bot.blockPosition().toShortString());
             finish(context, bot, "DigDownMissionReturnGT");
         });
     }
 
     @GameTest(maxTicks = 80)
-    public void exhaustedReturnBudgetFailsOnItsOwnClock(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void exhaustedReturnBudgetFailsOnItsOwnClock(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 5);
-        BlockPos far = start.add(2, 0, 0);
+        BlockPos far = start.offset(2, 0, 0);
         AIPlayerEntity bot = spawn(context, "DigDownBudgetGT", far);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
-        List<BlockPos> trail = List.of(start, start.add(1, 0, 0), far);
+        List<BlockPos> trail = List.of(start, start.offset(1, 0, 0), far);
         DigDownTask task = new DigDownTask(Blocks.STONE, 3,
                 returnCheckpoint(start, trail, 1, 600, false));
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_return_budget"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 return;
             }
@@ -784,39 +783,39 @@ public final class DigDownReturnGameTests {
                     "exhausted return budget ended as " + task.state());
             require(context, task.failureReason().startsWith("dig_down_return_failed"),
                     "unexpected return budget reason: " + task.failureReason());
-            require(context, bot.getBlockPos().equals(far),
+            require(context, bot.blockPosition().equals(far),
                     "budget exhaustion moved the bot before failing");
             finish(context, bot, "DigDownBudgetGT");
         });
     }
 
     @GameTest(environment = "minecraftai-gametest:dig_down_return_game_tests_safety_displacement_can_dig_back_after_legacy_return_limit", maxTicks = 2600)
-    public void safetyDisplacementCanDigBackAfterLegacyReturnLimit(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 24, 3));
+    public void safetyDisplacementCanDigBackAfterLegacyReturnLimit(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 24, 3));
         List<BlockPos> trail = new java.util.ArrayList<>();
         for (int step = 0; step <= 18; step++) {
-            BlockPos feet = start.add(step, -step, 0);
+            BlockPos feet = start.offset(step, -step, 0);
             trail.add(feet);
-            context.getWorld().setBlockState(feet.down(),
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(feet,
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(feet.up(),
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(feet.below(),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(feet,
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(feet.above(),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         BlockPos tail = trail.getLast();
         int displacement = 16;
         BlockPos displaced = tail.south(displacement);
         for (int step = 1; step <= displacement; step++) {
             BlockPos corridor = tail.south(step);
-            context.getWorld().setBlockState(corridor.down(),
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(corridor,
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(corridor.up(),
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(corridor.up(2),
-                    Blocks.BEDROCK.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(corridor.below(),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(corridor,
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(corridor.above(),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(corridor.above(2),
+                    Blocks.BEDROCK.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         AIPlayerEntity bot = spawn(context, "DigDownSafetyRecoveryGT", tail);
@@ -847,14 +846,14 @@ public final class DigDownReturnGameTests {
                             bot, tail.south(step), "gametest_dig_down_restart_displacement"),
                     "fixture could not apply safety displacement step " + step);
         }
-        require(context, bot.getBlockPos().equals(displaced),
+        require(context, bot.blockPosition().equals(displaced),
                 "fixture did not end at the displaced restart pose");
         for (int step = 1; step < displacement; step++) {
             BlockPos wall = tail.south(step);
-            context.getWorld().setBlockState(wall,
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(wall.up(),
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(wall,
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(wall.above(),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
         interrupted.cancel(bot, "simulate_paused_process_restart");
 
@@ -873,21 +872,21 @@ public final class DigDownReturnGameTests {
         AtomicBoolean crossedLegacyLimitBeforeRejoin = new AtomicBoolean();
         AtomicBoolean physicallyDugRejoin = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             DigDownTask.DigDownCheckpoint live = DigDownTask.DigDownCheckpoint
                     .decode(task.checkpoint()).orElse(null);
             if (live != null && live.returnBudgetUsed() > 600) {
                 crossedLegacyLimit.set(true);
-                if (!bot.getBlockPos().equals(tail)) {
+                if (!bot.blockPosition().equals(tail)) {
                     crossedLegacyLimitBeforeRejoin.set(true);
                 }
             }
-            if (context.getWorld().getBlockState(tail.south(1)).isAir()
-                    || context.getWorld().getBlockState(tail.south(1).up()).isAir()) {
+            if (context.getLevel().getBlockState(tail.south(1)).isAir()
+                    || context.getLevel().getBlockState(tail.south(1).above()).isAir()) {
                 physicallyDugRejoin.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("safety-expanded return ended as " + task.state()
+                context.fail(Component.nullToEmpty("safety-expanded return ended as " + task.state()
                         + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -899,16 +898,16 @@ public final class DigDownReturnGameTests {
                     "safety recovery crossed 600 ticks only after rejoining the factual tail");
             require(context, physicallyDugRejoin.get(),
                     "safety recovery did not physically dig through the displaced rejoin wall");
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "safety recovery completed away from the exact mine entry: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             finish(context, bot, "DigDownSafetyRecoveryGT");
         });
     }
 
     @GameTest(maxTicks = 40)
-    public void safetyReturnHardCapSurvivesPauseAndResume(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void safetyReturnHardCapSurvivesPauseAndResume(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
         BlockPos displaced = tail.east(6);
         preparePlatform(context, start, 12);
@@ -943,14 +942,14 @@ public final class DigDownReturnGameTests {
                         "dig_down_return_failed:hard_limit"),
                 "safety return did not fail closed beyond 2400 ticks: "
                         + task.state() + ":" + task.failureReason());
-        require(context, !bot.getBlockPos().equals(start),
+        require(context, !bot.blockPosition().equals(start),
                 "hard-cap fixture unexpectedly settled the exact return debt");
         finish(context, bot, "DigDownSafetyHardCapGT");
     }
 
     @GameTest(maxTicks = 40)
-    public void safetyReturnStallLeaseFailsBeforeHardCap(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void safetyReturnStallLeaseFailsBeforeHardCap(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         BlockPos tail = start.east();
         BlockPos displaced = tail.east(6);
         preparePlatform(context, start, 12);
@@ -966,23 +965,23 @@ public final class DigDownReturnGameTests {
                         && task.failureReason().startsWith("dig_down_return_failed:stalled"),
                 "stalled safety return escaped its 600-tick no-progress lease: "
                         + task.state() + ":" + task.failureReason());
-        require(context, !bot.getBlockPos().equals(start),
+        require(context, !bot.blockPosition().equals(start),
                 "stall fixture unexpectedly settled the exact return debt");
         finish(context, bot, "DigDownSafetyStallGT");
     }
 
     @GameTest(maxTicks = 240)
-    public void timeoutWithRequestedNetDeliveryCompletesOnlyAfterExactReturn(TestContext context) {
-        BlockPos bottom = context.getAbsolutePos(new BlockPos(3, 3, 3));
-        BlockPos middle = bottom.east().up();
-        BlockPos start = middle.east().up();
+    public void timeoutWithRequestedNetDeliveryCompletesOnlyAfterExactReturn(GameTestHelper context) {
+        BlockPos bottom = context.absolutePos(new BlockPos(3, 3, 3));
+        BlockPos middle = bottom.east().above();
+        BlockPos start = middle.east().above();
         for (BlockPos feet : List.of(bottom, middle, start)) {
-            context.getWorld().setBlockState(feet.down(),
-                    Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(feet,
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(feet.up(),
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(feet.below(),
+                    Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(feet,
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(feet.above(),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         AIPlayerEntity bot = spawn(context, "DigDownTimeoutNetGT", bottom);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 6));
@@ -998,11 +997,11 @@ public final class DigDownReturnGameTests {
         java.util.concurrent.atomic.AtomicBoolean moved =
                 new java.util.concurrent.atomic.AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
-            if (!bot.getBlockPos().equals(bottom)) {
+        context.failIfEver(() -> {
+            if (!bot.blockPosition().equals(bottom)) {
                 moved.set(true);
             }
-            if (!bot.getBlockPos().equals(start)) {
+            if (!bot.blockPosition().equals(start)) {
                 require(context, task.state() == TaskState.RUNNING,
                         "net delivery forgave the outstanding exact-return debt: "
                                 + task.state() + ":" + task.failureReason());
@@ -1025,17 +1024,17 @@ public final class DigDownReturnGameTests {
 
     @GameTest(maxTicks = 40)
     public void restoredLargeQuotaContinuesPastLegacyBudgetAndKeepsNetDeliveryStrict(
-            TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 4, 3));
+            GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 4, 3));
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -3; dy <= -1; dy++) {
-                    context.getWorld().setBlockState(start.add(dx, dy, dz),
-                            Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 }
                 for (int dy = 0; dy <= 2; dy++) {
-                    context.getWorld().setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
@@ -1069,7 +1068,7 @@ public final class DigDownReturnGameTests {
         require(context, task.state() == TaskState.COMPLETED,
                 "restored large batch did not complete after exact 64/64 delivery and return: "
                         + task.failureReason());
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "restored large batch completed away from its exact entry");
         require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 64,
                 "restored large batch changed the strict net-delivery target");
@@ -1077,15 +1076,15 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(maxTicks = 240)
-    public void horizontalOpenCorridorAdvancesFactuallyAndNeverBacktracks(TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 18));
+    public void horizontalOpenCorridorAdvancesFactuallyAndNeverBacktracks(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(6, 5, 18));
         int openCells = 12;
         for (int distance = 0; distance <= openCells; distance++) {
             BlockPos feet = start.north(distance);
-            world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         AIPlayerEntity bot = spawn(context, "DigDownHorizontalCorridorGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_PICKAXE));
@@ -1103,10 +1102,10 @@ public final class DigDownReturnGameTests {
             require(context, task.state() == TaskState.RUNNING,
                     "horizontal corridor task ended before the first solid boundary: "
                             + task.state() + ":" + task.failureReason());
-            require(context, bot.getBlockPos().equals(expected),
+            require(context, bot.blockPosition().equals(expected),
                     "horizontal corridor did not advance exactly one factual cell on step "
                             + distance + ": expected=" + expected.toShortString()
-                            + " actual=" + bot.getBlockPos().toShortString());
+                            + " actual=" + bot.blockPosition().toShortString());
             DigDownTask.DigDownCheckpoint advanced = DigDownTask.DigDownCheckpoint
                     .decode(task.checkpoint()).orElse(null);
             require(context, advanced != null
@@ -1118,7 +1117,7 @@ public final class DigDownReturnGameTests {
         // NORTH/EAST/WEST beyond the endpoint are unsupported; SOUTH is the already recorded
         // corridor. A mining frontier must not reinterpret that return trail as fresh work.
         task.tick(bot);
-        require(context, bot.getBlockPos().equals(start.north(openCells)),
+        require(context, bot.blockPosition().equals(start.north(openCells)),
                 "horizontal endpoint backtracked into its already recorded return trail");
         require(context, task.state() == TaskState.RUNNING,
                 "horizontal endpoint exposed failure during its physical pickup settle tick");
@@ -1151,26 +1150,26 @@ public final class DigDownReturnGameTests {
                         && task.failureReason().startsWith("dig_down_walled"),
                 "closed horizontal frontier did not settle as WALLED after exact return: "
                         + task.state() + ":" + task.failureReason());
-        require(context, bot.getBlockPos().equals(start),
+        require(context, bot.blockPosition().equals(start),
                 "closed horizontal frontier failed away from its exact origin: "
-                        + bot.getBlockPos().toShortString());
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownHorizontalCorridorGT");
+                        + bot.blockPosition().toShortString());
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownHorizontalCorridorGT");
 
-        BlockPos frontierStart = context.getAbsolutePos(new BlockPos(8, 5, 8));
+        BlockPos frontierStart = context.absolutePos(new BlockPos(8, 5, 8));
         BlockPos frontier = frontierStart.north();
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 for (int dy = -1; dy <= 1; dy++) {
-                    world.setBlockState(frontierStart.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(frontierStart.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(frontierStart.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(frontier.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(frontier, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(frontierStart.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(frontier.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(frontier, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity frontierBot = spawn(
                 context, "DigDownHorizontalFrontierGT", frontierStart);
@@ -1185,7 +1184,7 @@ public final class DigDownReturnGameTests {
         frontierTask.start(frontierBot);
         AtomicBoolean frontierBroken = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (frontierTask.state() == TaskState.RUNNING) {
                 frontierTask.tick(frontierBot);
             }
@@ -1194,7 +1193,7 @@ public final class DigDownReturnGameTests {
             }
             if (frontierTask.state() == TaskState.FAILED
                     || frontierTask.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("supported horizontal frontier ended as "
+                context.fail(Component.nullToEmpty("supported horizontal frontier ended as "
                         + frontierTask.state() + ":" + frontierTask.failureReason()
                         + " checkpoint=" + frontierTask.checkpoint()));
             }
@@ -1205,31 +1204,31 @@ public final class DigDownReturnGameTests {
                     "horizontal task completed without physically mining the stone frontier");
             require(context, InventoryAction.countItem(frontierBot, Items.COBBLESTONE) == 1,
                     "horizontal task did not physically collect its exact stone delivery");
-            require(context, frontierBot.getBlockPos().equals(frontierStart),
+            require(context, frontierBot.blockPosition().equals(frontierStart),
                     "horizontal stone delivery completed away from its exact origin");
             AIPlayerManager.INSTANCE.despawn(
-                    frontierBot.getEntityWorld().getServer(), "DigDownHorizontalFrontierGT");
-            context.complete();
+                    frontierBot.level().getServer(), "DigDownHorizontalFrontierGT");
+            context.succeed();
         });
     }
 
     @GameTest(maxTicks = 180)
     public void nearBudgetHorizontalPickupDebtSurvivesRestartAndSettlesBeforeTimeout(
-            TestContext context) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 5, 6));
+            GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(6, 5, 6));
         BlockPos frontier = start.north();
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -3; dz <= 2; dz++) {
                 for (int dy = -1; dy <= 2; dy++) {
-                    world.setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
-        world.setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(frontier.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(frontier, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(frontier.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(frontier, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DigDownNearBudgetSettleGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.NETHERITE_PICKAXE));
@@ -1249,7 +1248,7 @@ public final class DigDownReturnGameTests {
         AtomicBoolean crossedHardBoundary = new AtomicBoolean();
         AtomicBoolean frontierBroken = new AtomicBoolean();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             DigDownTask task = active.get();
             if (task.state() == TaskState.RUNNING) {
                 task.tick(bot);
@@ -1258,10 +1257,10 @@ public final class DigDownReturnGameTests {
                 frontierBroken.set(true);
             }
             if (!pickupReleased.get() && delayedDrop.get() == null) {
-                world.getEntitiesByClass(ItemEntity.class, bot.getBoundingBox().expand(4.0D),
-                                drop -> drop.isAlive() && drop.getStack().isOf(Items.COBBLESTONE))
+                world.getEntitiesOfClass(ItemEntity.class, bot.getBoundingBox().inflate(4.0D),
+                                drop -> drop.isAlive() && drop.getItem().is(Items.COBBLESTONE))
                         .stream().findFirst().ifPresent(drop -> {
-                            drop.setPickupDelayInfinite();
+                            drop.setNeverPickUp();
                             delayedDrop.set(drop);
                         });
             }
@@ -1293,13 +1292,13 @@ public final class DigDownReturnGameTests {
                 crossedHardBoundary.set(true);
                 ItemEntity held = delayedDrop.getAndSet(null);
                 if (held != null && held.isAlive()) {
-                    held.resetPickupDelay();
+                    held.setNoPickUpDelay();
                 }
                 pickupReleased.set(true);
             }
 
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("near-budget settlement ended as "
+                context.fail(Component.nullToEmpty("near-budget settlement ended as "
                         + task.state() + ":" + task.failureReason()
                         + " checkpoint=" + task.checkpoint()));
                 return;
@@ -1315,20 +1314,20 @@ public final class DigDownReturnGameTests {
                     "near-budget task completed without physically breaking the frontier");
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 1,
                     "settlement did not deliver the exact physical cobblestone drop");
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "settled batch completed away from its exact entry: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             finish(context, bot, "DigDownNearBudgetSettleGT");
         });
     }
 
     @GameTest(maxTicks = 240)
-    public void unsafeRecordedLandingIsSkippedAndReturnStillCompletes(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void unsafeRecordedLandingIsSkippedAndReturnStillCompletes(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 5);
-        BlockPos unsafe = start.add(1, 0, 0);
-        BlockPos end = start.add(2, 0, 0);
-        context.getWorld().setBlockState(unsafe.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos unsafe = start.offset(1, 0, 0);
+        BlockPos end = start.offset(2, 0, 0);
+        context.getLevel().setBlock(unsafe.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         AIPlayerEntity bot = spawn(context, "DigDownUnsafeReturnGT", end);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
         DigDownTask task = new DigDownTask(Blocks.STONE, 3,
@@ -1336,39 +1335,39 @@ public final class DigDownReturnGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_unsafe_return"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("unsafe return failed: "
+                context.fail(Component.nullToEmpty("unsafe return failed: "
                         + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, !bot.getBlockPos().equals(unsafe),
+            require(context, !bot.blockPosition().equals(unsafe),
                     "return completed on an unsupported landing");
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "return skipped the stale waypoint but did not settle exact origin: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             finish(context, bot, "DigDownUnsafeReturnGT");
         });
     }
 
     @GameTest(maxTicks = 240)
-    public void unsupportedAscendingWaypointGetsPhysicalSupportBeforeExactReturn(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(6, 6, 6));
+    public void unsupportedAscendingWaypointGetsPhysicalSupportBeforeExactReturn(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(6, 6, 6));
         BlockPos unsupported = start.west();
-        BlockPos bottom = unsupported.west().down();
-        for (BlockPos body : List.of(start, start.up(), unsupported, unsupported.up(),
-                bottom, bottom.up())) {
-            context.getWorld().setBlockState(body, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        BlockPos bottom = unsupported.west().below();
+        for (BlockPos body : List.of(start, start.above(), unsupported, unsupported.above(),
+                bottom, bottom.above())) {
+            context.getLevel().setBlock(body, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        context.getWorld().setBlockState(bottom.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(start.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(bottom.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(start.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         // The ascending intermediate loses its Y-1 support. A deeper solid remains available as
         // the vanilla placement face for the single adjacent repair optimization.
-        context.getWorld().setBlockState(unsupported.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(unsupported.down(2),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(unsupported.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(unsupported.below(2),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DigDownSupportRepairGT", bottom);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 4));
@@ -1378,12 +1377,12 @@ public final class DigDownReturnGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_support_repair"));
 
         AtomicBoolean repaired = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
-            if (!context.getWorld().getBlockState(unsupported.down()).isAir()) {
+        context.failIfEver(() -> {
+            if (!context.getLevel().getBlockState(unsupported.below()).isAir()) {
                 repaired.set(true);
             }
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("support-repair return failed: "
+                context.fail(Component.nullToEmpty("support-repair return failed: "
                         + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
@@ -1391,9 +1390,9 @@ public final class DigDownReturnGameTests {
             }
             require(context, repaired.get(),
                     "DigDown skipped the unsupported ascending waypoint instead of repairing it");
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "support-repair return did not settle the exact origin: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 3,
                     "support repair did not pay exactly one physical cobblestone");
             finish(context, bot, "DigDownSupportRepairGT");
@@ -1401,16 +1400,16 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(maxTicks = 320)
-    public void unsupportedExactEntryUsesTwoPhysicalPillarsInsteadOfSnapping(TestContext context) {
-        BlockPos bottom = context.getAbsolutePos(new BlockPos(6, 4, 6));
-        BlockPos middle = bottom.up();
-        BlockPos start = bottom.up(2);
+    public void unsupportedExactEntryUsesTwoPhysicalPillarsInsteadOfSnapping(GameTestHelper context) {
+        BlockPos bottom = context.absolutePos(new BlockPos(6, 4, 6));
+        BlockPos middle = bottom.above();
+        BlockPos start = bottom.above(2);
         for (int dy = 0; dy <= 3; dy++) {
-            context.getWorld().setBlockState(bottom.up(dy),
-                    Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(bottom.above(dy),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
-        context.getWorld().setBlockState(bottom.down(),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(bottom.below(),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = spawn(context, "DigDownExactPillarsGT", bottom);
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 2));
@@ -1420,19 +1419,19 @@ public final class DigDownReturnGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_exact_pillars"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.FAILED || task.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("two-pillar exact return failed: "
+                context.fail(Component.nullToEmpty("two-pillar exact return failed: "
                         + task.state() + ":" + task.failureReason()));
             }
             if (task.state() != TaskState.COMPLETED) {
                 return;
             }
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "two-pillar return snapped below the exact entry: "
-                            + bot.getBlockPos().toShortString());
-            require(context, context.getWorld().getBlockState(bottom).isOf(Blocks.DIRT)
-                            && context.getWorld().getBlockState(middle).isOf(Blocks.DIRT),
+                            + bot.blockPosition().toShortString());
+            require(context, context.getLevel().getBlockState(bottom).is(Blocks.DIRT)
+                            && context.getLevel().getBlockState(middle).is(Blocks.DIRT),
                     "exact return did not place both physical dirt pillars");
             require(context, InventoryAction.countItem(bot, Items.DIRT) == 0,
                             "exact return did not spend exactly two dirt supports");
@@ -1443,11 +1442,11 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(maxTicks = 160)
-    public void restoredDescentFailureReturnsBeforePublishingFailure(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void restoredDescentFailureReturnsBeforePublishingFailure(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 5);
-        BlockPos middle = start.add(1, 0, 0);
-        BlockPos end = start.add(2, 0, 0);
+        BlockPos middle = start.offset(1, 0, 0);
+        BlockPos end = start.offset(2, 0, 0);
         AIPlayerEntity bot = spawn(context, "DigDownFailureReturnGT", end);
         List<BlockPos> trail = List.of(start, middle, end);
         Map<String, String> checkpoint = new DigDownTask.DigDownCheckpoint(
@@ -1459,7 +1458,7 @@ public final class DigDownReturnGameTests {
         TaskManager.INSTANCE.assign(bot, task,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_down_failure_return"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 require(context, !task.failureReason().startsWith("dig_down_timeout"),
                         "failure leaked before exact return completed");
@@ -1469,18 +1468,18 @@ public final class DigDownReturnGameTests {
                     "failure recovery ended as " + task.state());
             require(context, task.failureReason().equals("dig_down_timeout collected=2"),
                     "failure recovery lost its typed terminal outcome: " + task.failureReason());
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "failure was published below/away from the original entry: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             finish(context, bot, "DigDownFailureReturnGT");
         });
     }
 
     @GameTest(maxTicks = 40)
-    public void promotedSchema2ReturnClearsLocalWaterSealOwnership(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void promotedSchema2ReturnClearsLocalWaterSealOwnership(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 3);
-        BlockPos end = start.add(1, 0, 0);
+        BlockPos end = start.offset(1, 0, 0);
         AIPlayerEntity bot = spawn(context, "DigDownPromotedReturnGT", end);
         List<BlockPos> trail = List.of(start, end);
         Map<String, String> checkpoint = new DigDownTask.DigDownCheckpoint(
@@ -1500,20 +1499,20 @@ public final class DigDownReturnGameTests {
                         && decoded.rejectedLandingDirections() == 0,
                 "promoted return retained stale water-seal direction ownership: " + promoted);
         task.cancel(bot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownPromotedReturnGT");
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownPromotedReturnGT");
+        context.succeed();
     }
 
     @GameTest(maxTicks = 40)
-    public void missingMineCheckpointIsRejectedEvenWhenGoalIsSatisfied(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void missingMineCheckpointIsRejectedEvenWhenGoalIsSatisfied(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 2);
         AIPlayerEntity bot = spawn(context, "DigDownMissingCheckpointGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 3));
         Goal goal = new Goal.HaveItem(Items.COBBLESTONE, 3);
         Map<String, String> missionCheckpoint = new LinkedHashMap<>();
         missionCheckpoint.put("origin", encode(start));
-        missionCheckpoint.put("started_tick", String.valueOf(bot.getEntityWorld().getServer().getTicks()));
+        missionCheckpoint.put("started_tick", String.valueOf(bot.level().getServer().getTickCount()));
         missionCheckpoint.put("revision", "0");
         missionCheckpoint.put("task_kind", GoalStep.Kind.MINE.name());
 
@@ -1532,8 +1531,8 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void exactReturnRejectsGrossCollectionWithNetDeliveryShortfall(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void exactReturnRejectsGrossCollectionWithNetDeliveryShortfall(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 2);
         AIPlayerEntity bot = spawn(context, "DigDownNetDeliveryGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 2));
@@ -1551,26 +1550,26 @@ public final class DigDownReturnGameTests {
         require(context, task.failureReason().equals(
                         "dig_down_net_delivery_shortfall:have=2:required=3"),
                 "wrong net-delivery failure: " + task.failureReason());
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownNetDeliveryGT");
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownNetDeliveryGT");
+        context.succeed();
     }
 
     @GameTest(maxTicks = 240)
-    public void grossReservePaysTwoPillarsAndStillDeliversRequestedStone(TestContext context) {
-        BlockPos bottom = context.getAbsolutePos(new BlockPos(3, 3, 3));
-        BlockPos start = bottom.up(2);
-        context.getWorld().setBlockState(bottom.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+    public void grossReservePaysTwoPillarsAndStillDeliversRequestedStone(GameTestHelper context) {
+        BlockPos bottom = context.absolutePos(new BlockPos(3, 3, 3));
+        BlockPos start = bottom.above(2);
+        context.getLevel().setBlock(bottom.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         for (int dy = 0; dy <= 4; dy++) {
-            context.getWorld().setBlockState(bottom.up(dy), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(bottom.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         }
         AIPlayerEntity bot = spawn(context, "DigDownNetPillarsGT", bottom);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 5));
         Node origin = new Node(bottom, 0.0D, 2.0D, MoveType.WALK, null);
-        Node middle = new Node(bottom.up(), 1.0D, 1.0D, MoveType.PILLAR_UP, origin);
+        Node middle = new Node(bottom.above(), 1.0D, 1.0D, MoveType.PILLAR_UP, origin);
         Node upper = new Node(start, 2.0D, 0.0D, MoveType.PILLAR_UP, middle);
         PathExecutor executor = new PathExecutor(List.of(origin, middle, upper), start);
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             // A real jump-arc's raw Y can transiently reach (or even overshoot) the target
             // block's Y band mid-flight, well before PathExecutor itself considers that node
             // landed and commits to the next one (tickPillar only advances once the bot is
@@ -1581,18 +1580,18 @@ public final class DigDownReturnGameTests {
             // whole path is done instead.
             var result = executor.tick(bot.getActionPack());
             if (result.isFailed()) {
-                context.throwGameTestException(Text.of("two-pillar return failed: " + result));
+                context.fail(Component.nullToEmpty("two-pillar return failed: " + result));
             }
             if (!result.isSuccess()) {
                 return;
             }
-            require(context, bot.getBlockPos().equals(start),
+            require(context, bot.blockPosition().equals(start),
                     "two-pillar path reported success away from its goal: "
-                            + bot.getBlockPos().toShortString());
+                            + bot.blockPosition().toShortString());
             require(context, InventoryAction.countItem(bot, Items.COBBLESTONE) == 3,
                     "two physical pillar repairs did not preserve the requested net delivery");
-            require(context, context.getWorld().getBlockState(bottom).isOf(Blocks.COBBLESTONE)
-                            && context.getWorld().getBlockState(bottom.up()).isOf(Blocks.COBBLESTONE),
+            require(context, context.getLevel().getBlockState(bottom).is(Blocks.COBBLESTONE)
+                            && context.getLevel().getBlockState(bottom.above()).is(Blocks.COBBLESTONE),
                     "fixture did not pay two factual cobblestone pillar repairs");
 
             // The same gross reserve now arrives at the exact DigDown origin. Completion must use
@@ -1612,25 +1611,25 @@ public final class DigDownReturnGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void pillarRepairSpendsDirtBeforeMissionCobblestone(TestContext context) {
-        BlockPos start = context.getAbsolutePos(new BlockPos(3, 3, 3));
+    public void pillarRepairSpendsDirtBeforeMissionCobblestone(GameTestHelper context) {
+        BlockPos start = context.absolutePos(new BlockPos(3, 3, 3));
         preparePlatform(context, start, 2);
         AIPlayerEntity bot = spawn(context, "DigDownPillarMaterialGT", start);
         InventoryAction.giveItem(bot, new ItemStack(Items.COBBLESTONE, 6));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 2));
         Node origin = new Node(start, 0.0D, 1.0D, MoveType.WALK, null);
-        Node upper = new Node(start.up(), 1.0D, 0.0D, MoveType.PILLAR_UP, origin);
+        Node upper = new Node(start.above(), 1.0D, 0.0D, MoveType.PILLAR_UP, origin);
         PathExecutor executor = new PathExecutor(List.of(origin, upper), upper.pos());
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             var result = executor.tick(bot.getActionPack());
             if (result.isFailed()) {
-                context.throwGameTestException(Text.of("fixture pillar failed: " + result));
+                context.fail(Component.nullToEmpty("fixture pillar failed: " + result));
             }
-            if (!bot.getBlockPos().equals(start.up())) {
+            if (!bot.blockPosition().equals(start.above())) {
                 return;
             }
-            require(context, context.getWorld().getBlockState(start).isOf(Blocks.DIRT),
+            require(context, context.getLevel().getBlockState(start).is(Blocks.DIRT),
                     "pillar repair did not place the preferred disposable dirt");
             require(context, InventoryAction.countItem(bot, Items.DIRT) == 1,
                     "pillar repair consumed the wrong dirt count");
@@ -1638,8 +1637,8 @@ public final class DigDownReturnGameTests {
                     "pillar repair spent mission cobblestone while dirt was available");
 
             executor.abort(bot.getActionPack());
-            AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), "DigDownPillarMaterialGT");
-            context.complete();
+            AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), "DigDownPillarMaterialGT");
+            context.succeed();
         });
     }
 
@@ -1705,25 +1704,25 @@ public final class DigDownReturnGameTests {
                 0, -1, -1L, false).encode();
     }
 
-    private static void preparePlatform(TestContext context, BlockPos start, int radius) {
+    private static void preparePlatform(GameTestHelper context, BlockPos start, int radius) {
         for (int dx = -1; dx <= radius; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                context.getWorld().setBlockState(start.add(dx, -1, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                context.getLevel().setBlock(start.offset(dx, -1, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 2; dy++) {
-                    context.getWorld().setBlockState(start.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(start.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
     }
 
-    private static AIPlayerEntity spawn(TestContext context, String name, BlockPos pos) {
+    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos pos) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(), Vec3d.ofBottomCenter(pos),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(), Vec3.atBottomCenterOf(pos),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(context.getWorld(), pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
+        bot.teleportTo(context.getLevel(), pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         return bot;
     }
@@ -1732,16 +1731,16 @@ public final class DigDownReturnGameTests {
         return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
-    private static void finish(TestContext context, AIPlayerEntity bot, String name) {
+    private static void finish(GameTestHelper context, AIPlayerEntity bot, String name) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         GoalExecutor.INSTANCE.unload(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

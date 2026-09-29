@@ -2,10 +2,10 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import io.github.zoyluo.minecraftai.task.FollowSwimGameTests.Pond;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.level.ServerLevel;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.github.zoyluo.minecraftai.task.FollowSwimGameTests.LANE_Z;
@@ -33,22 +33,22 @@ public final class FollowAroundPondGameTests {
      * dry ground (never the pond floor) and the bot must walk around the pond, never swim.
      */
     @GameTest(environment = "minecraftai-gametest:follow_around_pond_game_tests_land_target_across_pond_is_followed_around_the_water_not_through_it", maxTicks = 900)
-    public void landTargetAcrossPondIsFollowedAroundTheWaterNotThroughIt(TestContext context) {
+    public void landTargetAcrossPondIsFollowedAroundTheWaterNotThroughIt(GameTestHelper context) {
         Pond pond = buildPond(context, 8, 19, 3, 26);
-        ServerWorld world = context.getWorld();
-        AIPlayerEntity bot = spawnBot(world, "AroundBot", pond.feet().add(3, 0, LANE_Z));
-        AIPlayerEntity target = spawnBot(world, "AroundTgt", pond.feet().add(22, 0, LANE_Z));
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "AroundBot", pond.feet().offset(3, 0, LANE_Z));
+        AIPlayerEntity target = spawnBot(world, "AroundTgt", pond.feet().offset(22, 0, LANE_Z));
         holdStill(target);
         FollowTask follow = new FollowTask("AroundTgt");
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_around_pond"));
         AtomicInteger tick = new AtomicInteger();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
-            require(context, !bot.isTouchingWater() && bot.getY() >= pond.feet().getY() - 0.5D,
+            require(context, !bot.isInWater() && bot.getY() >= pond.feet().getY() - 0.5D,
                     "the bot went into (or under) the pond for a target on land at tick " + now
-                            + " pos=" + bot.getEntityPos());
+                            + " pos=" + bot.position());
             require(context, bot.getVehicle() == null && noBoats(world, pond), "follow used a boat for a land target");
             if (bot.getX() >= pond.feet().getX() + 19.5D && bot.distanceTo(target) <= 4.5D && follow.isWaiting()) {
                 finish(context, pond, bot, target);

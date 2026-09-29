@@ -1,15 +1,14 @@
 package io.github.zoyluo.minecraftai.goal;
 
 import io.github.zoyluo.minecraftai.craft.RecipeRegistry;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import java.util.List;
 import java.util.Map;
-import net.minecraft.text.Text;
 
 /**
  * World-runtime coverage for the player-visible "start from nothing" tool chain, without an
@@ -18,7 +17,7 @@ import net.minecraft.text.Text;
  */
 public final class GoalPlannerChainedCraftingGameTests {
     @GameTest(maxTicks = 20)
-    public void twoStonePickaxesFromNothingPlansLogsWoodToolStoneAndFinalCraft(TestContext context) {
+    public void twoStonePickaxesFromNothingPlansLogsWoodToolStoneAndFinalCraft(GameTestHelper context) {
         GoalPlanner.GoalPlan plan = GoalPlanner.planFromState(
                 null,
                 new Goal.HaveItem(Items.STONE_PICKAXE, 2),
@@ -46,7 +45,7 @@ public final class GoalPlannerChainedCraftingGameTests {
         require(context, finalCraft > stone, "the stone pickaxes must be crafted after cobblestone exists");
         require(context, plan.steps().get(finalCraft).count() >= 2,
                 "the final craft must cover the requested two pickaxes");
-        context.complete();
+        context.succeed();
     }
 
     /** Gather steps name the concrete log they collect (e.g. oak_log), so match any log item. */
@@ -63,7 +62,7 @@ public final class GoalPlannerChainedCraftingGameTests {
     private static int firstIndex(List<GoalStep> steps,
                                   GoalStep.Kind kind,
                                   Item item,
-                                  net.minecraft.block.Block block) {
+                                  net.minecraft.world.level.block.Block block) {
         for (int index = 0; index < steps.size(); index++) {
             GoalStep step = steps.get(index);
             if (step.kind() == kind && step.item() == item && step.block() == block) {
@@ -73,9 +72,9 @@ public final class GoalPlannerChainedCraftingGameTests {
         return -1;
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

@@ -1,6 +1,5 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.OVERWORLD;
@@ -11,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.core.BlockPos;
 
 class PoiCandidatesTest {
     private static final int RADIUS = 40;
@@ -80,7 +81,7 @@ class PoiCandidatesTest {
     void aFarAwaySiteIsAnotherCandidate() {
         PoiCandidates candidates = new PoiCandidates();
         PoiCandidates.Tracked a = candidates.record(SITE, possible(), 100, RADIUS);
-        PoiCandidates.Tracked b = candidates.record(SITE.add(200, 0, 0), possible(), 120, RADIUS);
+        PoiCandidates.Tracked b = candidates.record(SITE.offset(200, 0, 0), possible(), 120, RADIUS);
         assertNotSame(a.candidate(), b.candidate());
         assertFalse(b.satisfied());
         assertEquals(2, candidates.size());
@@ -90,10 +91,10 @@ class PoiCandidatesTest {
     void candidatesAreCappedAndTheStalestIsEvicted() {
         PoiCandidates candidates = new PoiCandidates();
         for (int i = 0; i < PoiCandidates.MAX_CANDIDATES; i++) {
-            candidates.record(SITE.add(i * 500, 0, 0), possible(), 100 + i, RADIUS);
+            candidates.record(SITE.offset(i * 500, 0, 0), possible(), 100 + i, RADIUS);
         }
         assertEquals(PoiCandidates.MAX_CANDIDATES, candidates.size());
-        candidates.record(SITE.add(9999, 0, 0), possible(), 110, RADIUS);
+        candidates.record(SITE.offset(9999, 0, 0), possible(), 110, RADIUS);
         assertEquals(PoiCandidates.MAX_CANDIDATES, candidates.size());
         assertTrue(candidates.snapshot().stream().noneMatch(c -> c.anchor().equals(SITE)),
                 "the candidate with the oldest last tick was dropped");
@@ -112,8 +113,8 @@ class PoiCandidatesTest {
     void theAnchorFollowsTheLatestEvaluation() {
         PoiCandidates candidates = new PoiCandidates();
         candidates.record(SITE, possible(), 100, RADIUS);
-        PoiCandidates.Tracked moved = candidates.record(SITE.add(20, 0, 0), possible(), 120, RADIUS);
-        assertEquals(SITE.add(20, 0, 0), moved.candidate().anchor());
+        PoiCandidates.Tracked moved = candidates.record(SITE.offset(20, 0, 0), possible(), 120, RADIUS);
+        assertEquals(SITE.offset(20, 0, 0), moved.candidate().anchor());
         assertEquals(100, moved.candidate().firstTick());
         assertEquals(120, moved.candidate().lastTick());
     }

@@ -13,23 +13,22 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.command.argument.MessageArgumentType;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.MessageArgument;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiBrainSubcommand {
     private MinecraftAiBrainSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         return literal("brain")
                 .then(literal("status")
                         .then(botName()
@@ -45,11 +44,11 @@ public final class MinecraftAiBrainSubcommand {
                                         .executes(context -> manual(context.getSource(), StringArgumentType.getString(context, "name"), false)))))
                 .then(literal("say")
                         .then(botName()
-                                .then(argument("text", MessageArgumentType.message())
+                                .then(argument("text", MessageArgument.message())
                                         .executes(context -> say(
                                                 context.getSource(),
                                                 StringArgumentType.getString(context, "name"),
-                                                MessageArgumentType.getMessage(context, "text").getString())))))
+                                                MessageArgument.getMessage(context, "text").getString())))))
                 .then(literal("validate")
                         .then(botName()
                                 .then(literal("api-failure")
@@ -60,12 +59,12 @@ public final class MinecraftAiBrainSubcommand {
                                         .executes(context -> validateBadResponse(context.getSource(), StringArgumentType.getString(context, "name"))))
                                 .then(literal("tps")
                                         .then(argument("seconds", IntegerArgumentType.integer(3, 60))
-                                                .then(argument("text", MessageArgumentType.message())
+                                                .then(argument("text", MessageArgument.message())
                                                         .executes(context -> validateTps(
                                                                 context.getSource(),
                                                                 StringArgumentType.getString(context, "name"),
                                                                 IntegerArgumentType.getInteger(context, "seconds"),
-                                                                MessageArgumentType.getMessage(context, "text").getString()))))))
+                                                                MessageArgument.getMessage(context, "text").getString()))))))
                         .then(literal("api-failure")
                                 .then(botName()
                                         .executes(context -> validateApiFailure(context.getSource(), StringArgumentType.getString(context, "name")))))
@@ -78,25 +77,25 @@ public final class MinecraftAiBrainSubcommand {
                         .then(literal("tps")
                                 .then(botName()
                                         .then(argument("seconds", IntegerArgumentType.integer(3, 60))
-                                                .then(argument("text", MessageArgumentType.message())
+                                                .then(argument("text", MessageArgument.message())
                                                         .executes(context -> validateTps(
                                                                 context.getSource(),
                                                                 StringArgumentType.getString(context, "name"),
                                                                 IntegerArgumentType.getInteger(context, "seconds"),
-                                                                MessageArgumentType.getMessage(context, "text").getString())))))));
+                                                                MessageArgument.getMessage(context, "text").getString())))))));
     }
 
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<ServerCommandSource, String> botName() {
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> botName() {
         return argument("name", StringArgumentType.word());
     }
 
-    private static int status(ServerCommandSource source, String name) {
+    private static int status(CommandSourceStack source, String name) {
         Optional<AIPlayerEntity> bot = getBot(source, name, BotAuthorizationPolicy.Operation.VIEW, "command:brain_status");
         if (bot.isEmpty()) {
             return 0;
         }
         BrainCoordinator.BrainStatus status = BrainCoordinator.INSTANCE.status(bot.get());
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] brain status " + name
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] brain status " + name
                 + ": busy=" + status.busy()
                 + ", history=" + status.historySize()
                 + ", prompt_tokens=" + status.promptTokens()
@@ -105,28 +104,28 @@ public final class MinecraftAiBrainSubcommand {
         return 1;
     }
 
-    private static int reset(ServerCommandSource source, String name) {
+    private static int reset(CommandSourceStack source, String name) {
         Optional<AIPlayerEntity> bot = getBot(source, name, BotAuthorizationPolicy.Operation.COMMAND, "command:brain_reset");
         if (bot.isEmpty()) {
             return 0;
         }
         RuntimeLifecycleCoordinator.INSTANCE.resetBot(
                 bot.get(), IntentController.ControlOrigin.PLAYER_COMMAND, "command_brain_reset");
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] brain reset " + name), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] brain reset " + name), false);
         return 1;
     }
 
-    private static int manual(ServerCommandSource source, String name, boolean enabled) {
+    private static int manual(CommandSourceStack source, String name, boolean enabled) {
         Optional<AIPlayerEntity> bot = getBot(source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:brain_manual");
         if (bot.isEmpty()) {
             return 0;
         }
         BrainCoordinator.INSTANCE.setManualMode(bot.get(), enabled);
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] manual low-level tools " + (enabled ? "on" : "off") + " for " + name), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] manual low-level tools " + (enabled ? "on" : "off") + " for " + name), false);
         return 1;
     }
 
-    private static int say(ServerCommandSource source, String name, String text) {
+    private static int say(CommandSourceStack source, String name, String text) {
         Optional<AIPlayerEntity> bot = getBot(source, name, BotAuthorizationPolicy.Operation.COMMAND, "command:brain_say");
         if (bot.isEmpty()) {
             return 0;
@@ -135,39 +134,39 @@ public final class MinecraftAiBrainSubcommand {
                 bot.get(), IntentController.ControlOrigin.PLAYER_COMMAND, text)) {
             return 1;
         }
-        boolean queued = BrainCoordinator.INSTANCE.handleMessage(bot.get(), source.getName(), text);
+        boolean queued = BrainCoordinator.INSTANCE.handleMessage(bot.get(), source.getTextName(), text);
         if (queued) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] brain request queued for " + name), false);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] brain request queued for " + name), false);
             return 1;
         }
         return 0;
     }
 
-    private static int validateApiFailure(ServerCommandSource source, String name) {
+    private static int validateApiFailure(CommandSourceStack source, String name) {
         return reportValidation(source, getBot(source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:brain_validate"), BrainValidation::apiFailure);
     }
 
-    private static int validateBadToolArgs(ServerCommandSource source, String name) {
+    private static int validateBadToolArgs(CommandSourceStack source, String name) {
         return reportValidation(source, getBot(source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:brain_validate"), BrainValidation::badToolArgs);
     }
 
-    private static int validateBadResponse(ServerCommandSource source, String name) {
+    private static int validateBadResponse(CommandSourceStack source, String name) {
         return reportValidation(source, getBot(source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:brain_validate"), BrainValidation::badResponse);
     }
 
-    private static int validateTps(ServerCommandSource source, String name, int seconds, String text) {
+    private static int validateTps(CommandSourceStack source, String name, int seconds, String text) {
         Optional<AIPlayerEntity> bot = getBot(source, name, BotAuthorizationPolicy.Operation.ADMIN, "command:brain_validate_tps");
         if (bot.isEmpty()) {
             return 0;
         }
 
         MinecraftServer server = source.getServer();
-        long startTicks = server.getTicks();
+        long startTicks = server.getTickCount();
         long startNanos = System.nanoTime();
-        boolean queued = BrainCoordinator.INSTANCE.handleMessage(bot.get(), source.getName(), text);
+        boolean queued = BrainCoordinator.INSTANCE.handleMessage(bot.get(), source.getTextName(), text);
         CompletableFuture.delayedExecutor(seconds, TimeUnit.SECONDS).execute(() ->
                 server.execute(() -> {
-                    long elapsedTicks = server.getTicks() - startTicks;
+                    long elapsedTicks = server.getTickCount() - startTicks;
                     double elapsedSeconds = Math.max(0.001D, (System.nanoTime() - startNanos) / 1_000_000_000.0D);
                     double tps = elapsedTicks / elapsedSeconds;
                     boolean ok = tps >= 19.0D;
@@ -178,17 +177,17 @@ public final class MinecraftAiBrainSubcommand {
                             "seconds", seconds,
                             "ticks", elapsedTicks,
                             "tps", String.format(java.util.Locale.ROOT, "%.2f", tps));
-                    source.sendFeedback(() -> Text.literal("[Minecraft-AI] TPS validation "
+                    source.sendSuccess(() -> Component.literal("[Minecraft-AI] TPS validation "
                             + (ok ? "ok" : "failed")
                             + ": queued=" + queued
                             + ", ticks=" + elapsedTicks
                             + ", tps=" + String.format(java.util.Locale.ROOT, "%.2f", tps)), false);
                 }));
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] TPS validation started for " + name + " over " + seconds + "s"), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] TPS validation started for " + name + " over " + seconds + "s"), false);
         return queued ? 1 : 0;
     }
 
-    private static int reportValidation(ServerCommandSource source,
+    private static int reportValidation(CommandSourceStack source,
                                         Optional<AIPlayerEntity> bot,
                                         java.util.function.Function<AIPlayerEntity, BrainValidation.ValidationResult> validator) {
         if (bot.isEmpty()) {
@@ -196,14 +195,14 @@ public final class MinecraftAiBrainSubcommand {
         }
         BrainValidation.ValidationResult result = validator.apply(bot.get());
         if (result.ok()) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] validation ok: " + result.scenario() + " -> " + result.message()), false);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] validation ok: " + result.scenario() + " -> " + result.message()), false);
             return 1;
         }
-        source.sendError(Text.literal("[Minecraft-AI] validation failed: " + result.scenario() + " -> " + result.message()));
+        source.sendFailure(Component.literal("[Minecraft-AI] validation failed: " + result.scenario() + " -> " + result.message()));
         return 0;
     }
 
-    private static Optional<AIPlayerEntity> getBot(ServerCommandSource source,
+    private static Optional<AIPlayerEntity> getBot(CommandSourceStack source,
                                                    String name,
                                                    BotAuthorizationPolicy.Operation operation,
                                                    String channel) {

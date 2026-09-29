@@ -1,12 +1,12 @@
 package io.github.zoyluo.minecraftai.mixin;
 
-import net.minecraft.entity.passive.MerchantEntity;
-import net.minecraft.village.TradeOffer;
+import net.minecraft.world.entity.npc.villager.AbstractVillager;
+import net.minecraft.world.item.trading.MerchantOffer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Invoker;
 
-@Mixin(MerchantEntity.class)
+@Mixin(AbstractVillager.class)
 public interface MerchantEntityInvokerMixin {
-    @Invoker("afterUsing")
-    void minecraftai$invokeAfterUsing(TradeOffer offer);
+    @Invoker("rewardTradeXp")
+    void minecraftai$invokeAfterUsing(MerchantOffer offer);
 }

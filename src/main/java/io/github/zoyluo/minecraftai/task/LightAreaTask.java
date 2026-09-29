@@ -6,17 +6,16 @@ import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.LightType;
-import net.minecraft.world.World;
-
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -124,17 +123,17 @@ public final class LightAreaTask extends AbstractTask {
     }
 
     private void scan(AIPlayerEntity bot) {
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         threshold = MinecraftAiConfig.get().night().torchLightThreshold();
-        var world = bot.getEntityWorld();
-        BlockPos.stream(origin.add(-radius, -2, -radius), origin.add(radius, 3, radius))
-                .map(BlockPos::toImmutable)
-                .filter(pos -> !pos.equals(origin) && !pos.equals(origin.up()))
-                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.down()))
+        var world = bot.level();
+        BlockPos.betweenClosedStream(origin.offset(-radius, -2, -radius), origin.offset(radius, 3, radius))
+                .map(BlockPos::immutable)
+                .filter(pos -> !pos.equals(origin) && !pos.equals(origin.above()))
+                .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.below()))
                 .filter(pos -> isDarkFloorCell(world, pos, threshold))
                 .forEach(pos -> {
                     cells.add(pos);
-                    worldBlockLight.put(pos, world.getLightLevel(LightType.BLOCK, pos));
+                    worldBlockLight.put(pos, world.getBrightness(LightLayer.BLOCK, pos));
                 });
         if (skipSurfaceCells) {
             int before = cells.size();
@@ -153,7 +152,7 @@ public final class LightAreaTask extends AbstractTask {
         Set<BlockPos> available = new LinkedHashSet<>(cells);
         available.removeAll(excluded);
         target = TorchPlacementPlanner.chooseNext(
-                available, worldBlockLight, placedTorches, bot.getBlockPos(), threshold);
+                available, worldBlockLight, placedTorches, bot.blockPosition(), threshold);
         standPos = null;
         phase = target == null ? Phase.DONE : Phase.WALK;
     }
@@ -163,7 +162,7 @@ public final class LightAreaTask extends AbstractTask {
             pickNextTarget(bot);
             return;
         }
-        if (bot.getEyePos().distanceTo(target.toCenterPos()) <= 4.0D) {
+        if (bot.getEyePosition().distanceTo(target.getCenter()) <= 4.0D) {
             bot.getActionPack().stopAll();
             phase = Phase.PLACE;
             return;
@@ -217,19 +216,19 @@ public final class LightAreaTask extends AbstractTask {
      * the same floor/air test the old scan() used, now also the definition of a "dark spawnable
      * cell" that {@link TorchPlacementPlanner} tries to bring up to the threshold.
      */
-    private static boolean isDarkFloorCell(World world, BlockPos pos, int threshold) {
+    private static boolean isDarkFloorCell(Level world, BlockPos pos, int threshold) {
         return world.getBlockState(pos).isAir()
-                && !world.getBlockState(pos.down()).isAir()
-                && world.getLightLevel(LightType.BLOCK, pos) < threshold;
+                && !world.getBlockState(pos.below()).isAir()
+                && world.getBrightness(LightLayer.BLOCK, pos) < threshold;
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
-        if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), target)) {
+        if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), target)) {
             return target;
         }
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = target.offset(direction);
-            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = target.relative(direction);
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), candidate)) {
                 return candidate;
             }
         }

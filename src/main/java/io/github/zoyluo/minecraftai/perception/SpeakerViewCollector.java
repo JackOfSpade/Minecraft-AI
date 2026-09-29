@@ -1,16 +1,7 @@
 package io.github.zoyluo.minecraftai.perception;
 
 import com.google.gson.Gson;
-import net.minecraft.block.BlockState;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -19,6 +10,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * A small, honest visual-context sample for conversational questions such as "do you see this?"
@@ -42,41 +41,41 @@ public final class SpeakerViewCollector {
      * context is intentionally unavailable across dimensions: a remote companion must not claim
      * that it can see a scene beside the player.
      */
-    public static SpeakerView collect(ServerPlayerEntity speaker, AIPlayerEntity companion) {
-        if (speaker == null || companion == null || speaker.getEntityWorld() != companion.getEntityWorld()) {
+    public static SpeakerView collect(ServerPlayer speaker, AIPlayerEntity companion) {
+        if (speaker == null || companion == null || speaker.level() != companion.level()) {
             return SpeakerView.unavailable();
         }
 
-        Vec3d eye = speaker.getEyePos();
-        Vec3d forward = speaker.getRotationVec(1.0F).normalize();
-        Vec3d right = forward.crossProduct(new Vec3d(0.0D, 1.0D, 0.0D));
-        if (right.lengthSquared() < 0.0001D) {
-            right = new Vec3d(1.0D, 0.0D, 0.0D);
+        Vec3 eye = speaker.getEyePosition();
+        Vec3 forward = speaker.getViewVector(1.0F).normalize();
+        Vec3 right = forward.cross(new Vec3(0.0D, 1.0D, 0.0D));
+        if (right.lengthSqr() < 0.0001D) {
+            right = new Vec3(1.0D, 0.0D, 0.0D);
         } else {
             right = right.normalize();
         }
-        Vec3d up = right.crossProduct(forward).normalize();
+        Vec3 up = right.cross(forward).normalize();
 
         Map<BlockPos, SampledBlock> visible = new LinkedHashMap<>();
         SampledBlock center = null;
         for (double vertical : VERTICAL_SAMPLES) {
             for (double horizontal : HORIZONTAL_SAMPLES) {
-                Vec3d ray = forward.add(right.multiply(horizontal)).add(up.multiply(vertical)).normalize();
-                BlockHitResult hit = speaker.getEntityWorld().raycast(new RaycastContext(
+                Vec3 ray = forward.add(right.scale(horizontal)).add(up.scale(vertical)).normalize();
+                BlockHitResult hit = speaker.level().clip(new ClipContext(
                         eye,
-                        eye.add(ray.multiply(VIEW_RANGE)),
-                        RaycastContext.ShapeType.COLLIDER,
-                        RaycastContext.FluidHandling.ANY,
+                        eye.add(ray.scale(VIEW_RANGE)),
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.ANY,
                         speaker));
                 if (hit.getType() != HitResult.Type.BLOCK) {
                     continue;
                 }
-                BlockPos pos = hit.getBlockPos().toImmutable();
-                BlockState state = speaker.getEntityWorld().getBlockState(pos);
+                BlockPos pos = hit.getBlockPos().immutable();
+                BlockState state = speaker.level().getBlockState(pos);
                 SampledBlock sampled = new SampledBlock(
-                        Registries.BLOCK.getId(state.getBlock()).toString(),
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
                         pos,
-                        round(eye.distanceTo(hit.getPos())));
+                        round(eye.distanceTo(hit.getLocation())));
                 visible.putIfAbsent(pos, sampled);
                 if (horizontal == 0.0D && vertical == 0.0D) {
                     center = sampled;
@@ -87,7 +86,7 @@ public final class SpeakerViewCollector {
         List<SampledBlock> samples = List.copyOf(visible.values());
         if (samples.isEmpty()) {
             return new SpeakerView(true, false, "", 0, 0, 0, 0.0D,
-                    speaker.getBlockPos().getY(), 0, 0, List.of(), List.of(), 0, 0, 0,
+                    speaker.blockPosition().getY(), 0, 0, List.of(), List.of(), 0, 0, 0,
                     "No solid or fluid surface is visible in the speaker's current view cone.");
         }
 
@@ -100,10 +99,10 @@ public final class SpeakerViewCollector {
         int maxY = samples.stream().mapToInt(sample -> sample.pos().getY()).max().orElse(focus.pos().getY());
         int minZ = samples.stream().mapToInt(sample -> sample.pos().getZ()).min().orElse(focus.pos().getZ());
         int maxZ = samples.stream().mapToInt(sample -> sample.pos().getZ()).max().orElse(focus.pos().getZ());
-        int lowestDrop = Math.max(0, speaker.getBlockPos().getY() - minY);
+        int lowestDrop = Math.max(0, speaker.blockPosition().getY() - minY);
 
         return new SpeakerView(true, true, focus.blockId(), focus.pos().getX(), focus.pos().getY(), focus.pos().getZ(),
-                focus.distance(), speaker.getBlockPos().getY(), minY, lowestDrop, materials, features,
+                focus.distance(), speaker.blockPosition().getY(), minY, lowestDrop, materials, features,
                 maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1,
                 "This is a sampled line-of-sight view, not a full map or screenshot. Describe only the visible evidence.");
     }

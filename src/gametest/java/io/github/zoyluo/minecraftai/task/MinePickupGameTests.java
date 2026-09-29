@@ -8,17 +8,16 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -54,11 +53,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class MinePickupGameTests {
     @GameTest(environment = "minecraftai-gametest:mine_pickup_game_tests_paused_task_resumes_after_natural_pickup_nudge", maxTicks = 400)
-    public void pausedTaskResumesAfterNaturalPickupNudge(TestContext context) {
+    public void pausedTaskResumesAfterNaturalPickupNudge(GameTestHelper context) {
         Fixture fixture = spawnMiner(context, "MinePickupDeadlockGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos ore = fixture.start().east(2);
-        bot.getEntityWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(ore, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
 
         assertStrictCapabilities(context, bot);
 
@@ -83,9 +82,9 @@ public final class MinePickupGameTests {
 
         int[] ticksSinceMineCompleted = {-1};
         AtomicBoolean observedMidNudgeSneak = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (mineTask.state() == TaskState.FAILED || mineTask.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of(
+                context.fail(Component.nullToEmpty(
                         "MineTask ended as " + mineTask.state() + ":" + mineTask.failureReason()));
             }
             if (mineTask.state() != TaskState.COMPLETED) {
@@ -99,7 +98,7 @@ public final class MinePickupGameTests {
                 // inventory delta true it finds sneaking already dangling, exactly as a real
                 // mid-chase nudge would leave it. Scoped to strictly after the break so it can
                 // never influence the real search/move/mine phases beforehand.
-                if (bot.getEntityWorld().getBlockState(ore).isAir()
+                if (bot.level().getBlockState(ore).isAir()
                         && InventoryAction.countItem(bot, Items.RAW_IRON) == 0) {
                     bot.getActionPack().setSneaking(true);
                     observedMidNudgeSneak.set(true);
@@ -115,7 +114,7 @@ public final class MinePickupGameTests {
             // completes, the action pack must already be clean -- not merely "clean soon".
             require(context, !bot.getActionPack().hasActiveActions(),
                     "MineTask completed while a dangling action-pack flag (e.g. sneaking) was "
-                            + "still held: sneaking=" + bot.isSneaking());
+                            + "still held: sneaking=" + bot.isShiftKeyDown());
             ticksSinceMineCompleted[0]++;
             // TaskManager.tickAll runs before BotTickCoordinator (and its DangerWatcher scan) in
             // the same server tick, and TpsGuard's normal (non-degraded) danger-scan interval is
@@ -137,32 +136,32 @@ public final class MinePickupGameTests {
         });
     }
 
-    private static Fixture spawnMiner(TestContext context, String name) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(2, 2, 2));
+    private static Fixture spawnMiner(GameTestHelper context, String name) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(2, 2, 2));
         for (int dx = -2; dx <= 4; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 3; dy++) {
-                    world.setBlockState(feet.up(dy), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    world.setBlock(feet.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
-        return new Fixture(name, bot, start.toImmutable());
+        return new Fixture(name, bot, start.immutable());
     }
 
-    private static void assertStrictCapabilities(TestContext context, AIPlayerEntity bot) {
+    private static void assertStrictCapabilities(GameTestHelper context, AIPlayerEntity bot) {
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         for (PrivilegedCapability capability : PrivilegedCapability.values()) {
@@ -172,14 +171,14 @@ public final class MinePickupGameTests {
         }
     }
 
-    private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+    private static void finish(GameTestHelper context, Fixture fixture) {
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

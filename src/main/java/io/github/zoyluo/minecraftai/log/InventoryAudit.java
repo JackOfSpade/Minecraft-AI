@@ -3,11 +3,10 @@ package io.github.zoyluo.minecraftai.log;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.task.TaskManager;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
-
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,8 +62,8 @@ public final class InventoryAudit {
     }
 
     public void clear(AIPlayerEntity bot) {
-        lastCounts.remove(bot.getUuid());
-        viewers.remove(bot.getUuid());
+        lastCounts.remove(bot.getUUID());
+        viewers.remove(bot.getUUID());
     }
 
     public void clearAll() {
@@ -73,11 +72,11 @@ public final class InventoryAudit {
     }
 
     public void tick(MinecraftServer server) {
-        int tick = server.getTicks();
+        int tick = server.getTickCount();
         if (tick % SNAPSHOT_INTERVAL != 0) {
             return;
         }
-        if (server.isStopping()) {
+        if (server.isShutdown()) {
             // Entities unload normally while the server stops; a diff against that teardown would
             // misreport ordinary despawn as a burst of "lost" items. clearTransient/forgetBot
             // already clear this bot's baseline on the same shutdown path.
@@ -89,7 +88,7 @@ public final class InventoryAudit {
     }
 
     private void sampleAndLog(AIPlayerEntity bot) {
-        UUID botId = bot.getUuid();
+        UUID botId = bot.getUUID();
         Map<Item, Integer> current = currentCounts(bot);
         Map<Item, Integer> previous = lastCounts.put(botId, current);
         if (previous == null) {
@@ -100,10 +99,10 @@ public final class InventoryAudit {
         // TreeMap over the union of both samples' item ids gives deterministic, alphabetized output.
         Map<String, Item> byId = new TreeMap<>();
         for (Item item : previous.keySet()) {
-            byId.put(Registries.ITEM.getId(item).toString(), item);
+            byId.put(BuiltInRegistries.ITEM.getKey(item).toString(), item);
         }
         for (Item item : current.keySet()) {
-            byId.put(Registries.ITEM.getId(item).toString(), item);
+            byId.put(BuiltInRegistries.ITEM.getKey(item).toString(), item);
         }
         for (Map.Entry<String, Item> entry : byId.entrySet()) {
             int before = previous.getOrDefault(entry.getValue(), 0);
@@ -135,7 +134,7 @@ public final class InventoryAudit {
 
     private static Map<Item, Integer> currentCounts(AIPlayerEntity bot) {
         Map<Item, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty()) {
                 counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
             }

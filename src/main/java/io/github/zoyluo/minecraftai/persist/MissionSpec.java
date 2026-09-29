@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.persist;
 
 import io.github.zoyluo.minecraftai.goal.Goal;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 
 /** Stable, declarative Goal representation. No Task, phase, path, entity, or world object is serialized. */
 public record MissionSpec(String type, Map<String, String> params, List<String> values) {
@@ -24,7 +23,7 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
         switch (goal) {
             case Goal.HaveItem g -> {
                 type = "have_item";
-                params.put("item", Registries.ITEM.getId(g.item()).toString());
+                params.put("item", BuiltInRegistries.ITEM.getKey(g.item()).toString());
                 params.put("count", String.valueOf(g.count()));
             }
             case Goal.HavePickaxeTier g -> {
@@ -34,20 +33,20 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
             case Goal.MineOre g -> {
                 type = "mine_ore";
                 params.put("count", String.valueOf(g.count()));
-                values = g.ores().stream().map(block -> Registries.BLOCK.getId(block).toString()).sorted().toList();
+                values = g.ores().stream().map(block -> BuiltInRegistries.BLOCK.getKey(block).toString()).sorted().toList();
             }
             case Goal.HarvestCrop g -> {
                 type = "harvest_crop";
-                params.put("crop", Registries.BLOCK.getId(g.crop()).toString());
-                params.put("seed", Registries.ITEM.getId(g.seed()).toString());
-                params.put("produce", Registries.ITEM.getId(g.produce()).toString());
+                params.put("crop", BuiltInRegistries.BLOCK.getKey(g.crop()).toString());
+                params.put("seed", BuiltInRegistries.ITEM.getKey(g.seed()).toString());
+                params.put("produce", BuiltInRegistries.ITEM.getKey(g.produce()).toString());
                 params.put("count", String.valueOf(g.count()));
             }
             case Goal.Armor ignored -> type = "armor";
             case Goal.Workstation ignored -> type = "workstation";
             case Goal.Stockpile g -> {
                 type = "stockpile";
-                params.put("item", Registries.ITEM.getId(g.item()).toString());
+                params.put("item", BuiltInRegistries.ITEM.getKey(g.item()).toString());
                 params.put("count", String.valueOf(g.count()));
             }
             case Goal.Food g -> {
@@ -68,8 +67,8 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
                 case "have_item" -> new Goal.HaveItem(item("item"), integer("count"));
                 case "have_pickaxe_tier" -> new Goal.HavePickaxeTier(integer("tier"));
                 case "mine_ore" -> new Goal.MineOre(values.stream()
-                        .map(Identifier::of)
-                        .map(id -> Registries.BLOCK.getOptionalValue(id).orElseThrow())
+                        .map(Identifier::parse)
+                        .map(id -> BuiltInRegistries.BLOCK.getOptional(id).orElseThrow())
                         .collect(java.util.stream.Collectors.toSet()), integer("count"));
                 case "harvest_crop" -> new Goal.HarvestCrop(
                         block("crop"), item("seed"), item("produce"), integer("count"));
@@ -85,12 +84,12 @@ public record MissionSpec(String type, Map<String, String> params, List<String> 
         }
     }
 
-    private net.minecraft.item.Item item(String key) {
-        return Registries.ITEM.getOptionalValue(Identifier.of(required(key))).orElseThrow();
+    private net.minecraft.world.item.Item item(String key) {
+        return BuiltInRegistries.ITEM.getOptional(Identifier.parse(required(key))).orElseThrow();
     }
 
-    private net.minecraft.block.Block block(String key) {
-        return Registries.BLOCK.getOptionalValue(Identifier.of(required(key))).orElseThrow();
+    private net.minecraft.world.level.block.Block block(String key) {
+        return BuiltInRegistries.BLOCK.getOptional(Identifier.parse(required(key))).orElseThrow();
     }
 
     private int integer(String key) {

@@ -3,19 +3,18 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.Set;
 
@@ -30,7 +29,7 @@ import java.util.Set;
 public final class GiveItemTaskGameTests {
     @GameTest(maxTicks = 300)
     public void recipientEndsUpHoldingExactlyTheGivenItemsAndGiverInventoryDecreasesByThatCount(
-            TestContext context) {
+            GameTestHelper context) {
         Fixture fixture = spawnGiverAndRecipient(context, new BlockPos(6, 4, 6), "HoldingGT");
         AIPlayerEntity giver = fixture.giver();
         AIPlayerEntity recipient = fixture.recipient();
@@ -40,7 +39,7 @@ public final class GiveItemTaskGameTests {
 
         GiveItemTask task = new GiveItemTask(Items.STONE_PICKAXE, 1, fixture.recipientName());
         task.start(giver);
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (task.state() == TaskState.RUNNING) {
                 task.tick(giver);
                 return;
@@ -62,7 +61,7 @@ public final class GiveItemTaskGameTests {
     }
 
     @GameTest(maxTicks = 60)
-    public void insufficientInventoryFailsWithAClearReasonAndTouchesNothing(TestContext context) {
+    public void insufficientInventoryFailsWithAClearReasonAndTouchesNothing(GameTestHelper context) {
         Fixture fixture = spawnGiverAndRecipient(context, new BlockPos(16, 4, 6), "InsufficientGT");
         AIPlayerEntity giver = fixture.giver();
         InventoryAction.giveItem(giver, new ItemStack(Items.STONE_PICKAXE, 1));
@@ -83,23 +82,23 @@ public final class GiveItemTaskGameTests {
     }
 
     private static List<ItemEntity> nearbyItemEntities(
-            TestContext context, AIPlayerEntity near, net.minecraft.item.Item item) {
-        Box search = near.getBoundingBox().expand(2.0D);
-        return context.getWorld().getEntitiesByClass(ItemEntity.class, search,
-                entity -> entity.getStack().isOf(item));
+            GameTestHelper context, AIPlayerEntity near, net.minecraft.world.item.Item item) {
+        AABB search = near.getBoundingBox().inflate(2.0D);
+        return context.getLevel().getEntitiesOfClass(ItemEntity.class, search,
+                entity -> entity.getItem().is(item));
     }
 
     private static Fixture spawnGiverAndRecipient(
-            TestContext context, BlockPos relativeFeet, String uniqueSuffix) {
-        var world = context.getWorld();
-        world.setTimeOfDay(1000L);
-        BlockPos feet = context.getAbsolutePos(relativeFeet);
+            GameTestHelper context, BlockPos relativeFeet, String uniqueSuffix) {
+        var world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos feet = context.absolutePos(relativeFeet);
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                world.setBlockState(cell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos cell = feet.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         // Distinct names per test method: Fabric GameTest batches can run different tests'
@@ -113,27 +112,27 @@ public final class GiveItemTaskGameTests {
     }
 
     private static AIPlayerEntity spawnBot(
-            net.minecraft.server.world.ServerWorld world, String name, BlockPos feet) {
+            net.minecraft.server.level.ServerLevel world, String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(feet),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
+        bot.getFoodData().setFoodLevel(20);
         return bot;
     }
 
-    private static void cleanup(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.giver().getEntityWorld().getServer(), fixture.giverName());
-        AIPlayerManager.INSTANCE.despawn(fixture.recipient().getEntityWorld().getServer(), fixture.recipientName());
-        context.complete();
+    private static void cleanup(GameTestHelper context, Fixture fixture) {
+        AIPlayerManager.INSTANCE.despawn(fixture.giver().level().getServer(), fixture.giverName());
+        AIPlayerManager.INSTANCE.despawn(fixture.recipient().level().getServer(), fixture.recipientName());
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

@@ -60,17 +60,15 @@ import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.persist.MissionRecord;
 import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.persist.MissionSpec;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.stat.Stats;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
-
+import net.minecraft.stats.Stats;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -187,7 +185,7 @@ public final class GoalExecutor {
      * checkpoint (especially an open disposal pocket) remains unresolved.
      */
     private Optional<Boolean> submitIntoSuspendedRuntime(AIPlayerEntity bot, Goal goal) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         while (true) {
             MissionRuntimeRecord suspended = deathSuspended.get(uuid);
             if (suspended == null) {
@@ -239,16 +237,16 @@ public final class GoalExecutor {
         }
         // GOALFIX-GF3: idempotency -- when the same bot already has an active plan for the same goal, ignore the duplicate submit
         // (prevents the brain from repeatedly calling mine_ore/achieve_goal, overwriting the plan and interrupting a step in progress).
-        ActivePlan existing = activePlans.get(bot.getUuid());
+        ActivePlan existing = activePlans.get(bot.getUUID());
         if (existing != null && existing.goal.equals(goal)) {
             BotLog.task(bot, "goal_submit_ignored", "goal", goal, "reason", "duplicate_active_plan");
             return true;
         }
         // P0 queue: an in-progress goal already exists -> the new goal is enqueued (de-duplicated), and once the current work finishes it automatically continues to the next one. This is the foundation for compound instructions/sequential requests.
         // Note: is it only safe to check this after the "prerequisite downgrade block"? No -- the downgrade block is below; let it run its check first: a sub-goal must still be blocked.
-        java.util.Deque<Goal> queued = goalQueue.computeIfAbsent(bot.getUuid(), k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
+        java.util.Deque<Goal> queued = goalQueue.computeIfAbsent(bot.getUUID(), k -> new java.util.concurrent.ConcurrentLinkedDeque<>());
         if (existing != null) {
-            Goal ugQ = userGoal.get(bot.getUuid());
+            Goal ugQ = userGoal.get(bot.getUUID());
             if (ugQ != null && !ugQ.equals(goal) && isPrerequisiteOf(bot, goal, ugQ)) {
                 BotLog.task(bot, "goal_downgrade_blocked", "sub", goal, "user", ugQ);
                 report(bot, "This is a prerequisite for the current goal and will finish automatically.");
@@ -266,14 +264,14 @@ public final class GoalExecutor {
         }
         // B: protect the user's original goal -- the brain must not downgrade it to one of its prerequisite sub-goals. Observed in testing: after mining diamond failed, the brain's achieve_goal to make an iron pickaxe,
         // and mine_ore to mine iron (both prerequisites of mining diamond), overwrote the goal -- and after making the iron pickaxe it falsely reported "task complete", when the original request was to mine iron and make a pickaxe.
-        Goal ug = userGoal.get(bot.getUuid());
+        Goal ug = userGoal.get(bot.getUUID());
         if (ug != null && !ug.equals(goal) && isPrerequisiteOf(bot, goal, ug)) {
             BotLog.task(bot, "goal_downgrade_blocked", "sub", goal, "user", ug);
             report(bot, "This is a prerequisite for the current goal and will finish automatically. Send a new request to replace the goal.");
             return false;
         }
         UUID missionId = restore == null ? UUID.randomUUID() : restore.missionId();
-        int startedTick = restore == null ? bot.getEntityWorld().getServer().getTicks() : restore.startedTick();
+        int startedTick = restore == null ? bot.level().getServer().getTickCount() : restore.startedTick();
         Optional<CapacityParentNamespace> decodedCapacityParent = restore == null
                 ? Optional.empty()
                 : CapacityParentNamespace.decode(restore.capacityParentNamespace());
@@ -385,8 +383,8 @@ public final class GoalExecutor {
         if (restoredHunt.filter(metadata ->
                 hasSameDimensionOpenHuntTimeRollback(
                         metadata,
-                        bot.getEntityWorld().getRegistryKey().getValue().toString(),
-                        bot.getEntityWorld().getTime())
+                        bot.level().dimension().identifier().toString(),
+                        bot.level().getGameTime())
                 || !metadata.open()
                 && !trustedClosedHuntPickupReceipt(bot, metadata)).isPresent()) {
             queued.removeFirstOccurrence(goal);
@@ -402,8 +400,8 @@ public final class GoalExecutor {
                 MiningServiceTask.inspectCheckpoint(restoredServiceCheckpoint);
         boolean mergedSettledTerminalReceipt = false;
         String mergedSettledTerminalFailure = "";
-        String liveServiceDimension = bot.getEntityWorld().getRegistryKey()
-                .getValue().toString();
+        String liveServiceDimension = bot.level().dimension()
+                .identifier().toString();
         if (!restoredServiceCheckpoint.isEmpty() && (restoredService.isEmpty()
                 || !liveServiceDimension.equals(
                 restoredService.orElseThrow().serviceDimension())
@@ -727,7 +725,7 @@ public final class GoalExecutor {
             MiningServiceTask.RestoreMetadata serviceMetadata = restoredService.orElseThrow();
             ServiceProfile profile = serviceMetadata.policy().profile();
             boolean obsidianOres = serviceMetadata.ores().equals(
-                    OreScan.expandOreFamilies(Set.of(net.minecraft.block.Blocks.OBSIDIAN)));
+                    OreScan.expandOreFamilies(Set.of(net.minecraft.world.level.block.Blocks.OBSIDIAN)));
             boolean missionMatches = missionId.toString().equals(
                     serviceMetadata.serviceMissionId());
             boolean incompatibleServiceIdentity;
@@ -1376,7 +1374,7 @@ public final class GoalExecutor {
         // if planning the replacement fails, keep B so the next tick's normal queue drain can handle it again -- the goal must never be silently dropped.
         queued.removeFirstOccurrence(goal);
         if (restoredSteps.isEmpty()) {
-            activePlans.remove(bot.getUuid());
+            activePlans.remove(bot.getUUID());
             GoalResult.Status status = GoalResult.classify(initialEvaluation, false);
             String reason = !mergedSettledTerminalFailure.isBlank()
                     ? mergedSettledTerminalFailure
@@ -1486,25 +1484,25 @@ public final class GoalExecutor {
         // state so old completed steps or a negative mining Y cannot manufacture progress on the
         // first post-restart failure. New snapshots retain the exact prior comparison boundary.
         if (restore == null || restore.replanSnapshot().isEmpty()) {
-            net.minecraft.util.math.BlockPos sp0 = bot.getBlockPos();
+            net.minecraft.core.BlockPos sp0 = bot.blockPosition();
             active.snapSteps = active.completedSteps;
             active.snapX = sp0.getX();
             active.snapY = sp0.getY();
             active.snapZ = sp0.getZ();
             active.snapTargetCount = goalTargetCount(bot, goal);
-            active.snapDimension = bot.getEntityWorld().getRegistryKey()
-                    .getValue().toString();
+            active.snapDimension = bot.level().dimension()
+                    .identifier().toString();
             active.snapHuntRawMeat = rawMeatCount(bot);
             active.snapHuntVisitedSectors = active.huntSearchCursor.visitedCount();
         }
-        activePlans.put(bot.getUuid(), active);
+        activePlans.put(bot.getUUID(), active);
         // Working-memory episode boundary: a new goal = a new episode, so the previous task's exclusions/trajectory are invalidated.
         // (A replan does not go through here -- handleStepFailure modifies plan.steps in place, and working memory surviving across a replan is intentional by design.)
-        io.github.zoyluo.minecraftai.task.EpisodeMemory.INSTANCE.reset(bot.getUuid());
-        userGoal.putIfAbsent(bot.getUuid(), goal); // B: record the first goal as the "user's original goal"; subsequent prerequisite sub-goals are blocked above, and switching goals is cleared by a user message
+        io.github.zoyluo.minecraftai.task.EpisodeMemory.INSTANCE.reset(bot.getUUID());
+        userGoal.putIfAbsent(bot.getUUID(), goal); // B: record the first goal as the "user's original goal"; subsequent prerequisite sub-goals are blocked above, and switching goals is cleared by a user message
         BotLog.task(bot, "goal_plan", "goal", goal,
                 "steps", restoredSteps.stream().map(GoalStep::describe).toList());
-        if (!pocketRestorePreflights.contains(bot.getUuid())
+        if (!pocketRestorePreflights.contains(bot.getUUID())
                 && !active.awaitingPlayerContinuation) {
             report(bot, "I will complete this goal in " + restoredSteps.size() + " steps.");
         }
@@ -1526,26 +1524,26 @@ public final class GoalExecutor {
     }
 
     public boolean tickBot(MinecraftServer server, AIPlayerEntity bot) {
-        MissionRuntimeRecord suspended = deathSuspended.get(bot.getUuid());
+        MissionRuntimeRecord suspended = deathSuspended.get(bot.getUUID());
         if (suspended != null) {
-            if (restoreQuarantined.containsKey(bot.getUuid())) {
+            if (restoreQuarantined.containsKey(bot.getUUID())) {
                 return true;
             }
             if (!bot.isAlive()) {
                 return true;
             }
-            String requiredDimension = dimensionSuspended.get(bot.getUuid());
+            String requiredDimension = dimensionSuspended.get(bot.getUUID());
             if (requiredDimension != null && !requiredDimension.equals(
-                    bot.getEntityWorld().getRegistryKey().getValue().toString())) {
+                    bot.level().dimension().identifier().toString())) {
                 return true;
             }
             Optional<Task> recovery = TaskManager.INSTANCE.getActive(bot);
             if (recovery.isPresent() || TaskManager.INSTANCE.hasPaused(bot)) {
                 return true;
             }
-            if (deathSuspended.remove(bot.getUuid(), suspended)) {
-                dimensionSuspended.remove(bot.getUuid());
-                restoreQuarantined.remove(bot.getUuid());
+            if (deathSuspended.remove(bot.getUUID(), suspended)) {
+                dimensionSuspended.remove(bot.getUUID());
+                restoreQuarantined.remove(bot.getUUID());
                 BotLog.lifecycle(bot, "mission_death_resume",
                         "mission_id", suspended.active() == null ? "queued_only" : suspended.active().missionId());
                 restoreRuntime(bot, suspended);
@@ -1556,7 +1554,7 @@ public final class GoalExecutor {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return hasActivePlan(bot) || queuedGoalCount(bot) > 0 || TaskManager.INSTANCE.hasPaused(bot);
         }
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan == null) {
             if (TaskManager.INSTANCE.getActive(bot).isEmpty()
                     && !TaskManager.INSTANCE.hasPaused(bot)
@@ -1855,34 +1853,34 @@ public final class GoalExecutor {
         Identifier expectedId = metadata == null
                 ? null : Identifier.tryParse(metadata.expectedRawItemId());
         Item expected = expectedId == null
-                ? null : Registries.ITEM.getOptionalValue(expectedId).orElse(null);
+                ? null : BuiltInRegistries.ITEM.getOptional(expectedId).orElse(null);
         if (expected == null
-                || !Registries.ITEM.getId(expected).toString().equals(
+                || !BuiltInRegistries.ITEM.getKey(expected).toString().equals(
                 metadata.expectedRawItemId())) {
             return false;
         }
         int inventory = io.github.zoyluo.minecraftai.action.HarvestCore.countInventoryItems(
                 bot, Set.of(expected));
-        int pickupStat = bot.getStatHandler().getStat(Stats.PICKED_UP, expected);
+        int pickupStat = bot.getStats().getValue(Stats.ITEM_PICKED_UP, expected);
         return trustedClosedHuntPickupReceipt(
                 metadata,
-                bot.getEntityWorld().getRegistryKey().getValue().toString(),
+                bot.level().dimension().identifier().toString(),
                 inventory,
                 pickupStat,
-                bot.getEntityWorld().getTime());
+                bot.level().getGameTime());
     }
 
     public boolean hasActivePlan(AIPlayerEntity bot) {
-        return activePlans.containsKey(bot.getUuid()) || deathSuspended.containsKey(bot.getUuid());
+        return activePlans.containsKey(bot.getUUID()) || deathSuspended.containsKey(bot.getUUID());
     }
 
     /** Exact active-goal probe used by deterministic runtime verification and diagnostics. */
     public boolean isActiveGoal(AIPlayerEntity bot, Goal goal) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan != null) {
             return plan.goal.equals(goal);
         }
-        MissionRuntimeRecord suspended = deathSuspended.get(bot.getUuid());
+        MissionRuntimeRecord suspended = deathSuspended.get(bot.getUUID());
         return suspended != null && suspended.active() != null
                 && suspended.active().spec() != null
                 && suspended.active().spec().toGoal().filter(goal::equals).isPresent();
@@ -1898,7 +1896,7 @@ public final class GoalExecutor {
     }
 
     public boolean cancelCurrent(AIPlayerEntity bot, String reason) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         ActivePlan active = activePlans.get(uuid);
         MissionRuntimeRecord suspended = deathSuspended.remove(uuid);
         dimensionSuspended.remove(uuid);
@@ -1919,7 +1917,7 @@ public final class GoalExecutor {
     }
 
     public int clearQueue(AIPlayerEntity bot) {
-        java.util.Deque<Goal> queued = goalQueue.remove(bot.getUuid());
+        java.util.Deque<Goal> queued = goalQueue.remove(bot.getUUID());
         int removed = queued == null ? 0 : queued.size();
         if (removed > 0) {
             markDirty(bot);
@@ -1934,7 +1932,7 @@ public final class GoalExecutor {
 
     /** Detach a Mission without publishing a terminal result while corpse recovery runs. */
     public boolean suspendForDeath(AIPlayerEntity bot) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         if (deathSuspended.containsKey(uuid)) {
             return true;
         }
@@ -1983,7 +1981,7 @@ public final class GoalExecutor {
         if (runtime.active() == null) {
             return false;
         }
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         String requiredDimension = required.orElseThrow();
         deathSuspended.put(uuid, runtime);
         dimensionSuspended.put(uuid, requiredDimension);
@@ -1995,15 +1993,15 @@ public final class GoalExecutor {
         BotLog.lifecycle(bot, "mission_dimension_suspended",
                 "mission_id", runtime.active().missionId(),
                 "required_dimension", requiredDimension,
-                "live_dimension", bot.getEntityWorld().getRegistryKey()
-                        .getValue().toString());
+                "live_dimension", bot.level().dimension()
+                        .identifier().toString());
         markDirty(bot);
         return true;
     }
 
     /** Drop every in-memory projection for a Bot without publishing a terminal result (server unload path). */
     public void unload(AIPlayerEntity bot) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         activePlans.remove(uuid);
         goalQueue.remove(uuid);
         lastGoalFailTick.remove(uuid);
@@ -2029,13 +2027,13 @@ public final class GoalExecutor {
     }
 
     public int queuedGoalCount(AIPlayerEntity bot) {
-        java.util.Deque<Goal> queued = goalQueue.get(bot.getUuid());
+        java.util.Deque<Goal> queued = goalQueue.get(bot.getUUID());
         return queued == null ? 0 : queued.size();
     }
 
     /** True only when this goal deliberately stopped at a safe player-confirmation boundary. */
     public boolean isAwaitingBatchContinuation(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         return plan != null && plan.awaitingPlayerContinuation;
     }
 
@@ -2045,7 +2043,7 @@ public final class GoalExecutor {
      * advance a paused mission just by inspecting it.
      */
     public Optional<BatchCheckpointStatus> batchCheckpointStatus(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan == null) {
             return Optional.empty();
         }
@@ -2064,7 +2062,7 @@ public final class GoalExecutor {
      * current continuation remain authoritative.
      */
     public boolean resumeBatchCheckpoint(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan == null || !plan.awaitingPlayerContinuation) {
             return false;
         }
@@ -2083,11 +2081,11 @@ public final class GoalExecutor {
     }
 
     public Optional<GoalResult> lastResult(AIPlayerEntity bot) {
-        return Optional.ofNullable(lastResults.get(bot.getUuid()));
+        return Optional.ofNullable(lastResults.get(bot.getUUID()));
     }
 
     public Optional<GoalResult> resultAfter(AIPlayerEntity bot, long sequence) {
-        GoalResult result = lastResults.get(bot.getUuid());
+        GoalResult result = lastResults.get(bot.getUUID());
         return result != null && result.sequence() > sequence ? Optional.of(result) : Optional.empty();
     }
 
@@ -2096,17 +2094,17 @@ public final class GoalExecutor {
     }
 
     public MissionRuntimeRecord captureRuntime(AIPlayerEntity bot) {
-        MissionRuntimeRecord suspended = deathSuspended.get(bot.getUuid());
+        MissionRuntimeRecord suspended = deathSuspended.get(bot.getUUID());
         if (suspended != null) {
             return suspended;
         }
-        ActivePlan active = activePlans.get(bot.getUuid());
+        ActivePlan active = activePlans.get(bot.getUUID());
         if (active != null) {
             captureTaskEvidence(bot, active);
         }
         MissionRecord activeRecord = active == null ? null : new MissionRecord(
                 active.missionId.toString(), MissionSpec.fromGoal(active.goal), checkpoint(active));
-        java.util.Deque<Goal> queued = goalQueue.get(bot.getUuid());
+        java.util.Deque<Goal> queued = goalQueue.get(bot.getUUID());
         List<MissionSpec> queue = queued == null ? List.of() : queued.stream().map(MissionSpec::fromGoal).toList();
         boolean hasPersistableMission = activeRecord != null || !queue.isEmpty();
         return new MissionRuntimeRecord(activeRecord, queue,
@@ -2129,10 +2127,10 @@ public final class GoalExecutor {
             return;
         }
         Optional<String> pocketDimension = activePocketServiceDimension(runtime);
-        String liveDimension = bot.getEntityWorld().getRegistryKey()
-                .getValue().toString();
+        String liveDimension = bot.level().dimension()
+                .identifier().toString();
         if (pocketDimension.filter(required -> !required.equals(liveDimension)).isPresent()) {
-            UUID uuid = bot.getUuid();
+            UUID uuid = bot.getUUID();
             deathSuspended.put(uuid, runtime);
             dimensionSuspended.put(uuid, pocketDimension.orElseThrow());
             restoreQuarantined.remove(uuid);
@@ -2158,7 +2156,7 @@ public final class GoalExecutor {
             if (restored.isPresent()) {
                 boolean submitted;
                 if (rawActivePocket) {
-                    pocketRestorePreflights.add(bot.getUuid());
+                    pocketRestorePreflights.add(bot.getUUID());
                 }
                 try {
                     submitted = submit(bot, restored.get(),
@@ -2181,7 +2179,7 @@ public final class GoalExecutor {
                     return;
                 } finally {
                     if (rawActivePocket) {
-                        pocketRestorePreflights.remove(bot.getUuid());
+                        pocketRestorePreflights.remove(bot.getUUID());
                     }
                 }
                 // This is a replay of an existing mission, not a new plan announcement. Commit
@@ -2219,7 +2217,7 @@ public final class GoalExecutor {
     private boolean restoredActivePocketAuthority(AIPlayerEntity bot,
                                                   String missionId,
                                                   Map<String, String> rawCheckpoint) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan == null || missionId == null
                 || !plan.missionId.toString().equals(missionId)
                 || plan.current == null
@@ -2256,7 +2254,7 @@ public final class GoalExecutor {
     private void quarantinePhysicalPocketRestore(AIPlayerEntity bot,
                                                  MissionRuntimeRecord runtime,
                                                  String reason) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         deathSuspended.put(uuid, runtime);
         dimensionSuspended.remove(uuid);
         restoreQuarantined.put(uuid, reason);
@@ -2464,7 +2462,7 @@ public final class GoalExecutor {
         }
         int restoredStartedTick = checkpoint.containsKey("started_tick")
                 ? nonNegativeInt(checkpoint.get("started_tick"))
-                : bot.getEntityWorld().getServer().getTicks();
+                : bot.level().getServer().getTickCount();
         GoalStep.Kind taskCheckpointKind = decodeStepKind(checkpoint.get("task_kind")).orElse(null);
         Map<String, String> taskCheckpoint = new java.util.LinkedHashMap<>();
         Map<String, String> miningCheckpoint = new java.util.LinkedHashMap<>();
@@ -2685,13 +2683,13 @@ public final class GoalExecutor {
 
     /** Diagnostic tracepoint: the currently active top-level goal (or "none" if there isn't one). For logging; kept in English to make troubleshooting easier. */
     public String describeActiveGoal(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         return plan == null ? "none" : String.valueOf(plan.goal);
     }
 
     /** Panel task chain: goal title (Chinese). Item ids stay as minecraft:xxx; the client localizes them into a Chinese display name. */
     public String activeGoalTitle(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         return plan == null ? "No active goal" : goalLabel(plan.goal);
     }
 
@@ -2710,13 +2708,13 @@ public final class GoalExecutor {
     }
 
     private static String itemLabel(Item item) {
-        Identifier id = item == null ? null : Registries.ITEM.getId(item);
+        Identifier id = item == null ? null : BuiltInRegistries.ITEM.getKey(item);
         return id == null ? "unknown item" : id.getPath().replace('_', ' ');
     }
 
     /** Diagnostic tracepoint: the step currently being executed + progress [step number/total steps] (or "" if there is no active step). */
     public String describeActiveStep(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan == null || plan.current == null) {
             return "";
         }
@@ -2726,13 +2724,13 @@ public final class GoalExecutor {
 
     /** Panel task chain: the full list of step descriptions (empty if there is no active plan). */
     public java.util.List<String> activeGoalSteps(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         return plan == null ? java.util.List.of() : plan.stepLabels;
     }
 
     /** Panel task chain: the 0-based index of the current step. */
     public int activeGoalCurrentIndex(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         if (plan == null || plan.current == null) {
             return 0;
         }
@@ -2741,13 +2739,13 @@ public final class GoalExecutor {
 
     /** Panel task chain: the total number of steps. */
     public int activeGoalTotalSteps(AIPlayerEntity bot) {
-        ActivePlan plan = activePlans.get(bot.getUuid());
+        ActivePlan plan = activePlans.get(bot.getUUID());
         return plan == null ? 0 : plan.totalSteps;
     }
 
     // P0 queue continuation: once the current goal is settled (completed/failed), automatically start the next one in the queue; ones that fail to plan are skipped one by one, with an explanation each time.
     private boolean advanceQueue(AIPlayerEntity bot) {
-        java.util.Deque<Goal> queued = goalQueue.get(bot.getUuid());
+        java.util.Deque<Goal> queued = goalQueue.get(bot.getUUID());
         if (queued == null) {
             return false;
         }
@@ -2762,7 +2760,7 @@ public final class GoalExecutor {
             }
             // If submit failed (planning failed / blocked), the reason was already reported internally; keep trying the next one in the queue
         }
-        goalQueue.remove(bot.getUuid(), queued);
+        goalQueue.remove(bot.getUUID(), queued);
         return false;
     }
 
@@ -2900,12 +2898,12 @@ public final class GoalExecutor {
         int done = plan.totalSteps - plan.steps.size();
         BotLog.task(bot, "goal_step", "index", done, "total", plan.totalSteps, "step", step.describe());
         TaskOrigin origin = TaskOrigin.mission(plan.missionId, step.describe());
-        if (pocketRestorePreflights.contains(bot.getUuid())) {
+        if (pocketRestorePreflights.contains(bot.getUUID())) {
             TaskManager.INSTANCE.assignSilently(bot, task.get(), origin);
         } else {
             TaskManager.INSTANCE.assign(bot, task.get(), origin);
         }
-        if (!pocketRestorePreflights.contains(bot.getUuid())) {
+        if (!pocketRestorePreflights.contains(bot.getUUID())) {
             report(bot, "Stage " + done + "/" + plan.totalSteps + ": "
                     + step.describe() + ".");
         }
@@ -3357,7 +3355,7 @@ public final class GoalExecutor {
                     "reason", reason,
                     "face", authority.geometry().workFace().toShortString(),
                     "entries", plan.settledServiceTombstones.size());
-            if (!bot.getEntityWorld().getRegistryKey().getValue().toString()
+            if (!bot.level().dimension().identifier().toString()
                     .equals(settledMetadata.serviceDimension())) {
                 finishActive(bot, plan, evaluate(bot, plan), reason,
                         false, true, GoalResult.Status.FAILED);
@@ -3482,12 +3480,12 @@ public final class GoalExecutor {
         // Phase A progress-aware budget (the core of checkpoint/resume): progress made -> reset the "consecutive no-progress" counter. For HUNT,
         // only a net increase in raw meat or a search sector visited for the first time counts as additional progress; lateral movement/descent caused by chasing prey must never
         // refresh the budget. Other steps keep the semantics of mine-shaft lateral movement and descent.
-        net.minecraft.util.math.BlockPos bp = bot.getBlockPos();
+        net.minecraft.core.BlockPos bp = bot.blockPosition();
         int curTarget = goalTargetCount(bot, plan.goal);
         int currentHuntRawMeat = rawMeatCount(bot);
         int currentHuntVisitedSectors = plan.huntSearchCursor.visitedCount();
-        String currentDimension = bot.getEntityWorld().getRegistryKey()
-                .getValue().toString();
+        String currentDimension = bot.level().dimension()
+                .identifier().toString();
         boolean madeProgress = madeReplanProgress(
                 plan.current == null ? null : plan.current.kind(),
                 plan.completedSteps, plan.snapSteps,
@@ -3676,13 +3674,13 @@ public final class GoalExecutor {
 
     // Optimization 2: whether the goal has failed overall recently (within withinTicks) -- used by ActionDispatcher to intercept the brain's manual block-by-block mining after a failure.
     public boolean recentlyFailed(AIPlayerEntity bot, int withinTicks) {
-        Integer t = lastGoalFailTick.get(bot.getUuid());
-        return t != null && bot.getEntityWorld().getServer().getTicks() - t < withinTicks;
+        Integer t = lastGoalFailTick.get(bot.getUUID());
+        return t != null && bot.level().getServer().getTickCount() - t < withinTicks;
     }
 
     // B: clear the memory of the original goal when the user sends a new message (allowing the user to switch goals normally); called by BrainCoordinator when it receives a user message.
     public void clearUserGoal(AIPlayerEntity bot) {
-        userGoal.remove(bot.getUuid());
+        userGoal.remove(bot.getUUID());
     }
 
     // B: whether sub is a prerequisite of parent (the user's original goal) -- sub's product falls within the output of some step in parent's plan.
@@ -3770,7 +3768,7 @@ public final class GoalExecutor {
             case SMELT -> Optional.of(new SmeltTask(step.input(), step.output(), step.count()));
             case MOVE -> Optional.of(new MoveTask(bot, step.pos()));
             // P3: the FARM step -> a count-limited FarmTask (till/plant/wait for growth/harvest in place; completes once count units of produce are collected).
-            case FARM -> Optional.of(new FarmTask(bot.getBlockPos(), 4, step.input(), step.block(),
+            case FARM -> Optional.of(new FarmTask(bot.blockPosition(), 4, step.input(), step.block(),
                     true, false, step.item(), step.count()));
             // Layer 4: the HUNT step -> HuntTask kills animals for raw meat (to stock food).
             case HUNT -> Optional.of(new HuntTask(
@@ -3827,7 +3825,7 @@ public final class GoalExecutor {
                     .map(MiningServiceTask.RestoreMetadata::miningCursor)
                     .orElse(null);
         }
-        return MiningCursor.initial(bot.getBlockPos(), 48);
+        return MiningCursor.initial(bot.blockPosition(), 48);
     }
 
     private static MiningServiceInvocation miningServiceInvocation(
@@ -4388,13 +4386,13 @@ public final class GoalExecutor {
 
     private static GoalSnapshotCollector.Context initialContext(AIPlayerEntity bot, Goal goal) {
         if (goal instanceof Goal.Stockpile) {
-            net.minecraft.util.math.BlockPos base = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE
-                    .of(bot.getUuid())
-                    .placeIn(bot.getEntityWorld(), "base")
-                    .orElse(bot.getBlockPos());
+            net.minecraft.core.BlockPos base = io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE
+                    .of(bot.getUUID())
+                    .placeIn(bot.level(), "base")
+                    .orElse(bot.blockPosition());
             return GoalSnapshotCollector.Context.at(base);
         }
-        return GoalSnapshotCollector.Context.at(bot.getBlockPos());
+        return GoalSnapshotCollector.Context.at(bot.blockPosition());
     }
 
     private void finishActive(AIPlayerEntity bot,
@@ -4413,7 +4411,7 @@ public final class GoalExecutor {
                               boolean cancelled,
                               boolean advanceQueue,
                               GoalResult.Status forcedStatus) {
-        if (!activePlans.remove(bot.getUuid(), plan)) {
+        if (!activePlans.remove(bot.getUUID(), plan)) {
             return;
         }
         GoalResult.Status status = forcedStatus == null
@@ -4426,13 +4424,13 @@ public final class GoalExecutor {
                 evaluation,
                 reason,
                 plan.startedTick,
-                bot.getEntityWorld().getServer().getTicks(),
+                bot.level().getServer().getTickCount(),
                 plan.skippedSteps,
                 plan.lastStructure);
         publishResult(bot, result);
-        userGoal.remove(bot.getUuid());
+        userGoal.remove(bot.getUUID());
         if (status == GoalResult.Status.FAILED || status == GoalResult.Status.PARTIAL) {
-            lastGoalFailTick.put(bot.getUuid(), bot.getEntityWorld().getServer().getTicks());
+            lastGoalFailTick.put(bot.getUUID(), bot.level().getServer().getTickCount());
         }
         if (advanceQueue) {
             advanceQueue(bot);
@@ -4458,17 +4456,17 @@ public final class GoalExecutor {
                                        GoalResult.Status status,
                                        String reason,
                                        List<GoalResult.SkippedStep> skippedSteps) {
-        if (pocketRestorePreflights.contains(bot.getUuid())) {
+        if (pocketRestorePreflights.contains(bot.getUUID())) {
             return;
         }
         publishResult(bot, new GoalResult(
                 resultSequence.incrementAndGet(), missionId, goal, status, evaluation, reason,
-                startedTick, bot.getEntityWorld().getServer().getTicks(),
+                startedTick, bot.level().getServer().getTickCount(),
                 skippedSteps == null ? List.of() : List.copyOf(skippedSteps), null));
     }
 
     private void publishResult(AIPlayerEntity bot, GoalResult result) {
-        lastResults.put(bot.getUuid(), result);
+        lastResults.put(bot.getUUID(), result);
         BotLog.task(bot, "goal_result",
                 "sequence", result.sequence(),
                 "mission_id", result.missionId(),
@@ -4481,10 +4479,10 @@ public final class GoalExecutor {
                 "evidence", result.evaluation().evidence());
         if (result.status() == GoalResult.Status.COMPLETED) {
             io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
-                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_DONE, bot.getBlockPos(), goalLabel(result.goal()));
+                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_DONE, bot.blockPosition(), goalLabel(result.goal()));
         } else if (result.status() != GoalResult.Status.CANCELLED) {
             io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
-                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_FAILED, bot.getBlockPos(), goalLabel(result.goal()));
+                    io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.GOAL_FAILED, bot.blockPosition(), goalLabel(result.goal()));
         }
         String message = resultMessage(result.status(), result.evaluation(), result.reason());
         reportTerminal(bot, message, result.status());
@@ -4493,7 +4491,7 @@ public final class GoalExecutor {
 
     // Package-private: also called by MissionRecoveryScheduler's write-ahead-capture dispatches.
     static void markDirty(AIPlayerEntity bot) {
-        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.level().getServer());
     }
 
     private static String resultMessage(GoalResult.Status status, GoalEvaluation evaluation, String reason) {
@@ -4533,8 +4531,8 @@ public final class GoalExecutor {
         private final int startedTick;
         private final Goal goal;
         private final GoalPredicate predicate;
-        private net.minecraft.util.math.BlockPos origin;
-        private final Set<net.minecraft.util.math.BlockPos> boundContainers = new HashSet<>();
+        private net.minecraft.core.BlockPos origin;
+        private final Set<net.minecraft.core.BlockPos> boundContainers = new HashSet<>();
         private final ArrayDeque<GoalStep> steps;
         private final java.util.List<String> stepLabels; // full step descriptions (steps gets polled empty as execution proceeds; this keeps the full list for the panel's task-chain display)
         private final List<GoalResult.SkippedStep> skippedSteps = new ArrayList<>();
@@ -4542,7 +4540,7 @@ public final class GoalExecutor {
         private GoalStep current;
         private Task currentTask;
         private BlueprintSchema blueprint;
-        private net.minecraft.util.math.BlockPos buildAnchor;
+        private net.minecraft.core.BlockPos buildAnchor;
         private int buildPlaced;
         private int buildSkipped;
         private StructureReport lastStructure;

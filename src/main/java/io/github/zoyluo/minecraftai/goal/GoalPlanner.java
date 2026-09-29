@@ -22,17 +22,6 @@ import io.github.zoyluo.minecraftai.task.HuntTask;
 import io.github.zoyluo.minecraftai.task.MiningServiceTask;
 import io.github.zoyluo.minecraftai.task.ServicePolicy;
 import io.github.zoyluo.minecraftai.task.WorkshopLocator;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.world.Heightmap;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,6 +31,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 public final class GoalPlanner {
 
@@ -112,7 +111,7 @@ public final class GoalPlanner {
         // attempts over 1092 ticks still yielded 0 prey) but often have sweet berry bushes nearby --
         // when there is no prey to hunt, berries are the last resort for "something to eat right now."
         boolean hasBerries = OreProspector.nearest(bot,
-                FOOD_GRASS_SCAN, state -> state.isOf(Blocks.SWEET_BERRY_BUSH)) != null;
+                FOOD_GRASS_SCAN, state -> state.is(Blocks.SWEET_BERRY_BUSH)) != null;
         // Nearby-ore perception: at planning time, check whether the target ore is already nearby
         // (within 48 blocks). If so -> mine directly without descending to the ore layer
         // (digging a 70-block shaft down to Y16 while standing next to iron ore would be silly; also
@@ -130,16 +129,16 @@ public final class GoalPlanner {
             // descent; OreDigTask's prospect(64) + horizontal tunneling can reach it --
             // "remembering where it was" covers more ground than "seeing it right now."
             for (Block ore : ores) {
-                String id = Registries.BLOCK.getId(ore).toString();
+                String id = BuiltInRegistries.BLOCK.getKey(ore).toString();
                 if (io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
-                        .nearestResource(bot.getUuid(), id, bot.getBlockPos(), 96).isPresent()) {
+                        .nearestResource(bot.getUUID(), id, bot.blockPosition(), 96).isPresent()) {
                     return true;
                 }
             }
             return false;
         };
         return planFromState(bot, goal, inventoryCounts(bot), toolUsableDurability(bot),
-                Math.max(1, MinecraftAiConfig.get().goal().maxPlanDepth()), bot.getBlockPos().getY(),
+                Math.max(1, MinecraftAiConfig.get().goal().maxPlanDepth()), bot.blockPosition().getY(),
                 hasPrey, hasGrass, hasBerries, canAcquireSurfaceResources(bot),
                 oreNearby, resumeContext, missionId);
     }
@@ -151,7 +150,7 @@ public final class GoalPlanner {
      * and tolerates a small shelter/overhang without classifying a Y=16 mine as surface.
      */
     public static boolean canAcquireSurfaceResources(AIPlayerEntity bot) {
-        net.minecraft.util.math.BlockPos origin = bot.getBlockPos();
+        net.minecraft.core.BlockPos origin = bot.blockPosition();
         // Even an open ravine or isolated test canvas at deepslate height has sky visibility but
         // no trees, animals or crops at the work face. Keep the heightmap test, with a conservative
         // lower bound that only rules out unequivocal deep-mine positions.
@@ -160,8 +159,8 @@ public final class GoalPlanner {
         }
         for (int dx = -8; dx <= 8; dx += 4) {
             for (int dz = -8; dz <= 8; dz += 4) {
-                int topY = bot.getEntityWorld().getTopY(
-                        Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
+                int topY = bot.level().getHeight(
+                        Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                         origin.getX() + dx,
                         origin.getZ() + dz);
                 if (Math.abs(topY - origin.getY()) <= 8) {
@@ -252,8 +251,8 @@ public final class GoalPlanner {
     // Grass types cut for seeds (the starting point of the bread-farming chain): only treat
     // "farming" as a food source when there are no animals if grass is actually present nearby.
     private static boolean isGrassForSeeds(BlockState state) {
-        return state.isOf(Blocks.SHORT_GRASS) || state.isOf(Blocks.TALL_GRASS)
-                || state.isOf(Blocks.FERN) || state.isOf(Blocks.LARGE_FERN);
+        return state.is(Blocks.SHORT_GRASS) || state.is(Blocks.TALL_GRASS)
+                || state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN);
     }
 
     // Tier A consolidated gathering (root-cause fix for diamond-mining failures): when there is no
@@ -323,13 +322,13 @@ public final class GoalPlanner {
 
     private static Map<Item, Integer> inventoryCounts(AIPlayerEntity bot) {
         Map<Item, Integer> counts = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             add(counts, stack);
         }
-        add(counts, bot.getEquippedStack(EquipmentSlot.OFFHAND));
+        add(counts, bot.getItemBySlot(EquipmentSlot.OFFHAND));
         // Tier 3: also count already-equipped slots, so ensureArmor doesn't treat "already wearing iron armor" as missing and craft it again.
         for (EquipmentSlot slot : ARMOR_SLOTS) {
-            add(counts, bot.getEquippedStack(slot));
+            add(counts, bot.getItemBySlot(slot));
         }
         return counts;
     }
@@ -346,7 +345,7 @@ public final class GoalPlanner {
         // replacement was crafted -> mine_ore repeatedly failed with need_better_tool:stone_pickaxe).
         // Not counting it -> ensurePickaxeTier crafts a fresh stone pick from cobblestone in
         // inventory, pick-selection safety switches to the new one, and the chain continues.
-        if (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1) {
+        if (stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1) {
             return;
         }
         counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
@@ -354,15 +353,15 @@ public final class GoalPlanner {
 
     private static Map<Item, Integer> toolUsableDurability(AIPlayerEntity bot) {
         Map<Item, Integer> durability = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             addToolUsableDurability(durability, stack);
         }
-        addToolUsableDurability(durability, bot.getEquippedStack(EquipmentSlot.OFFHAND));
+        addToolUsableDurability(durability, bot.getItemBySlot(EquipmentSlot.OFFHAND));
         return durability;
     }
 
     private static void addToolUsableDurability(Map<Item, Integer> durability, ItemStack stack) {
-        if (stack == null || stack.isEmpty() || !stack.isDamageable()) {
+        if (stack == null || stack.isEmpty() || !stack.isDamageableItem()) {
             return;
         }
         durability.merge(stack.getItem(), MiningServiceTask.usableDurability(stack),
@@ -383,7 +382,7 @@ public final class GoalPlanner {
 
     private static int freshUsableDurability(Item item) {
         ItemStack stack = new ItemStack(item);
-        return stack.isDamageable() ? Math.max(0, stack.getMaxDamage() - 1) : 0;
+        return stack.isDamageableItem() ? Math.max(0, stack.getMaxDamage() - 1) : 0;
     }
 
     private static int saturatedAdd(int left, int right) {
@@ -1148,9 +1147,9 @@ public final class GoalPlanner {
 
         // Phase 3: stockpiling -- first acquire enough of the item to reach count, then emit the STOCKPILE step to store the resource in a nearby chest (best-effort).
         private boolean ensureStockpile(Goal.Stockpile g, int depth, Set<String> visiting) {
-            net.minecraft.util.math.BlockPos base = resumeContext == null
+            net.minecraft.core.BlockPos base = resumeContext == null
                     ? io.github.zoyluo.minecraftai.memory.BotMemoryStore.INSTANCE
-                            .of(bot.getUuid()).placeIn(bot.getEntityWorld(), "base").orElse(bot.getBlockPos())
+                            .of(bot.getUUID()).placeIn(bot.level(), "base").orElse(bot.blockPosition())
                     : resumeContext.origin();
             GoalSnapshotCollector.Context stockpileContext = resumeContext == null
                     ? GoalSnapshotCollector.Context.at(base)
@@ -1158,7 +1157,7 @@ public final class GoalPlanner {
             GoalSnapshot snapshot = GoalSnapshotCollector.collect(
                     bot, g, stockpileContext);
             int alreadyDelivered = new GoalPredicate.Stockpile(
-                    Registries.ITEM.getId(g.item()).toString(), g.count()).evaluate(snapshot).matched();
+                    BuiltInRegistries.ITEM.getKey(g.item()).toString(), g.count()).evaluate(snapshot).matched();
             int missing = Math.max(0, g.count() - alreadyDelivered);
             if (missing == 0) {
                 return true;
@@ -1210,7 +1209,7 @@ public final class GoalPlanner {
             Map<Item, Integer> exactNeeds = new LinkedHashMap<>();
             for (BlueprintSchema.BlockPlacement placement : schema.placements()) {
                 if (resumeContext != null && resumeContext.buildAnchor() != null
-                        && StructureVerifier.matches(bot.getEntityWorld(), resumeContext.buildAnchor(), placement)) {
+                        && StructureVerifier.matches(bot.level(), resumeContext.buildAnchor(), placement)) {
                     continue;
                 }
                 if ("minecraft:air".equals(placement.blockId())) {
@@ -1292,7 +1291,7 @@ public final class GoalPlanner {
                 }
             }
             Identifier blockKey = placement.blockId() == null ? null : Identifier.tryParse(placement.blockId());
-            Block block = blockKey == null ? null : Registries.BLOCK.getOptionalValue(blockKey).orElse(null);
+            Block block = blockKey == null ? null : BuiltInRegistries.BLOCK.getOptional(blockKey).orElse(null);
             Item item = block == null ? Items.AIR : block.asItem();
             if (item == Items.AIR) {
                 BotLog.warn(LogCategory.TASK, null, "blueprint_material_skipped",
@@ -1750,7 +1749,7 @@ public final class GoalPlanner {
                 unresolved.add("missing_smelt_recipe:" + id(item));
                 return false;
             }
-            if ("mine".equals(AcquisitionHints.source(item)) && item instanceof net.minecraft.item.BlockItem blockItem) {
+            if ("mine".equals(AcquisitionHints.source(item)) && item instanceof net.minecraft.world.item.BlockItem blockItem) {
                 addStep(GoalStep.mine(blockItem.getBlock(), missing));
                 counts.merge(item, missing, Integer::sum);
                 return true;
@@ -2447,7 +2446,7 @@ public final class GoalPlanner {
         }
 
         private static String id(Item item) {
-            return Registries.ITEM.getId(item).toString();
+            return BuiltInRegistries.ITEM.getKey(item).toString();
         }
     }
 

@@ -2,20 +2,19 @@ package io.github.zoyluo.minecraftai.loot;
 
 import io.github.zoyluo.minecraftai.action.GatherToolPolicy;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.loot.context.LootContextParameters;
-import net.minecraft.loot.context.LootWorldContext;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.loot.LootParams;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -114,13 +113,13 @@ public final class RuntimeDropIndex {
             return;
         }
         MinecraftServer server = armedServer;
-        if (server != null && server.isOnThread()) {
+        if (server != null && server.isSameThread()) {
             rebuild(server);
         }
     }
 
     public static void rebuild(MinecraftServer server) {
-        ServerWorld world = server.getOverworld();
+        ServerLevel world = server.overworld();
         if (world == null) {
             return;
         }
@@ -128,7 +127,7 @@ public final class RuntimeDropIndex {
         Map<Item, Set<Block>> deterministic = new HashMap<>();
         Map<Item, Set<Block>> probabilistic = new HashMap<>();
         int scanned = 0;
-        for (Block block : Registries.BLOCK) {
+        for (Block block : BuiltInRegistries.BLOCK) {
             scanned++;
             if (EXCLUDED_SOURCES.contains(block)) {
                 continue;
@@ -192,9 +191,9 @@ public final class RuntimeDropIndex {
         }
     }
 
-    private static void classifyBlock(ServerWorld world, Block block,
+    private static void classifyBlock(ServerLevel world, Block block,
                                        Map<Item, Set<Block>> deterministic, Map<Item, Set<Block>> probabilistic) {
-        BlockState state = block.getDefaultState();
+        BlockState state = block.defaultBlockState();
         ItemStack tool = representativeTool(GatherToolPolicy.categoryFor(state));
         List<Map<Item, Integer>> trials = new ArrayList<>(TRIALS);
         for (int i = 0; i < TRIALS; i++) {
@@ -203,12 +202,12 @@ public final class RuntimeDropIndex {
         DropClassification.merge(block, DropClassification.classify(trials), deterministic, probabilistic);
     }
 
-    private static Map<Item, Integer> oneTrial(ServerWorld world, BlockState state, ItemStack tool) {
-        LootWorldContext.Builder builder = new LootWorldContext.Builder(world)
-                .add(LootContextParameters.ORIGIN, Vec3d.ofCenter(BlockPos.ORIGIN))
-                .add(LootContextParameters.TOOL, tool)
-                .luck(0.0F);
-        List<ItemStack> drops = state.getDroppedStacks(builder);
+    private static Map<Item, Integer> oneTrial(ServerLevel world, BlockState state, ItemStack tool) {
+        LootParams.Builder builder = new LootParams.Builder(world)
+                .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(BlockPos.ZERO))
+                .withParameter(LootContextParams.TOOL, tool)
+                .withLuck(0.0F);
+        List<ItemStack> drops = state.getDrops(builder);
         Map<Item, Integer> counts = new HashMap<>();
         for (ItemStack stack : drops) {
             if (!stack.isEmpty()) {

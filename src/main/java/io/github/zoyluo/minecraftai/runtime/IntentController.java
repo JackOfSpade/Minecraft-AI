@@ -79,7 +79,7 @@ public final class IntentController {
         if (origin.notifiesUser()) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", "The current mission is paused. Queued goals are preserved and safety recovery can still run.");
         }
-        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.level().getServer());
         return changed;
     }
 
@@ -98,7 +98,7 @@ public final class IntentController {
         if (origin.notifiesUser()) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system", "Mission resumed from its paused point.");
         }
-        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.getEntityWorld().getServer());
+        io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(bot.level().getServer());
         return changed;
     }
 
@@ -170,7 +170,7 @@ public final class IntentController {
 
     private static void requireServerThread(AIPlayerEntity bot) {
         Objects.requireNonNull(bot, "bot");
-        if (!bot.getEntityWorld().getServer().isOnThread()) {
+        if (!bot.level().getServer().isSameThread()) {
             throw new IllegalStateException("intent_control_must_run_on_server_thread");
         }
     }
@@ -208,7 +208,7 @@ public final class IntentController {
 
         @Override
         public boolean clearLongTermGoal() {
-            return BotMemoryStore.INSTANCE.of(bot.getUuid()).clearGoal();
+            return BotMemoryStore.INSTANCE.of(bot.getUUID()).clearGoal();
         }
 
         @Override

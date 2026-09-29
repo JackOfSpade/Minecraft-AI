@@ -30,15 +30,14 @@ import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.block.Block;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -69,7 +68,7 @@ public final class MinecraftAiServerNetworking {
         ServerPlayNetworking.registerGlobalReceiver(BotTeleportC2S.ID, (payload, context) ->
                 context.server().execute(() -> handleTeleport(context.player(), payload)));
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-                subscriptions.remove(handler.player.getUuid()));
+                subscriptions.remove(handler.player.getUUID()));
     }
 
     public void tick(MinecraftServer server) {
@@ -78,7 +77,7 @@ public final class MinecraftAiServerNetworking {
             return;
         }
         for (Map.Entry<UUID, UUID> entry : subscriptions.entrySet()) {
-            ServerPlayerEntity viewer = server.getPlayerManager().getPlayer(entry.getKey());
+            ServerPlayer viewer = server.getPlayerList().getPlayer(entry.getKey());
             if (viewer == null) {
                 subscriptions.remove(entry.getKey());
                 continue;
@@ -109,10 +108,10 @@ public final class MinecraftAiServerNetworking {
             return;
         }
         for (Map.Entry<UUID, UUID> entry : subscriptions.entrySet()) {
-            if (!bot.getUuid().equals(entry.getValue())) {
+            if (!bot.getUUID().equals(entry.getValue())) {
                 continue;
             }
-            ServerPlayerEntity viewer = bot.getEntityWorld().getServer().getPlayerManager().getPlayer(entry.getKey());
+            ServerPlayer viewer = bot.level().getServer().getPlayerList().getPlayer(entry.getKey());
             if (viewer == null) {
                 subscriptions.remove(entry.getKey(), entry.getValue());
                 continue;
@@ -128,27 +127,27 @@ public final class MinecraftAiServerNetworking {
         }
     }
 
-    private void handleSubscribe(ServerPlayerEntity player, SubscribeBotC2S payload) {
+    private void handleSubscribe(ServerPlayer player, SubscribeBotC2S payload) {
         if (!payload.subscribe()) {
-            subscriptions.remove(player.getUuid());
+            subscriptions.remove(player.getUUID());
             return;
         }
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.VIEW, "network:subscribe");
         if (bot.isEmpty()) {
-            subscriptions.remove(player.getUuid());
+            subscriptions.remove(player.getUUID());
             sendSystem(player, "", "Bot not found or insufficient permissions.");
             return;
         }
         AIPlayerEntity target = bot.get();
-        subscriptions.put(player.getUuid(), target.getUuid());
+        subscriptions.put(player.getUUID(), target.getUUID());
         if (ServerPlayNetworking.canSend(player, BotSnapshotS2C.ID)) {
             ServerPlayNetworking.send(player, snapshot(target));
         }
         sendSystem(player, target.getGameProfile().name(), "Subscribed to " + target.getGameProfile().name());
     }
 
-    private void handleCommand(ServerPlayerEntity player, BotCommandC2S payload) {
+    private void handleCommand(ServerPlayer player, BotCommandC2S payload) {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.COMMAND, "network:command");
         if (bot.isEmpty()) {
@@ -164,7 +163,7 @@ public final class MinecraftAiServerNetworking {
         }
     }
 
-    private void handleSetOption(ServerPlayerEntity player, SetOptionC2S payload) {
+    private void handleSetOption(ServerPlayer player, SetOptionC2S payload) {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.ADMIN, "network:set_option");
         if (bot.isEmpty()) {
@@ -188,7 +187,7 @@ public final class MinecraftAiServerNetworking {
     }
 
     // Panel teleport: runs on the server thread; authorization completes after the target is resolved, before any coordinate change.
-    private void handleTeleport(ServerPlayerEntity player, BotTeleportC2S payload) {
+    private void handleTeleport(ServerPlayer player, BotTeleportC2S payload) {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.TELEPORT, "network:teleport");
         if (bot.isEmpty()) {
@@ -205,25 +204,25 @@ public final class MinecraftAiServerNetworking {
         }
         if (payload.direction() == BotTeleportC2S.TO_AI) {
             // Player -> a standable block within 10 blocks of the AI.
-            net.minecraft.server.world.ServerWorld world = target.getEntityWorld();
-            io.github.zoyluo.minecraftai.pathfinding.Standability.findNearestStandable(world, target.getBlockPos(), 10, 8, 8)
-                    .ifPresent(p -> player.teleport(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
-                            java.util.Set.of(), player.getYaw(), player.getPitch(), true));
+            net.minecraft.server.level.ServerLevel world = target.level();
+            io.github.zoyluo.minecraftai.pathfinding.Standability.findNearestStandable(world, target.blockPosition(), 10, 8, 8)
+                    .ifPresent(p -> player.teleportTo(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
+                            java.util.Set.of(), player.getYRot(), player.getXRot(), true));
         } else if (payload.direction() == BotTeleportC2S.RECALL_AI) {
             // AI -> a standable block within 10 blocks of the player (stop its current action first, then teleport).
-            net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
-            io.github.zoyluo.minecraftai.pathfinding.Standability.findNearestStandable(world, player.getBlockPos(), 10, 8, 8)
+            net.minecraft.server.level.ServerLevel world = player.level();
+            io.github.zoyluo.minecraftai.pathfinding.Standability.findNearestStandable(world, player.blockPosition(), 10, 8, 8)
                     .ifPresent(p -> {
                         target.getActionPack().stopAll();
-                        target.teleport(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
-                                java.util.Set.of(), target.getYaw(), target.getPitch(), true);
+                        target.teleportTo(world, p.getX() + 0.5D, p.getY(), p.getZ() + 0.5D,
+                                java.util.Set.of(), target.getYRot(), target.getXRot(), true);
                     });
         } else {
             sendSystem(player, target.getGameProfile().name(), "Invalid teleport direction.");
         }
     }
 
-    private void handleItemMove(ServerPlayerEntity player, BotItemMoveC2S payload) {
+    private void handleItemMove(ServerPlayer player, BotItemMoveC2S payload) {
         Optional<AIPlayerEntity> bot = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 player, payload.botName(), BotAuthorizationPolicy.Operation.INVENTORY, "network:item_move");
         if (bot.isEmpty()) {
@@ -236,29 +235,29 @@ public final class MinecraftAiServerNetworking {
         if (payload.direction() == BotItemMoveC2S.TAKE) {
             // Take from the AI's main[slot] into the player's inventory
             int slot = payload.slot();
-            if (slot < 0 || slot >= botInv.getMainStacks().size()) {
+            if (slot < 0 || slot >= botInv.getNonEquipmentItems().size()) {
                 return;
             }
-            ItemStack src = botInv.getMainStacks().get(slot);
+            ItemStack src = botInv.getNonEquipmentItems().get(slot);
             if (src.isEmpty()) {
                 return;
             }
             int move = payload.amount() <= 0 ? src.getCount() : Math.min(payload.amount(), src.getCount());
             ItemStack moving = src.copy();
             moving.setCount(move);
-            boolean inserted = playerInv.insertStack(moving); // moving is mutated in place to the "remainder not inserted"
+            boolean inserted = playerInv.add(moving); // moving is mutated in place to the "remainder not inserted"
             int placed = move - moving.getCount();
             if (placed > 0) {
-                src.decrement(placed);
-                botInv.markDirty();
+                src.shrink(placed);
+                botInv.setChanged();
             }
         } else if (payload.direction() == BotItemMoveC2S.PUT) {
             // Put the player's inventory.main[slot] into the AI's inventory
             int slot = payload.slot();
-            if (slot < 0 || slot >= playerInv.getMainStacks().size()) {
+            if (slot < 0 || slot >= playerInv.getNonEquipmentItems().size()) {
                 return;
             }
-            ItemStack src = playerInv.getMainStacks().get(slot);
+            ItemStack src = playerInv.getNonEquipmentItems().get(slot);
             if (src.isEmpty()) {
                 return;
             }
@@ -267,8 +266,8 @@ public final class MinecraftAiServerNetworking {
             moving.setCount(move);
             int placed = insertIntoBot(botInv, moving);
             if (placed > 0) {
-                src.decrement(placed);
-                playerInv.markDirty();
+                src.shrink(placed);
+                playerInv.setChanged();
             }
         } else {
             sendSystem(player, target.getGameProfile().name(), "Invalid item move direction.");
@@ -281,32 +280,32 @@ public final class MinecraftAiServerNetworking {
     }
 
     // Insert stack into the AI's inventory main area as much as possible (stack onto matching items first, then fill empty slots); returns the amount actually placed.
-    private static int insertIntoBot(net.minecraft.entity.player.PlayerInventory botInv, ItemStack moving) {
+    private static int insertIntoBot(net.minecraft.world.entity.player.Inventory botInv, ItemStack moving) {
         int want = moving.getCount();
         // 1) Stack onto existing not-yet-full slots of the same item
-        for (int i = 0; i < botInv.getMainStacks().size() && !moving.isEmpty(); i++) {
-            ItemStack dst = botInv.getMainStacks().get(i);
-            if (!dst.isEmpty() && ItemStack.areItemsAndComponentsEqual(dst, moving) && dst.getCount() < dst.getMaxCount()) {
-                int room = dst.getMaxCount() - dst.getCount();
+        for (int i = 0; i < botInv.getNonEquipmentItems().size() && !moving.isEmpty(); i++) {
+            ItemStack dst = botInv.getNonEquipmentItems().get(i);
+            if (!dst.isEmpty() && ItemStack.isSameItemSameComponents(dst, moving) && dst.getCount() < dst.getMaxStackSize()) {
+                int room = dst.getMaxStackSize() - dst.getCount();
                 int add = Math.min(room, moving.getCount());
-                dst.increment(add);
-                moving.decrement(add);
+                dst.grow(add);
+                moving.shrink(add);
             }
         }
         // 2) Fill empty slots
-        for (int i = 0; i < botInv.getMainStacks().size() && !moving.isEmpty(); i++) {
-            if (botInv.getMainStacks().get(i).isEmpty()) {
-                botInv.getMainStacks().set(i, moving.copy());
+        for (int i = 0; i < botInv.getNonEquipmentItems().size() && !moving.isEmpty(); i++) {
+            if (botInv.getNonEquipmentItems().get(i).isEmpty()) {
+                botInv.getNonEquipmentItems().set(i, moving.copy());
                 moving.setCount(0);
             }
         }
         if (want != moving.getCount()) {
-            botInv.markDirty();
+            botInv.setChanged();
         }
         return want - moving.getCount();
     }
 
-    private void dispatch(ServerPlayerEntity player, AIPlayerEntity bot, BotCommandC2S payload) {
+    private void dispatch(ServerPlayer player, AIPlayerEntity bot, BotCommandC2S payload) {
         String action = payload.action().toLowerCase(Locale.ROOT);
         switch (action) {
             case "move" -> assign(bot, new MoveTask(bot, parseBlockPos(payload.arg1())));
@@ -352,25 +351,25 @@ public final class MinecraftAiServerNetworking {
     private BotSnapshotS2C snapshot(AIPlayerEntity bot) {
         TaskStatus task = TaskManager.INSTANCE.status(bot);
         BrainCoordinator.BrainStatus brain = BrainCoordinator.INSTANCE.status(bot);
-        BotMemory memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
+        BotMemory memory = BotMemoryStore.INSTANCE.of(bot.getUUID());
         ArrayList<BotSnapshotS2C.ItemEntry> inventory = new ArrayList<>();
-        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-            ItemStack stack = bot.getInventory().getMainStacks().get(slot);
+        for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = bot.getInventory().getNonEquipmentItems().get(slot);
             if (!stack.isEmpty()) {
-                inventory.add(new BotSnapshotS2C.ItemEntry(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), slot));
+                inventory.add(new BotSnapshotS2C.ItemEntry(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), slot));
             }
         }
         // UI: full-body equipment (head/chest/legs/feet/main hand/off hand), slot index 0..5, for the inventory panel's equipment display.
         ArrayList<BotSnapshotS2C.ItemEntry> equipment = new ArrayList<>();
-        net.minecraft.entity.EquipmentSlot[] equipSlots = {
-                net.minecraft.entity.EquipmentSlot.HEAD, net.minecraft.entity.EquipmentSlot.CHEST,
-                net.minecraft.entity.EquipmentSlot.LEGS, net.minecraft.entity.EquipmentSlot.FEET,
-                net.minecraft.entity.EquipmentSlot.MAINHAND, net.minecraft.entity.EquipmentSlot.OFFHAND};
+        net.minecraft.world.entity.EquipmentSlot[] equipSlots = {
+                net.minecraft.world.entity.EquipmentSlot.HEAD, net.minecraft.world.entity.EquipmentSlot.CHEST,
+                net.minecraft.world.entity.EquipmentSlot.LEGS, net.minecraft.world.entity.EquipmentSlot.FEET,
+                net.minecraft.world.entity.EquipmentSlot.MAINHAND, net.minecraft.world.entity.EquipmentSlot.OFFHAND};
         for (int slotIndex = 0; slotIndex < equipSlots.length; slotIndex++) {
-            ItemStack equipped = bot.getEquippedStack(equipSlots[slotIndex]);
+            ItemStack equipped = bot.getItemBySlot(equipSlots[slotIndex]);
             if (!equipped.isEmpty()) {
                 equipment.add(new BotSnapshotS2C.ItemEntry(
-                        Registries.ITEM.getId(equipped.getItem()).toString(), equipped.getCount(), slotIndex));
+                        BuiltInRegistries.ITEM.getKey(equipped.getItem()).toString(), equipped.getCount(), slotIndex));
             }
         }
         // Task chain: prefer showing GoalExecutor's actual deterministic plan (provision_food -> [chop tree/craft pickaxe/mine stone/build furnace/hunt/cook]...),
@@ -394,7 +393,7 @@ public final class MinecraftAiServerNetworking {
                 bot.getGameProfile().name(),
                 bot.getHealth(),
                 bot.getMaxHealth(),
-                bot.getHungerManager().getFoodLevel(),
+                bot.getFoodData().getFoodLevel(),
                 bot.getBlockX(),
                 bot.getBlockY(),
                 bot.getBlockZ(),
@@ -425,7 +424,7 @@ public final class MinecraftAiServerNetworking {
                 equipment);
     }
 
-    private void sendSystem(ServerPlayerEntity player, String botName, String text) {
+    private void sendSystem(ServerPlayer player, String botName, String text) {
         if (ServerPlayNetworking.canSend(player, BotChatS2C.ID)) {
             ServerPlayNetworking.send(player, new BotChatS2C(botName, "system", text));
         }
@@ -450,14 +449,14 @@ public final class MinecraftAiServerNetworking {
     }
 
     private static Block requiredBlock(String idText) {
-        Identifier id = Identifier.of(idText);
-        return Registries.BLOCK.getOptionalValue(id)
+        Identifier id = Identifier.parse(idText);
+        return BuiltInRegistries.BLOCK.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id));
     }
 
     private static Item requiredItem(String idText) {
-        Identifier id = Identifier.of(idText);
-        return Registries.ITEM.getOptionalValue(id)
+        Identifier id = Identifier.parse(idText);
+        return BuiltInRegistries.ITEM.getOptional(id)
                 .orElseThrow(() -> new IllegalArgumentException("unknown_item: " + id));
     }
 

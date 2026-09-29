@@ -9,16 +9,6 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,6 +21,15 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Continuous SAFETY ownership for one or more Creeper risks.
@@ -68,7 +67,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     record ObservedCreeper(UUID uuid, BlockPos pos) {
     }
 
-    private record VisibleCreeper(CreeperEntity entity,
+    private record VisibleCreeper(Creeper entity,
                                   UUID uuid,
                                   BlockPos pos,
                                   double distanceSquared,
@@ -95,7 +94,7 @@ public final class CreeperDefenseTask extends AbstractTask {
                            double distanceSquared,
                            int lastSeenElapsed) {
             this.uuid = uuid;
-            this.pos = pos.toImmutable();
+            this.pos = pos.immutable();
             this.distanceSquared = distanceSquared;
             this.lastSeenElapsed = lastSeenElapsed;
         }
@@ -146,7 +145,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     private boolean rememberedLateFuse;
     private boolean rememberedCharged;
     private BlockPos escapeGoal;
-    private Vec3d awayProgressAnchor;
+    private Vec3 awayProgressAnchor;
     private int awayProgressElapsed;
     private int lastRepathElapsed;
     private int nextWallAttemptElapsed;
@@ -163,14 +162,14 @@ public final class CreeperDefenseTask extends AbstractTask {
      * Compatibility admission for callers that already proved this exact entity observable.
      * Production scheduling uses the UUID snapshot overload below and never retains the entity.
      */
-    public CreeperDefenseTask(CreeperEntity initiallyObserved, BlockPos initiallyObservedPos) {
-        this(initiallyObserved == null ? null : initiallyObserved.getUuid(), initiallyObservedPos);
+    public CreeperDefenseTask(Creeper initiallyObserved, BlockPos initiallyObservedPos) {
+        this(initiallyObserved == null ? null : initiallyObserved.getUUID(), initiallyObservedPos);
     }
 
     public CreeperDefenseTask(UUID initiallyObservedId, BlockPos initiallyObservedPos) {
         this.initiallyObservedId = initiallyObservedId;
         this.initiallyObservedPos = initiallyObservedPos == null
-                ? null : initiallyObservedPos.toImmutable();
+                ? null : initiallyObservedPos.immutable();
     }
 
     @Override
@@ -234,7 +233,7 @@ public final class CreeperDefenseTask extends AbstractTask {
             recentRisks.put(initiallyObservedId, new RiskMemory(
                     initiallyObservedId,
                     initiallyObservedPos,
-                    bot.getEntityPos().squaredDistanceTo(Vec3d.ofBottomCenter(initiallyObservedPos)),
+                    bot.position().distanceToSqr(Vec3.atBottomCenterOf(initiallyObservedPos)),
                     0));
         }
         RiskSelection risk = refreshRiskSelection(bot).orElse(null);
@@ -339,7 +338,7 @@ public final class CreeperDefenseTask extends AbstractTask {
         }
 
         boolean reachedGoal = escapeGoal != null
-                && bot.getBlockPos().getSquaredDistance(escapeGoal)
+                && bot.blockPosition().distSqr(escapeGoal)
                 <= ESCAPE_GOAL_REACHED_SQUARED;
         if (reachedGoal
                 || bot.getActionPack().isPathExecutorIdle()
@@ -356,16 +355,16 @@ public final class CreeperDefenseTask extends AbstractTask {
 
     private boolean beginWall(AIPlayerEntity bot, RiskSelection risk) {
         bot.getActionPack().stopAll();
-        BlockPos origin = bot.getBlockPos().toImmutable();
+        BlockPos origin = bot.blockPosition().immutable();
         boolean stepped = tryFastStepAway(bot, lastSeenPos);
-        BlockPos retreatFeet = bot.getBlockPos().toImmutable();
+        BlockPos retreatFeet = bot.blockPosition().immutable();
         Direction towardThreat = dominantDirectionToward(retreatFeet, lastSeenPos);
         if (towardThreat == null) {
             fallbackToEscape(bot, risk, "creeper_wall_missing_direction");
             return false;
         }
 
-        BlockPos center = retreatFeet.offset(towardThreat).toImmutable();
+        BlockPos center = retreatFeet.relative(towardThreat).immutable();
         if (intersectsBot(bot, center)) {
             fallbackToEscape(bot, risk, "creeper_wall_center_intersects_bot");
             return false;
@@ -380,7 +379,7 @@ public final class CreeperDefenseTask extends AbstractTask {
         barrierTowardThreat = towardThreat;
         addColumn(coreTargets, center);
         for (Direction side : orderedBarrierSides(retreatFeet, lastSeenPos, towardThreat)) {
-            BlockPos sideFeet = center.offset(side).toImmutable();
+            BlockPos sideFeet = center.relative(side).immutable();
             if (!sideFeet.equals(retreatFeet) && !intersectsBot(bot, sideFeet)) {
                 addColumn(wingTargets, sideFeet);
             }
@@ -505,7 +504,7 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (!isObservablePhysicalBarrierCell(bot, target)) {
             return "placed_block_unobservable_or_nonphysical";
         }
-        placedWallBlocks.add(target.toImmutable());
+        placedWallBlocks.add(target.immutable());
         wallPlacements++;
         BotLog.action(bot, "creeper_wall_block_placed",
                 "target", target,
@@ -578,8 +577,8 @@ public final class CreeperDefenseTask extends AbstractTask {
             // The source position is remembered, but the Bot's own position is always current.
             // Recompute clearance before ranking so movement cannot leave a stale "near/far"
             // ordering across multiple remembered Creepers.
-            memory.distanceSquared = bot.getEntityPos().squaredDistanceTo(
-                    Vec3d.ofBottomCenter(memory.pos));
+            memory.distanceSquared = bot.position().distanceToSqr(
+                    Vec3.atBottomCenterOf(memory.pos));
         }
         // Grace expiry alone is not a safety proof. Keep every close, unoccluded memory until the
         // Bot has physically cleared that source (or its own maintained wall blocks that exact
@@ -658,24 +657,24 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private static List<VisibleCreeper> observableCreeperSnapshots(AIPlayerEntity bot) {
-        return bot.getEntityWorld()
-                .getEntitiesByClass(
-                        CreeperEntity.class,
-                        bot.getBoundingBox().expand(CREEPER_SCAN_RANGE),
+        return bot.level()
+                .getEntitiesOfClass(
+                        Creeper.class,
+                        bot.getBoundingBox().inflate(CREEPER_SCAN_RANGE),
                         entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
                 .stream()
-                .filter(CreeperEntity::isAlive)
+                .filter(Creeper::isAlive)
                 .map(entity -> {
-                    float fuseProgress = entity.getLerpedFuseTime(1.0F);
+                    float fuseProgress = entity.getSwelling(1.0F);
                     boolean fuseStarted = entity.isIgnited()
-                            || entity.getFuseSpeed() > 0
+                            || entity.getSwellDir() > 0
                             || fuseProgress > 0.0F;
-                    boolean charged = entity.isCharged();
+                    boolean charged = entity.isPowered();
                     return new VisibleCreeper(
                             entity,
-                            entity.getUuid(),
-                            entity.getBlockPos().toImmutable(),
-                            bot.squaredDistanceTo(entity),
+                            entity.getUUID(),
+                            entity.blockPosition().immutable(),
+                            bot.distanceToSqr(entity),
                             fuseProgress,
                             fuseStarted,
                             fuseProgress >= LATE_FUSE_PROGRESS,
@@ -696,14 +695,14 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (source == null) {
             return false;
         }
-        BlockPos from = bot.getBlockPos();
+        BlockPos from = bot.blockPosition();
         double awayX = bot.getX() - (source.getX() + 0.5D);
         double awayZ = bot.getZ() - (source.getZ() + 0.5D);
         List<StepCandidate> candidates = new ArrayList<>();
         for (Direction direction : new Direction[]{
                 Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
-            int dx = direction.getOffsetX();
-            int dz = direction.getOffsetZ();
+            int dx = direction.getStepX();
+            int dz = direction.getStepZ();
             double score = dx * awayX + dz * awayZ;
             if (score >= -1.0E-6D) {
                 candidates.add(new StepCandidate(dx, dz, score));
@@ -713,12 +712,12 @@ public final class CreeperDefenseTask extends AbstractTask {
                 .comparingDouble(StepCandidate::awayScore).reversed()
                 .thenComparingInt(candidate -> Math.abs(candidate.dx()) + Math.abs(candidate.dz())));
         for (StepCandidate candidate : candidates) {
-            BlockPos target = from.add(candidate.dx(), 0, candidate.dz());
+            BlockPos target = from.offset(candidate.dx(), 0, candidate.dz());
             if (ObservableWorldQuery.canObserveCell(bot, target)
-                    && ObservableWorldQuery.canObserveCell(bot, target.up())
-                    && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target.down())
+                    && ObservableWorldQuery.canObserveCell(bot, target.above())
+                    && ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, target.below())
                     && FakePlayerMotion.stepToStandable(bot, target, "creeper_fast_step_away")) {
-                bot.setVelocity(Vec3d.ZERO);
+                bot.setDeltaMovement(Vec3.ZERO);
                 bot.fallDistance = 0.0F;
                 bot.setOnGround(true);
                 return true;
@@ -728,8 +727,8 @@ public final class CreeperDefenseTask extends AbstractTask {
     }
 
     private static void addColumn(Deque<BlockPos> targets, BlockPos feet) {
-        targets.add(feet.toImmutable());
-        targets.add(feet.up().toImmutable());
+        targets.add(feet.immutable());
+        targets.add(feet.above().immutable());
     }
 
     private static List<Direction> orderedBarrierSides(BlockPos retreatFeet,
@@ -768,17 +767,17 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (barrierFeet == null || source == null) {
             return false;
         }
-        Direction currentToward = dominantDirectionToward(bot.getBlockPos(), source);
+        Direction currentToward = dominantDirectionToward(bot.blockPosition(), source);
         return currentToward != null
                 && currentToward == barrierTowardThreat
-                && barrierFeet.equals(bot.getBlockPos().offset(currentToward));
+                && barrierFeet.equals(bot.blockPosition().relative(currentToward));
     }
 
     private boolean ownedCorePrefixMaintained(AIPlayerEntity bot) {
         if (barrierFeet == null) {
             return false;
         }
-        for (BlockPos core : List.of(barrierFeet, barrierFeet.up())) {
+        for (BlockPos core : List.of(barrierFeet, barrierFeet.above())) {
             if (placedWallBlocks.contains(core)
                     && !isObservablePhysicalBarrierCell(bot, core)) {
                 return false;
@@ -790,22 +789,22 @@ public final class CreeperDefenseTask extends AbstractTask {
     private boolean maintainedCoreBarrier(AIPlayerEntity bot) {
         return barrierFeet != null
                 && placedWallBlocks.contains(barrierFeet)
-                && placedWallBlocks.contains(barrierFeet.up())
+                && placedWallBlocks.contains(barrierFeet.above())
                 && isObservablePhysicalBarrierCell(bot, barrierFeet)
-                && isObservablePhysicalBarrierCell(bot, barrierFeet.up());
+                && isObservablePhysicalBarrierCell(bot, barrierFeet.above());
     }
 
     private static boolean isObservablePhysicalBarrierCell(AIPlayerEntity bot, BlockPos pos) {
         if (!ObservableWorldQuery.canObserveBlockWithInsetFaces(bot, pos)) {
             return false;
         }
-        var state = bot.getEntityWorld().getBlockState(pos);
-        return !state.getCollisionShape(bot.getEntityWorld(), pos).isEmpty();
+        var state = bot.level().getBlockState(pos);
+        return !state.getCollisionShape(bot.level(), pos).isEmpty();
     }
 
     private static boolean intersectsBot(AIPlayerEntity bot, BlockPos feet) {
-        return bot.getBoundingBox().intersects(new Box(feet))
-                || bot.getBoundingBox().intersects(new Box(feet.up()));
+        return bot.getBoundingBox().intersects(new AABB(feet))
+                || bot.getBoundingBox().intersects(new AABB(feet.above()));
     }
 
     private boolean ownedWallOccludesLastSeen(AIPlayerEntity bot) {
@@ -816,12 +815,12 @@ public final class CreeperDefenseTask extends AbstractTask {
         if (source == null || !maintainedCoreBarrier(bot)) {
             return false;
         }
-        Vec3d rememberedEye = Vec3d.ofCenter(source).add(0.0D, 0.75D, 0.0D);
-        BlockHitResult hit = bot.getEntityWorld().raycast(new RaycastContext(
-                bot.getEyePos(),
+        Vec3 rememberedEye = Vec3.atCenterOf(source).add(0.0D, 0.75D, 0.0D);
+        BlockHitResult hit = bot.level().clip(new ClipContext(
+                bot.getEyePosition(),
                 rememberedEye,
-                RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE,
+                ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE,
                 bot));
         return hit.getType() == HitResult.Type.BLOCK
                 && placedWallBlocks.contains(hit.getBlockPos())
@@ -833,24 +832,24 @@ public final class CreeperDefenseTask extends AbstractTask {
             resetAwayProgress(bot);
             return;
         }
-        Vec3d source = Vec3d.ofCenter(lastSeenPos);
-        Vec3d away = new Vec3d(
+        Vec3 source = Vec3.atCenterOf(lastSeenPos);
+        Vec3 away = new Vec3(
                 awayProgressAnchor.x - source.x,
                 0.0D,
                 awayProgressAnchor.z - source.z);
-        if (away.lengthSquared() < 1.0E-6D) {
+        if (away.lengthSqr() < 1.0E-6D) {
             return;
         }
-        Vec3d displacement = bot.getEntityPos().subtract(awayProgressAnchor);
-        double outward = displacement.x * away.x / Math.sqrt(away.lengthSquared())
-                + displacement.z * away.z / Math.sqrt(away.lengthSquared());
+        Vec3 displacement = bot.position().subtract(awayProgressAnchor);
+        double outward = displacement.x * away.x / Math.sqrt(away.lengthSqr())
+                + displacement.z * away.z / Math.sqrt(away.lengthSqr());
         if (outward >= AWAY_PROGRESS_DISTANCE) {
             resetAwayProgress(bot);
         }
     }
 
     private void resetAwayProgress(AIPlayerEntity bot) {
-        awayProgressAnchor = bot.getEntityPos();
+        awayProgressAnchor = bot.position();
         awayProgressElapsed = elapsed;
     }
 
@@ -886,7 +885,7 @@ public final class CreeperDefenseTask extends AbstractTask {
     private double distanceToLastSeenSquared(AIPlayerEntity bot) {
         return lastSeenPos == null
                 ? Double.POSITIVE_INFINITY
-                : bot.getEntityPos().squaredDistanceTo(Vec3d.ofBottomCenter(lastSeenPos));
+                : bot.position().distanceToSqr(Vec3.atBottomCenterOf(lastSeenPos));
     }
 
     private void completeOwner(AIPlayerEntity bot, String reason) {

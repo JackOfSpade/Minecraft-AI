@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.mixin;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
@@ -25,17 +25,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * the boat's controlling passenger is our own {@link AIPlayerEntity} -- a real player's boat is
  * untouched and keeps driving its paddles client-side exactly as before.</p>
  */
-@Mixin(AbstractBoatEntity.class)
+@Mixin(AbstractBoat.class)
 abstract class AIPlayerControlledBoatPaddleMixin {
-    @Invoker("updatePaddles")
+    @Invoker("controlBoat")
     abstract void minecraftai$invokeUpdatePaddles();
 
     @Inject(method = "tick", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/entity/vehicle/AbstractBoatEntity;updateVelocity()V",
+            target = "Lnet/minecraft/world/entity/vehicle/boat/AbstractBoat;floatBoat()V",
             shift = At.Shift.AFTER))
     private void minecraftai$driveAiPlayerPaddlesServerSide(CallbackInfo ci) {
-        AbstractBoatEntity self = (AbstractBoatEntity) (Object) this;
-        if (self.getEntityWorld().isClient()) {
+        AbstractBoat self = (AbstractBoat) (Object) this;
+        if (self.level().isClientSide()) {
             return;
         }
         if (self.getControllingPassenger() instanceof AIPlayerEntity) {

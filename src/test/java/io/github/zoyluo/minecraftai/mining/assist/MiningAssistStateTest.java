@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.BOT;
 import static org.junit.jupiter.api.Assertions.assertEquals;

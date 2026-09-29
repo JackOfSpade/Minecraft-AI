@@ -1,9 +1,5 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,6 +8,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
 
 /**
  * Bounded breadth-first search over the water (and its dry landings) around a swimming bot.  It
@@ -40,9 +39,9 @@ final class SwimRoute {
     }
 
     /** @return the cells to step through, in order, excluding {@code start}; empty when none. */
-    static Optional<List<BlockPos>> search(ServerWorld world, BlockPos start, BlockPos target,
+    static Optional<List<BlockPos>> search(ServerLevel world, BlockPos start, BlockPos target,
                                            Goal goal, double standoff) {
-        BlockPos origin = start.toImmutable();
+        BlockPos origin = start.immutable();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
         Map<BlockPos, BlockPos> parent = new HashMap<>();
         Map<BlockPos, Integer> depth = new HashMap<>();
@@ -53,7 +52,7 @@ final class SwimRoute {
 
         BlockPos best = null;
         double bestScore = Double.MAX_VALUE;
-        double startDistance = origin.getSquaredDistance(target);
+        double startDistance = origin.distSqr(target);
         int nodes = 0;
         while (!queue.isEmpty() && nodes < MAX_NODES) {
             BlockPos current = queue.removeFirst();
@@ -69,7 +68,7 @@ final class SwimRoute {
                 if (!NavSafetyNet.passableWaterColumn(world, candidate)) {
                     continue;
                 }
-                BlockPos cell = candidate.toImmutable();
+                BlockPos cell = candidate.immutable();
                 parent.put(cell, current);
                 depth.put(cell, currentDepth + 1);
                 boolean dry = NavSafetyNet.isDryStandableCell(world, cell);
@@ -82,7 +81,7 @@ final class SwimRoute {
                     case EXIT -> {
                         if (dry) {
                             double score = (currentDepth + 1)
-                                    + 1.5D * Math.abs(Math.sqrt(cell.getSquaredDistance(target)) - standoff);
+                                    + 1.5D * Math.abs(Math.sqrt(cell.distSqr(target)) - standoff);
                             if (score < bestScore) {
                                 bestScore = score;
                                 best = cell;
@@ -92,8 +91,8 @@ final class SwimRoute {
                     }
                     case APPROACH -> {
                         if (!dry) {
-                            double score = cell.getSquaredDistance(target) * 1000.0D + currentDepth + 1;
-                            if (cell.getSquaredDistance(target) + 0.01D < startDistance && score < bestScore) {
+                            double score = cell.distSqr(target) * 1000.0D + currentDepth + 1;
+                            if (cell.distSqr(target) + 0.01D < startDistance && score < bestScore) {
                                 bestScore = score;
                                 best = cell;
                             }
@@ -109,9 +108,9 @@ final class SwimRoute {
     }
 
     /** A water cell whose head cell is free of water: standing there the bot breathes. */
-    static boolean hasAirAbove(ServerWorld world, BlockPos cell) {
-        return world.getFluidState(cell).isIn(FluidTags.WATER)
-                && !world.getFluidState(cell.up()).isIn(FluidTags.WATER);
+    static boolean hasAirAbove(ServerLevel world, BlockPos cell) {
+        return world.getFluidState(cell).is(FluidTags.WATER)
+                && !world.getFluidState(cell.above()).is(FluidTags.WATER);
     }
 
     private static List<BlockPos> pathTo(Map<BlockPos, BlockPos> parent, BlockPos origin, BlockPos goal) {

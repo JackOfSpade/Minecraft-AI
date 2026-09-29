@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.craft;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-
 import java.util.HashMap;
 import java.util.Map;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Item / Block → display-name lookup table. Used by the goal chain ({@code GoalStep.describe} /
@@ -29,7 +28,7 @@ public final class ItemNames {
             return "?";
         }
         String name = ITEMS.get(item);
-        return name != null ? name : Registries.ITEM.getId(item).getPath();
+        return name != null ? name : BuiltInRegistries.ITEM.getKey(item).getPath();
     }
 
     public static String cn(Block block) {
@@ -37,7 +36,7 @@ public final class ItemNames {
             return "?";
         }
         String name = BLOCKS.get(block);
-        return name != null ? name : Registries.BLOCK.getId(block).getPath();
+        return name != null ? name : BuiltInRegistries.BLOCK.getKey(block).getPath();
     }
 
     private static void i(Item item, String cn) {

@@ -3,17 +3,16 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.craft.SmeltChain;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Visible, local workstation lookup shared by the deterministic task executors.
@@ -42,7 +41,7 @@ public final class WorkshopLocator {
     /** Returns the nearest visible crafting table in the local workshop radius. */
     public static Optional<BlockPos> nearestCraftingTable(AIPlayerEntity bot) {
         return nearestBlock(bot, CRAFTING_TABLE_RADIUS,
-                state -> state.isOf(Blocks.CRAFTING_TABLE));
+                state -> state.is(Blocks.CRAFTING_TABLE));
     }
 
     public static boolean hasNearbyCraftingTable(AIPlayerEntity bot) {
@@ -51,7 +50,7 @@ public final class WorkshopLocator {
 
     /** Returns the nearest visible normal furnace. A normal furnace is the universal fallback. */
     public static Optional<BlockPos> nearestFurnace(AIPlayerEntity bot) {
-        return nearestBlock(bot, FURNACE_RADIUS, state -> state.isOf(Blocks.FURNACE));
+        return nearestBlock(bot, FURNACE_RADIUS, state -> state.is(Blocks.FURNACE));
     }
 
     public static boolean hasNearbyFurnace(AIPlayerEntity bot) {
@@ -83,19 +82,19 @@ public final class WorkshopLocator {
             Item output,
             int requestedItems,
             Set<BlockPos> excluded) {
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         Set<BlockPos> rejected = excluded == null ? Set.of() : Set.copyOf(excluded);
         int itemCount = Math.max(1, requestedItems);
-        return BlockPos.stream(origin.add(-FURNACE_RADIUS, -3, -FURNACE_RADIUS),
-                        origin.add(FURNACE_RADIUS, 4, FURNACE_RADIUS))
+        return BlockPos.betweenClosedStream(origin.offset(-FURNACE_RADIUS, -3, -FURNACE_RADIUS),
+                        origin.offset(FURNACE_RADIUS, 4, FURNACE_RADIUS))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> !rejected.contains(pos))
                 .filter(pos -> isCompatibleFurnace(bot, pos, input, output))
-                .map(BlockPos::toImmutable)
+                .map(BlockPos::immutable)
                 .min(Comparator
                         .comparingLong((BlockPos pos) -> estimatedCompletionTicks(
-                                pos, origin, bot.getEntityWorld().getBlockState(pos), input, itemCount))
-                        .thenComparingDouble(pos -> pos.getSquaredDistance(origin)));
+                                pos, origin, bot.level().getBlockState(pos), input, itemCount))
+                        .thenComparingDouble(pos -> pos.distSqr(origin)));
     }
 
     public static boolean hasNearbyCompatibleFurnace(AIPlayerEntity bot, Item input, Item output) {
@@ -104,44 +103,44 @@ public final class WorkshopLocator {
 
     public static boolean isCompatibleFurnace(
             AIPlayerEntity bot, BlockPos pos, Item input, Item output) {
-        BlockState state = bot.getEntityWorld().getBlockState(pos);
+        BlockState state = bot.level().getBlockState(pos);
         if (!isCompatibleFurnaceType(state, input)) {
             return false;
         }
-        if (!(bot.getEntityWorld().getBlockEntity(pos) instanceof AbstractFurnaceBlockEntity furnace)) {
+        if (!(bot.level().getBlockEntity(pos) instanceof AbstractFurnaceBlockEntity furnace)) {
             return false;
         }
-        ItemStack queuedInput = furnace.getStack(0);
-        if (!queuedInput.isEmpty() && !queuedInput.isOf(input)) {
+        ItemStack queuedInput = furnace.getItem(0);
+        if (!queuedInput.isEmpty() && !queuedInput.is(input)) {
             return false;
         }
-        ItemStack queuedOutput = furnace.getStack(2);
-        return queuedOutput.isEmpty() || queuedOutput.isOf(output);
+        ItemStack queuedOutput = furnace.getItem(2);
+        return queuedOutput.isEmpty() || queuedOutput.is(output);
     }
 
     private static boolean isCompatibleFurnaceType(BlockState state, Item input) {
-        if (state.isOf(Blocks.FURNACE)) {
+        if (state.is(Blocks.FURNACE)) {
             return true;
         }
-        if (state.isOf(Blocks.SMOKER)) {
+        if (state.is(Blocks.SMOKER)) {
             return SmeltChain.RAW_FOODS.contains(input);
         }
-        return state.isOf(Blocks.BLAST_FURNACE) && BLAST_FURNACE_INPUTS.contains(input);
+        return state.is(Blocks.BLAST_FURNACE) && BLAST_FURNACE_INPUTS.contains(input);
     }
 
     private static long estimatedCompletionTicks(
             BlockPos pos, BlockPos origin, BlockState state, Item input, int itemCount) {
         long cooking = (long) cookingTicks(state, input) * itemCount;
-        long walking = Math.round(Math.sqrt(pos.getSquaredDistance(origin))
+        long walking = Math.round(Math.sqrt(pos.distSqr(origin))
                 * ESTIMATED_WALK_TICKS_PER_BLOCK);
         return cooking + walking;
     }
 
     private static int cookingTicks(BlockState state, Item input) {
-        if (state.isOf(Blocks.SMOKER) && SmeltChain.RAW_FOODS.contains(input)) {
+        if (state.is(Blocks.SMOKER) && SmeltChain.RAW_FOODS.contains(input)) {
             return FAST_COOK_TICKS;
         }
-        if (state.isOf(Blocks.BLAST_FURNACE) && BLAST_FURNACE_INPUTS.contains(input)) {
+        if (state.is(Blocks.BLAST_FURNACE) && BLAST_FURNACE_INPUTS.contains(input)) {
             return FAST_COOK_TICKS;
         }
         return NORMAL_COOK_TICKS;
@@ -149,12 +148,12 @@ public final class WorkshopLocator {
 
     private static Optional<BlockPos> nearestBlock(
             AIPlayerEntity bot, int horizontalRadius, java.util.function.Predicate<BlockState> matches) {
-        BlockPos origin = bot.getBlockPos();
-        return BlockPos.stream(origin.add(-horizontalRadius, -3, -horizontalRadius),
-                        origin.add(horizontalRadius, 4, horizontalRadius))
+        BlockPos origin = bot.blockPosition();
+        return BlockPos.betweenClosedStream(origin.offset(-horizontalRadius, -3, -horizontalRadius),
+                        origin.offset(horizontalRadius, 4, horizontalRadius))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> matches.test(bot.getEntityWorld().getBlockState(pos)))
-                .map(BlockPos::toImmutable)
-                .min(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));
+                .filter(pos -> matches.test(bot.level().getBlockState(pos)))
+                .map(BlockPos::immutable)
+                .min(Comparator.comparingDouble(pos -> pos.distSqr(origin)));
     }
 }

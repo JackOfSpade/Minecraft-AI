@@ -4,15 +4,14 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.GameTestTimeLock;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Fixture helpers shared by the emergency-shelter and underground-safety GameTests
@@ -30,62 +29,62 @@ final class ShelterGameTestFixtures {
     /** The nine shell positions (top plus the four horizontal walls, two cells tall) around {@code feet}. */
     static List<BlockPos> shelterShell(BlockPos feet) {
         List<BlockPos> shell = new ArrayList<>(9);
-        shell.add(feet.up(2));
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            shell.add(feet.offset(direction));
-            shell.add(feet.up().offset(direction));
+        shell.add(feet.above(2));
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            shell.add(feet.relative(direction));
+            shell.add(feet.above().relative(direction));
         }
         return List.copyOf(shell);
     }
 
-    static boolean isSealed(TestContext context, BlockPos pos) {
-        var state = context.getWorld().getBlockState(pos);
-        return !state.isReplaceable()
-                && !state.getCollisionShape(context.getWorld(), pos).isEmpty();
+    static boolean isSealed(GameTestHelper context, BlockPos pos) {
+        var state = context.getLevel().getBlockState(pos);
+        return !state.canBeReplaced()
+                && !state.getCollisionShape(context.getLevel(), pos).isEmpty();
     }
 
-    static void assertPhysicalExit(TestContext context,
+    static void assertPhysicalExit(GameTestHelper context,
                                    AIPlayerEntity bot,
                                    BlockPos shelterFeet) {
-        BlockPos actual = bot.getBlockPos();
+        BlockPos actual = bot.blockPosition();
         int horizontal = Math.abs(actual.getX() - shelterFeet.getX())
                 + Math.abs(actual.getZ() - shelterFeet.getZ());
         require(context, actual.getY() == shelterFeet.getY() && horizontal == 1,
                 "terminal pose was not one adjacent exit step: "
                         + shelterFeet.toShortString() + " -> " + actual.toShortString());
-        require(context, Standability.isStandable(context.getWorld(), actual),
+        require(context, Standability.isStandable(context.getLevel(), actual),
                 "terminal exit was not standable: " + actual.toShortString());
-        require(context, context.getWorld().getBlockState(actual).isAir()
-                        && context.getWorld().getBlockState(actual.up()).isAir(),
+        require(context, context.getLevel().getBlockState(actual).isAir()
+                        && context.getLevel().getBlockState(actual.above()).isAir(),
                 "terminal exit did not leave a two-block opening");
     }
 
-    static void preparePlatform(TestContext context, BlockPos feet, int radius) {
+    static void preparePlatform(GameTestHelper context, BlockPos feet, int radius) {
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                context.getWorld().setBlockState(cell.down(),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell,
-                        Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell.up(),
-                        Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(cell.up(2),
-                        Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos cell = feet.offset(dx, 0, dz);
+                context.getLevel().setBlock(cell.below(),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(cell,
+                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(cell.above(),
+                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(cell.above(2),
+                        Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
     }
 
-    static void finish(TestContext context, AIPlayerEntity bot, String name) {
+    static void finish(GameTestHelper context, AIPlayerEntity bot, String name) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         DangerWatcher.INSTANCE.clear(bot);
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), name);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), name);
+        context.succeed();
     }
 
-    static void require(TestContext context, boolean condition, String message) {
+    static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 
@@ -97,14 +96,14 @@ final class ShelterGameTestFixtures {
      * acquired. See {@link GameTestTimeLock}'s class docs for why this must stay the test's only
      * {@code runAtEveryTick} registration.
      */
-    static void runLocked(TestContext context, Runnable perTick) {
+    static void runLocked(GameTestHelper context, Runnable perTick) {
         boolean[] timeLockAcquired = {false};
-        context.addFinalTask(() -> {
+        context.succeedIf(() -> {
             if (timeLockAcquired[0]) {
                 GameTestTimeLock.release();
             }
         });
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!timeLockAcquired[0]) {
                 if (!GameTestTimeLock.tryAcquire()) {
                     return;

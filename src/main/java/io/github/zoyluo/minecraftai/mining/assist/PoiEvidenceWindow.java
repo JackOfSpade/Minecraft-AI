@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
 
 /**
  * Per-bot POI evidence window (mining-assist design 2.4 and 3.3): the non-natural cells the sensor
@@ -35,7 +34,7 @@ public final class PoiEvidenceWindow {
     /** One remembered cell. {@code viaDecor} is true when only the OUTLINE pass has ever seen it. */
     public record Entry(BlockPos pos, PoiBucket bucket, int flags, int lastTick, boolean viaDecor) {
         public Entry {
-            pos = Objects.requireNonNull(pos, "pos").toImmutable();
+            pos = Objects.requireNonNull(pos, "pos").immutable();
             Objects.requireNonNull(bucket, "bucket");
         }
     }

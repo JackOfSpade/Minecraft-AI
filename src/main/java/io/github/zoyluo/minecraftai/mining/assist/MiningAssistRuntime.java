@@ -363,7 +363,7 @@ public final class MiningAssistRuntime {
             return false;
         }
         MiningAssistConfig cfg = config;
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         GateCache.Verdict cached = GATE.fresh(id, serverTick);
         if (cached != null && (!cached.enabled()
                 || stillOpen(originKindOf(bot), MiningEvidenceAudit.hasSession(id)))) {
@@ -411,10 +411,10 @@ public final class MiningAssistRuntime {
      */
     public static void clearBot(AIPlayerEntity bot) {
         MiningAssistRegistry.clear(bot);
-        GATE.remove(bot.getUuid());
-        FAILURES.clear(bot.getUuid());
+        GATE.remove(bot.getUUID());
+        FAILURES.clear(bot.getUUID());
         // P1 (F.4, M5): a detour's soft claims must not outlive the bot's own transient state.
-        OreClaims.releaseAll(bot.getUuid());
+        OreClaims.releaseAll(bot.getUUID());
     }
 
     /** Same as {@link #clearBot} plus the POI dedupe registry and warden mandatory-repeat latch — genuine
@@ -427,8 +427,8 @@ public final class MiningAssistRuntime {
         clearBot(bot);
         // P2: POI dedupe/registry and the warden mandatory-repeat latch are per-bot transient state too, but
         // only safe to drop on a genuine unload, not on the soft idle-release above.
-        PoiRegistry.clear(bot.getUuid());
-        MandatoryLatch.clear(bot.getUuid());
+        PoiRegistry.clear(bot.getUUID());
+        MandatoryLatch.clear(bot.getUUID());
     }
 
     /** The coordinator's exception fence: per-bot failure log throttle and sensing cooldown. */
@@ -483,7 +483,7 @@ public final class MiningAssistRuntime {
     /** The bot's server tick, or 0 when it has no server yet. */
     public static int serverTick(AIPlayerEntity bot) {
         MinecraftServer server = bot.getServer();
-        return server == null ? 0 : server.getTicks();
+        return server == null ? 0 : server.getTickCount();
     }
 
     /** Logs the first few failures of an exception-free hook, then stays quiet. */

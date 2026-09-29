@@ -4,9 +4,9 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
-import net.minecraft.block.BlockState;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * The Minecraft adapter of the honest sensor (mining-assist design 3.3): each tick it casts a
@@ -48,16 +48,16 @@ public final class ViewSweeper {
         long started = System.nanoTime();
         MiningAssistConfig config = MiningAssistRuntime.config();
         int target = SenseBudget.target(state.breakthroughActive(), raysPerTick);
-        boolean halve = config.adaptiveThrottleActive(MiningAssistRuntime.isForced(bot.getUuid()))
+        boolean halve = config.adaptiveThrottleActive(MiningAssistRuntime.isForced(bot.getUUID()))
                 && MiningAssistRuntime.headroom().halveRays();
         int sweeping = MiningAssistRegistry.activeSweepers(serverTick, state);
         int rays = SenseBudget.raysEff(target, config.sense().globalRaysPerTick(), sweeping, halve);
         state.counters().raysThrottledOut += Math.max(0, target - rays);
 
-        Vec3d eye = bot.getEyePos();
-        BlockPos feet = bot.getBlockPos();
+        Vec3 eye = bot.getEyePosition();
+        BlockPos feet = bot.blockPosition();
         double radius = SenseBudget.sweepRadius(MinecraftAiConfig.get().perception().radius());
-        String dimension = BotEdits.dimensionKey(bot.getEntityWorld());
+        String dimension = BotEdits.dimensionKey(bot.level());
         SweepEngine.Context context = new SweepEngine.Context(
                 eye.x, eye.y, eye.z, feet.getX(), feet.getY(), feet.getZ(), radius, serverTick, dimension,
                 packed -> BotEdits.wasPlaced(dimension, packed));

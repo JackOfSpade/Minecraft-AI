@@ -5,27 +5,26 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.InventoryAudit;
 import io.github.zoyluo.minecraftai.task.TaskManager;
-import net.minecraft.entity.ContainerUser;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.inventory.SimpleInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
-import net.minecraft.resource.featuretoggle.FeatureFlags;
-import net.minecraft.screen.Property;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.ScreenHandlerType;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.Identifier;
-
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.Container;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.ContainerUser;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.flag.FeatureFlags;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.DataSlot;
+import net.minecraft.world.inventory.MenuType;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * The real inventory menu for an AI player.
@@ -34,7 +33,7 @@ import java.util.UUID;
  * nine-slot hotbar, four armor slots, and its offhand. The selected hotbar cell is the bot's
  * actual main hand; it is not duplicated as an extra, fake equipment slot.</p>
  */
-public final class BotInventoryScreenHandler extends ScreenHandler {
+public final class BotInventoryScreenHandler extends AbstractContainerMenu {
     public static final int BACKPACK_SIZE = 27;
     public static final int HOTBAR_SIZE = 9;
     public static final int BOT_HOTBAR_START = BACKPACK_SIZE;
@@ -55,41 +54,41 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
 
     /** Registered on the common side; only the screen renderer itself is registered client-side. */
-    public static final ScreenHandlerType<BotInventoryScreenHandler> TYPE = Registry.register(
-            Registries.SCREEN_HANDLER,
-            Identifier.of(MinecraftAiMod.MOD_ID, "bot_inventory"),
-            new ScreenHandlerType<>(BotInventoryScreenHandler::new, FeatureFlags.VANILLA_FEATURES));
+    public static final MenuType<BotInventoryScreenHandler> TYPE = Registry.register(
+            BuiltInRegistries.MENU,
+            Identifier.fromNamespaceAndPath(MinecraftAiMod.MOD_ID, "bot_inventory"),
+            new MenuType<>(BotInventoryScreenHandler::new, FeatureFlags.VANILLA_SET));
 
-    private final Inventory botInventory;
+    private final Container botInventory;
     private final BotBackedInventory serverInventory;
-    private final Property selectedBotHotbarSlot;
+    private final DataSlot selectedBotHotbarSlot;
     private boolean opened;
 
     /** Creates the client mirror. Slot updates fill this temporary inventory immediately after open. */
-    public BotInventoryScreenHandler(int syncId, PlayerInventory viewerInventory) {
-        this(syncId, viewerInventory, new SimpleInventory(BOT_SLOT_COUNT), null);
+    public BotInventoryScreenHandler(int syncId, Inventory viewerInventory) {
+        this(syncId, viewerInventory, new SimpleContainer(BOT_SLOT_COUNT), null);
     }
 
     /** Creates the authoritative server menu backed by the target bot's real player inventory. */
-    public BotInventoryScreenHandler(int syncId, PlayerInventory viewerInventory,
+    public BotInventoryScreenHandler(int syncId, Inventory viewerInventory,
                                      AIPlayerEntity bot, UUID viewerId) {
         this(syncId, viewerInventory, new BotBackedInventory(bot, viewerId), bot);
     }
 
-    private BotInventoryScreenHandler(int syncId, PlayerInventory viewerInventory,
-                                      Inventory botInventory, AIPlayerEntity bot) {
+    private BotInventoryScreenHandler(int syncId, Inventory viewerInventory,
+                                      Container botInventory, AIPlayerEntity bot) {
         super(TYPE, syncId);
         this.botInventory = botInventory;
         this.serverInventory = botInventory instanceof BotBackedInventory backed ? backed : null;
-        this.selectedBotHotbarSlot = addProperty(bot == null
-                ? Property.create()
+        this.selectedBotHotbarSlot = addDataSlot(bot == null
+                ? DataSlot.standalone()
                 : selectedHotbarProperty(bot));
 
         addBotSlots();
         addViewerSlots(viewerInventory);
 
         if (serverInventory != null) {
-            serverInventory.onOpen(viewerInventory.player);
+            serverInventory.startOpen(viewerInventory.player);
             opened = true;
         }
     }
@@ -105,48 +104,48 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
     }
 
     @Override
-    public ItemStack quickMove(PlayerEntity player, int index) {
+    public ItemStack quickMoveStack(Player player, int index) {
         if (index < 0 || index >= slots.size()) {
             return ItemStack.EMPTY;
         }
 
         Slot source = slots.get(index);
-        if (!source.hasStack() || !source.canTakeItems(player)) {
+        if (!source.hasItem() || !source.mayPickup(player)) {
             return ItemStack.EMPTY;
         }
 
-        ItemStack stack = source.getStack();
+        ItemStack stack = source.getItem();
         ItemStack original = stack.copy();
         boolean moved;
         if (index < BOT_SLOT_COUNT) {
-            moved = insertItem(stack, BOT_SLOT_COUNT, slots.size(), true);
+            moved = moveItemStackTo(stack, BOT_SLOT_COUNT, slots.size(), true);
         } else {
             moved = insertIntoPreferredEquipment(stack)
-                    || insertItem(stack, 0, ARMOR_START, false);
+                    || moveItemStackTo(stack, 0, ARMOR_START, false);
         }
         if (!moved) {
             return ItemStack.EMPTY;
         }
 
         if (stack.isEmpty()) {
-            source.setStack(ItemStack.EMPTY);
+            source.setByPlayer(ItemStack.EMPTY);
         } else {
-            source.markDirty();
+            source.setChanged();
         }
-        source.onTakeItem(player, stack);
+        source.onTake(player, stack);
         return original;
     }
 
     @Override
-    public boolean canUse(PlayerEntity player) {
-        return serverInventory == null || serverInventory.canPlayerUse(player);
+    public boolean stillValid(Player player) {
+        return serverInventory == null || serverInventory.stillValid(player);
     }
 
     @Override
-    public void onClosed(PlayerEntity player) {
-        super.onClosed(player);
+    public void removed(Player player) {
+        super.removed(player);
         if (opened && serverInventory != null) {
-            serverInventory.onClose(player);
+            serverInventory.stopOpen(player);
             opened = false;
         }
     }
@@ -176,7 +175,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
                 SLOT_X + 6 * SLOT_SPACING, GEAR_Y, serverInventory, EquipmentSlot.OFFHAND));
     }
 
-    private void addViewerSlots(PlayerInventory viewerInventory) {
+    private void addViewerSlots(Inventory viewerInventory) {
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < HOTBAR_SIZE; column++) {
                 addSlot(new Slot(viewerInventory, 9 + row * HOTBAR_SIZE + column,
@@ -195,7 +194,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
             return false;
         }
         int target = botSlotForEquipment(serverInventory.preferredEquipmentSlot(stack));
-        return target >= 0 && insertItem(stack, target, target + 1, false);
+        return target >= 0 && moveItemStackTo(stack, target, target + 1, false);
     }
 
     private int botSlotForEquipment(EquipmentSlot equipmentSlot) {
@@ -213,8 +212,8 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         return -1;
     }
 
-    private static Property selectedHotbarProperty(AIPlayerEntity bot) {
-        return new Property() {
+    private static DataSlot selectedHotbarProperty(AIPlayerEntity bot) {
+        return new DataSlot() {
             @Override
             public int get() {
                 return clampHotbarSlot(bot.getInventory().getSelectedSlot());
@@ -254,25 +253,25 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
     private static class BotInventorySlot extends Slot {
         protected final BotBackedInventory serverInventory;
 
-        private BotInventorySlot(Inventory inventory, int index, int x, int y,
+        private BotInventorySlot(Container inventory, int index, int x, int y,
                                  BotBackedInventory serverInventory) {
             super(inventory, index, x, y);
             this.serverInventory = serverInventory;
         }
 
         @Override
-        public boolean canInsert(ItemStack stack) {
-            return serverInventory == null || serverInventory.isValid(getIndex(), stack);
+        public boolean mayPlace(ItemStack stack) {
+            return serverInventory == null || serverInventory.canPlaceItem(getContainerSlot(), stack);
         }
 
         @Override
-        public boolean canTakeItems(PlayerEntity player) {
-            return serverInventory == null || serverInventory.canPlayerUse(player);
+        public boolean mayPickup(Player player) {
+            return serverInventory == null || serverInventory.stillValid(player);
         }
 
         @Override
-        public int getMaxItemCount() {
-            return isArmorSlot(getIndex()) ? 1 : super.getMaxItemCount();
+        public int getMaxStackSize() {
+            return isArmorSlot(getContainerSlot()) ? 1 : super.getMaxStackSize();
         }
     }
 
@@ -280,15 +279,15 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
     private static final class BotEquipmentSlot extends BotInventorySlot {
         private final EquipmentSlot equipmentSlot;
 
-        private BotEquipmentSlot(Inventory inventory, int index, int x, int y,
+        private BotEquipmentSlot(Container inventory, int index, int x, int y,
                                  BotBackedInventory serverInventory, EquipmentSlot equipmentSlot) {
             super(inventory, index, x, y, serverInventory);
             this.equipmentSlot = equipmentSlot;
         }
 
         @Override
-        public boolean canInsert(ItemStack stack) {
-            return super.canInsert(stack)
+        public boolean mayPlace(ItemStack stack) {
+            return super.mayPlace(stack)
                     && (equipmentSlot == EquipmentSlot.OFFHAND
                     || stack.isEmpty()
                     || serverInventory == null
@@ -300,7 +299,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
      * Maps the 41 visible bot cells directly to a ServerPlayerEntity's normal PlayerInventory,
      * armor, and offhand. Nothing in this inventory is padding or a copied stack.
      */
-    private static final class BotBackedInventory implements Inventory {
+    private static final class BotBackedInventory implements Container {
         private final AIPlayerEntity bot;
         private final UUID viewerId;
         private final Set<UUID> viewers = new HashSet<>();
@@ -311,14 +310,14 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         }
 
         @Override
-        public int size() {
+        public int getContainerSize() {
             return BOT_SLOT_COUNT;
         }
 
         @Override
         public boolean isEmpty() {
             for (int slot = 0; slot < BOT_SLOT_COUNT; slot++) {
-                if (!getStack(slot).isEmpty()) {
+                if (!getItem(slot).isEmpty()) {
                     return false;
                 }
             }
@@ -326,97 +325,97 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         }
 
         @Override
-        public ItemStack getStack(int slot) {
+        public ItemStack getItem(int slot) {
             int mainSlot = mainInventorySlot(slot);
             if (mainSlot >= 0) {
-                return bot.getInventory().getStack(mainSlot);
+                return bot.getInventory().getItem(mainSlot);
             }
             EquipmentSlot armor = armorSlot(slot);
             if (armor != null) {
-                return bot.getEquippedStack(armor);
+                return bot.getItemBySlot(armor);
             }
-            return slot == OFFHAND_SLOT ? bot.getOffHandStack() : ItemStack.EMPTY;
+            return slot == OFFHAND_SLOT ? bot.getOffhandItem() : ItemStack.EMPTY;
         }
 
         @Override
-        public ItemStack removeStack(int slot, int amount) {
+        public ItemStack removeItem(int slot, int amount) {
             if (amount <= 0 || !isManagedSlot(slot)) {
                 return ItemStack.EMPTY;
             }
             int mainSlot = mainInventorySlot(slot);
             if (mainSlot >= 0) {
-                ItemStack removed = bot.getInventory().removeStack(mainSlot, amount);
-                markDirty();
+                ItemStack removed = bot.getInventory().removeItem(mainSlot, amount);
+                setChanged();
                 return removed;
             }
-            ItemStack stack = getStack(slot);
+            ItemStack stack = getItem(slot);
             if (stack.isEmpty()) {
                 return ItemStack.EMPTY;
             }
             ItemStack removed = stack.split(amount);
-            setStack(slot, stack.isEmpty() ? ItemStack.EMPTY : stack);
+            setItem(slot, stack.isEmpty() ? ItemStack.EMPTY : stack);
             return removed;
         }
 
         @Override
-        public ItemStack removeStack(int slot) {
+        public ItemStack removeItemNoUpdate(int slot) {
             if (!isManagedSlot(slot)) {
                 return ItemStack.EMPTY;
             }
             int mainSlot = mainInventorySlot(slot);
             if (mainSlot >= 0) {
-                ItemStack removed = bot.getInventory().removeStack(mainSlot);
-                markDirty();
+                ItemStack removed = bot.getInventory().removeItemNoUpdate(mainSlot);
+                setChanged();
                 return removed;
             }
-            ItemStack removed = getStack(slot);
-            setStack(slot, ItemStack.EMPTY);
+            ItemStack removed = getItem(slot);
+            setItem(slot, ItemStack.EMPTY);
             return removed;
         }
 
         @Override
-        public void setStack(int slot, ItemStack stack) {
+        public void setItem(int slot, ItemStack stack) {
             ItemStack value = stack == null ? ItemStack.EMPTY : stack;
-            if (!isManagedSlot(slot) || (!value.isEmpty() && !isValid(slot, value))) {
+            if (!isManagedSlot(slot) || (!value.isEmpty() && !canPlaceItem(slot, value))) {
                 return;
             }
             int mainSlot = mainInventorySlot(slot);
             if (mainSlot >= 0) {
-                bot.getInventory().setStack(mainSlot, value);
+                bot.getInventory().setItem(mainSlot, value);
             } else if (slot == OFFHAND_SLOT) {
-                bot.equipStack(EquipmentSlot.OFFHAND, value);
+                bot.setItemSlot(EquipmentSlot.OFFHAND, value);
             } else {
                 EquipmentSlot armor = armorSlot(slot);
                 if (armor != null) {
-                    bot.equipStack(armor, value);
+                    bot.setItemSlot(armor, value);
                 }
             }
-            markDirty();
+            setChanged();
         }
 
         @Override
-        public void markDirty() {
-            bot.getInventory().markDirty();
+        public void setChanged() {
+            bot.getInventory().setChanged();
         }
 
         @Override
-        public void clear() {
+        public void clearContent() {
             for (int slot = 0; slot < BOT_SLOT_COUNT; slot++) {
-                setStack(slot, ItemStack.EMPTY);
+                setItem(slot, ItemStack.EMPTY);
             }
         }
 
         @Override
-        public boolean canPlayerUse(PlayerEntity player) {
+        public boolean stillValid(Player player) {
             return player != null
-                    && player.getUuid().equals(viewerId)
+                    && player.getUUID().equals(viewerId)
                     && bot.isAlive()
-                    && player.getEntityWorld() == bot.getEntityWorld()
-                    && player.squaredDistanceTo(bot) <= MAX_USE_DISTANCE_SQUARED;
+                    && player.level() == bot.level()
+                    && player.distanceToSqr(bot) <= MAX_USE_DISTANCE_SQUARED;
         }
 
         @Override
-        public boolean isValid(int slot, ItemStack stack) {
+        public boolean canPlaceItem(int slot, ItemStack stack) {
             if (!isManagedSlot(slot)) {
                 return false;
             }
@@ -425,22 +424,22 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         }
 
         @Override
-        public void onOpen(ContainerUser user) {
-            if (!(user instanceof PlayerEntity player) || !canPlayerUse(player) || !viewers.add(player.getUuid())) {
+        public void startOpen(ContainerUser user) {
+            if (!(user instanceof Player player) || !stillValid(player) || !viewers.add(player.getUUID())) {
                 return;
             }
             OpenScreenLeases.open(bot);
-            InventoryAudit.INSTANCE.viewerOpened(bot.getUuid(), player.getUuid(), player.getGameProfile().name());
+            InventoryAudit.INSTANCE.viewerOpened(bot.getUUID(), player.getUUID(), player.getGameProfile().name());
             BotLog.action(bot, "inventory_screen_opened", "viewer", player.getGameProfile().name());
         }
 
         @Override
-        public void onClose(ContainerUser user) {
-            PlayerEntity player = user instanceof PlayerEntity viewer ? viewer : null;
-            boolean closed = player != null && viewers.remove(player.getUuid());
+        public void stopOpen(ContainerUser user) {
+            Player player = user instanceof Player viewer ? viewer : null;
+            boolean closed = player != null && viewers.remove(player.getUUID());
             if (closed) {
                 OpenScreenLeases.close(bot);
-                InventoryAudit.INSTANCE.viewerClosed(bot.getUuid(), player.getUuid());
+                InventoryAudit.INSTANCE.viewerClosed(bot.getUUID(), player.getUUID());
             }
             if (player != null) {
                 BotLog.action(bot, "inventory_screen_closed", "viewer", player.getGameProfile().name());
@@ -448,7 +447,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         }
 
         private EquipmentSlot preferredEquipmentSlot(ItemStack stack) {
-            return bot.getPreferredEquipmentSlot(stack);
+            return bot.getEquipmentSlotForItem(stack);
         }
 
         private static boolean isManagedSlot(int slot) {
@@ -464,7 +463,7 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
         }
 
         private static synchronized void open(AIPlayerEntity bot) {
-            Lease lease = OPEN.get(bot.getUuid());
+            Lease lease = OPEN.get(bot.getUUID());
             if (lease == null) {
                 boolean pausedTask = TaskManager.INSTANCE.getActive(bot).isPresent();
                 if (pausedTask) {
@@ -472,20 +471,20 @@ public final class BotInventoryScreenHandler extends ScreenHandler {
                 }
                 lease = new Lease(0, pausedTask);
             }
-            OPEN.put(bot.getUuid(), new Lease(lease.count() + 1, lease.pausedTask()));
+            OPEN.put(bot.getUUID(), new Lease(lease.count() + 1, lease.pausedTask()));
             bot.getActionPack().stopAll();
         }
 
         private static synchronized void close(AIPlayerEntity bot) {
-            Lease lease = OPEN.get(bot.getUuid());
+            Lease lease = OPEN.get(bot.getUUID());
             if (lease == null || lease.count() <= 1) {
-                OPEN.remove(bot.getUuid());
+                OPEN.remove(bot.getUUID());
                 if (lease != null && lease.pausedTask()) {
                     TaskManager.INSTANCE.resumeFromPause(bot);
                 }
                 return;
             }
-            OPEN.put(bot.getUuid(), new Lease(lease.count() - 1, lease.pausedTask()));
+            OPEN.put(bot.getUUID(), new Lease(lease.count() - 1, lease.pausedTask()));
         }
 
         private record Lease(int count, boolean pausedTask) {

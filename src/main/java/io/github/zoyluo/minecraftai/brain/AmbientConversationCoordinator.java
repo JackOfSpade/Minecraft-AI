@@ -91,7 +91,7 @@ public final class AmbientConversationCoordinator {
         if (!Boolean.TRUE.equals(cfg.enabled())) {
             return;
         }
-        long now = server.getTicks();
+        long now = server.getTickCount();
         if (now < nextEligibleTick || !shouldCheckThisTick(now, cfg.checkIntervalTicks())) {
             return;
         }
@@ -107,7 +107,7 @@ public final class AmbientConversationCoordinator {
         int count = pickParticipantCount(eligible.size(), cfg.minParticipants(), cfg.maxParticipants(), random);
         List<AIPlayerEntity> chosen = shuffleAndTake(eligible, count, random);
 
-        ActiveConversation conversation = new ActiveConversation(chosen.stream().map(AIPlayerEntity::getUuid).toList());
+        ActiveConversation conversation = new ActiveConversation(chosen.stream().map(AIPlayerEntity::getUUID).toList());
         active = conversation;
         BotLog.lifecycle("ambient_conversation_started",
                 "participants", chosen.stream().map(bot -> bot.getGameProfile().name()).toList());
@@ -132,7 +132,7 @@ public final class AmbientConversationCoordinator {
         if (conversation == null) {
             return;
         }
-        if (!conversation.pendingReady || server.getTicks() < conversation.revealAtTick) {
+        if (!conversation.pendingReady || server.getTickCount() < conversation.revealAtTick) {
             return;
         }
         revealAndAdvance(server, conversation);
@@ -163,7 +163,7 @@ public final class AmbientConversationCoordinator {
         MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
         BotLog.lifecycle("ambient_conversation_ended", "reason", reason);
         active = null;
-        nextEligibleTick = server.getTicks() + Math.max(0, cfg.cooldownTicks());
+        nextEligibleTick = server.getTickCount() + Math.max(0, cfg.cooldownTicks());
     }
 
     private void fireNextTurn(MinecraftServer server, ActiveConversation conversation) {
@@ -176,7 +176,7 @@ public final class AmbientConversationCoordinator {
         MinecraftAiConfig.Conversation cfg = MinecraftAiConfig.get().conversation();
         String previousLine = conversation.transcript.isEmpty()
                 ? null : conversation.transcript.get(conversation.transcript.size() - 1).text();
-        conversation.revealAtTick = server.getTicks() + computeDelayTicks(previousLine, cfg);
+        conversation.revealAtTick = server.getTickCount() + computeDelayTicks(previousLine, cfg);
         conversation.pendingReady = false;
 
         boolean mustBeStatement = conversation.index == conversation.order.size() - 1;

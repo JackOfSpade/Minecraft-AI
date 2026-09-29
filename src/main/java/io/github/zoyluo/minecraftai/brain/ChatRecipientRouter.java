@@ -6,8 +6,7 @@ import com.google.gson.JsonObject;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.perception.PerceptionSnapshot;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-
+import net.minecraft.server.level.ServerPlayer;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -68,7 +67,7 @@ public final class ChatRecipientRouter {
      * Sends one normal chat line to Gemini for a required structured recipient choice.
      * Callbacks always return to the Minecraft server thread.
      */
-    public void select(ServerPlayerEntity sender,
+    public void select(ServerPlayer sender,
                        String message,
                        List<Candidate> candidates,
                        Consumer<Decision> onDecision,
@@ -111,7 +110,7 @@ public final class ChatRecipientRouter {
                 ChatMessage.system(systemPrompt()),
                 ChatMessage.user(userPayload(sender, message, snapshot)));
         ToolDefinition routingTool = routingTool(snapshot);
-        MinecraftServer server = sender.getEntityWorld().getServer();
+        MinecraftServer server = sender.level().getServer();
         try {
             worker.submit(() -> {
                 try {
@@ -161,7 +160,7 @@ public final class ChatRecipientRouter {
                 """;
     }
 
-    private static String userPayload(ServerPlayerEntity sender, String message, List<Candidate> candidates) {
+    private static String userPayload(ServerPlayer sender, String message, List<Candidate> candidates) {
         return routingPayload(sender.getGameProfile().name(), message, candidates);
     }
 

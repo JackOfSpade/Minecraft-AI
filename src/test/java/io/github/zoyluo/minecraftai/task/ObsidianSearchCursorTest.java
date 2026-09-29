@@ -1,12 +1,12 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ObsidianSearchCursorTest {
     @Test
     void squareSpiralPhysicallyReachesWorkFacesOutsideInitialLos() {
-        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(BlockPos.ORIGIN, 4);
+        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(BlockPos.ZERO, 4);
         List<BlockPos> reached = new ArrayList<>();
         int previousEpoch = cursor.topologyEpoch();
 
@@ -72,7 +72,7 @@ class ObsidianSearchCursorTest {
 
     @Test
     void fourBlockedDirectionsPersistUntilPhysicalOrTopologyProgress() {
-        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(BlockPos.ORIGIN, 4);
+        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(BlockPos.ZERO, 4);
         int factualEpoch = cursor.topologyEpoch();
         for (int direction = 0; direction < 4; direction++) {
             cursor = cursor.beginNextLeg().skipBlockedLeg();
@@ -134,7 +134,7 @@ class ObsidianSearchCursorTest {
     @Test
     void decodeRejectsOutOfRangeCursorStateBeforeNormalization() {
         Map<String, String> encoded = new LinkedHashMap<>(
-                ObsidianSearchCursor.initial(BlockPos.ORIGIN, 4).encode());
+                ObsidianSearchCursor.initial(BlockPos.ZERO, 4).encode());
 
         assertRejectedWith(encoded, "direction", "-2");
         assertRejectedWith(encoded, "direction", "4");
@@ -152,7 +152,7 @@ class ObsidianSearchCursorTest {
     @Test
     void legacyDefaultsRemainCompatibleButCannotNormalizeInvalidValues() {
         Map<String, String> legacy = new LinkedHashMap<>(
-                ObsidianSearchCursor.initial(BlockPos.ORIGIN, 4).encode());
+                ObsidianSearchCursor.initial(BlockPos.ZERO, 4).encode());
         legacy.put("schema", "1");
         for (String compatibleDefault : List.of(
                 "direction", "leg", "steps_left", "leg_length", "base_leg_length",
@@ -175,7 +175,7 @@ class ObsidianSearchCursorTest {
 
     @Test
     void advanceToAcceptsOnlyBoundedSameLayerForwardMotion() {
-        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(BlockPos.ORIGIN, 4)
+        ObsidianSearchCursor cursor = ObsidianSearchCursor.initial(BlockPos.ZERO, 4)
                 .beginNextLeg();
 
         assertEquals(cursor, cursor.advanceTo(new BlockPos(1, 0, -1)),

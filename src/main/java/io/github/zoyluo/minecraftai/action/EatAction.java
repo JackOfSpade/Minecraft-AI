@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.util.Hand;
+import net.minecraft.world.InteractionHand;
 
 public final class EatAction {
     private EatAction() {
@@ -16,6 +16,6 @@ public final class EatAction {
         if (hotbar < 0) {
             return ActionResult.failed("equip_food_failed");
         }
-        return InteractAction.useItemInAir(player, Hand.MAIN_HAND);
+        return InteractAction.useItemInAir(player, InteractionHand.MAIN_HAND);
     }
 }

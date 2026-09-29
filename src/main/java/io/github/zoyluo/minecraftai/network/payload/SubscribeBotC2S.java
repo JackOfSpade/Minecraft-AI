@@ -1,26 +1,26 @@
 package io.github.zoyluo.minecraftai.network.payload;
 
 import io.github.zoyluo.minecraftai.MinecraftAiMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record SubscribeBotC2S(String botName, boolean subscribe) implements CustomPayload {
-    public static final Id<SubscribeBotC2S> ID = new Id<>(Identifier.of(MinecraftAiMod.MOD_ID, "subscribe_bot"));
-    public static final PacketCodec<RegistryByteBuf, SubscribeBotC2S> CODEC = PacketCodec.of(SubscribeBotC2S::write, SubscribeBotC2S::new);
+public record SubscribeBotC2S(String botName, boolean subscribe) implements CustomPacketPayload {
+    public static final Type<SubscribeBotC2S> ID = new Type<>(Identifier.fromNamespaceAndPath(MinecraftAiMod.MOD_ID, "subscribe_bot"));
+    public static final StreamCodec<RegistryFriendlyByteBuf, SubscribeBotC2S> CODEC = StreamCodec.ofMember(SubscribeBotC2S::write, SubscribeBotC2S::new);
 
-    private SubscribeBotC2S(RegistryByteBuf buf) {
-        this(buf.readString(), buf.readBoolean());
+    private SubscribeBotC2S(RegistryFriendlyByteBuf buf) {
+        this(buf.readUtf(), buf.readBoolean());
     }
 
-    private void write(RegistryByteBuf buf) {
-        buf.writeString(botName);
+    private void write(RegistryFriendlyByteBuf buf) {
+        buf.writeUtf(botName);
         buf.writeBoolean(subscribe);
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

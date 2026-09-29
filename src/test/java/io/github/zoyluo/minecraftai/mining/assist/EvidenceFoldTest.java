@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.function.LongPredicate;
+import net.minecraft.core.BlockPos;
 
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.BOT;
 import static io.github.zoyluo.minecraftai.mining.assist.AssistTestSupport.NOT_PLACED;
@@ -64,9 +64,9 @@ class EvidenceFoldTest {
         MiningAssistState s = state();
         int lava = hit(s, P, facts("lava"), HazardField.Kind.LAVA, 3);
         assertEquals(EvidenceFold.NEW_HAZARD, lava & EvidenceFold.NEW_HAZARD);
-        hit(s, P.up(), facts("water"), HazardField.Kind.WATER, 3);
+        hit(s, P.above(), facts("water"), HazardField.Kind.WATER, 3);
         assertTrue(s.hazards().isLava(P));
-        assertEquals(HazardField.Kind.WATER, s.hazards().kindAt(P.up()));
+        assertEquals(HazardField.Kind.WATER, s.hazards().kindAt(P.above()));
         assertEquals(1, s.counters().lavaCells);
         assertEquals(1, s.counters().waterCells);
     }
@@ -128,7 +128,7 @@ class EvidenceFoldTest {
     void weakBucketsAreRecordedToo() {
         MiningAssistState s = state();
         hit(s, P, facts("torch"), null, 1);
-        hit(s, P.up(), facts("cobblestone"), null, 1);
+        hit(s, P.above(), facts("cobblestone"), null, 1);
         assertEquals(2, s.poiWindow().structuralSize());
     }
 
@@ -141,7 +141,7 @@ class EvidenceFoldTest {
         int result = EvidenceFold.foldHit(s, P, facts("torch"), null, placed, 2);
         assertEquals(0, result & EvidenceFold.NEW_POI);
         assertEquals(0, s.poiWindow().structuralSize());
-        EvidenceFold.foldHit(s, P.up(), facts("torch"), null, placed, 3);
+        EvidenceFold.foldHit(s, P.above(), facts("torch"), null, placed, 3);
         assertEquals(1, s.poiWindow().structuralSize());
     }
 
@@ -154,9 +154,9 @@ class EvidenceFoldTest {
             return false;
         };
         EvidenceFold.foldHit(s, P, facts("stone"), null, counting, 1);
-        EvidenceFold.foldHit(s, P.up(), facts("diamond_ore"), null, counting, 1);
+        EvidenceFold.foldHit(s, P.above(), facts("diamond_ore"), null, counting, 1);
         assertEquals(0, calls[0]);
-        EvidenceFold.foldHit(s, P.down(), facts("rail"), null, counting, 1);
+        EvidenceFold.foldHit(s, P.below(), facts("rail"), null, counting, 1);
         assertEquals(1, calls[0]);
     }
 
@@ -185,11 +185,11 @@ class EvidenceFoldTest {
     void decorNeverClearsAnything() {
         MiningAssistState s = state();
         hit(s, P, facts("oak_planks"), null, 1);
-        hit(s, P.up(), facts("lava"), HazardField.Kind.LAVA, 1);
+        hit(s, P.above(), facts("lava"), HazardField.Kind.LAVA, 1);
         assertFalse(EvidenceFold.foldDecor(s, P, facts("stone"), NOT_PLACED, 2));
-        assertFalse(EvidenceFold.foldDecor(s, P.up(), facts("stone"), NOT_PLACED, 2));
+        assertFalse(EvidenceFold.foldDecor(s, P.above(), facts("stone"), NOT_PLACED, 2));
         assertEquals(1, s.poiWindow().structuralSize());
-        assertTrue(s.hazards().isLava(P.up()));
+        assertTrue(s.hazards().isLava(P.above()));
     }
 
     @Test

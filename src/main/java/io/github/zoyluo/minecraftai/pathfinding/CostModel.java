@@ -1,10 +1,10 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
 
 public final class CostModel {
     private CostModel() {
@@ -30,10 +30,10 @@ public final class CostModel {
         };
     }
 
-    public static double stepCost(Node current, NeighborCandidate neighbor, ServerWorld world) {
+    public static double stepCost(Node current, NeighborCandidate neighbor, ServerLevel world) {
         double cost = stepCost(neighbor.moveType(), neighbor.fallHeight());
         cost += turnPenalty(current, neighbor.pos());
-        if (world.getFluidState(neighbor.pos()).isIn(FluidTags.WATER)) {
+        if (world.getFluidState(neighbor.pos()).is(FluidTags.WATER)) {
             cost *= 1.5D;
         }
         return cost;

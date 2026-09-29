@@ -1,11 +1,11 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 import java.util.Random;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,18 +23,18 @@ class StandabilityShellScanTest {
         for (int dx = -r; dx <= r; dx++) {
             for (int dz = -r; dz <= r; dz++) {
                 for (int dy = -down; dy <= up; dy++) {
-                    BlockPos candidate = origin.add(dx, dy, dz);
+                    BlockPos candidate = origin.offset(dx, dy, dz);
                     if (!standable.test(candidate)) {
                         continue;
                     }
-                    double distSq = candidate.getSquaredDistance(origin);
+                    double distSq = candidate.distSqr(origin);
                     int horizontalSq = dx * dx + dz * dz;
                     boolean better = distSq < bestDistSq
                             || (distSq == bestDistSq && best != null
                             && (horizontalSq < bestHorizontalSq
                             || (horizontalSq == bestHorizontalSq && candidate.getY() < best.getY())));
                     if (better) {
-                        best = candidate.toImmutable();
+                        best = candidate.immutable();
                         bestDistSq = distSq;
                         bestHorizontalSq = horizontalSq;
                     }
@@ -63,7 +63,7 @@ class StandabilityShellScanTest {
             if (expected.isPresent()) {
                 BlockPos e = expected.get();
                 BlockPos a = actual.get();
-                assertEquals(e.getSquaredDistance(origin), a.getSquaredDistance(origin), "trial " + trial);
+                assertEquals(e.distSqr(origin), a.distSqr(origin), "trial " + trial);
                 assertEquals(horizontalSq(e, origin), horizontalSq(a, origin), "trial " + trial);
                 assertEquals(e.getY(), a.getY(), "trial " + trial);
             }

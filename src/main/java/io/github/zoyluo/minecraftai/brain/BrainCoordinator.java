@@ -15,9 +15,6 @@ import io.github.zoyluo.minecraftai.task.MemoryStore;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.task.TaskStatus;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
-import net.minecraft.text.Text;
-import net.minecraft.server.network.ServerPlayerEntity;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -29,6 +26,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 
 public final class BrainCoordinator {
     public static final BrainCoordinator INSTANCE = new BrainCoordinator();
@@ -100,7 +99,7 @@ public final class BrainCoordinator {
     }
 
     /** Preserves the speaker's real current view for ordinary/player-panel chat. */
-    public boolean handleMessage(AIPlayerEntity bot, ServerPlayerEntity sender, String text) {
+    public boolean handleMessage(AIPlayerEntity bot, ServerPlayer sender, String text) {
         if (sender == null) {
             return handleMessage(bot, "player", text);
         }
@@ -113,7 +112,7 @@ public final class BrainCoordinator {
 
     /** Receives normal chat after its successful Gemini recipient-routing call is accounted for. */
     boolean handleRoutedMessage(AIPlayerEntity bot,
-                                ServerPlayerEntity sender,
+                                ServerPlayer sender,
                                 String text,
                                 int routingModelCallCost) {
         if (sender == null) {
@@ -136,15 +135,15 @@ public final class BrainCoordinator {
                                   String speakerViewJson,
                                   int callsAlreadyUsed) {
         ensureConfigured();
-        BotConversation conversation = conversations.computeIfAbsent(bot.getUuid(), BotConversation::new);
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
         boolean supersededDecision = conversation.decision.busy();
         // Companion-mode semantics: the newest player request is authoritative.  Cancel all
         // current and queued work before making a new plan, so a bot never quietly finishes an
         // older request after the player has changed their mind.
         IntentController.INSTANCE.cancelAll(
                 bot, IntentController.ControlOrigin.SYSTEM, "new_player_request");
-        awaitingTask.remove(bot.getUuid());
-        nextGoalWakeTick.remove(bot.getUuid());
+        awaitingTask.remove(bot.getUUID());
+        nextGoalWakeTick.remove(bot.getUUID());
         DecisionLease lease = conversation.decision.beginEpoch();
         // A fresh instruction also gets a fresh LLM context. This avoids old tool calls and
         // goals biasing the planner toward a request the player has already replaced.
@@ -158,8 +157,8 @@ public final class BrainCoordinator {
 
         // The recent-chat block must reflect only what was said BEFORE this instruction; render
         // it first, then record this instruction so later calls see it as history.
-        String recentChat = ChatTranscript.renderRecentChat(bot.getUuid());
-        ChatTranscript.recordPlayerLine(bot.getUuid(), senderName, text);
+        String recentChat = ChatTranscript.renderRecentChat(bot.getUUID());
+        ChatTranscript.recordPlayerLine(bot.getUUID(), senderName, text);
         String recentChatBlock = recentChat.isEmpty() ? "" : recentChat + "\n\n";
 
         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
@@ -419,7 +418,7 @@ public final class BrainCoordinator {
         // a long task then stopped"), mark that it is waiting for the task to finish; after the
         // task ends the idle-watcher auto-wakes the brain to decide the next step, no human nudge needed.
         if (TaskManager.INSTANCE.getActive(bot).isPresent()) {
-            awaitingTask.put(bot.getUuid(), true);
+            awaitingTask.put(bot.getUUID(), true);
         }
         trimHistory(conversation);
         BotLog.comm(bot, "conversation_done", "finish_reason", response.finishReason());
@@ -634,21 +633,21 @@ public final class BrainCoordinator {
     }
 
     public void reset(AIPlayerEntity bot) {
-        BotConversation conversation = conversations.remove(bot.getUuid());
+        BotConversation conversation = conversations.remove(bot.getUUID());
         if (conversation != null) {
             conversation.decision.invalidate();
         }
-        manualModes.remove(bot.getUuid());
-        awaitingTask.remove(bot.getUuid());
-        nextGoalWakeTick.remove(bot.getUuid());
+        manualModes.remove(bot.getUUID());
+        awaitingTask.remove(bot.getUUID());
+        nextGoalWakeTick.remove(bot.getUUID());
         BotRuntimeOptions.INSTANCE.clear(bot);
-        ChatTranscript.clear(bot.getUuid());
+        ChatTranscript.clear(bot.getUUID());
         BotLog.comm(bot, "conversation_reset");
     }
 
     /** Invalidates only the asynchronous decision; P0-02 owns full Mission/Task cancellation. */
     public boolean invalidateDecision(AIPlayerEntity bot, String reason) {
-        BotConversation conversation = conversations.get(bot.getUuid());
+        BotConversation conversation = conversations.get(bot.getUUID());
         if (conversation == null || !conversation.decision.invalidateIfBusy()) {
             return false;
         }
@@ -657,8 +656,8 @@ public final class BrainCoordinator {
     }
 
     public boolean clearIntentWakeSources(AIPlayerEntity bot) {
-        boolean awaitingCleared = awaitingTask.remove(bot.getUuid()) != null;
-        boolean wakeTickCleared = nextGoalWakeTick.remove(bot.getUuid()) != null;
+        boolean awaitingCleared = awaitingTask.remove(bot.getUUID()) != null;
+        boolean wakeTickCleared = nextGoalWakeTick.remove(bot.getUUID()) != null;
         return awaitingCleared || wakeTickCleared;
     }
 
@@ -671,29 +670,29 @@ public final class BrainCoordinator {
      * design 6.5's stated reason for the P3 POI hold bypassing {@code IntentController}). */
     public void setAwaitingTaskForTest(AIPlayerEntity bot, boolean awaiting) {
         if (awaiting) {
-            awaitingTask.put(bot.getUuid(), true);
+            awaitingTask.put(bot.getUUID(), true);
         } else {
-            awaitingTask.remove(bot.getUuid());
+            awaitingTask.remove(bot.getUUID());
         }
     }
 
     /** Test-only seam pairing {@link #setAwaitingTaskForTest}: reads the {@code awaitingTask} wake source
      * back without going through the heavier {@link #status}/conversation machinery. */
     public boolean isAwaitingTaskForTest(AIPlayerEntity bot) {
-        return Boolean.TRUE.equals(awaitingTask.get(bot.getUuid()));
+        return Boolean.TRUE.equals(awaitingTask.get(bot.getUUID()));
     }
 
     public void setManualMode(AIPlayerEntity bot, boolean enabled) {
         if (enabled) {
-            manualModes.put(bot.getUuid(), true);
+            manualModes.put(bot.getUUID(), true);
         } else {
-            manualModes.remove(bot.getUuid());
+            manualModes.remove(bot.getUUID());
         }
         BotLog.comm(bot, "manual_mode_set", "enabled", enabled);
     }
 
     public boolean manualMode(AIPlayerEntity bot) {
-        return manualModes.getOrDefault(bot.getUuid(), false);
+        return manualModes.getOrDefault(bot.getUUID(), false);
     }
 
     public boolean maybeWakeForFailureOrGoal(AIPlayerEntity bot) {
@@ -706,15 +705,15 @@ public final class BrainCoordinator {
             return false;
         }
         boolean hasFailure = TaskManager.INSTANCE.peekFailure(bot).isPresent();
-        boolean hasGoal = BotMemoryStore.INSTANCE.of(bot.getUuid()).hasActiveGoal();
+        boolean hasGoal = BotMemoryStore.INSTANCE.of(bot.getUUID()).hasActiveGoal();
         // FLOW-2: the idle-watcher only calls this method when there is no active task, so
         // awaiting=true means "the task the brain assigned has already finished".
-        boolean taskJustFinished = Boolean.TRUE.equals(awaitingTask.get(bot.getUuid()));
+        boolean taskJustFinished = Boolean.TRUE.equals(awaitingTask.get(bot.getUUID()));
         if (!hasFailure && !shouldWakeForGoal(bot, hasGoal) && !taskJustFinished) {
             return false;
         }
         ensureConfigured();
-        BotConversation conversation = conversations.computeIfAbsent(bot.getUuid(), BotConversation::new);
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUUID(), BotConversation::new);
         if (conversation.decision.busy()) {
             return false;
         }
@@ -727,14 +726,14 @@ public final class BrainCoordinator {
             return false;
         }
         if (hasFailure && maybeInjectFailure(bot, conversation)) {
-            awaitingTask.remove(bot.getUuid());
+            awaitingTask.remove(bot.getUUID());
             trimHistory(conversation);
             submit(bot, conversation, conversation.decision.beginEpoch());
             return true;
         }
         if (hasGoal && maybeInjectGoalContinuation(bot, conversation, "There is no active task, but the long-term goal is unfinished. Continue the current step and assign a high-level task when needed.")) {
-            awaitingTask.remove(bot.getUuid());
-            nextGoalWakeTick.put(bot.getUuid(), bot.getEntityWorld().getServer().getTicks() + 200);
+            awaitingTask.remove(bot.getUUID());
+            nextGoalWakeTick.put(bot.getUUID(), bot.level().getServer().getTickCount() + 200);
             trimHistory(conversation);
             submit(bot, conversation, conversation.decision.beginEpoch());
             return true;
@@ -742,7 +741,7 @@ public final class BrainCoordinator {
         // FLOW-2: the task the brain assigned has finished, with no failure and no long-term
         // goal -> auto-wake the brain to decide the next step, no human nudge needed.
         if (taskJustFinished) {
-            awaitingTask.remove(bot.getUuid());
+            awaitingTask.remove(bot.getUUID());
             TaskStatus status = TaskManager.INSTANCE.status(bot);
             PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
             conversation.lastPerceptionDigest = perceptionDigest(snapshot);
@@ -772,7 +771,7 @@ public final class BrainCoordinator {
     }
 
     public BrainStatus status(AIPlayerEntity bot) {
-        BotConversation conversation = conversations.get(bot.getUuid());
+        BotConversation conversation = conversations.get(bot.getUUID());
         if (conversation == null) {
             return new BrainStatus(false, 0, 0, 0, 0);
         }
@@ -794,10 +793,10 @@ public final class BrainCoordinator {
             return;
         }
         String concise = text.length() > 240 ? text.substring(0, 240) : text;
-        ChatTranscript.recordBotReply(bot.getUuid(), bot.getGameProfile().name(), concise);
+        ChatTranscript.recordBotReply(bot.getUUID(), bot.getGameProfile().name(), concise);
         sendPanelChat(bot, "bot", concise);
-        bot.getEntityWorld().getServer().getPlayerManager().broadcast(
-                Text.literal("<" + bot.getGameProfile().name() + "> ").append(Text.literal(concise)), false);
+        bot.level().getServer().getPlayerList().broadcastSystemMessage(
+                Component.literal("<" + bot.getGameProfile().name() + "> ").append(Component.literal(concise)), false);
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation, DecisionLease lease) {
@@ -895,7 +894,7 @@ public final class BrainCoordinator {
     }
 
     private void scheduleContinuation(AIPlayerEntity bot, BotConversation conversation, DecisionLease waitingLease) {
-        var server = bot.getEntityWorld().getServer();
+        var server = bot.level().getServer();
         CompletableFuture.delayedExecutor(TpsGuard.INSTANCE.continuationDelaySeconds(), TimeUnit.SECONDS).execute(() ->
                 server.execute(() -> {
                     if (conversations.get(waitingLease.botId()) != conversation
@@ -1033,7 +1032,7 @@ public final class BrainCoordinator {
         io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.clear(bot);
         TaskManager.INSTANCE.resetToIdle(bot);
         bot.getActionPack().stopAll();
-        awaitingTask.remove(bot.getUuid());
+        awaitingTask.remove(bot.getUUID());
         sendBotReply(bot, "Sorry, I could not work out how to do that. Could you say it another way?");
     }
 
@@ -1149,7 +1148,7 @@ public final class BrainCoordinator {
     }
 
     private boolean maybeInjectGoalContinuation(AIPlayerEntity bot, BotConversation conversation, String reason) {
-        String goal = BotMemoryStore.INSTANCE.of(bot.getUuid()).goalDriveStatus("");
+        String goal = BotMemoryStore.INSTANCE.of(bot.getUUID()).goalDriveStatus("");
         if (goal.isBlank()) {
             return false;
         }
@@ -1168,7 +1167,7 @@ public final class BrainCoordinator {
         if (!hasGoal) {
             return false;
         }
-        return bot.getEntityWorld().getServer().getTicks() >= nextGoalWakeTick.getOrDefault(bot.getUuid(), 0);
+        return bot.level().getServer().getTickCount() >= nextGoalWakeTick.getOrDefault(bot.getUUID(), 0);
     }
 
     private static String perceptionDigest(PerceptionSnapshot snapshot) {

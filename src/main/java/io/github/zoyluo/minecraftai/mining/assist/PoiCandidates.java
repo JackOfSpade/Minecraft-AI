@@ -1,10 +1,9 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
 
 /**
  * Per-bot set of shadow POI candidates and their hysteresis (mining-assist design 6.3: "T >= 0.40 on at
@@ -25,7 +24,7 @@ public final class PoiCandidates {
         private int lastTick;
 
         private Candidate(BlockPos anchor, int tick) {
-            this.anchor = anchor.toImmutable();
+            this.anchor = anchor.immutable();
             this.firstTick = tick;
             this.lastTick = tick;
         }
@@ -75,7 +74,7 @@ public final class PoiCandidates {
             candidates.add(match);
         }
         boolean satisfied = match.hysteresis.record(tick, score);
-        match.anchor = anchor.toImmutable();
+        match.anchor = anchor.immutable();
         match.lastTick = tick;
         return new Tracked(match, satisfied, match.hysteresis.hits(tick), match.hysteresis.evaluations());
     }

@@ -6,8 +6,6 @@ import io.github.zoyluo.minecraftai.mining.assist.MissionAssistLedger;
 import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -15,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 /**
  * The opportunistic valuables detour of OreDig (mining-assist design 4.1 to 4.14, phase P1, walk only): a small
@@ -377,7 +376,7 @@ final class OreDigDetourEngine {
         ledger.noteStart(host.serverTick());
         lastClaimRenew = host.serverTick();
 
-        seed = selection.seed().toImmutable();
+        seed = selection.seed().immutable();
         curId = selection.blockId();
         clusterCells = new ArrayList<>(selection.cluster());
 
@@ -386,7 +385,7 @@ final class OreDigDetourEngine {
         BlockPos feet = host.feet();
         List<BlockPos> members = new ArrayList<>();
         for (BlockPos p : host.veinAt(seed, curId, MEMBER_CAP)) {
-            BlockPos pos = p.toImmutable();
+            BlockPos pos = p.immutable();
             if (pos.equals(seed) || host.excluded(pos) || members.contains(pos)) {
                 continue;
             }
@@ -917,7 +916,7 @@ final class OreDigDetourEngine {
             noStep.add(lastBreak);
         }
         for (BlockPos p : host.neighbours26Same(lastBreak, curId)) {
-            BlockPos pos = p.toImmutable();
+            BlockPos pos = p.immutable();
             if (!done.contains(pos) && !pending.contains(pos) && !host.excluded(pos)
                     && membersStarted + pending.size() < MEMBER_CAP) {
                 pending.add(pos);

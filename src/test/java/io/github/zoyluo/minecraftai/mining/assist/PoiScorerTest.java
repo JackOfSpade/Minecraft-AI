@@ -4,8 +4,6 @@ import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.Band;
 import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.Hysteresis;
 import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.PoiScore;
 import io.github.zoyluo.minecraftai.mining.assist.PoiSignals.Habitation;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -18,6 +16,8 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.SplittableRandom;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -372,7 +372,7 @@ class PoiScorerTest {
         PoiSignals.Builder b = PoiSignals.builder()
                 .cell(PoiBucket.STONE_BUILD, new BlockPos(0, 10, 0))
                 .cell(PoiBucket.LIGHT_DRESSING, new BlockPos(100, 10, 0));
-        assertEquals(new Vec3d(0.5D, 10.5D, 0.5D), eval(b).centroid());
+        assertEquals(new Vec3(0.5D, 10.5D, 0.5D), eval(b).centroid());
 
         b.cell(PoiBucket.WOOD_BUILD, new BlockPos(2, 10, 0));
         // Now weak counts: mean x = (0 + 2 + 100) / 3.
@@ -869,7 +869,7 @@ class PoiScorerTest {
                 .cell(PoiBucket.RAIL, new BlockPos(2, 11, -2));
         PoiScore r = eval(b);
 
-        assertEquals(new Vec3d(2.5D, 11.5D, 2.0D + 0.5D), r.centroid());
+        assertEquals(new Vec3(2.5D, 11.5D, 2.0D + 0.5D), r.centroid());
         assertEquals(new BlockPos(2, 11, 2), r.centroidBlock());
         assertNull(eval(PoiSignals.builder()).centroid());
         assertNull(eval(PoiSignals.builder()).centroidBlock());
@@ -1453,7 +1453,7 @@ class PoiScorerTest {
     /** The window sweep hands out mutable positions and reuses them; the snapshot must not alias them. */
     @Test
     void signalsCopyMutablePositionsAtInsertion() {
-        BlockPos.Mutable cursor = new BlockPos.Mutable(3, 40, 5);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos(3, 40, 5);
         PoiSignals.Builder b = PoiSignals.builder().cell(PoiBucket.SPAWNER, cursor);
         cursor.set(9, 41, 9);
         b.cell(PoiBucket.CONTAINER, cursor);

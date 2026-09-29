@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 record NeighborCandidate(BlockPos pos, MoveType moveType, int fallHeight) {
     NeighborCandidate {
-        pos = pos.toImmutable();
+        pos = pos.immutable();
     }
 }

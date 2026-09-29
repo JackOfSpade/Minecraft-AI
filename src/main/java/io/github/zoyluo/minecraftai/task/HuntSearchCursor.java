@@ -1,7 +1,5 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.Identifier;
-
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -16,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.resources.Identifier;
 
 /**
  * Mission-scoped search state shared by every {@link HuntTask} created for one goal.

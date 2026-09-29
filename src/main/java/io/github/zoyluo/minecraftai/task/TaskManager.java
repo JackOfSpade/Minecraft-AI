@@ -52,7 +52,7 @@ public final class TaskManager {
         }
         abort(bot, publishStatus);
         bot.getActionPack().stopAll();
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         active.put(uuid, task);
         activeOrigins.put(uuid, origin);
         try {
@@ -79,10 +79,10 @@ public final class TaskManager {
             TaskStatus failed = TaskStatus.from(task);
             lastStatus.put(uuid, failed);
             if (failed.state() == TaskState.FAILED) {
-                recordFailure(bot, task.name(), failed.failureReason(), bot.getEntityWorld().getServer().getTicks());
+                recordFailure(bot, task.name(), failed.failureReason(), bot.level().getServer().getTickCount());
             }
             if (publishStatus) {
-                BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, failed);
+                BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, failed);
             }
             BotLog.error(bot, "task_start_failed", startFailure, "name", task.name());
             throw startFailure;
@@ -101,20 +101,20 @@ public final class TaskManager {
     }
 
     private void abort(AIPlayerEntity bot, boolean publishStatus) {
-        Task current = active.remove(bot.getUuid());
-        activeOrigins.remove(bot.getUuid());
+        Task current = active.remove(bot.getUUID());
+        activeOrigins.remove(bot.getUUID());
         if (current != null) {
             current.abort(bot);
-            lastStatus.put(bot.getUuid(), TaskStatus.from(current));
+            lastStatus.put(bot.getUUID(), TaskStatus.from(current));
             if (publishStatus) {
-                BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, TaskStatus.from(current));
+                BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, TaskStatus.from(current));
             }
         }
     }
 
     /** Publishes the assignment established by {@link #assignSilently} after restore commit. */
     public boolean publishCurrentAssignment(AIPlayerEntity bot) {
-        Task current = active.get(bot.getUuid());
+        Task current = active.get(bot.getUUID());
         if (current == null) {
             return false;
         }
@@ -123,7 +123,7 @@ public final class TaskManager {
                 && status.state() != TaskState.PAUSED) {
             return false;
         }
-        lastStatus.put(bot.getUuid(), status);
+        lastStatus.put(bot.getUUID(), status);
         BotReporter.INSTANCE.onAssigned(bot, status);
         return true;
     }
@@ -137,7 +137,7 @@ public final class TaskManager {
      * causes the idle-watcher to spin with nothing to do (root cause of an observed 13-minute stall).
      */
     public void resetToIdle(AIPlayerEntity bot) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         Task current = active.remove(uuid);
         if (current != null) {
             current.abort(bot);
@@ -153,12 +153,12 @@ public final class TaskManager {
         lastFailure.remove(uuid);
         pendingFailure.remove(uuid);
         lastStatus.put(uuid, TaskStatus.idle());
-        BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, TaskStatus.idle());
+        BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, TaskStatus.idle());
     }
 
     /** User-intent cancellation: clear active and paused work without creating a failure/replan. */
     public boolean cancelIntentTasks(AIPlayerEntity bot, String reason) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         bumpUserPauseEpoch(uuid);
         Task current = active.remove(uuid);
         activeOrigins.remove(uuid);
@@ -189,41 +189,41 @@ public final class TaskManager {
         if (representative != null) {
             TaskStatus cancelled = TaskStatus.from(representative);
             lastStatus.put(uuid, cancelled);
-            BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, cancelled);
+            BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, cancelled);
             BotLog.task(bot, "task_cancelled", "name", representative.name(), "reason", reason);
         } else if (hadFailure || hadPendingFailure) {
             lastStatus.put(uuid, TaskStatus.idle());
-            BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, TaskStatus.idle());
+            BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, TaskStatus.idle());
         }
         return representative != null || hadFailure || hadPendingFailure;
     }
 
     public Optional<Task> getActive(AIPlayerEntity bot) {
-        return Optional.ofNullable(active.get(bot.getUuid()));
+        return Optional.ofNullable(active.get(bot.getUUID()));
     }
 
     public boolean hasPaused(AIPlayerEntity bot) {
-        ExecutionStack<Task> stack = executionStacks.get(bot.getUuid());
+        ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
         return stack != null && !stack.isEmpty();
     }
 
     /** Most recently interrupted work, used by safety routing without consuming the stack. */
     public Optional<Task> peekPaused(AIPlayerEntity bot) {
-        ExecutionStack<Task> stack = executionStacks.get(bot.getUuid());
+        ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
         return stack == null ? Optional.empty() : stack.peek().map(ExecutionStack.Frame::work);
     }
 
     public int pausedDepth(AIPlayerEntity bot) {
-        ExecutionStack<Task> stack = executionStacks.get(bot.getUuid());
+        ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
         return stack == null ? 0 : stack.size();
     }
 
     public Optional<TaskOrigin> activeOrigin(AIPlayerEntity bot) {
-        return Optional.ofNullable(activeOrigins.get(bot.getUuid()));
+        return Optional.ofNullable(activeOrigins.get(bot.getUUID()));
     }
 
     public boolean isUserPaused(AIPlayerEntity bot) {
-        return userPaused.contains(bot.getUuid());
+        return userPaused.contains(bot.getUUID());
     }
 
     /** Design 6.5 "Pause epoch": additive per-bot counter bumped by pauseUserIntent, resumeUserIntent, and
@@ -238,7 +238,7 @@ public final class TaskManager {
      * prior cancellation and keeps calling {@link #onBotDespawn} for its one bump.
      * Unused by TaskManager itself in P2; P3's hold logic reads it to detect a player action during a hold. */
     public int userPauseEpoch(AIPlayerEntity bot) {
-        return userPauseEpoch.getOrDefault(bot.getUuid(), 0);
+        return userPauseEpoch.getOrDefault(bot.getUUID(), 0);
     }
 
     private void bumpUserPauseEpoch(UUID uuid) {
@@ -246,19 +246,19 @@ public final class TaskManager {
     }
 
     public TaskStatus status(AIPlayerEntity bot) {
-        Task current = active.get(bot.getUuid());
+        Task current = active.get(bot.getUUID());
         if (current != null) {
             return TaskStatus.from(current);
         }
-        ExecutionStack<Task> stack = executionStacks.get(bot.getUuid());
+        ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
         if (stack != null && stack.peek().isPresent()) {
             return TaskStatus.from(stack.peek().orElseThrow().work());
         }
-        return lastStatus.getOrDefault(bot.getUuid(), TaskStatus.idle());
+        return lastStatus.getOrDefault(bot.getUUID(), TaskStatus.idle());
     }
 
     public void pauseFor(AIPlayerEntity bot, String why) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         Task current = active.remove(uuid);
         TaskOrigin origin = activeOrigins.remove(uuid);
         if (current == null) {
@@ -270,14 +270,14 @@ public final class TaskManager {
         ExecutionStack<Task> stack = executionStacks.computeIfAbsent(uuid, ignored -> new ExecutionStack<>());
         stack.push(current, preservedOrigin);
         TaskStatus status = TaskStatus.from(current);
-        lastStatus.put(bot.getUuid(), status);
-        BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, status);
+        lastStatus.put(bot.getUUID(), status);
+        BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, status);
         BotLog.task(bot, "task_paused", "name", current.name(), "why", why,
                 "origin", preservedOrigin.kind(), "stack_depth", stack.size());
     }
 
     public void resumeFromPause(AIPlayerEntity bot) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         if (active.containsKey(uuid)) {
             return;
         }
@@ -295,8 +295,8 @@ public final class TaskManager {
         activeOrigins.put(uuid, frame.origin());
         task.resume(bot);
         TaskStatus status = TaskStatus.from(task);
-        lastStatus.put(bot.getUuid(), status);
-        BotReporter.INSTANCE.onStatus(bot.getEntityWorld().getServer(), bot, status);
+        lastStatus.put(bot.getUUID(), status);
+        BotReporter.INSTANCE.onStatus(bot.level().getServer(), bot, status);
         if (stack.isEmpty()) {
             executionStacks.remove(uuid, stack);
         }
@@ -305,7 +305,7 @@ public final class TaskManager {
     }
 
     public boolean pauseUserIntent(AIPlayerEntity bot, String why) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         bumpUserPauseEpoch(uuid);
         boolean changed = userPaused.add(uuid);
         TaskOrigin origin = activeOrigins.get(uuid);
@@ -319,7 +319,7 @@ public final class TaskManager {
     }
 
     public boolean resumeUserIntent(AIPlayerEntity bot, String why) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         bumpUserPauseEpoch(uuid);
         boolean changed = userPaused.remove(uuid);
         if (!active.containsKey(uuid)) {
@@ -389,7 +389,7 @@ public final class TaskManager {
             } else if (task.state() == TaskState.FAILED) {
                 active.remove(uuid);
                 activeOrigins.remove(uuid);
-                recordFailure(player, task.name(), task.failureReason(), server.getTicks());
+                recordFailure(player, task.name(), task.failureReason(), server.getTickCount());
                 BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.TASK, player, "task_failed",
                         "name", task.name(), "reason", task.failureReason(), "elapsed_ticks", task.elapsedTicks());
             } else if (task.state() == TaskState.CANCELLED) {
@@ -403,7 +403,7 @@ public final class TaskManager {
     }
 
     public void recordFailure(AIPlayerEntity bot, String name, String reason, int tick) {
-        UUID uuid = bot.getUuid();
+        UUID uuid = bot.getUUID();
         FailureRecord previous = lastFailure.get(uuid);
         int count = previous != null && previous.name().equals(name) && previous.reason().equals(reason)
                 ? previous.count() + 1
@@ -414,11 +414,11 @@ public final class TaskManager {
     }
 
     public Optional<FailureRecord> peekFailure(AIPlayerEntity bot) {
-        return Optional.ofNullable(pendingFailure.get(bot.getUuid()));
+        return Optional.ofNullable(pendingFailure.get(bot.getUUID()));
     }
 
     public Optional<FailureRecord> consumeFailure(AIPlayerEntity bot) {
-        return Optional.ofNullable(pendingFailure.remove(bot.getUuid()));
+        return Optional.ofNullable(pendingFailure.remove(bot.getUUID()));
     }
 
     public void onServerStopping(MinecraftServer server) {
@@ -447,12 +447,12 @@ public final class TaskManager {
      * map removal here is then a no-op except the ones {@code cancelIntentTasks} never touches
      * ({@code lastStatus}, {@code BotReporter}). */
     public void forgetDespawnedBot(AIPlayerEntity bot) {
-        executionStacks.remove(bot.getUuid());
-        activeOrigins.remove(bot.getUuid());
-        userPaused.remove(bot.getUuid());
-        lastStatus.remove(bot.getUuid());
-        lastFailure.remove(bot.getUuid());
-        pendingFailure.remove(bot.getUuid());
+        executionStacks.remove(bot.getUUID());
+        activeOrigins.remove(bot.getUUID());
+        userPaused.remove(bot.getUUID());
+        lastStatus.remove(bot.getUUID());
+        lastFailure.remove(bot.getUUID());
+        pendingFailure.remove(bot.getUUID());
         BotReporter.INSTANCE.onCleared(bot);
     }
 

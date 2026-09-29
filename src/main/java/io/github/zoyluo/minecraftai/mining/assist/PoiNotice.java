@@ -1,8 +1,7 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
 
 /**
  * Pure text rendering of the design 6.1/6.8/6.9 POI notice templates. {@code BlockPos}/{@code String}/

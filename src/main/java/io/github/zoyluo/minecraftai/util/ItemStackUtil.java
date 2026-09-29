@@ -1,6 +1,6 @@
 package io.github.zoyluo.minecraftai.util;
 
-import net.minecraft.item.ItemStack;
+import net.minecraft.world.item.ItemStack;
 
 public final class ItemStackUtil {
     private ItemStackUtil() {
@@ -13,6 +13,6 @@ public final class ItemStackUtil {
      * {@code CreateObsidianTask}.
      */
     public static boolean isNearlyBroken(ItemStack stack) {
-        return stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1;
+        return stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1;
     }
 }

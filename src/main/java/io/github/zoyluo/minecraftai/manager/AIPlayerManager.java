@@ -13,24 +13,23 @@ import io.github.zoyluo.minecraftai.persist.BotPersistence;
 import io.github.zoyluo.minecraftai.persist.BotRecord;
 import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.util.OfflineProfileFactory;
-import net.minecraft.entity.attribute.EntityAttributeInstance;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.network.DisconnectionInfo;
-import net.minecraft.network.NetworkSide;
-import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.DisconnectionDetails;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ConnectedClientData;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.World;
-
+import net.minecraft.server.level.ClientInformation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.Vec3;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Locale;
@@ -65,62 +64,62 @@ public final class AIPlayerManager {
      * Returns true if it was revived.
      */
     public boolean respawnDeadBot(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         // Episodic memory: record the death event (using the death position = current position,
         // before teleporting to the surface). Distillation rule: two deaths in the same area -> danger zone.
         io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
-                io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, bot.getBlockPos(),
-                bot.getRecentDamageSource() == null ? "unknown" : bot.getRecentDamageSource().getName());
+                io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, bot.blockPosition(),
+                bot.getLastDamageSource() == null ? "unknown" : bot.getLastDamageSource().getMsgId());
         RuntimeLifecycleCoordinator.INSTANCE.onBotDeath(bot);
         boolean enhancedRespawn = CapabilityRuntime.decide(
                 bot, PrivilegedCapability.EMERGENCY_TELEPORT, "death_surface_respawn").allowed();
-        ServerWorld respawnWorld;
-        Vec3d respawnPos;
+        ServerLevel respawnWorld;
+        Vec3 respawnPos;
         String respawnStrategy;
         if (enhancedRespawn) {
-            BlockPos surface = world.getTopPosition(
-                    Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, bot.getBlockPos());
+            BlockPos surface = world.getHeightmapPos(
+                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bot.blockPosition());
             respawnWorld = world;
-            respawnPos = Vec3d.ofBottomCenter(surface);
+            respawnPos = Vec3.atBottomCenterOf(surface);
             respawnStrategy = "operator_death_column_surface";
         } else {
             // Fake players cannot send the vanilla respawn packet. In strict mode this adapter uses
             // the world's normal spawn area instead of teleporting to the death column's surface.
-            respawnWorld = bot.getEntityWorld().getServer().getOverworld();
+            respawnWorld = bot.level().getServer().overworld();
             respawnPos = safeSpawnPosition(
-                    respawnWorld, Vec3d.ofBottomCenter(respawnWorld.getSpawnPoint().getPos()),
+                    respawnWorld, Vec3.atBottomCenterOf(respawnWorld.getRespawnData().pos()),
                     bot.getGameProfile().name());
             respawnStrategy = "strict_world_spawn";
         }
         bot.setHealth(20.0F);
         bot.deathTime = 0;
-        bot.getHungerManager().setFoodLevel(20);
-        bot.teleport(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
-                Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
-        bot.extinguish();
+        bot.getFoodData().setFoodLevel(20);
+        bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
+                Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+        bot.clearFire();
         BotLog.danger(bot, "bot_respawned_after_death",
-                "pos", LogFields.pos(bot.getBlockPos()),
+                "pos", LogFields.pos(bot.blockPosition()),
                 "strategy", respawnStrategy);
         return true;
     }
 
     public Optional<AIPlayerEntity> spawn(MinecraftServer server,
                                           String name,
-                                          ServerWorld world,
-                                          Vec3d pos,
+                                          ServerLevel world,
+                                          Vec3 pos,
                                           float yaw,
                                           float pitch,
-                                          GameMode gameMode) {
+                                          GameType gameMode) {
         return spawn(server, name, world, pos, yaw, pitch, gameMode, null);
     }
 
     public Optional<AIPlayerEntity> spawn(MinecraftServer server,
                                           String name,
-                                          ServerWorld world,
-                                          Vec3d pos,
+                                          ServerLevel world,
+                                          Vec3 pos,
                                           float yaw,
                                           float pitch,
-                                          GameMode gameMode,
+                                          GameType gameMode,
                                           UUID ownerUuid) {
         return spawnInternal(server, name, world, pos, yaw, pitch, gameMode, ownerUuid, null);
     }
@@ -132,31 +131,31 @@ public final class AIPlayerManager {
      */
     private Optional<AIPlayerEntity> spawnInternal(MinecraftServer server,
                                                     String name,
-                                                    ServerWorld world,
-                                                    Vec3d pos,
+                                                    ServerLevel world,
+                                                    Vec3 pos,
                                                     float yaw,
                                                     float pitch,
-                                                    GameMode gameMode,
+                                                    GameType gameMode,
                                                     UUID ownerUuid,
                                                     Integer explicitSkinIndex) {
         String normalizedName = normalizeName(name);
-        if (nameIndex.containsKey(normalizedName) || server.getPlayerManager().getPlayer(name) != null) {
+        if (nameIndex.containsKey(normalizedName) || server.getPlayerList().getPlayerByName(name) != null) {
             return Optional.empty();
         }
 
         int skinIndex = explicitSkinIndex != null ? explicitSkinIndex : OfflineProfileFactory.randomSkinIndex();
         GameProfile profile = OfflineProfileFactory.create(name, skinIndex);
-        SyncedClientOptions options = SyncedClientOptions.createDefault();
+        ClientInformation options = ClientInformation.createDefault();
         AIPlayerEntity player = new AIPlayerEntity(server, world, profile, options);
-        FakeClientConnection connection = new FakeClientConnection(NetworkSide.SERVERBOUND);
-        ConnectedClientData clientData = new ConnectedClientData(profile, 0, options, false);
-        Vec3d safePos = safeSpawnPosition(world, pos, name);
+        FakeClientConnection connection = new FakeClientConnection(PacketFlow.SERVERBOUND);
+        CommonListenerCookie clientData = new CommonListenerCookie(profile, 0, options, false);
+        Vec3 safePos = safeSpawnPosition(world, pos, name);
 
-        server.getPlayerManager().onPlayerConnect(connection, player, clientData);
-        player.teleport(world, safePos.x, safePos.y, safePos.z, Collections.emptySet(), yaw, pitch, true);
+        server.getPlayerList().placeNewPlayer(connection, player, clientData);
+        player.teleportTo(world, safePos.x, safePos.y, safePos.z, Collections.emptySet(), yaw, pitch, true);
         player.setHealth(20.0F);
         player.reviveForMinecraftAiSpawn();
-        EntityAttributeInstance stepHeight = player.getAttributeInstance(EntityAttributes.STEP_HEIGHT);
+        AttributeInstance stepHeight = player.getAttribute(Attributes.STEP_HEIGHT);
         if (stepHeight != null) {
             stepHeight.setBaseValue(0.6D);
         }
@@ -164,24 +163,24 @@ public final class AIPlayerManager {
         // drop, and in adventure mode breaking/placing is disallowed, both of which would break
         // gathering/building. So the incoming gameMode is ignored (it may be the summoner's
         // creative mode, or creative restored from an old save) and SURVIVAL is always used.
-        GameMode effectiveMode = GameMode.SURVIVAL;
-        player.interactionManager.changeGameMode(effectiveMode);
+        GameType effectiveMode = GameType.SURVIVAL;
+        player.gameMode.changeGameModeForPlayer(effectiveMode);
 
-        players.put(player.getUuid(), player);
-        nameIndex.put(normalizedName, player.getUuid());
-        skinIndices.put(player.getUuid(), skinIndex);
+        players.put(player.getUUID(), player);
+        nameIndex.put(normalizedName, player.getUUID());
+        skinIndices.put(player.getUUID(), skinIndex);
         if (ownerUuid != null) {
-            ownerIndex.computeIfAbsent(ownerUuid, ignored -> new java.util.LinkedHashSet<>()).add(player.getUuid());
-            botOwners.put(player.getUuid(), ownerUuid);
+            ownerIndex.computeIfAbsent(ownerUuid, ignored -> new java.util.LinkedHashSet<>()).add(player.getUUID());
+            botOwners.put(player.getUUID(), ownerUuid);
         }
-        BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.getBlockPos()), "mode", effectiveMode.asString());
+        BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.blockPosition()), "mode", effectiveMode.getSerializedName());
         BotPersistence.INSTANCE.markDirty(server);
         return Optional.of(player);
     }
 
     public Optional<AIPlayerEntity> respawnFromRecord(MinecraftServer server, BotRecord record) {
         RestoreTarget target = restoreTarget(server, record);
-        GameMode gameMode = GameMode.SURVIVAL;  // The AI assistant is always survival; ignore any creative mode that may have been saved in the old record
+        GameType gameMode = GameType.SURVIVAL;  // The AI assistant is always survival; ignore any creative mode that may have been saved in the old record
         Optional<AIPlayerEntity> spawned = spawnInternal(
                 server,
                 record.name(),
@@ -195,13 +194,13 @@ public final class AIPlayerManager {
         spawned.ifPresent(bot -> {
             BotPersistence.applyInventory(bot, record.inventoryNbt());
             BotPersistence.applyPlayerState(bot, record.playerStateNbt());
-            BotMemoryStore.INSTANCE.loadString(bot.getUuid(), record.memoryNbt());
+            BotMemoryStore.INSTANCE.loadString(bot.getUUID(), record.memoryNbt());
             bot.setHealth(Math.max(1.0F, Math.min(record.health(), bot.getMaxHealth())));
-            bot.getHungerManager().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));
+            bot.getFoodData().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));
             BotLog.lifecycle(bot, "bot_restored",
-                    "pos", LogFields.pos(bot.getBlockPos()),
-                    "mode", gameMode.asString(),
-                    "dimension", bot.getEntityWorld().getRegistryKey().getValue(),
+                    "pos", LogFields.pos(bot.blockPosition()),
+                    "mode", gameMode.getSerializedName(),
+                    "dimension", bot.level().dimension().identifier(),
                     "fallback", target.fallback());
         });
         return spawned;
@@ -215,10 +214,10 @@ public final class AIPlayerManager {
 
         AIPlayerEntity entity = player.get();
         RuntimeLifecycleCoordinator.INSTANCE.deleteBot(entity);
-        players.remove(entity.getUuid());
+        players.remove(entity.getUUID());
         nameIndex.remove(normalizeName(name));
-        skinIndices.remove(entity.getUuid());
-        clearOwner(entity.getUuid());
+        skinIndices.remove(entity.getUUID());
+        clearOwner(entity.getUUID());
         disconnect(server, entity, "MinecraftAi despawn");
         BotLog.lifecycle(entity, "bot_despawned", "reason", "command_or_shutdown");
         BotPersistence.INSTANCE.markDirty(server);
@@ -238,7 +237,7 @@ public final class AIPlayerManager {
         Optional<AIPlayerEntity> recovered = players.values().stream()
                 .filter(player -> normalizeName(player.getGameProfile().name()).equals(normalized))
                 .findFirst();
-        recovered.ifPresent(player -> nameIndex.put(normalized, player.getUuid()));
+        recovered.ifPresent(player -> nameIndex.put(normalized, player.getUUID()));
         return recovered;
     }
 
@@ -287,7 +286,7 @@ public final class AIPlayerManager {
     }
 
     public Optional<UUID> ownerOf(AIPlayerEntity bot) {
-        return Optional.ofNullable(botOwners.get(bot.getUuid()));
+        return Optional.ofNullable(botOwners.get(bot.getUUID()));
     }
 
     public Collection<AIPlayerEntity> all() {
@@ -296,7 +295,7 @@ public final class AIPlayerManager {
 
     /** The one of {@link OfflineProfileFactory}'s 18 default-skin indices this bot was spawned with. */
     public int skinIndex(AIPlayerEntity bot) {
-        return skinIndices.getOrDefault(bot.getUuid(), 0);
+        return skinIndices.getOrDefault(bot.getUUID(), 0);
     }
 
     public void onServerStopping(MinecraftServer server) {
@@ -325,10 +324,10 @@ public final class AIPlayerManager {
     }
 
     private static void disconnect(MinecraftServer server, AIPlayerEntity entity, String reason) {
-        if (entity.networkHandler != null) {
-            entity.networkHandler.onDisconnected(new DisconnectionInfo(Text.literal(reason)));
+        if (entity.connection != null) {
+            entity.connection.onDisconnect(new DisconnectionDetails(Component.literal(reason)));
         } else {
-            server.getPlayerManager().remove(entity);
+            server.getPlayerList().remove(entity);
         }
     }
 
@@ -344,30 +343,30 @@ public final class AIPlayerManager {
     }
 
     private static RestoreTarget restoreTarget(MinecraftServer server, BotRecord record) {
-        RegistryKey<World> worldKey;
+        ResourceKey<Level> worldKey;
         try {
-            worldKey = RegistryKey.of(RegistryKeys.WORLD, Identifier.of(record.dimension()));
+            worldKey = ResourceKey.create(Registries.DIMENSION, Identifier.parse(record.dimension()));
         } catch (RuntimeException exception) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null, "bot_restore_dimension_invalid",
                     "name", record.name(), "dimension", record.dimension());
             return overworldSpawn(server);
         }
-        ServerWorld world = server.getWorld(worldKey);
+        ServerLevel world = server.getLevel(worldKey);
         if (world == null) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, null, "bot_restore_world_missing",
                     "name", record.name(), "dimension", record.dimension());
             return overworldSpawn(server);
         }
-        return new RestoreTarget(world, new Vec3d(record.x(), record.y(), record.z()), false);
+        return new RestoreTarget(world, new Vec3(record.x(), record.y(), record.z()), false);
     }
 
     private static RestoreTarget overworldSpawn(MinecraftServer server) {
-        ServerWorld overworld = server.getOverworld();
-        return new RestoreTarget(overworld, Vec3d.ofBottomCenter(overworld.getSpawnPoint().getPos()), true);
+        ServerLevel overworld = server.overworld();
+        return new RestoreTarget(overworld, Vec3.atBottomCenterOf(overworld.getRespawnData().pos()), true);
     }
 
-    private static Vec3d safeSpawnPosition(ServerWorld world, Vec3d requested, String name) {
-        BlockPos requestedBlock = BlockPos.ofFloored(requested);
+    private static Vec3 safeSpawnPosition(ServerLevel world, Vec3 requested, String name) {
+        BlockPos requestedBlock = BlockPos.containing(requested);
         Standability.clearCache();
         if (Standability.isStandable(world, requestedBlock)) {
             return requested;
@@ -382,13 +381,13 @@ public final class AIPlayerManager {
                 "name", name,
                 "from", LogFields.pos(requestedBlock),
                 "to", LogFields.pos(safe.get()));
-        return Vec3d.ofBottomCenter(safe.get());
+        return Vec3.atBottomCenterOf(safe.get());
     }
 
     private static String normalizeName(String name) {
         return name.toLowerCase(Locale.ROOT);
     }
 
-    private record RestoreTarget(ServerWorld world, Vec3d pos, boolean fallback) {
+    private record RestoreTarget(ServerLevel world, Vec3 pos, boolean fallback) {
     }
 }

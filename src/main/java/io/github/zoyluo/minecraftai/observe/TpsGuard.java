@@ -69,7 +69,7 @@ public final class TpsGuard {
     }
 
     public synchronized boolean shouldTickNonCriticalTask(MinecraftServer server) {
-        return !lastDegraded || server.getTicks() % NON_CRITICAL_TASK_INTERVAL == 0;
+        return !lastDegraded || server.getTickCount() % NON_CRITICAL_TASK_INTERVAL == 0;
     }
 
     public synchronized Snapshot snapshot(MinecraftServer server) {

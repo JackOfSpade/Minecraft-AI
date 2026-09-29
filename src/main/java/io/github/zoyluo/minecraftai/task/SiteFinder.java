@@ -6,13 +6,12 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.Heightmap;
-
 import java.util.Optional;
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.material.FluidState;
 
 public final class SiteFinder {
     private static final double MAX_SCORE = 2.0D;
@@ -39,8 +38,8 @@ public final class SiteFinder {
         if (!hiddenScanAllowed) {
             return findObservableSite(bot, footprintX, footprintZ, searchRadius, lenient);
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         BlockPos best = null;
         double bestScore = Double.MAX_VALUE;
         int ySpread = lenient ? 8 : 4;
@@ -68,11 +67,11 @@ public final class SiteFinder {
                 if (!hasUsableStand(world, anchor, footprintX, footprintZ)) {
                     continue;
                 }
-                double distancePenalty = anchor.getSquaredDistance(origin) / 256.0D;
+                double distancePenalty = anchor.distSqr(origin) / 256.0D;
                 double total = score + distancePenalty;
                 if (total < bestScore) {
                     bestScore = total;
-                    best = anchor.toImmutable();
+                    best = anchor.immutable();
                 }
             }
         }
@@ -119,7 +118,7 @@ public final class SiteFinder {
                                                          int footprintZ,
                                                          int searchRadius,
                                                          boolean lenient) {
-        BlockPos origin = bot.getBlockPos();
+        BlockPos origin = bot.blockPosition();
         int ySpread = lenient ? 8 : 4;
         int maxRange = lenient ? 5 : 2;
         double scoreCap = lenient ? Double.MAX_VALUE : MAX_SCORE;
@@ -145,10 +144,10 @@ public final class SiteFinder {
                     continue;
                 }
                 usableApproaches++;
-                double total = score + anchor.getSquaredDistance(origin) / 256.0D;
+                double total = score + anchor.distSqr(origin) / 256.0D;
                 if (total < bestScore) {
                     bestScore = total;
-                    best = anchor.toImmutable();
+                    best = anchor.immutable();
                 }
             }
         }
@@ -230,7 +229,7 @@ public final class SiteFinder {
                                                     int z,
                                                     int preferredY,
                                                     int verticalRange) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         int range = Math.max(0, verticalRange);
         for (int delta = 0; delta <= range; delta++) {
             int high = preferredY + delta;
@@ -246,17 +245,17 @@ public final class SiteFinder {
     }
 
     private static boolean isObservableStandable(AIPlayerEntity bot,
-                                                 ServerWorld world,
+                                                 ServerLevel world,
                                                  int x,
                                                  int y,
                                                  int z) {
-        if (y <= world.getBottomY() || y >= world.getBottomY() + world.getHeight() - 1) {
+        if (y <= world.getMinY() || y >= world.getMinY() + world.getHeight() - 1) {
             return false;
         }
         BlockPos feet = new BlockPos(x, y, z);
-        return ObservableWorldQuery.canObserveBlock(bot, feet.down())
+        return ObservableWorldQuery.canObserveBlock(bot, feet.below())
                 && ObservableWorldQuery.canObserveCell(bot, feet)
-                && ObservableWorldQuery.canObserveCell(bot, feet.up())
+                && ObservableWorldQuery.canObserveCell(bot, feet.above())
                 && Standability.isStandable(world, feet);
     }
 
@@ -266,7 +265,7 @@ public final class SiteFinder {
                                                  int footprintZ) {
         for (int dx = 0; dx < footprintX; dx++) {
             for (int dz = 0; dz < footprintZ; dz++) {
-                BlockPos ground = anchor.add(dx, -1, dz);
+                BlockPos ground = anchor.offset(dx, -1, dz);
                 if (!ObservableWorldQuery.canObserveBlock(bot, ground)) {
                     return false;
                 }
@@ -280,7 +279,7 @@ public final class SiteFinder {
     // 0 = clean and acceptable / 1 = feet or head block is non-air (clearable obstruction) /
     // 2 = ground or feet block has fluid (water) / 3 = ground block is air (floating) /
     // 4 = height difference > maxRange / -1 = not standable.
-    private static int footprintReject(ServerWorld world, BlockPos anchor, int footprintX, int footprintZ, int maxRange) {
+    private static int footprintReject(ServerLevel world, BlockPos anchor, int footprintX, int footprintZ, int maxRange) {
         int minY = Integer.MAX_VALUE;
         int maxY = Integer.MIN_VALUE;
         for (int dx = 0; dx < footprintX; dx++) {
@@ -294,10 +293,10 @@ public final class SiteFinder {
                 int surfaceY = my.getAsInt();
                 BlockPos feet = new BlockPos(x, surfaceY, z);
                 if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
-                        || !world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()) {
+                        || !world.getBlockState(feet.above()).getCollisionShape(world, feet.above()).isEmpty()) {
                     return 1; // solid obstruction with a collision box (once relaxed, collision-less vegetation like grass no longer counts as an obstruction)
                 }
-                BlockPos ground = feet.down();
+                BlockPos ground = feet.below();
                 if (!world.getFluidState(ground).isEmpty() || !world.getFluidState(feet).isEmpty()) {
                     return 2;
                 }
@@ -311,11 +310,11 @@ public final class SiteFinder {
         return (maxY - minY) > maxRange ? 4 : 0;
     }
 
-    public static double flatnessScore(ServerWorld world, BlockPos anchor, int footprintX, int footprintZ) {
+    public static double flatnessScore(ServerLevel world, BlockPos anchor, int footprintX, int footprintZ) {
         return flatnessScore(world, anchor, footprintX, footprintZ, 2);
     }
 
-    public static double flatnessScore(ServerWorld world, BlockPos anchor, int footprintX, int footprintZ, int maxRange) {
+    public static double flatnessScore(ServerLevel world, BlockPos anchor, int footprintX, int footprintZ, int maxRange) {
         int minY = Integer.MAX_VALUE;
         int maxY = Integer.MIN_VALUE;
         double sum = 0.0D;
@@ -340,10 +339,10 @@ public final class SiteFinder {
                 // through them without pre-clearing); water is rejected by the fluid check below
                 // (water-surface sites are not accepted).
                 if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
-                        || !world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()) {
+                        || !world.getBlockState(feet.above()).getCollisionShape(world, feet.above()).isEmpty()) {
                     return Double.MAX_VALUE;
                 }
-                BlockPos ground = feet.down();
+                BlockPos ground = feet.below();
                 FluidState groundFluid = world.getFluidState(ground);
                 FluidState feetFluid = world.getFluidState(feet);
                 if (!groundFluid.isEmpty() || !feetFluid.isEmpty() || world.getBlockState(ground).isAir()) {
@@ -370,7 +369,7 @@ public final class SiteFinder {
         return variance / count + (maxY - minY);
     }
 
-    private static boolean hasUsableStand(ServerWorld world, BlockPos anchor, int footprintX, int footprintZ) {
+    private static boolean hasUsableStand(ServerLevel world, BlockPos anchor, int footprintX, int footprintZ) {
         Standability.clearCache();
         for (int dx = -1; dx <= footprintX; dx++) {
             if (standableSurface(world, anchor.getX() + dx, anchor.getZ() - 1)
@@ -387,18 +386,18 @@ public final class SiteFinder {
         return false;
     }
 
-    private static boolean standableSurface(ServerWorld world, int x, int z) {
-        return standableY(world, x, z, world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z)).isPresent();
+    private static boolean standableSurface(ServerLevel world, int x, int z) {
+        return standableY(world, x, z, world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z)).isPresent();
     }
 
-    private static OptionalInt standableY(ServerWorld world, int x, int z, int preferredY) {
-        int heightmapY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+    private static OptionalInt standableY(ServerLevel world, int x, int z, int preferredY) {
+        int heightmapY = world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
         OptionalInt direct = firstStandable(world, x, z, preferredY, heightmapY, heightmapY + 1, heightmapY - 1);
         if (direct.isPresent()) {
             return direct;
         }
-        int minY = Math.max(world.getBottomY() + 1, Math.min(preferredY, heightmapY) - 4);
-        int maxY = Math.min(world.getBottomY() + world.getHeight() - 2, Math.max(preferredY, heightmapY) + 4);
+        int minY = Math.max(world.getMinY() + 1, Math.min(preferredY, heightmapY) - 4);
+        int maxY = Math.min(world.getMinY() + world.getHeight() - 2, Math.max(preferredY, heightmapY) + 4);
         for (int y = minY; y <= maxY; y++) {
             if (Standability.isStandable(world, new BlockPos(x, y, z))) {
                 return OptionalInt.of(y);
@@ -407,9 +406,9 @@ public final class SiteFinder {
         return OptionalInt.empty();
     }
 
-    private static OptionalInt firstStandable(ServerWorld world, int x, int z, int... ys) {
+    private static OptionalInt firstStandable(ServerLevel world, int x, int z, int... ys) {
         for (int y : ys) {
-            if (y > world.getBottomY() && y < world.getBottomY() + world.getHeight() - 1
+            if (y > world.getMinY() && y < world.getMinY() + world.getHeight() - 1
                     && Standability.isStandable(world, new BlockPos(x, y, z))) {
                 return OptionalInt.of(y);
             }

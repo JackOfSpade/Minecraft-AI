@@ -1,9 +1,8 @@
 package io.github.zoyluo.minecraftai.goal;
 
-import net.minecraft.block.Block;
-import net.minecraft.item.Item;
-
 import java.util.Set;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
 
 public sealed interface Goal permits Goal.HaveItem, Goal.HavePickaxeTier, Goal.MineOre, Goal.HarvestCrop, Goal.Armor, Goal.Workstation, Goal.Stockpile, Goal.Food, Goal.Build {
     record HaveItem(Item item, int count) implements Goal {

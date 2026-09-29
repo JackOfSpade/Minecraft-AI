@@ -13,22 +13,22 @@ import io.github.zoyluo.minecraftai.log.GatherConsistency;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.stat.Stats;
-import net.minecraft.util.math.BlockPos;
 import org.slf4j.event.Level;
 
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 public final class GatherQuotaTask extends AbstractTask {
     private static final int SEARCH_RADIUS = 16;
@@ -237,7 +237,7 @@ public final class GatherQuotaTask extends AbstractTask {
      */
     public static GatherQuotaTask breakBlocks(Block block, int targetCount) {
         return new GatherQuotaTask(block.asItem(), targetCount, true, Set.of(block),
-                "break_blocks", Registries.BLOCK.getId(block).toString(), false);
+                "break_blocks", BuiltInRegistries.BLOCK.getKey(block).toString(), false);
     }
 
     @Override
@@ -250,7 +250,7 @@ public final class GatherQuotaTask extends AbstractTask {
         return countBrokenBlocks
                 ? "Breaking " + exactBreakTargetLabel + " " + countSoFar + "/" + targetCount + " phase=" + phase
                 : "Gathering " + (countNewItems ? "new " : "")
-                + Registries.ITEM.getId(targetItem) + " " + countSoFar + "/" + targetCount + " phase=" + phase;
+                + BuiltInRegistries.ITEM.getKey(targetItem) + " " + countSoFar + "/" + targetCount + " phase=" + phase;
     }
 
     @Override
@@ -295,7 +295,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (!countBrokenBlocks) {
             lastLoggedItemCounts.putAll(currentAcceptedCounts(bot));
         }
-        CapabilityTally.INSTANCE.reset(bot.getUuid());
+        CapabilityTally.INSTANCE.reset(bot.getUUID());
     }
 
     @Override
@@ -331,7 +331,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // out-of-reach mining every 200 ticks while never rebuilding a path. Re-survey from the
         // factual recovery pose; the still-live block remains eligible and can be selected again.
         BotLog.action(bot, "gather_harvest_resume_reselect",
-                "pos", targetPos.toShortString(), "from", bot.getBlockPos().toShortString());
+                "pos", targetPos.toShortString(), "from", bot.blockPosition().toShortString());
         targetPos = null;
         clearPickupLedger();
         searchRadius = defaultSearchRadius();
@@ -348,7 +348,7 @@ public final class GatherQuotaTask extends AbstractTask {
         currentTickBot = bot; // complete()/fail() take no bot param; see the field's javadoc
         // Working memory: record the path traveled (4-block debounce); roam waypoint selection
         // avoids already-searched areas (no more blindly circling).
-        EpisodeMemory.INSTANCE.recordTrail(bot.getUuid(), countBrokenBlocks ? name() : "gather", bot.getBlockPos());
+        EpisodeMemory.INSTANCE.recordTrail(bot.getUUID(), countBrokenBlocks ? name() : "gather", bot.blockPosition());
         if (!countBrokenBlocks) {
             refreshCountSoFar(bot);
             // Any gain not claimed by confirmPickup's own "pickup" detection (below, later this
@@ -419,21 +419,21 @@ public final class GatherQuotaTask extends AbstractTask {
     // gathering. Surfacing uses teleport (which clears fallDistance); if already in the open, it
     // does nothing. This is a fallback beyond "centralized gathering" and rarely triggers.
     private boolean trySurface(AIPlayerEntity bot) {
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        if (world.isSkyVisible(feet)) {
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        if (world.canSeeSky(feet)) {
             return false;
         }
-        int top = world.getBottomY() + world.getHeight();
+        int top = world.getMinY() + world.getHeight();
         for (int dy = 1; feet.getY() + dy < top - 1 && dy <= 80; dy++) {
-            BlockPos candidate = feet.up(dy);
-            if (Standability.isStandable(world, candidate) && world.isSkyVisible(candidate)) {
+            BlockPos candidate = feet.above(dy);
+            if (Standability.isStandable(world, candidate) && world.canSeeSky(candidate)) {
                 boolean moved = io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
                         bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                         "gather_surface", () -> {
                             bot.getActionPack().stopAll();
-                            bot.teleport(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
-                                    java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+                            bot.teleportTo(world, candidate.getX() + 0.5D, candidate.getY(), candidate.getZ() + 0.5D,
+                                    java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
                         });
                 if (moved) {
                     BotLog.action(bot, "gather_surfaced",
@@ -451,8 +451,8 @@ public final class GatherQuotaTask extends AbstractTask {
     // Returns false when this call finds nothing (throttle not elapsed / genuinely no such resource
     // in range), deferring to roam's blind patch-switching fallback (which can walk beyond the scan range).
     private boolean prospectAndApproach(AIPlayerEntity bot) {
-        int now = bot.getEntityWorld().getServer().getTicks();
-        java.util.UUID botId = bot.getUuid();
+        int now = bot.level().getServer().getTickCount();
+        java.util.UUID botId = bot.getUUID();
         if (prospectScan == null) {
             if (now - lastProspectTick < PROSPECT_INTERVAL) {
                 return false;
@@ -467,17 +467,17 @@ public final class GatherQuotaTask extends AbstractTask {
                 EpisodeMemory.INSTANCE.exclude(botId, lastProspectFound, now, EpisodeMemory.TTL_UNREACHABLE);
                 lastProspectFound = null;
             }
-            var scanServer = bot.getEntityWorld().getServer();
+            var scanServer = bot.level().getServer();
             prospectScan = OreProspector.begin(bot, PROSPECT_RANGE,
                     state -> harvestBlocks.contains(state.getBlock()),
-                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, scanServer.getTicks()));
+                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, scanServer.getTickCount()));
         }
         if (!prospectScan.step(SCAN_STEP_BUDGET_NANOS)) {
             return true; // still scanning: hold position, survey() resumes this scan first on the next tick
         }
         OreProspector.Scan scan = prospectScan;
         prospectScan = null;
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         BlockPos found = scan.result();
         if (found == null) {
             // Observability: silently returning false can't distinguish "genuinely no such
@@ -524,7 +524,7 @@ public final class GatherQuotaTask extends AbstractTask {
             EpisodeMemory.INSTANCE.exclude(botId, found, now, EpisodeMemory.TTL_UNREACHABLE);
             return false;
         }
-        lastProspectFound = found.toImmutable();
+        lastProspectFound = found.immutable();
         // Lock directly onto this tree and go through GOTO, letting goToTarget uniformly drive
         // "arrive → harvest" (including dig-approach for cliffs/elevation differences + R1
         // airborne-stuck recovery). No longer routes through ROAM-to-landing-point-then-rescan:
@@ -532,7 +532,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // prospected, but SURVEY couldn't rescan it back → expand → died in 43 ticks with
         // no_resource, 3x goal_failed). GOTO commits: if unreachable, dig or blacklist and switch
         // trees, instead of spinning and losing the tree.
-        targetPos = found.toImmutable();
+        targetPos = found.immutable();
         lastGotoTarget = targetPos;
         treeDigTried = false;
         gotoFailStreak = 0;
@@ -545,8 +545,8 @@ public final class GatherQuotaTask extends AbstractTask {
         BotLog.action(bot, "gather_prospected",
                 "found", found.getX() + "," + found.getY() + "," + found.getZ(),
                 "to", ground.getX() + "," + ground.getY() + "," + ground.getZ(),
-                "item", Registries.ITEM.getId(targetItem).toString(),
-                "dist", (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(found)),
+                "item", BuiltInRegistries.ITEM.getKey(targetItem).toString(),
+                "dist", (int) Math.sqrt(bot.blockPosition().distSqr(found)),
                 "scan_steps", scan.steps(),
                 "scan_max_step_us", scan.maxStepNanos() / 1000L);
         return true;
@@ -557,7 +557,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // neighbors at ±1 level; if none are standable (the target is buried in a solid block or
     // floating), fall back to that column's surface (for a trunk column: stand beside the tree's
     // roots).
-    private BlockPos standNearTarget(net.minecraft.server.world.ServerWorld world, BlockPos found) {
+    private BlockPos standNearTarget(net.minecraft.server.level.ServerLevel world, BlockPos found) {
         if (Standability.isStandable(world, found)) {
             return found;
         }
@@ -566,10 +566,10 @@ public final class GatherQuotaTask extends AbstractTask {
         // at y73 — ±1 found no landing point → no_stand → prospect died quickly). ±3 covers
         // typical cliff differences and significantly improves the success rate for reaching trees
         // below/against a cliff.
-        for (var dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-            BlockPos side = found.offset(dir);
+        for (var dir : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            BlockPos side = found.relative(dir);
             for (int dy : new int[]{0, -1, 1, -2, 2, -3, 3}) {
-                BlockPos p = side.up(dy);
+                BlockPos p = side.above(dy);
                 if (Standability.isStandable(world, p)) {
                     return p;
                 }
@@ -600,8 +600,8 @@ public final class GatherQuotaTask extends AbstractTask {
         if (++roamCount > MAX_ROAMS) {
             return false;
         }
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
         int[][] dirs = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
         int start = Math.floorMod(roamCount, dirs.length);
         // Adaptive distance: if the full distance doesn't work, halve it and try again (on a
@@ -620,9 +620,9 @@ public final class GatherQuotaTask extends AbstractTask {
                 BlockPos ground = findGroundAt(world, feet.getX() + d[0] * dist, feet.getZ() + d[1] * dist);
                 if (ground == null
                         || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), ground, bot.getEntityWorld().getServer().getTicks())
+                        bot.getUUID(), ground, bot.level().getServer().getTickCount())
                         || (avoidTrail && EpisodeMemory.INSTANCE.nearTrail(
-                        bot.getUuid(), "gather", ground, 10.0D))) {
+                        bot.getUUID(), "gather", ground, 10.0D))) {
                     continue;
                 }
                 // Human-like: walk to the new patch instead of teleport-flashing (observed
@@ -646,7 +646,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     // Search column (x,z) from high to low for the first standable point (surface/forest floor).
-    private BlockPos findGroundAt(net.minecraft.server.world.ServerWorld world, int x, int z) {
+    private BlockPos findGroundAt(net.minecraft.server.level.ServerLevel world, int x, int z) {
         // Use the heightmap to get that column's surface, which works at any elevation (the old
         // hard cap of y=110 made roaming/landing fail entirely when the bot stood on ground above
         // y=110 — the same root-cause bug as in HuntTask). Canopy penetration (same fix as
@@ -654,8 +654,8 @@ public final class GatherQuotaTask extends AbstractTask {
         // forest (tall spruce 20+ blocks — a fixed downward-search offset can't reliably win that
         // bet). The correct fix: MOTION_BLOCKING_NO_LEAVES natively skips leaves, so the top
         // surface is terrain/trunk, and we then descend to the ground.
-        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
-        for (int y = surfaceY; y >= surfaceY - 24 && y > world.getBottomY() + 1; y--) {
+        int surfaceY = world.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        for (int y = surfaceY; y >= surfaceY - 24 && y > world.getMinY() + 1; y--) {
             BlockPos p = new BlockPos(x, y, z);
             if (Standability.isStandable(world, p)) {
                 return p;
@@ -675,7 +675,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // cascade of false kills during grass-clearing that ran all the way down to no_resource).
         boolean pathGaveUp = elapsed - selfStuckTick > 20 && bot.getActionPack().isPathExecutorIdle();
         if (roamTarget == null
-                || bot.getBlockPos().getSquaredDistance(roamTarget) <= 9.0D
+                || bot.blockPosition().distSqr(roamTarget) <= 9.0D
                 || pathGaveUp
                 || elapsed - selfStuckTick > ROAM_MOVE_LIMIT) { // Taking too long without arriving (roam target elevated/unreachable) → give up and return to SURVEY to find a reachable resource nearby
             roamTarget = null;
@@ -693,18 +693,18 @@ public final class GatherQuotaTask extends AbstractTask {
         if (exploreHops >= EXPLORE_MAX_HOPS) {
             return false;
         }
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
         exploreHint = null;
         boolean aimed = false;
         // Memory-guided: the nearest same-type resource point in the semantic knowledge base
         // (persists across sessions) → head straight for it (even if an en-route light scan
         // intercepts something first, that's still a win).
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         for (Block block : harvestBlocks) {
             var known = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.nearestResource(
-                    bot.getUuid(), Registries.BLOCK.getId(block).toString(), feet, KNOWN_RESOURCE_RANGE,
-                    pos -> !EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), pos, now));
+                    bot.getUUID(), BuiltInRegistries.BLOCK.getKey(block).toString(), feet, KNOWN_RESOURCE_RANGE,
+                    pos -> !EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), pos, now));
             if (known.isPresent()) {
                 exploreHint = known.get().pos();
                 exploreHeading = Math.atan2(exploreHint.getZ() + 0.5D - bot.getZ(), exploreHint.getX() + 0.5D - bot.getX());
@@ -723,7 +723,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 int pz = (int) Math.floor(bot.getZ() + 44.0D * Math.sin(heading));
                 BlockPos probe = findGroundAt(world, px, pz);
                 if (probe == null || EpisodeMemory.INSTANCE.nearTrail(
-                        bot.getUuid(), "gather", probe, 16.0D)) {
+                        bot.getUUID(), "gather", probe, 16.0D)) {
                     continue;
                 }
                 exploreHeading = heading;
@@ -760,12 +760,12 @@ public final class GatherQuotaTask extends AbstractTask {
     // doesn't fail is used (a successful pathfind means it has already set off); synchronous A*
     // runs are capped at EXPLORE_PATH_ATTEMPTS to prevent a long single-tick stall.
     private BlockPos pickExploreWaypoint(AIPlayerEntity bot) {
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         double bx = bot.getX();
         double bz = bot.getZ();
         double maxHintDistSq = Double.MAX_VALUE;
         if (exploreHint != null) {
-            double maxHintDist = Math.sqrt(exploreHint.getSquaredDistance(bot.getBlockPos())) * 1.10D;
+            double maxHintDist = Math.sqrt(exploreHint.distSqr(bot.blockPosition())) * 1.10D;
             maxHintDistSq = maxHintDist * maxHintDist;
         }
         int pathAttempts = 0;
@@ -777,10 +777,10 @@ public final class GatherQuotaTask extends AbstractTask {
                 BlockPos candidate = findGroundAt(world, (int) Math.floor(bx + dist * cos), (int) Math.floor(bz + dist * sin));
                 if (candidate == null || !isDryColumn(world, candidate)
                         || EpisodeMemory.INSTANCE.isExcluded(
-                        bot.getUuid(), candidate, bot.getEntityWorld().getServer().getTicks())) {
+                        bot.getUUID(), candidate, bot.level().getServer().getTickCount())) {
                     continue;
                 }
-                if (exploreHint != null && candidate.getSquaredDistance(exploreHint) > maxHintDistSq) {
+                if (exploreHint != null && candidate.distSqr(exploreHint) > maxHintDistSq) {
                     continue;
                 }
                 if (pathAttempts >= EXPLORE_PATH_ATTEMPTS) {
@@ -801,9 +801,9 @@ public final class GatherQuotaTask extends AbstractTask {
     // up the cell floating above the water surface; in shallow water, the foot cell itself is
     // water — both cases must be excluded, otherwise a waypoint would lead the bot straight into
     // water and turn exploration into a death trap.
-    private static boolean isDryColumn(net.minecraft.server.world.ServerWorld world, BlockPos feet) {
+    private static boolean isDryColumn(net.minecraft.server.level.ServerLevel world, BlockPos feet) {
         for (int i = 0; i <= 4; i++) {
-            if (!world.getFluidState(feet.down(i)).isEmpty()) {
+            if (!world.getFluidState(feet.below(i)).isEmpty()) {
                 return false;
             }
         }
@@ -831,7 +831,7 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         // (2) Light en-route scan (every EXPLORE_SCAN_INTERVAL ticks, 16 blocks): stop as soon as
         // a target block is spotted and hand back to SURVEY for precise gathering.
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         if (exploreScan != null && scanIsStale(bot, exploreScan, EXPLORE_SCAN_STALE_DISTANCE_SQ)) {
             exploreScan = null;
         }
@@ -856,8 +856,8 @@ public final class GatherQuotaTask extends AbstractTask {
         // (nothing there) → retire that resource point, so the next startExplore doesn't head for
         // the same stale intel again; then return to SURVEY (the fail chain keeps exploring
         // outward if there's still nothing).
-        if (exploreTarget == null || bot.getBlockPos().getSquaredDistance(exploreTarget) <= 9.0D) {
-            if (exploreHint != null && bot.getBlockPos().getSquaredDistance(exploreHint) <= 256.0D) {
+        if (exploreTarget == null || bot.blockPosition().distSqr(exploreTarget) <= 9.0D) {
+            if (exploreHint != null && bot.blockPosition().distSqr(exploreHint) <= 256.0D) {
                 invalidateKnownResource(bot, exploreHint);
                 exploreHint = null;
             }
@@ -914,7 +914,7 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         // F1: throttle large-radius scans to avoid scanning a 48-block cube every tick and
         // dragging down TPS.
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         if (surveyScan != null && scanIsStale(bot, surveyScan.startTick(), surveyScan.origin(), SCAN_STALE_DISTANCE_SQ)) {
             surveyScan = null;
         }
@@ -926,8 +926,8 @@ public final class GatherQuotaTask extends AbstractTask {
         // stream — survey no longer repeatedly relocks onto the same unreachable tree (observed
         // on real_wood: relock → GOTO fails → relock, ping-ponging all the way to the 6001t
         // timeout).
-        java.util.UUID botId = bot.getUuid();
-        var surveyServer = bot.getEntityWorld().getServer();
+        java.util.UUID botId = bot.getUUID();
+        var surveyServer = bot.level().getServer();
         HarvestCore.TargetChoice choice;
         if (searchRadius > SEARCH_RADIUS) {
             // The wide survey (radius 32/48: ~170,000 positions, 90-165 ms cold) is a resumable scan advanced a
@@ -935,7 +935,7 @@ public final class GatherQuotaTask extends AbstractTask {
             if (surveyScan == null) {
                 lastScanTick = now;
                 surveyScan = HarvestCore.beginNearestScan(bot, harvestBlocks, searchRadius, SEARCH_DOWN, SEARCH_UP,
-                        pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, surveyServer.getTicks()),
+                        pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, surveyServer.getTickCount()),
                         needsCellObservation());
             }
             if (!surveyScan.step(SCAN_STEP_BUDGET_NANOS)) {
@@ -966,7 +966,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 searchRadius = Math.min(MAX_SEARCH_RADIUS, searchRadius * 2);
                 BotLog.action(bot, "gather_expand_search",
                         "radius", searchRadius,
-                        "item", Registries.ITEM.getId(targetItem).toString());
+                        "item", BuiltInRegistries.ITEM.getKey(targetItem).toString());
                 return;
             }
             // B: still no reachable resource even at the max radius → if the bot is underground
@@ -1004,7 +1004,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (exploreHops > 0 && exploredSinceFind) {
             io.github.zoyluo.minecraftai.memory.EpisodeLog.INSTANCE.record(bot,
                     io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.RESOURCE_FOUND, targetPos,
-                    Registries.BLOCK.getId(bot.getEntityWorld().getBlockState(targetPos).getBlock()).toString());
+                    BuiltInRegistries.BLOCK.getKey(bot.level().getBlockState(targetPos).getBlock()).toString());
             exploredSinceFind = false;
             BotLog.action(bot, "gather_explore_found",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ(),
@@ -1039,9 +1039,9 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private static boolean scanIsStale(AIPlayerEntity bot, int startTick, BlockPos origin, double maxDistanceSq) {
-        int now = bot.getEntityWorld().getServer().getTicks();
+        int now = bot.level().getServer().getTickCount();
         return now - startTick > SCAN_STALE_TICKS
-                || bot.getBlockPos().getSquaredDistance(origin) > maxDistanceSq;
+                || bot.blockPosition().distSqr(origin) > maxDistanceSq;
     }
 
     /** Test hook: true while a budgeted wide survey scan is in flight (ProspectScanBudgetGameTests). */
@@ -1070,7 +1070,7 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         BotLog.action(bot, "gather_dig_approach",
                 "to", tree.getX() + "," + tree.getY() + "," + tree.getZ(), "why", why);
-        targetPos = tree.toImmutable();
+        targetPos = tree.immutable();
         lastGotoTarget = targetPos;
         treeDigTried = true;
         gotoFailStreak = 0;
@@ -1094,10 +1094,10 @@ public final class GatherQuotaTask extends AbstractTask {
         // (prevents SURVEY from immediately relocking onto the same underwater grass and
         // ping-ponging) + return to SURVEY, letting NavSafetyNet pull it ashore before reselecting
         // on dry land (real_wood doesn't drown: its trees are on dry land).
-        if (bot.isTouchingWater()) {
+        if (bot.isInWater()) {
             bot.getActionPack().stopAll();
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
             BotLog.action(bot, "gather_goto_water_bail",
                     "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ());
             targetPos = null;
@@ -1118,20 +1118,20 @@ public final class GatherQuotaTask extends AbstractTask {
         // blacklist that tree + return to SURVEY to reselect. Normal pathing keeps the coordinate
         // changing, and dig-approach keeps making progress too, so neither triggers this (the 4s
         // threshold is far longer than a single block's mining time).
-        BlockPos hereNow = bot.getBlockPos();
+        BlockPos hereNow = bot.blockPosition();
         if (hereNow.equals(gotoStuckPos)) {
             if (elapsed - gotoStuckTick >= GOTO_STUCK_LIMIT) {
                 bot.getActionPack().stopAll();
-                EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                        bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                        bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
                 BotLog.action(bot, "gather_goto_unstick",
-                        "pos", hereNow.toShortString(), "on_ground", bot.isOnGround());
+                        "pos", hereNow.toShortString(), "on_ground", bot.onGround());
                 gotoStuckPos = null;
                 phase = Phase.SURVEY;
                 return;
             }
         } else {
-            gotoStuckPos = hereNow.toImmutable();
+            gotoStuckPos = hereNow.immutable();
             gotoStuckTick = elapsed;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
@@ -1140,8 +1140,8 @@ public final class GatherQuotaTask extends AbstractTask {
                 // out to be stale, reject this block and try another nearby one; never tunnel
                 // toward an exact-break target.
                 bot.getActionPack().stopAll();
-                EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                        bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                        bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
                 BotLog.action(bot, name() + "_target_unreachable", "pos", targetPos.toShortString(),
                         "block", exactBreakTargetLabel);
                 targetPos = null;
@@ -1173,7 +1173,7 @@ public final class GatherQuotaTask extends AbstractTask {
             // Neither walking nor dig-approach can reach it → blacklist and switch trees
             // (survey's posFilter won't relock onto it; fixes the ping-pong infinite loop).
             if (++gotoFailStreak >= GOTO_FAIL_EXCLUDE) {
-                EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos, bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+                EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos, bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
                 BotLog.action(bot, "gather_target_excluded",
                         "pos", targetPos.getX() + "," + targetPos.getY() + "," + targetPos.getZ(),
                         "fails", gotoFailStreak);
@@ -1197,8 +1197,8 @@ public final class GatherQuotaTask extends AbstractTask {
         }
         if (elapsed - harvestStartedTick > HARVEST_LIMIT) {
             bot.getActionPack().stopAll();
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
             BotLog.action(bot, "gather_harvest_timeout", "pos", targetPos.toShortString());
             targetPos = null;
             clearPickupLedger();
@@ -1220,7 +1220,7 @@ public final class GatherQuotaTask extends AbstractTask {
         // A missing target is normally the bot's completed mining controller.  Do not credit a
         // block that disappeared while the bot was no longer close enough to be the breaker.
         // This keeps a nearby player's unrelated break from silently satisfying the quota.
-        if (cleared == null || cleared.getSquaredDistance(bot.getBlockPos()) > 36.0D) {
+        if (cleared == null || cleared.distSqr(bot.blockPosition()) > 36.0D) {
             BotLog.action(bot, name() + "_target_unverified",
                     "pos", cleared == null ? "unknown" : cleared.toShortString(),
                     "block", exactBreakTargetLabel);
@@ -1327,7 +1327,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 pickupOriginApproachLogged = true;
                 BotLog.action(bot, "gather_pickup_origin_approach",
                         "origin", pickupOrigin.toShortString(),
-                        "from", bot.getBlockPos().toShortString());
+                        "from", bot.blockPosition().toShortString());
             }
         }
         if (pickupTicks <= 0) {
@@ -1367,7 +1367,7 @@ public final class GatherQuotaTask extends AbstractTask {
                         "have", countSoFar + "/" + targetCount,
                         "miss", pickupMisses,
                         "origin", pickupOrigin == null ? "unknown" : pickupOrigin.toShortString(),
-                        "at", bot.getBlockPos().toShortString(),
+                        "at", bot.blockPosition().toShortString(),
                         "pickup_stat_delta", Math.max(0L, pickupStatNow - pickupStatBeforeHarvest),
                         "visible_drop", visibleDrop.isPresent());
                 clearPickupLedger();
@@ -1439,7 +1439,7 @@ public final class GatherQuotaTask extends AbstractTask {
 
     private boolean waitForDryGround(AIPlayerEntity bot) {
         boolean active = NavSafetyNet.INSTANCE.isWaterRescueActive(bot);
-        if (!bot.isTouchingWater() && !active) {
+        if (!bot.isInWater() && !active) {
             return false;
         }
         bot.getActionPack().stopAll();
@@ -1447,16 +1447,16 @@ public final class GatherQuotaTask extends AbstractTask {
             excludeExploreHint(bot, "water");
         }
         if (targetPos != null) {
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), targetPos,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), targetPos,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         }
         if (roamTarget != null) {
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), roamTarget,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), roamTarget,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         }
         if (exploreTarget != null) {
-            EpisodeMemory.INSTANCE.exclude(bot.getUuid(), exploreTarget,
-                    bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+            EpisodeMemory.INSTANCE.exclude(bot.getUUID(), exploreTarget,
+                    bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         }
         roamTarget = null;
         exploreTarget = null;
@@ -1471,7 +1471,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private void invalidateKnownResource(AIPlayerEntity bot, BlockPos pos) {
         for (Block block : harvestBlocks) {
             io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE.invalidateResource(
-                    bot.getUuid(), Registries.BLOCK.getId(block).toString(), pos);
+                    bot.getUUID(), BuiltInRegistries.BLOCK.getKey(block).toString(), pos);
         }
     }
 
@@ -1479,8 +1479,8 @@ public final class GatherQuotaTask extends AbstractTask {
         if (exploreHint == null) {
             return;
         }
-        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), exploreHint,
-                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), exploreHint,
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         BotLog.action(bot, "gather_known_hint_excluded",
                 "pos", exploreHint.toShortString(), "reason", reason);
         exploreHint = null;
@@ -1513,7 +1513,7 @@ public final class GatherQuotaTask extends AbstractTask {
     // back to a sub-optimal tool.
     private void startHarvest(AIPlayerEntity bot) {
         handLogBreakInFlight = false;
-        var targetState = bot.getEntityWorld().getBlockState(targetPos);
+        var targetState = bot.level().getBlockState(targetPos);
         GatherToolPolicy.Category category = GatherToolPolicy.categoryFor(targetState);
         if (category != GatherToolPolicy.Category.NONE && !GatherToolPolicy.hasTool(bot, category)) {
             // The one relaxation of the strict rule: no axe and none craftable from inventory, so
@@ -1559,7 +1559,7 @@ public final class GatherQuotaTask extends AbstractTask {
         countBeforeHarvest = countAccepted(bot);
         pickupSweepAttempted = false;
         harvestStartedTick = elapsed;
-        pickupOrigin = targetPos == null ? null : targetPos.toImmutable();
+        pickupOrigin = targetPos == null ? null : targetPos.immutable();
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
         pickupOriginApproachLogged = false;
         HarvestCore.startMining(bot, targetPos);
@@ -1600,7 +1600,7 @@ public final class GatherQuotaTask extends AbstractTask {
             toolCraftTask.start(bot);
             BotLog.action(bot, "gather_tool_craft_attempt",
                     "category", GatherToolPolicy.token(pendingToolCategory),
-                    "item", Registries.ITEM.getId(candidate).toString());
+                    "item", BuiltInRegistries.ITEM.getKey(candidate).toString());
         }
         toolCraftTask.tick(bot);
         if (toolCraftTask.state() == TaskState.FAILED) {
@@ -1661,7 +1661,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private long pickedUpAccepted(AIPlayerEntity bot) {
         long count = 0L;
         for (Item item : acceptItems) {
-            count += bot.getStatHandler().getStat(Stats.PICKED_UP, item);
+            count += bot.getStats().getValue(Stats.ITEM_PICKED_UP, item);
         }
         return count;
     }
@@ -1672,7 +1672,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private boolean isHarvestBlock(AIPlayerEntity bot, BlockPos pos) {
-        return harvestBlocks.contains(bot.getEntityWorld().getBlockState(pos).getBlock());
+        return harvestBlocks.contains(bot.level().getBlockState(pos).getBlock());
     }
 
     // Forage-food family: berries / melon slices (both are wild, ready-to-take, directly edible);
@@ -1776,7 +1776,7 @@ public final class GatherQuotaTask extends AbstractTask {
             gainedTotal += delta;
             if (pickup) {
                 BotLog.action(bot, "gather_unit",
-                        "item", Registries.ITEM.getId(item).toString(),
+                        "item", BuiltInRegistries.ITEM.getKey(item).toString(),
                         "delta", delta,
                         "total", countSoFar,
                         "target", targetCount,
@@ -1785,7 +1785,7 @@ public final class GatherQuotaTask extends AbstractTask {
             } else {
                 unattributedGains += delta;
                 BotLog.action(bot, "gather_unit",
-                        "item", Registries.ITEM.getId(item).toString(),
+                        "item", BuiltInRegistries.ITEM.getKey(item).toString(),
                         "delta", delta,
                         "total", countSoFar,
                         "target", targetCount,
@@ -1797,12 +1797,12 @@ public final class GatherQuotaTask extends AbstractTask {
     /** One inventory pass (main stacks + offhand), grouped by item, restricted to {@link #acceptItems}. */
     private Map<Item, Integer> currentAcceptedCounts(AIPlayerEntity bot) {
         Map<Item, Integer> counts = new HashMap<>();
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty() && acceptItems.contains(stack.getItem())) {
                 counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
             }
         }
-        ItemStack offhand = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack offhand = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         if (!offhand.isEmpty() && acceptItems.contains(offhand.getItem())) {
             counts.merge(offhand.getItem(), offhand.getCount(), Integer::sum);
         }
@@ -1833,10 +1833,10 @@ public final class GatherQuotaTask extends AbstractTask {
             return;
         }
         summaryLogged = true;
-        String itemLabel = countBrokenBlocks ? exactBreakTargetLabel : Registries.ITEM.getId(targetItem).toString();
+        String itemLabel = countBrokenBlocks ? exactBreakTargetLabel : BuiltInRegistries.ITEM.getKey(targetItem).toString();
         int baseline = countBrokenBlocks ? 0 : acceptedInventoryAtStart;
         int finalCount = countBrokenBlocks ? countSoFar : countAccepted(bot);
-        CapabilityTally.Snapshot decisions = CapabilityTally.INSTANCE.snapshot(bot.getUuid());
+        CapabilityTally.Snapshot decisions = CapabilityTally.INSTANCE.snapshot(bot.getUUID());
         boolean consistent = GatherConsistency.isConsistent(gainedTotal, breaksCount, maxDropsPerBrokenBlock(),
                 unattributedGains, decisions.forcedPickupsAllowed());
         BotLog.action(bot, "gather_summary",

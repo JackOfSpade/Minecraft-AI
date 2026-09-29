@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.mining;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -41,7 +41,7 @@ class MiningCursorTest {
 
     @Test
     void clampsUntrustedNumericFields() {
-        MiningCursor cursor = new MiningCursor(1, BlockPos.ORIGIN, BlockPos.ORIGIN,
+        MiningCursor cursor = new MiningCursor(1, BlockPos.ZERO, BlockPos.ZERO,
                 -5, -2, -3, 0, -4);
 
         assertEquals(3, cursor.directionIndex());

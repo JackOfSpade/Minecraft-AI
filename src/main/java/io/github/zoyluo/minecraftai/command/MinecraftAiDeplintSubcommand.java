@@ -12,20 +12,19 @@ import io.github.zoyluo.minecraftai.goal.GoalStep;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.OreScan;
 import io.github.zoyluo.minecraftai.mining.ToolTier;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 /**
  * S6: dependency-chain auditor `/minecraftai deplint <bot> <spec>` -- runs {@link GoalPlanner#plan}
@@ -38,14 +37,14 @@ public final class MinecraftAiDeplintSubcommand {
     private MinecraftAiDeplintSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         return literal("deplint")
                 .then(argument("name", StringArgumentType.word())
                         .then(argument("spec", StringArgumentType.greedyString())
                                 .executes(MinecraftAiDeplintSubcommand::run)));
     }
 
-    private static int run(CommandContext<ServerCommandSource> context) {
+    private static int run(CommandContext<CommandSourceStack> context) {
         String name = StringArgumentType.getString(context, "name");
         Optional<AIPlayerEntity> botOpt = BotAuthorizationGate.INSTANCE.resolveAuthorized(
                 context.getSource(), name, BotAuthorizationPolicy.Operation.ADMIN, "command:deplint");
@@ -57,19 +56,19 @@ public final class MinecraftAiDeplintSubcommand {
         try {
             goal = parseGoal(spec);
         } catch (RuntimeException e) {
-            context.getSource().sendError(Text.literal("[deplint] bad spec '" + spec + "': " + e.getMessage()));
+            context.getSource().sendFailure(Component.literal("[deplint] bad spec '" + spec + "': " + e.getMessage()));
             return 0;
         }
         GoalPlanner.GoalPlan plan = GoalPlanner.plan(botOpt.get(), goal);
         List<GoalStep> steps = plan.steps();
         List<String> unresolved = plan.unresolved();
-        context.getSource().sendFeedback(() -> Text.literal(
+        context.getSource().sendSuccess(() -> Component.literal(
                 "[deplint] goal=" + goal + "  steps=" + steps.size() + "  unresolved=" + unresolved.size()), false);
-        context.getSource().sendFeedback(() -> Text.literal("[deplint] " + plan.describeSteps()), false);
+        context.getSource().sendSuccess(() -> Component.literal("[deplint] " + plan.describeSteps()), false);
         if (unresolved.isEmpty()) {
-            context.getSource().sendFeedback(() -> Text.literal("[deplint] OK · chain complete, no unresolved items"), false);
+            context.getSource().sendSuccess(() -> Component.literal("[deplint] OK · chain complete, no unresolved items"), false);
         } else {
-            context.getSource().sendError(Text.literal("[deplint] UNRESOLVED · " + String.join(", ", unresolved)));
+            context.getSource().sendFailure(Component.literal("[deplint] UNRESOLVED · " + String.join(", ", unresolved)));
         }
         return 1;
     }
@@ -121,9 +120,9 @@ public final class MinecraftAiDeplintSubcommand {
 
     // Accepts "diamond" / "diamond_ore" / "minecraft:diamond_ore"
     private static Block block(String name) {
-        Block b = Registries.BLOCK.get(id(name));
+        Block b = BuiltInRegistries.BLOCK.getValue(id(name));
         if (b == Blocks.AIR && !name.contains(":") && !name.endsWith("_ore")) {
-            b = Registries.BLOCK.get(id(name + "_ore"));
+            b = BuiltInRegistries.BLOCK.getValue(id(name + "_ore"));
         }
         if (b == Blocks.AIR) {
             throw new IllegalArgumentException("unknown ore block: " + name);
@@ -132,15 +131,15 @@ public final class MinecraftAiDeplintSubcommand {
     }
 
     private static Item item(String name) {
-        return Registries.ITEM.getOptionalValue(id(name))
+        return BuiltInRegistries.ITEM.getOptional(id(name))
                 .orElseThrow(() -> new IllegalArgumentException("unknown item: " + name));
     }
 
     private static Identifier id(String name) {
         if (name.contains(":")) {
             String[] x = name.split(":", 2);
-            return Identifier.of(x[0], x[1]);
+            return Identifier.fromNamespaceAndPath(x[0], x[1]);
         }
-        return Identifier.of("minecraft", name);
+        return Identifier.fromNamespaceAndPath("minecraft", name);
     }
 }

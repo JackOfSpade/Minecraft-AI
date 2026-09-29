@@ -6,15 +6,15 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.OreProspector;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +43,7 @@ public final class ProspectScanBudgetGameTests {
      *   <li>when the synchronous run was long, the scan needed more than one step.</li>
      * </ul>
      */
-    private static void requireSpread(TestContext context, String label, int steps, long maxStepNanos,
+    private static void requireSpread(GameTestHelper context, String label, int steps, long maxStepNanos,
                                       long totalNanos, long syncNanos) {
         require(context, steps >= 1, label + " never stepped");
         require(context, totalNanos / steps <= 10L * BUDGET_NANOS,
@@ -58,24 +58,24 @@ public final class ProspectScanBudgetGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:prospect_scan_budget_game_tests_strict_scan_is_spread_and_matches_synchronous", maxTicks = 600)
-    public void strictScanIsSpreadAndMatchesSynchronous(TestContext context) {
+    public void strictScanIsSpreadAndMatchesSynchronous(GameTestHelper context) {
         Fixture fixture = fixture(context, "ProspectScanGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos log = fixture.start().east(4);
-        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
 
         long syncStart = System.nanoTime();
-        BlockPos syncFound = OreProspector.nearest(bot, 96, state -> state.isOf(Blocks.OAK_LOG));
+        BlockPos syncFound = OreProspector.nearest(bot, 96, state -> state.is(Blocks.OAK_LOG));
         long syncNanos = System.nanoTime() - syncStart;
         // A second, empty-result synchronous scan is the worst case (nothing to shortcut): the treeless roam step.
         long emptyStart = System.nanoTime();
-        BlockPos emptyFound = OreProspector.nearest(bot, 96, state -> state.isOf(Blocks.BEDROCK));
+        BlockPos emptyFound = OreProspector.nearest(bot, 96, state -> state.is(Blocks.BEDROCK));
         long emptyNanos = System.nanoTime() - emptyStart;
         require(context, emptyFound == null, "no bedrock is visible in the fixture, got " + emptyFound);
 
-        OreProspector.Scan scan = OreProspector.begin(bot, 96, state -> state.isOf(Blocks.OAK_LOG), null);
-        OreProspector.Scan emptyScan = OreProspector.begin(bot, 96, state -> state.isOf(Blocks.BEDROCK), null);
-        context.runAtEveryTick(() -> {
+        OreProspector.Scan scan = OreProspector.begin(bot, 96, state -> state.is(Blocks.OAK_LOG), null);
+        OreProspector.Scan emptyScan = OreProspector.begin(bot, 96, state -> state.is(Blocks.BEDROCK), null);
+        context.failIfEver(() -> {
             if (!scan.isDone()) {
                 scan.step(BUDGET_NANOS);
                 return;
@@ -100,11 +100,11 @@ public final class ProspectScanBudgetGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:prospect_scan_budget_game_tests_harvest_survey_scan_is_spread_and_matches_synchronous", maxTicks = 700)
-    public void harvestSurveyScanIsSpreadAndMatchesSynchronous(TestContext context) {
+    public void harvestSurveyScanIsSpreadAndMatchesSynchronous(GameTestHelper context) {
         Fixture fixture = fixture(context, "SurveyScanGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos log = fixture.start().east(3);
-        bot.getEntityWorld().setBlockState(log, Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        bot.level().setBlock(log, Blocks.OAK_LOG.defaultBlockState(), Block.UPDATE_ALL);
         Set<Block> logs = Set.of(Blocks.OAK_LOG);
         Set<Block> bedrock = Set.of(Blocks.BEDROCK);
 
@@ -119,7 +119,7 @@ public final class ProspectScanBudgetGameTests {
 
         HarvestCore.NearestScan hit = HarvestCore.beginNearestScan(bot, logs, 48, 6, 12, null, false);
         HarvestCore.NearestScan empty = HarvestCore.beginNearestScan(bot, bedrock, 48, 6, 12, null, false);
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (!hit.isDone()) {
                 hit.step(BUDGET_NANOS);
                 return;
@@ -142,13 +142,13 @@ public final class ProspectScanBudgetGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:prospect_scan_budget_game_tests_gather_prospect_never_lands_in_one_tick", maxTicks = 900)
-    public void gatherProspectNeverLandsInOneTick(TestContext context) {
+    public void gatherProspectNeverLandsInOneTick(GameTestHelper context) {
         Fixture fixture = fixture(context, "ProspectGatherGT");
         AIPlayerEntity bot = fixture.bot();
         InventoryAction.giveItem(bot, new ItemStack(Items.WOODEN_AXE));
         // Synchronous references for what one tick used to carry (measured, never asserted as fixed numbers).
         long surveyRef = timeNanos(() -> HarvestCore.nearestReachableBlock(bot, Set.of(Blocks.OAK_LOG), 48, 6, 12, null, false));
-        long prospectRef = timeNanos(() -> OreProspector.nearest(bot, 96, state -> state.isOf(Blocks.OAK_LOG)));
+        long prospectRef = timeNanos(() -> OreProspector.nearest(bot, 96, state -> state.is(Blocks.OAK_LOG)));
         // A pure scan tick must stay far below what the synchronous scan cost. The floor keeps a fast machine (where
         // the reference itself is small) from being held to a few milliseconds that a load spike would break.
         long ceiling = Math.max(60_000_000L, Math.max(surveyRef, prospectRef) / 2L);
@@ -165,7 +165,7 @@ public final class ProspectScanBudgetGameTests {
         AtomicInteger scanFinishedAt = new AtomicInteger(-1);
         AtomicInteger tick = new AtomicInteger();
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             int t = tick.incrementAndGet();
             boolean prospectBefore = task.prospectScanActive();
             boolean surveyBefore = task.surveyScanActive();
@@ -222,35 +222,35 @@ public final class ProspectScanBudgetGameTests {
         return System.nanoTime() - start;
     }
 
-    private static Fixture fixture(TestContext context, String name) {
-        var world = context.getWorld();
-        BlockPos start = context.getAbsolutePos(new BlockPos(2, 2, 2));
+    private static Fixture fixture(GameTestHelper context, String name) {
+        var world = context.getLevel();
+        BlockPos start = context.absolutePos(new BlockPos(2, 2, 2));
         // Keep every mutation inside the 8x8 empty structure (see GatherPickupGameTests.fixture).
         for (int dx = -2; dx <= 5; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
-                BlockPos feet = start.add(dx, 0, dz);
-                world.setBlockState(feet.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(feet.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos feet = start.offset(dx, 0, dz);
+                world.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(feet.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(start),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(start),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         return new Fixture(bot, start, name);
     }
 
-    private static void finish(TestContext context, Fixture fixture) {
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+    private static void finish(GameTestHelper context, Fixture fixture) {
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 

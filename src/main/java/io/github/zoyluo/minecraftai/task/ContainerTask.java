@@ -6,15 +6,14 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 public final class ContainerTask extends AbstractTask {
     public enum Mode {
@@ -52,7 +51,7 @@ public final class ContainerTask extends AbstractTask {
 
     private ContainerTask(Mode mode, BlockPos containerPos, Item item, int count, boolean allExceptTools) {
         this.mode = mode;
-        this.requestedContainerPos = containerPos == null ? null : containerPos.toImmutable();
+        this.requestedContainerPos = containerPos == null ? null : containerPos.immutable();
         this.item = item;
         this.targetCount = count <= 0 ? Integer.MAX_VALUE : count;
         this.allExceptTools = allExceptTools;
@@ -65,7 +64,7 @@ public final class ContainerTask extends AbstractTask {
 
     @Override
     public String describe() {
-        String target = item == null ? (allExceptTools ? "all_except_tools" : "all") : Registries.ITEM.getId(item).toString();
+        String target = item == null ? (allExceptTools ? "all_except_tools" : "all") : BuiltInRegistries.ITEM.getKey(item).toString();
         String count = targetCount == Integer.MAX_VALUE ? "all" : String.valueOf(targetCount);
         return "mode=" + mode + " target=" + target + " count=" + count + " transferred=" + transferred + " phase=" + phase;
     }
@@ -121,7 +120,7 @@ public final class ContainerTask extends AbstractTask {
             fail("no_container_at: " + shortPos(containerPos));
             return;
         }
-        if (observable && bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (observable && bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
             phase = Phase.TRANSFERRING;
             return;
         }
@@ -148,7 +147,7 @@ public final class ContainerTask extends AbstractTask {
             phase = Phase.FINDING;
             return;
         }
-        if (observable && bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (observable && bot.getEyePosition().distanceToSqr(containerPos.getCenter()) <= REACH_SQUARED) {
             bot.getActionPack().stopAll();
             phase = Phase.TRANSFERRING;
             return;
@@ -160,12 +159,12 @@ public final class ContainerTask extends AbstractTask {
 
     private void transfer(AIPlayerEntity bot) {
         if (containerPos == null
-                || bot.getEyePos().squaredDistanceTo(containerPos.toCenterPos()) > REACH_SQUARED
+                || bot.getEyePosition().distanceToSqr(containerPos.getCenter()) > REACH_SQUARED
                 || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, containerPos)) {
             phase = Phase.FINDING;
             return;
         }
-        Inventory container = ContainerAction.resolve(bot, containerPos).orElse(null);
+        Container container = ContainerAction.resolve(bot, containerPos).orElse(null);
         if (container == null) {
             fail("container_missing");
             return;
@@ -187,7 +186,7 @@ public final class ContainerTask extends AbstractTask {
         }
         doneReason = result.reason();
         if (mode == Mode.WITHDRAW && transferred < targetCount) {
-            fail(doneReason.isBlank() ? "missing " + Registries.ITEM.getId(item) + " x" + (targetCount - transferred) : doneReason);
+            fail(doneReason.isBlank() ? "missing " + BuiltInRegistries.ITEM.getKey(item) + " x" + (targetCount - transferred) : doneReason);
             return;
         }
         if ("container_full".equals(doneReason) && transferred == 0) {
@@ -200,7 +199,7 @@ public final class ContainerTask extends AbstractTask {
         // shortfall here -- the only place that knows both the target and the stop reason.
         if (targetCount != Integer.MAX_VALUE && transferred < targetCount) {
             BotLog.action(bot, "container_partial_complete",
-                    "item", item == null ? "all" : Registries.ITEM.getId(item).toString(),
+                    "item", item == null ? "all" : BuiltInRegistries.ITEM.getKey(item).toString(),
                     "requested", targetCount, "transferred", transferred,
                     "reason", doneReason.isBlank() ? "no_more_available" : doneReason);
         }
@@ -209,7 +208,7 @@ public final class ContainerTask extends AbstractTask {
 
     private Predicate<ItemStack> depositFilter() {
         if (item != null) {
-            return stack -> stack.isOf(item);
+            return stack -> stack.is(item);
         }
         if (allExceptTools) {
             return stack -> !ContainerAction.isReservedTool(stack);
@@ -218,24 +217,24 @@ public final class ContainerTask extends AbstractTask {
     }
 
     public static Optional<BlockPos> nearestContainer(AIPlayerEntity bot, int radius) {
-        return nearestContainerNear(bot, bot.getBlockPos(), radius);
+        return nearestContainerNear(bot, bot.blockPosition(), radius);
     }
 
     public static Optional<BlockPos> nearestContainerNear(AIPlayerEntity bot, BlockPos center, int radius) {
-        BlockPos origin = bot.getBlockPos();
-        return BlockPos.stream(center.add(-radius, -3, -radius), center.add(radius, 4, radius))
+        BlockPos origin = bot.blockPosition();
+        return BlockPos.betweenClosedStream(center.offset(-radius, -3, -radius), center.offset(radius, 4, radius))
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
-                .map(BlockPos::toImmutable)
-                .min(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));
+                .map(BlockPos::immutable)
+                .min(Comparator.comparingDouble(pos -> pos.distSqr(origin)));
     }
 
     private static Optional<BlockPos> rememberedContainer(AIPlayerEntity bot) {
-        return BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "depot", "home", "base", "chest")
+        return BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "depot", "home", "base", "chest")
                 .flatMap(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
                         && ContainerAction.resolve(bot, pos).isPresent()
-                        ? Optional.of(pos.toImmutable())
+                        ? Optional.of(pos.immutable())
                         : nearestContainerNear(bot, pos, 4));
     }
 

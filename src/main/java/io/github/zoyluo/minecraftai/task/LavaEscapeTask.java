@@ -7,12 +7,11 @@ import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Optional;
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Lava self-rescue (P0): dispatched by DangerWatcher when the bot is stuck in lava,
@@ -76,32 +75,32 @@ public final class LavaEscapeTask extends AbstractTask {
         if (!bot.isInLava()) {
             bot.getActionPack().setJumping(false);
             bot.getActionPack().setForward(0.0F);
-            if (bot.isOnGround()) {
+            if (bot.onGround()) {
                 bot.getActionPack().stopAll();
-                BotLog.action(bot, "lava_escape_done", "pos", bot.getBlockPos().toShortString());
+                BotLog.action(bot, "lava_escape_done", "pos", bot.blockPosition().toShortString());
                 complete();
             }
             return;
         }
 
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         // Keep rising: hold jump in lava to slowly ascend.
         bot.getActionPack().setJumping(true);
 
         // Find/reuse the nearest non-lava foothold (rescan on arrival or when it becomes invalid).
         if (target == null
-                || bot.getBlockPos().isWithinDistance(target, 1.6D)
+                || bot.blockPosition().closerThan(target, 1.6D)
                 || !Standability.isStandable(world, target)) {
-            Optional<BlockPos> bank = Standability.findNearestStandable(world, bot.getBlockPos(), ESCAPE_RADIUS, 2, 3);
+            Optional<BlockPos> bank = Standability.findNearestStandable(world, bot.blockPosition(), ESCAPE_RADIUS, 2, 3);
             target = bank.orElse(null);
         }
 
         if (target != null) {
             // Rush toward the bank edge: look at it + walk straight there (use walk for
             // short-distance lava escape, not pathfinding -- A* through lava would fail).
-            LookAction.lookAt(bot, Vec3d.ofCenter(target));
+            LookAction.lookAt(bot, Vec3.atCenterOf(target));
             if (bot.getActionPack().isWalkToIdle()) {
-                bot.getActionPack().startWalkTo(Vec3d.ofCenter(target));
+                bot.getActionPack().startWalkTo(Vec3.atCenterOf(target));
             }
             return;
         }
@@ -114,9 +113,9 @@ public final class LavaEscapeTask extends AbstractTask {
             OptionalInt slot = MaterialPalette.pickSacrificialBlockSlot(bot);
             if (slot.isPresent()) {
                 InventoryAction.equipFromSlot(bot, slot.getAsInt());
-                BlockPos feet = bot.getBlockPos();
-                for (Direction dir : Direction.Type.HORIZONTAL) {
-                    BlockPos side = feet.offset(dir);
+                BlockPos feet = bot.blockPosition();
+                for (Direction dir : Direction.Plane.HORIZONTAL) {
+                    BlockPos side = feet.relative(dir);
                     if (!BuildAction.placeBlockAt(bot, side).isFailed()) {
                         target = side; // platform built -> climb toward it
                         BotLog.action(bot, "lava_escape_platform", "at", side.toShortString());

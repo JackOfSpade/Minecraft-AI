@@ -3,17 +3,16 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.Set;
 
 /**
@@ -30,21 +29,21 @@ public final class FollowTaskGameTests {
     private static final int OLD_ABORT_WINDOW_TICKS = 200;
 
     @GameTest(maxTicks = 500)
-    public void followSurvivesAnExitBlockedByTheTargetAndReachesThemOnceItClears(TestContext context) {
-        ServerWorld world = context.getWorld();
-        BlockPos platformFeet = context.getAbsolutePos(new BlockPos(4, 8, 4));
+    public void followSurvivesAnExitBlockedByTheTargetAndReachesThemOnceItClears(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos platformFeet = context.absolutePos(new BlockPos(4, 8, 4));
         preparePlatform(context, platformFeet, 4);
 
         // A 1-wide pit one block below the platform; its only way out is a single JUMP_UP through
         // exitCell -- a miniature version of the log's own dig-down staircase.
-        BlockPos exitCell = platformFeet.add(2, 0, 0);
-        BlockPos pitCell = exitCell.add(1, -1, 0);
+        BlockPos exitCell = platformFeet.offset(2, 0, 0);
+        BlockPos pitCell = exitCell.offset(1, -1, 0);
         carveOneWidePit(world, pitCell, exitCell);
 
         String botName = "FollowStuckGT";
         AIPlayerEntity bot = spawn(context, botName, pitCell);
         String targetName = "FollowStuckTargetGT";
-        BlockPos targetHome = platformFeet.add(-2, 0, 0);
+        BlockPos targetHome = platformFeet.offset(-2, 0, 0);
         AIPlayerEntity targetBot = spawn(context, targetName, targetHome);
         // Keep the target completely inert (HoldTask both stops it from moving and, via
         // isWaiting()==true, keeps IdleCoordinator from ever touching it) until the test itself
@@ -61,7 +60,7 @@ public final class FollowTaskGameTests {
 
         int[] tick = {0};
         boolean[] cleared = {false};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tick[0]++;
             require(context, followTask.state() == TaskState.RUNNING,
                     "follow ended early at tick " + tick[0] + ": state=" + followTask.state()
@@ -86,8 +85,8 @@ public final class FollowTaskGameTests {
     }
 
     @GameTest(maxTicks = 300)
-    public void followSettlesAtTheWiderStopDistanceOnFlatGround(TestContext context) {
-        BlockPos platformFeet = context.getAbsolutePos(new BlockPos(4, 5, 4));
+    public void followSettlesAtTheWiderStopDistanceOnFlatGround(GameTestHelper context) {
+        BlockPos platformFeet = context.absolutePos(new BlockPos(4, 5, 4));
         preparePlatform(context, platformFeet, 8);
 
         String targetName = "FollowDistanceTargetGT";
@@ -96,12 +95,12 @@ public final class FollowTaskGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
 
         String botName = "FollowDistanceGT";
-        AIPlayerEntity bot = spawn(context, botName, platformFeet.add(7, 0, 0));
+        AIPlayerEntity bot = spawn(context, botName, platformFeet.offset(7, 0, 0));
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_distance"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, followTask.state() == TaskState.RUNNING,
                     "follow ended early: state=" + followTask.state()
                             + " reason=" + followTask.failureReason());
@@ -126,28 +125,28 @@ public final class FollowTaskGameTests {
      * dig (a walkable detour exists).
      */
     @GameTest(maxTicks = 700)
-    public void followWalksAroundATwoHighWallInsteadOfPressingIntoIt(TestContext context) {
-        ServerWorld world = context.getWorld();
-        BlockPos c = context.getAbsolutePos(new BlockPos(8, 12, 8));
+    public void followWalksAroundATwoHighWallInsteadOfPressingIntoIt(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 12, 8));
         preparePlatform(context, c, 6);
         java.util.List<BlockPos> wall = buildWall(world, c, -6, 5);
 
         String targetName = "FollowWallTargetGT";
-        AIPlayerEntity targetBot = spawn(context, targetName, c.add(4, 0, 0));
+        AIPlayerEntity targetBot = spawn(context, targetName, c.offset(4, 0, 0));
         TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
         String botName = "FollowWallGT";
-        AIPlayerEntity bot = spawn(context, botName, c.add(-4, 0, 0));
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-4, 0, 0));
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_wall_detour"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, followTask.state() == TaskState.RUNNING,
                     "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
             if (followTask.isWaiting() && bot.getX() > c.getX() + 0.5D && bot.distanceTo(targetBot) <= 4.0D) {
                 for (BlockPos pos : wall) {
-                    require(context, world.getBlockState(pos).isOf(Blocks.STONE),
+                    require(context, world.getBlockState(pos).is(Blocks.STONE),
                             "the bot dug through the wall at " + pos + " although a walkable detour existed");
                 }
                 finish(context, bot, botName, targetBot, targetName);
@@ -161,25 +160,25 @@ public final class FollowTaskGameTests {
      * until StuckWatcher aborted the follow order.
      */
     @GameTest(maxTicks = 1200)
-    public void followDigsThroughAWallOnlyWhenNoWalkableDetourExists(TestContext context) {
-        ServerWorld world = context.getWorld();
-        BlockPos c = context.getAbsolutePos(new BlockPos(8, 18, 8));
+    public void followDigsThroughAWallOnlyWhenNoWalkableDetourExists(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 18, 8));
         preparePlatform(context, c, 6);
         java.util.List<BlockPos> wall = buildWall(world, c, -6, 6);
 
         String targetName = "FollowDigTargetGT";
-        AIPlayerEntity targetBot = spawn(context, targetName, c.add(4, 0, 0));
+        AIPlayerEntity targetBot = spawn(context, targetName, c.offset(4, 0, 0));
         TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
         String botName = "FollowDigGT";
-        AIPlayerEntity bot = spawn(context, botName, c.add(-4, 0, 0));
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-4, 0, 0));
         io.github.zoyluo.minecraftai.action.InventoryAction.giveItem(bot,
-                new net.minecraft.item.ItemStack(net.minecraft.item.Items.STONE_PICKAXE));
+                new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE_PICKAXE));
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_wall_dig"));
 
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             require(context, followTask.state() == TaskState.RUNNING,
                     "follow ended early: state=" + followTask.state() + " reason=" + followTask.failureReason());
             if (followTask.isWaiting() && bot.getX() > c.getX() + 0.5D && bot.distanceTo(targetBot) <= 4.0D) {
@@ -197,24 +196,24 @@ public final class FollowTaskGameTests {
      * answered with a straight-line walk into the water (the lake incidents in the session log).
      */
     @GameTest(maxTicks = 400)
-    public void followAtTheNearBankNeverStraightLinesIntoTheWater(TestContext context) {
-        ServerWorld world = context.getWorld();
-        BlockPos c = context.getAbsolutePos(new BlockPos(8, 24, 8));
+    public void followAtTheNearBankNeverStraightLinesIntoTheWater(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 24, 8));
         preparePlatform(context, c, 6);
         buildWaterStrip(world, c, -1, 2);
 
         String targetName = "FollowNearBankTargetGT";
-        AIPlayerEntity targetBot = spawn(context, targetName, c.add(3, 0, 0));
+        AIPlayerEntity targetBot = spawn(context, targetName, c.offset(3, 0, 0));
         TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
         String botName = "FollowNearBankGT";
-        AIPlayerEntity bot = spawn(context, botName, c.add(-5, 0, 0));
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_near_bank"));
 
         int[] tick = {0};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tick[0]++;
             requireDry(context, world, bot);
             require(context, followTask.state() == TaskState.RUNNING,
@@ -235,24 +234,24 @@ public final class FollowTaskGameTests {
      * may only take a straight segment whose every cell is standable, so it stays dry.
      */
     @GameTest(maxTicks = 400)
-    public void followWithNoRouteAcrossWaterStaysDryInsteadOfWalkingStraightIn(TestContext context) {
-        ServerWorld world = context.getWorld();
-        BlockPos c = context.getAbsolutePos(new BlockPos(8, 30, 8));
+    public void followWithNoRouteAcrossWaterStaysDryInsteadOfWalkingStraightIn(GameTestHelper context) {
+        ServerLevel world = context.getLevel();
+        BlockPos c = context.absolutePos(new BlockPos(8, 30, 8));
         preparePlatform(context, c, 6);
         buildWaterStrip(world, c, -1, 0);
 
         String targetName = "FollowFarBankTargetGT";
-        AIPlayerEntity targetBot = spawn(context, targetName, c.add(3, 0, 0));
+        AIPlayerEntity targetBot = spawn(context, targetName, c.offset(3, 0, 0));
         TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
         String botName = "FollowFarBankGT";
-        AIPlayerEntity bot = spawn(context, botName, c.add(-5, 0, 0));
+        AIPlayerEntity bot = spawn(context, botName, c.offset(-5, 0, 0));
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_far_bank"));
 
         int[] tick = {0};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tick[0]++;
             requireDry(context, world, bot);
             require(context, followTask.state() == TaskState.RUNNING,
@@ -270,8 +269,8 @@ public final class FollowTaskGameTests {
      * kept forward=1 for up to WalkToController.MAX_TICKS with no replan.
      */
     @GameTest(maxTicks = 120)
-    public void followArrivalCancelsAStalePathExecutor(TestContext context) {
-        BlockPos c = context.getAbsolutePos(new BlockPos(8, 36, 8));
+    public void followArrivalCancelsAStalePathExecutor(GameTestHelper context) {
+        BlockPos c = context.absolutePos(new BlockPos(8, 36, 8));
         preparePlatform(context, c, 6);
 
         String targetName = "FollowStaleTargetGT";
@@ -279,18 +278,18 @@ public final class FollowTaskGameTests {
         TaskManager.INSTANCE.assign(targetBot, new HoldTask(),
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hold_still"));
         String botName = "FollowStaleGT";
-        AIPlayerEntity bot = spawn(context, botName, c.add(2, 0, 0));
+        AIPlayerEntity bot = spawn(context, botName, c.offset(2, 0, 0));
         FollowTask followTask = new FollowTask(targetName);
         TaskManager.INSTANCE.assign(bot, followTask,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_stale_executor"));
 
         int[] tick = {0};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             tick[0]++;
             if (tick[0] == 3) {
                 // A leftover route from some earlier order, leading away from the player (issued
                 // after the task has started, which clears earlier actions).
-                require(context, !bot.getActionPack().startPathTo(c.add(5, 0, 5)).isFailed(),
+                require(context, !bot.getActionPack().startPathTo(c.offset(5, 0, 5)).isFailed(),
                         "fixture: the leftover route could not be planned");
             }
             if (tick[0] >= 8) {
@@ -307,12 +306,12 @@ public final class FollowTaskGameTests {
     }
 
     /** A 2-high stone wall along x = c.x spanning z in [fromZ, toZ] (relative to c). */
-    private static java.util.List<BlockPos> buildWall(ServerWorld world, BlockPos c, int fromZ, int toZ) {
+    private static java.util.List<BlockPos> buildWall(ServerLevel world, BlockPos c, int fromZ, int toZ) {
         java.util.List<BlockPos> wall = new java.util.ArrayList<>();
         for (int dz = fromZ; dz <= toZ; dz++) {
             for (int dy = 0; dy <= 1; dy++) {
-                BlockPos pos = c.add(0, dy, dz);
-                world.setBlockState(pos, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos pos = c.offset(0, dy, dz);
+                world.setBlock(pos, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 wall.add(pos);
             }
         }
@@ -320,22 +319,22 @@ public final class FollowTaskGameTests {
     }
 
     /** Water columns x in [fromX, toX] (relative to c), full width of the platform, capped at both ends. */
-    private static void buildWaterStrip(ServerWorld world, BlockPos c, int fromX, int toX) {
+    private static void buildWaterStrip(ServerLevel world, BlockPos c, int fromX, int toX) {
         for (int dx = fromX; dx <= toX; dx++) {
             for (int dz = -7; dz <= 7; dz++) {
-                BlockPos floor = c.add(dx, -1, dz);
+                BlockPos floor = c.offset(dx, -1, dz);
                 boolean cap = Math.abs(dz) == 7;
-                world.setBlockState(floor.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(floor, cap ? Blocks.STONE.getDefaultState() : Blocks.WATER.getDefaultState(),
-                        Block.NOTIFY_ALL);
+                world.setBlock(floor.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(floor, cap ? Blocks.STONE.defaultBlockState() : Blocks.WATER.defaultBlockState(),
+                        Block.UPDATE_ALL);
             }
         }
     }
 
-    private static void requireDry(TestContext context, ServerWorld world, AIPlayerEntity bot) {
-        require(context, !bot.isTouchingWater() && world.getFluidState(bot.getBlockPos()).isEmpty()
-                        && world.getFluidState(bot.getBlockPos().down()).isEmpty(),
-                "the bot entered the water at " + bot.getBlockPos());
+    private static void requireDry(GameTestHelper context, ServerLevel world, AIPlayerEntity bot) {
+        require(context, !bot.isInWater() && world.getFluidState(bot.blockPosition()).isEmpty()
+                        && world.getFluidState(bot.blockPosition().below()).isEmpty(),
+                "the bot entered the water at " + bot.blockPosition());
     }
 
     /**
@@ -343,27 +342,27 @@ public final class FollowTaskGameTests {
      * the single westward JUMP_UP step up onto {@code exitCell} (the pit's east neighbour is
      * {@code exitCell}'s column one block down).
      */
-    private static void carveOneWidePit(ServerWorld world, BlockPos pitCell, BlockPos exitCell) {
-        world.setBlockState(pitCell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(pitCell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        world.setBlockState(pitCell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+    private static void carveOneWidePit(ServerLevel world, BlockPos pitCell, BlockPos exitCell) {
+        world.setBlock(pitCell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(pitCell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        world.setBlock(pitCell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         // Jump clearance above the pit itself (NeighborEnumerator.canJumpFrom needs two clear
         // cells above the jumping-off footing).
-        world.setBlockState(pitCell.up(2), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(pitCell.above(2), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         // The step between the pit and the platform: solid at pit level (the JUMP_UP front face);
         // exitCell itself is already open platform ground one block above it.
-        world.setBlockState(exitCell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlock(exitCell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         for (Direction side : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST}) {
-            BlockPos wall = pitCell.offset(side);
-            world.setBlockState(wall, Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(wall.up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            BlockPos wall = pitCell.relative(side);
+            world.setBlock(wall, Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(wall.above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         }
     }
 
-    private static void teleportTo(ServerWorld world, AIPlayerEntity bot, BlockPos pos) {
-        bot.teleport(world, pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
+    private static void teleportTo(ServerLevel world, AIPlayerEntity bot, BlockPos pos) {
+        bot.teleportTo(world, pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         bot.fallDistance = 0.0F;
         bot.setOnGround(true);
     }
@@ -374,16 +373,16 @@ public final class FollowTaskGameTests {
      * cell in it is refused. The refusal cases alone cannot show the fallback still works where it should.
      */
     @GameTest(maxTicks = 40)
-    public void directWalkVerifiesASafeStraightSegmentAndRefusesWaterOnTheLine(TestContext context) {
-        BlockPos platformFeet = context.getAbsolutePos(new BlockPos(4, 5, 4));
+    public void directWalkVerifiesASafeStraightSegmentAndRefusesWaterOnTheLine(GameTestHelper context) {
+        BlockPos platformFeet = context.absolutePos(new BlockPos(4, 5, 4));
         preparePlatform(context, platformFeet, 8);
-        ServerWorld world = context.getWorld();
+        ServerLevel world = context.getLevel();
         // West of the platform centre: the test structure's barrier boundary sits two cells above the
         // ground four cells east of it, which would (correctly) count as no headroom.
-        BlockPos start = platformFeet.add(-3, 0, 0);
-        BlockPos goal = start.add(4, 0, 0);
+        BlockPos start = platformFeet.offset(-3, 0, 0);
+        BlockPos goal = start.offset(4, 0, 0);
         boolean[] done = {false};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (done[0]) {
                 return;
             }
@@ -392,55 +391,55 @@ public final class FollowTaskGameTests {
             require(context, flat.safe(), "a flat, dry straight segment was refused: " + flat.reason());
 
             // A one-block step up at +2, along a raised pair, and a one-block drop at +4: still verified walkable.
-            world.setBlockState(start.add(2, 0, 0), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(start.add(3, 0, 0), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(start.offset(2, 0, 0), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(start.offset(3, 0, 0), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             FollowDirectWalk.Verdict stepped = FollowDirectWalk.verify(world, start, goal);
             require(context, stepped.safe(), "a segment with a one-block step up and drop was refused: " + stepped.reason());
 
             // Water in the middle of the line: refused, never walked into.
-            world.setBlockState(start.add(2, 0, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(start.add(2, -1, 0), Blocks.WATER.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(start.offset(2, 0, 0), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(start.offset(2, -1, 0), Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
             FollowDirectWalk.Verdict wet = FollowDirectWalk.verify(world, start, goal);
             require(context, !wet.safe(), "a segment through water was verified safe");
-            context.complete();
+            context.succeed();
         });
     }
 
-    private static void preparePlatform(TestContext context, BlockPos feet, int radius) {
-        ServerWorld world = context.getWorld();
+    private static void preparePlatform(GameTestHelper context, BlockPos feet, int radius) {
+        ServerLevel world = context.getLevel();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                world.setBlockState(cell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos cell = feet.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
     }
 
-    private static AIPlayerEntity spawn(TestContext context, String name, BlockPos feet) {
+    private static AIPlayerEntity spawn(GameTestHelper context, String name, BlockPos feet) {
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        context.getWorld().getServer(), name, context.getWorld(),
-                        Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL)
+                        context.getLevel().getServer(), name, context.getLevel(),
+                        Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        teleportTo(context.getWorld(), bot, feet);
+        teleportTo(context.getLevel(), bot, feet);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
+        bot.getFoodData().setFoodLevel(20);
         return bot;
     }
 
-    private static void finish(TestContext context, AIPlayerEntity bot, String botName,
+    private static void finish(GameTestHelper context, AIPlayerEntity bot, String botName,
                                AIPlayerEntity targetBot, String targetName) {
         TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_complete");
         TaskManager.INSTANCE.cancelIntentTasks(targetBot, "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(bot.getEntityWorld().getServer(), botName);
-        AIPlayerManager.INSTANCE.despawn(targetBot.getEntityWorld().getServer(), targetName);
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(bot.level().getServer(), botName);
+        AIPlayerManager.INSTANCE.despawn(targetBot.level().getServer(), targetName);
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

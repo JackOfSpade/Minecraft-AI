@@ -1,10 +1,10 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.BlockState;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Last-resort straight-line walk check for {@link FollowTask}. A direct walk has no planning of its
@@ -32,7 +32,7 @@ final class FollowDirectWalk {
         }
     }
 
-    static Verdict verify(ServerWorld world, BlockPos start, BlockPos goal) {
+    static Verdict verify(ServerLevel world, BlockPos start, BlockPos goal) {
         if (!Standability.isStandableFresh(world, start)) {
             return Verdict.unsafe("start_not_standable");
         }
@@ -83,7 +83,7 @@ final class FollowDirectWalk {
     }
 
     /** Passable for a body: no collision, no fluid, nothing that hurts. */
-    private static boolean isOpen(ServerWorld world, BlockPos pos) {
+    private static boolean isOpen(ServerLevel world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         return state.getCollisionShape(world, pos).isEmpty()
                 && state.getFluidState().isEmpty()
@@ -91,11 +91,11 @@ final class FollowDirectWalk {
     }
 
     /** Cactus, fire, berry bushes... in a side cell still hurt a body brushing past them. */
-    private static boolean hazardBeside(ServerWorld world, BlockPos pos) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos side = pos.offset(direction);
+    private static boolean hazardBeside(ServerLevel world, BlockPos pos) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos side = pos.relative(direction);
             if (Standability.isDangerous(world.getBlockState(side))
-                    || Standability.isDangerous(world.getBlockState(side.up()))) {
+                    || Standability.isDangerous(world.getBlockState(side.above()))) {
                 return true;
             }
         }

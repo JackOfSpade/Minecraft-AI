@@ -2,7 +2,6 @@ package io.github.zoyluo.minecraftai.mode;
 
 import io.github.zoyluo.minecraftai.goal.StructureVerifier;
 import io.github.zoyluo.minecraftai.task.BlueprintSchema;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -12,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -148,7 +148,7 @@ class PrivilegedBoundarySourceTest {
                 "raw standability must stay inside the observable work-pose adapter");
         assertFalse(StructureVerifier.matches(
                         null,
-                        BlockPos.ORIGIN,
+                        BlockPos.ZERO,
                         new BlueprintSchema.BlockPlacement(0, 0, 0, "invalid id", null)),
                 "invalid blueprint IDs must fail closed before touching world state");
 

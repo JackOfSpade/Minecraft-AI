@@ -2,10 +2,10 @@ package io.github.zoyluo.minecraftai.mining.assist;
 
 import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.Band;
 import io.github.zoyluo.minecraftai.mining.assist.PoiScorer.PoiScore;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

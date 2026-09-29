@@ -13,19 +13,18 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 public final class BuildTask extends AbstractTask {
     private enum Phase {
@@ -64,7 +63,7 @@ public final class BuildTask extends AbstractTask {
 
     public BuildTask(BlueprintSchema blueprint, BlockPos anchor, boolean autoSite, boolean flatten) {
         this.blueprint = blueprint;
-        this.anchor = anchor == null ? null : anchor.toImmutable();
+        this.anchor = anchor == null ? null : anchor.immutable();
         this.autoSite = autoSite;
         this.flatten = flatten;
     }
@@ -162,20 +161,20 @@ public final class BuildTask extends AbstractTask {
     }
 
     private void planFlatten(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         boolean rawTerrainRead = CapabilityRuntime.decide(
                 bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "build_flatten_plan").allowed();
         flattenTargets.clear();
         for (int dx = 0; dx < blueprint.width(); dx++) {
             for (int dz = 0; dz < blueprint.depth(); dz++) {
-                BlockPos ground = anchor.add(dx, -1, dz);
+                BlockPos ground = anchor.offset(dx, -1, dz);
                 if (!rawTerrainRead
                         || world.getBlockState(ground).isAir()
                         || !world.getFluidState(ground).isEmpty()) {
                     flattenTargets.addLast(new FlattenTarget(ground, FlattenKind.FILL));
                 }
                 for (int dy = 0; dy < Math.max(blueprint.height(), 1); dy++) {
-                    BlockPos clear = anchor.add(dx, dy, dz);
+                    BlockPos clear = anchor.offset(dx, dy, dz);
                     if (!rawTerrainRead
                             || (!world.getBlockState(clear).isAir() && world.getFluidState(clear).isEmpty())) {
                         flattenTargets.addLast(new FlattenTarget(clear, FlattenKind.CLEAR));
@@ -222,7 +221,7 @@ public final class BuildTask extends AbstractTask {
         if (!ensureObservableWorkPose(bot, pos, "flatten_clear")) {
             return;
         }
-        if (bot.getEntityWorld().getBlockState(pos).isAir()) {
+        if (bot.level().getBlockState(pos).isAir()) {
             Standability.clearCache();
             currentFlattenTarget = null;
             retryTicks = 0;
@@ -235,7 +234,7 @@ public final class BuildTask extends AbstractTask {
             if (flattenMiningStarted) {
                 flattenMiningStarted = false;
             }
-            ActionResult result = MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
+            ActionResult result = MiningAction.startMining(bot, pos, Direction.getApproximateNearest(bot.getEyePosition().subtract(pos.getCenter())));
             if (result.isFailed()) {
                 fail(result.reason());
                 return;
@@ -249,7 +248,7 @@ public final class BuildTask extends AbstractTask {
         if (!ensureObservableWorkPose(bot, pos, "flatten_fill")) {
             return;
         }
-        if (!bot.getEntityWorld().getBlockState(pos).isAir()) {
+        if (!bot.level().getBlockState(pos).isAir()) {
             Standability.clearCache();
             currentFlattenTarget = null;
             retryTicks = 0;
@@ -285,7 +284,7 @@ public final class BuildTask extends AbstractTask {
     private void build(AIPlayerEntity bot) {
         if (nextIndex >= blueprint.placements().size()) {
             var report = StructureVerifier.verify(
-                    bot.getEntityWorld(), blueprint, anchor, placedBlocks, skippedBlocks);
+                    bot.level(), blueprint, anchor, placedBlocks, skippedBlocks);
             bot.getActionPack().stopAll();
             if (report.mismatched() > 0 || report.matched() != report.expected()) {
                 fail("structure_incomplete: matched=" + report.matched()
@@ -297,7 +296,7 @@ public final class BuildTask extends AbstractTask {
             return;
         }
         BlueprintSchema.BlockPlacement placement = blueprint.placements().get(nextIndex);
-        BlockPos pos = anchor.add(placement.dx(), placement.dy(), placement.dz());
+        BlockPos pos = anchor.offset(placement.dx(), placement.dy(), placement.dz());
         // Registry validation is pure and must happen before visibility/path budgets. Otherwise an
         // invalid ID can be skipped while still unseen and reach terminal structure verification,
         // where it used to surface as an uncaught Identifier exception.
@@ -324,8 +323,8 @@ public final class BuildTask extends AbstractTask {
             clearBlueprintAir(bot, pos);
             return;
         }
-        if (bot.getEntityWorld().getBlockState(pos).isOf(block)
-                || (placement.palette() != null && MaterialPalette.matchesBlock(bot.getEntityWorld().getBlockState(pos), placement.palette()))) {
+        if (bot.level().getBlockState(pos).is(block)
+                || (placement.palette() != null && MaterialPalette.matchesBlock(bot.level().getBlockState(pos), placement.palette()))) {
             nextIndex++;
             return;
         }
@@ -360,7 +359,7 @@ public final class BuildTask extends AbstractTask {
         if (!ensureObservableWorkPose(bot, pos, "build_air")) {
             return;
         }
-        if (bot.getEntityWorld().getBlockState(pos).isAir()) {
+        if (bot.level().getBlockState(pos).isAir()) {
             if (buildMiningStarted) {
                 placedBlocks++;
             }
@@ -377,7 +376,7 @@ public final class BuildTask extends AbstractTask {
             retryTicks++;
         }
         ActionResult result = MiningAction.startMining(
-                bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
+                bot, pos, Direction.getApproximateNearest(bot.getEyePosition().subtract(pos.getCenter())));
         if (result.isFailed()) {
             retryTicks++;
             if (retryTicks > 12) {
@@ -389,7 +388,7 @@ public final class BuildTask extends AbstractTask {
     }
 
     private boolean ensureObservableWorkPose(AIPlayerEntity bot, BlockPos pos, String reason) {
-        double reach = bot.getBlockInteractionRange();
+        double reach = bot.blockInteractionRange();
         if (ObservableWorldQuery.canObserveCell(bot, pos)
                 && moveWithinReach(bot, pos, reason, reach * reach)) {
             return true;
@@ -441,12 +440,12 @@ public final class BuildTask extends AbstractTask {
     private Block resolveBlock(String blockId) {
         Identifier id;
         try {
-            id = Identifier.of(blockId);
+            id = Identifier.parse(blockId);
         } catch (RuntimeException exception) {
             fail("invalid_block_id: " + blockId);
             return null;
         }
-        return Registries.BLOCK.getOptionalValue(id)
+        return BuiltInRegistries.BLOCK.getOptional(id)
                 .orElseGet(() -> {
                     fail("unknown_block_id: " + id);
                     return null;
@@ -457,8 +456,8 @@ public final class BuildTask extends AbstractTask {
         // Never place a blueprint block through the bot's feet or head. Operator mode used to
         // hide this mistake with an emergency teleport; strict survival must first walk to a
         // real adjacent stand position.
-        BlockPos feet = bot.getBlockPos();
-        if (pos.equals(feet) || pos.equals(feet.up())) {
+        BlockPos feet = bot.blockPosition();
+        if (pos.equals(feet) || pos.equals(feet.above())) {
             if (bot.getActionPack().isPathExecutorIdle()) {
                 BlockPos stand = nearbyStand(bot, pos);
                 if (stand == null || stand.equals(feet)) {
@@ -481,7 +480,7 @@ public final class BuildTask extends AbstractTask {
         if (!bot.getActionPack().isPathExecutorIdle()) {
             return false;
         }
-        if (bot.getEyePos().squaredDistanceTo(pos.toCenterPos()) > maxDistanceSquared) {
+        if (bot.getEyePosition().distanceToSqr(pos.getCenter()) > maxDistanceSquared) {
             BlockPos stand = nearbyStand(bot, pos);
             if (stand == null) {
                 fail("no_stand_position_for_" + reason + ": " + BlockPosText.compact(pos));
@@ -509,7 +508,7 @@ public final class BuildTask extends AbstractTask {
 
     private BlockPos nearbyStand(AIPlayerEntity bot, BlockPos pos) {
         Standability.clearCache();
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         BlockPos exterior = preferredExteriorStand(bot, pos, current);
         if (exterior != null) {
             return exterior;
@@ -532,15 +531,15 @@ public final class BuildTask extends AbstractTask {
                                 && Math.abs(candidate.getY() - current.getY()) <= 1;
                         if (candidate.equals(current)
                                 || pathAlreadyConsidersArrived
-                                || candidate.getSquaredDistance(pos) > 100.0D
+                                || candidate.distSqr(pos) > 100.0D
                                 || !isObservableStandable(bot, candidate)) {
                             continue;
                         }
-                        double score = candidate.getSquaredDistance(current)
-                                + candidate.getSquaredDistance(pos) * 0.05D;
+                        double score = candidate.distSqr(current)
+                                + candidate.distSqr(pos) * 0.05D;
                         if (score < bestScore) {
                             bestScore = score;
-                            best = candidate.toImmutable();
+                            best = candidate.immutable();
                         }
                     }
                 }
@@ -583,9 +582,9 @@ public final class BuildTask extends AbstractTask {
                     : new int[]{anchor.getY() + delta, anchor.getY() - delta}) {
                 BlockPos candidate = new BlockPos(horizontal.getX(), y, horizontal.getZ());
                 if (!pathAlreadyConsidersArrived(current, candidate)
-                        && candidate.getSquaredDistance(target) <= 100.0D
+                        && candidate.distSqr(target) <= 100.0D
                         && isObservableStandable(bot, candidate)) {
-                    return candidate.toImmutable();
+                    return candidate.immutable();
                 }
             }
         }
@@ -599,10 +598,10 @@ public final class BuildTask extends AbstractTask {
      * scan capability.
      */
     private static boolean isObservableStandable(AIPlayerEntity bot, BlockPos candidate) {
-        return ObservableWorldQuery.canObserveBlock(bot, candidate.down())
+        return ObservableWorldQuery.canObserveBlock(bot, candidate.below())
                 && ObservableWorldQuery.canObserveCell(bot, candidate)
-                && ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                && Standability.isStandable(bot.getEntityWorld(), candidate);
+                && ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                && Standability.isStandable(bot.level(), candidate);
     }
 
     private static boolean pathAlreadyConsidersArrived(BlockPos current, BlockPos candidate) {
@@ -616,7 +615,7 @@ public final class BuildTask extends AbstractTask {
     }
 
     public BlockPos anchor() {
-        return anchor == null ? null : anchor.toImmutable();
+        return anchor == null ? null : anchor.immutable();
     }
 
     public BlueprintSchema blueprint() {
@@ -633,7 +632,7 @@ public final class BuildTask extends AbstractTask {
 
     public void restoreAnchor(BlockPos restoredAnchor) {
         if (restoredAnchor != null && phase == Phase.SITE) {
-            this.anchor = restoredAnchor.toImmutable();
+            this.anchor = restoredAnchor.immutable();
             this.note = "restored_anchor=" + BlockPosText.compact(this.anchor);
         }
     }

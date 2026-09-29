@@ -6,10 +6,9 @@ import io.github.zoyluo.minecraftai.mining.assist.ObservedReach;
 import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 /**
  * The IDLE half of the detour engine: decides, for one bot at one moment, whether a detour may start and on what

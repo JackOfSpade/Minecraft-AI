@@ -7,10 +7,10 @@ import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * A standing follow order must never be permanently abandoned by {@link StuckWatcher}: a real
@@ -81,7 +81,7 @@ final class FollowStuckRecovery {
 
     void reset(AIPlayerEntity bot, int nowTick) {
         digOut.cancel(bot);
-        lastPos = bot.getBlockPos().toImmutable();
+        lastPos = bot.blockPosition().immutable();
         recoveryStartDistance = Double.NaN;
         forceRepathPending = false;
         clock.reset(nowTick);
@@ -94,8 +94,8 @@ final class FollowStuckRecovery {
      *         this tick is a forced-replan tick handed back to the caller's ordinary logic (see
      *         {@link #consumeForcedRepath()}).
      */
-    boolean tick(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed, double minDistance) {
-        BlockPos current = bot.getBlockPos().toImmutable();
+    boolean tick(AIPlayerEntity bot, ServerPlayer target, int elapsed, double minDistance) {
+        BlockPos current = bot.blockPosition().immutable();
         boolean positionChanged = !current.equals(lastPos);
         if (positionChanged) {
             lastPos = current;
@@ -108,7 +108,7 @@ final class FollowStuckRecovery {
                 return true;
             }
             // Finished or abandoned this tick: hand it back to the ordinary path logic.
-            lastPos = bot.getBlockPos().toImmutable();
+            lastPos = bot.blockPosition().immutable();
             forceRepathPending = true;
             return false;
         }
@@ -178,29 +178,29 @@ final class FollowStuckRecovery {
      * which is exactly "wait a moment" for a landing that is only momentarily occupied -- and, on
      * the {@code RecoveryClock}'s next alternate window, a fresh replan is tried instead.
      */
-    private void attemptStep(AIPlayerEntity bot, ServerPlayerEntity target, double minDistance) {
+    private void attemptStep(AIPlayerEntity bot, ServerPlayer target, double minDistance) {
         bot.getActionPack().stopMovement();
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos current = bot.getBlockPos();
-        BlockPos targetPos = target.getBlockPos();
-        double currentDistSq = current.getSquaredDistance(targetPos);
+        ServerLevel world = bot.level();
+        BlockPos current = bot.blockPosition();
+        BlockPos targetPos = target.blockPosition();
+        double currentDistSq = current.distSqr(targetPos);
         double minDistSq = minDistance * minDistance;
 
         BlockPos best = null;
         double bestDistSq = currentDistSq;
         for (int dy = -1; dy <= 1; dy++) {
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos candidate = current.offset(direction).add(0, dy, 0);
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos candidate = current.relative(direction).offset(0, dy, 0);
                 if (!Standability.isStandableFresh(world, candidate)) {
                     continue;
                 }
-                double distSq = candidate.getSquaredDistance(targetPos);
+                double distSq = candidate.distSqr(targetPos);
                 if (distSq < minDistSq) {
                     // Would land closer than the caller's own floor -- never an "unstick" move.
                     continue;
                 }
                 if (distSq + 0.01D < bestDistSq) {
-                    best = candidate.toImmutable();
+                    best = candidate.immutable();
                     bestDistSq = distSq;
                 }
             }

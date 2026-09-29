@@ -3,12 +3,11 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.mining.MiningBudget;
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.Block;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Block;
 
 /** Durable {@link OreDigTask} restart state: codec, schema migration and validation. */
 record OreDigCheckpoint(int taskSchema,
@@ -114,13 +113,13 @@ record OreDigCheckpoint(int taskSchema,
 
     OreDigCheckpoint {
         controlledStripRear = controlledStripRear == null
-                ? null : controlledStripRear.toImmutable();
+                ? null : controlledStripRear.immutable();
         boundaryRerouteOrigin = boundaryRerouteOrigin == null
-                ? null : boundaryRerouteOrigin.toImmutable();
-        pendingPickupPos = pendingPickupPos == null ? null : pendingPickupPos.toImmutable();
+                ? null : boundaryRerouteOrigin.immutable();
+        pendingPickupPos = pendingPickupPos == null ? null : pendingPickupPos.immutable();
         pendingPickupLastSeenPos = pendingPickupLastSeenPos == null
-                ? null : pendingPickupLastSeenPos.toImmutable();
-        activeBreakPos = activeBreakPos == null ? null : activeBreakPos.toImmutable();
+                ? null : pendingPickupLastSeenPos.immutable();
+        activeBreakPos = activeBreakPos == null ? null : activeBreakPos.immutable();
         if (rememberedHighWorkPoses == null || rememberedHighWorkPoses.isEmpty()) {
             rememberedHighWorkPoses = Map.of();
         } else {
@@ -129,7 +128,7 @@ record OreDigCheckpoint(int taskSchema,
                 if (entry.getKey() == null || entry.getValue() == null) {
                     throw new IllegalArgumentException("null_remembered_high_work_pose");
                 }
-                immutable.put(entry.getKey().toImmutable(), entry.getValue().toImmutable());
+                immutable.put(entry.getKey().immutable(), entry.getValue().immutable());
             }
             rememberedHighWorkPoses = Map.copyOf(immutable);
         }
@@ -375,12 +374,12 @@ record OreDigCheckpoint(int taskSchema,
                     || batchOpen && direction >= 0 && stepsLeft > 0
                     && (boundaryRerouteOrigin == null
                     && controlledStripRear.equals(
-                    face.offset(OreDigTask.STRIP_DIRS[direction].getOpposite()))
+                    face.relative(OreDigTask.STRIP_DIRS[direction].getOpposite()))
                     || boundaryRerouteOrigin != null
                     && boundaryRerouteOrigin.equals(face)
                     && stepsLeft == legLength
                     && controlledStripRear.equals(
-                    face.offset(OreDigTask.STRIP_DIRS[direction].rotateYClockwise())))
+                    face.relative(OreDigTask.STRIP_DIRS[direction].getClockWise())))
                     && pending == null && activeBreak == null;
             boolean committedShape = batchOpen
                     || budget == 0 && lastProgress == 0

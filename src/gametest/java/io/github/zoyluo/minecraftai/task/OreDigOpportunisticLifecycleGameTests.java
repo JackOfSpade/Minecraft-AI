@@ -19,19 +19,19 @@ import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,7 +70,7 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.hasSpawnLine;
  */
 public final class OreDigOpportunisticLifecycleGameTests {
     private static final Logger LOG = LoggerFactory.getLogger("minecraftai-detour-gametest");
-    private static final BlockState STONE = Blocks.STONE.getDefaultState();
+    private static final BlockState STONE = Blocks.STONE.defaultBlockState();
     private static final Pattern EVENT = Pattern.compile("event=(ore_dig_detour_[a-z_]+)");
 
     // ---------------------------------------------------------------------------------------------
@@ -78,7 +78,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_slow_mine_and_drop_lost_and_long_return_never_trip_no_progress", maxTicks = 4200)
-    public void slowMineAndDropLostAndLongReturnNeverTripNoProgress(TestContext context) {
+    public void slowMineAndDropLostAndLongReturnNeverTripNoProgress(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -3, 18, -3, 3, 4);
         // Far enough from the anchor (spawn) that the walk-only return is a genuinely long trip, but still well
@@ -109,7 +109,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.TORCH, 16));
         h.enableDetourMode();
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         boolean[] fatigued = {false};
@@ -118,7 +118,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         int[] activeSince = {-1};
         int failuresBefore = MiningAssistRuntime.failures().size();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -156,7 +156,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
                 // an iron-pick diamond_ore swing to comfortably above MINE_BEAT_TICKS(50) so a real mid-swing beat
                 // is exercised, while staying comfortably under both MINE_SWING_TICKS(160) and, for ordinary
                 // stone/ore breaks afterward, NO_PROGRESS_LIMIT(200).
-                bot.addStatusEffect(new StatusEffectInstance(StatusEffects.MINING_FATIGUE, 6000, 0));
+                bot.addEffect(new MobEffectInstance(MobEffects.MINING_FATIGUE, 6000, 0));
                 fatigued[0] = true;
             }
             if (phase != DetourPhase.IDLE) {
@@ -195,7 +195,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_pause_mid_detour_resumes_to_anchor", maxTicks = 2000)
-    public void pauseMidDetourResumesToAnchor(TestContext context) {
+    public void pauseMidDetourResumesToAnchor(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(31, -3, 10, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
@@ -211,14 +211,14 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode();
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         Map<String, String>[] anchorCheckpoint = new Map[1];
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -271,9 +271,9 @@ public final class OreDigOpportunisticLifecycleGameTests {
                 }
                 case 2 -> {
                     BlockPos anchor = decode(anchorCheckpoint[0].get("face"));
-                    if (!bot.getBlockPos().equals(anchor)) {
+                    if (!bot.blockPosition().equals(anchor)) {
                         h.require(p.tick - stageStart[0] < 400, "the resumed bot never walked back to the interrupted anchor "
-                                + anchor.toShortString() + " (at " + bot.getBlockPos().toShortString() + ")");
+                                + anchor.toShortString() + " (at " + bot.blockPosition().toShortString() + ")");
                         return;
                     }
                     Map<String, String> after = task[0].checkpoint();
@@ -296,7 +296,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_restart_mid_detour_returns_to_anchor", maxTicks = 2100)
-    public void restartMidDetourReturnsToAnchor(TestContext context) {
+    public void restartMidDetourReturnsToAnchor(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(32, -3, 10, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
@@ -312,7 +312,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode();
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         OreDigTask[] restored = {null};
@@ -320,7 +320,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -359,9 +359,9 @@ public final class OreDigOpportunisticLifecycleGameTests {
                     // so it must walk back to the anchor face like any other restart, never resume the detour.
                     h.require(phaseOf(id) == DetourPhase.IDLE,
                             "a freshly restarted task instance published a live detour it never started");
-                    if (!bot.getBlockPos().equals(anchor[0])) {
+                    if (!bot.blockPosition().equals(anchor[0])) {
                         h.require(p.tick - stageStart[0] < 500, "the restarted task never walked back to the anchor "
-                                + anchor[0].toShortString() + " (at " + bot.getBlockPos().toShortString() + ")");
+                                + anchor[0].toShortString() + " (at " + bot.blockPosition().toShortString() + ")");
                         return;
                     }
                     LOG.info("[detour-gametest] restart anchor={} reached_ticks={}", anchor[0].toShortString(), p.tick - stageStart[0]);
@@ -378,16 +378,16 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_fail_mid_detour_releases_claims", maxTicks = 1100)
-    public void failMidDetourReleasesClaims(TestContext context) {
+    public void failMidDetourReleasesClaims(GameTestHelper context) {
         terminalExitReleasesClaims(context, "DetourFailGT", "gametest_detour_fail", true);
     }
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_complete_mid_detour_releases_claims", maxTicks = 1100)
-    public void completeMidDetourReleasesClaims(TestContext context) {
+    public void completeMidDetourReleasesClaims(GameTestHelper context) {
         terminalExitReleasesClaims(context, "DetourCompleteGT", "gametest_detour_complete", false);
     }
 
-    private void terminalExitReleasesClaims(TestContext context, String name, String reason, boolean viaFail) {
+    private void terminalExitReleasesClaims(GameTestHelper context, String name, String reason, boolean viaFail) {
         Harness h = new Harness(context);
         Room room = h.newRoom(33, -3, 10, -3, 3, 4);
         // A lone ore cell with no same-block neighbour: the vein has exactly one member (the seed itself), so
@@ -406,7 +406,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode();
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         String dimensionKey = BotEdits.dimensionKey(room.world);
         UUID otherBot = UUID.randomUUID();
         Progress p = new Progress();
@@ -414,7 +414,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -478,7 +478,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_drop_recovery_contract_bound_and_non_terminal", maxTicks = 1800)
-    public void dropRecoveryContractBoundAndNonTerminal(TestContext context) {
+    public void dropRecoveryContractBoundAndNonTerminal(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(34, -3, 12, -3, 3, 4);
         // FIXTURE HISTORY / ROOT CAUSE (confirmed against the real GameTest log; see the g2/r7/r8 debugging
@@ -533,12 +533,12 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode(256); // a wider sensor budget, belt-and-braces
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         int[] activeTicks = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -556,7 +556,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
                     "an unrecovered drop must never fail the mission: " + task[0].failureReason());
             h.require(!task[0].failureReason().toLowerCase(java.util.Locale.ROOT).contains("unrecovered"),
                     "an unrecovered-drop failure reason appeared: " + task[0].failureReason());
-            h.require(room.world.getBlockState(guard).isOf(Blocks.STONE),
+            h.require(room.world.getBlockState(guard).is(Blocks.STONE),
                     "the walk-only chase dug through solid rock chasing an unreachable drop");
             if (phaseOf(id) != DetourPhase.IDLE) {
                 activeTicks[0]++;
@@ -575,7 +575,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             }
             h.require(!task[0].failureReason().toLowerCase(java.util.Locale.ROOT).contains("unrecovered"),
                     "an unrecovered-drop failure reason appeared after settling");
-            h.require(room.world.getBlockState(guard).isOf(Blocks.STONE), "the chase eventually dug through solid rock");
+            h.require(room.world.getBlockState(guard).is(Blocks.STONE), "the chase eventually dug through solid rock");
             LOG.info("[detour-gametest] drop_recovery active_ticks={} diamonds_held={}",
                     activeTicks[0], InventoryAction.countItem(bot, Items.DIAMOND));
             h.pass();
@@ -587,7 +587,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_two_bots_one_vein_exactly_one_breaker", maxTicks = 2500)
-    public void twoBotsOneVeinExactlyOneBreaker(TestContext context) {
+    public void twoBotsOneVeinExactlyOneBreaker(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(35, -6, 6, -3, 3, 4);
         // A lone valuable exactly between two symmetric bots: both selectors see the same single candidate, so
@@ -608,13 +608,13 @@ public final class OreDigOpportunisticLifecycleGameTests {
         h.enableDetourMode();
         h.enableAssist(botA);
         h.enableAssist(botB);
-        UUID idA = botA.getUuid();
-        UUID idB = botB.getUuid();
+        UUID idA = botA.getUUID();
+        UUID idB = botB.getUUID();
         Progress p = new Progress();
         OreDigTask[] taskA = {null};
         OreDigTask[] taskB = {null};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -658,7 +658,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_inventory_reserve_stops_detour", maxTicks = 1800)
-    public void inventoryReserveStopsDetour(TestContext context) {
+    public void inventoryReserveStopsDetour(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(36, -3, 8, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
@@ -707,13 +707,13 @@ public final class OreDigOpportunisticLifecycleGameTests {
         setInventory(bot, Items.IRON_PICKAXE, 2); // leaves only 2 empty slots: below the default reserve of 3
         h.enableDetourMode(256); // a wider sensor budget, belt-and-braces
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -770,7 +770,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_return_failure_rebases_in_place_and_disables_detours", maxTicks = 3800)
-    public void returnFailureRebasesInPlaceAndDisablesDetours(TestContext context) {
+    public void returnFailureRebasesInPlaceAndDisablesDetours(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(37, -3, 10, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
@@ -813,14 +813,14 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode(256); // see enableDetourMode(int)'s own comment: this fixture's local coal supply
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         int[] stage = {0};
         int[] stageStart = {0};
         int[] startsBefore = {-1};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -870,8 +870,8 @@ public final class OreDigOpportunisticLifecycleGameTests {
                     // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file --
                     // otherwise a further detour would stay silent for a geometry reason having nothing to do
                     // with the return-rebase disabling further detours, and this stage would prove nothing.
-                    room.world.setBlockState(face.add(2, 1, 1), Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
-                    room.world.setBlockState(face.add(2, 2, 1), STONE, Block.NOTIFY_ALL);
+                    room.world.setBlock(face.offset(2, 1, 1), Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
+                    room.world.setBlock(face.offset(2, 2, 1), STONE, Block.UPDATE_ALL);
                     stage[0] = 2;
                     stageStart[0] = p.tick;
                 }
@@ -898,7 +898,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_degraded_tps_aborts_in_flight_detour", maxTicks = 1800)
-    public void degradedTpsAbortsInFlightDetour(TestContext context) {
+    public void degradedTpsAbortsInFlightDetour(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(38, -3, 12, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
@@ -914,13 +914,13 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode();
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -969,7 +969,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = "minecraftai-gametest:ore_dig_opportunistic_lifecycle_hurt_edge_aborts_approach_but_not_return", maxTicks = 2200)
-    public void hurtEdgeAbortsApproachButNotReturn(TestContext context) {
+    public void hurtEdgeAbortsApproachButNotReturn(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(39, -3, 12, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see the pose comment on the first test in this file.
@@ -985,13 +985,13 @@ public final class OreDigOpportunisticLifecycleGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 8));
         h.enableDetourMode();
         h.enableAssist(bot);
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask[] task = {null};
         int[] stage = {0};
         int[] stageStart = {0};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -1074,8 +1074,8 @@ public final class OreDigOpportunisticLifecycleGameTests {
      * bottleneck, see the giveItem comment on the earlier tests in this file), {@code pickaxe} in slot 1,
      * cobblestone filling every slot but the last {@code emptySlots}.
      */
-    private static void setInventory(AIPlayerEntity bot, net.minecraft.item.Item pickaxe, int emptySlots) {
-        var main = bot.getInventory().getMainStacks();
+    private static void setInventory(AIPlayerEntity bot, net.minecraft.world.item.Item pickaxe, int emptySlots) {
+        var main = bot.getInventory().getNonEquipmentItems();
         int size = main.size();
         int keepEmpty = Math.max(0, Math.min(emptySlots, size - 2));
         main.set(0, new ItemStack(Items.STONE_PICKAXE));
@@ -1090,7 +1090,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         for (int i = size - keepEmpty; i < size; i++) {
             main.set(i, ItemStack.EMPTY);
         }
-        bot.getInventory().markDirty();
+        bot.getInventory().setChanged();
     }
 
     private static BlockPos decode(String value) {
@@ -1141,7 +1141,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
 
     /** Cleanup-on-failure, strict-capability and readiness plumbing shared by every test in this file. */
     private static final class Harness {
-        final TestContext context;
+        final GameTestHelper context;
         final List<String> bots = new ArrayList<>();
         final List<Runnable> cleanups = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
@@ -1149,7 +1149,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         boolean tpsOverridden;
         boolean done;
 
-        Harness(TestContext context) {
+        Harness(GameTestHelper context) {
             this.context = context;
         }
 
@@ -1160,19 +1160,19 @@ public final class OreDigOpportunisticLifecycleGameTests {
         }
 
         AIPlayerEntity spawn(String name, Room room, int dx, int dz) {
-            ServerWorld world = room.world;
+            ServerLevel world = room.world;
             BlockPos feet = room.at(dx, 0, dz);
             bots.add(name);
             var spawned = AIPlayerManager.INSTANCE.spawn(
-                    world.getServer(), name, world, Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL);
+                    world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL);
             if (spawned.isEmpty()) {
                 fail("failed to spawn " + name + " (a bot of that name is still alive)");
             }
             AIPlayerEntity bot = spawned.get();
-            bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+            bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
             bot.setHealth(bot.getMaxHealth());
-            bot.getHungerManager().setFoodLevel(20);
-            bot.getHungerManager().setSaturationLevel(5.0F);
+            bot.getFoodData().setFoodLevel(20);
+            bot.getFoodData().setSaturation(5.0F);
             return bot;
         }
 
@@ -1209,7 +1209,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
         void enableAssist(AIPlayerEntity bot) {
             MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
             tpsOverridden = true;
-            MiningAssistRuntime.forceEnable(bot.getUuid());
+            MiningAssistRuntime.forceEnable(bot.getUUID());
         }
 
         void onCleanup(Runnable cleanup) {
@@ -1221,9 +1221,9 @@ public final class OreDigOpportunisticLifecycleGameTests {
          * A chunk ring that never loads is waived after 60 ticks (matches {@code MiningAssistSenseGameTests}).
          */
         boolean settle(AIPlayerEntity bot, Progress p) {
-            ServerWorld world = bot.getEntityWorld();
-            BlockPos feet = bot.getBlockPos();
-            if (world.isSkyVisible(feet)) {
+            ServerLevel world = bot.level();
+            BlockPos feet = bot.blockPosition();
+            if (world.canSeeSky(feet)) {
                 require(p.tick < 200, "the sealed fixture never became underground by the world's sky test");
                 return false;
             }
@@ -1231,7 +1231,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             boolean loaded = true;
             for (int dx = -ring; dx <= ring && loaded; dx++) {
                 for (int dz = -ring; dz <= ring && loaded; dz++) {
-                    loaded = world.getChunkManager().isChunkLoaded((feet.getX() >> 4) + dx, (feet.getZ() >> 4) + dz);
+                    loaded = world.getChunkSource().hasChunk((feet.getX() >> 4) + dx, (feet.getZ() >> 4) + dz);
                 }
             }
             if (loaded) {
@@ -1264,7 +1264,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
 
         void fail(String message) {
             cleanup();
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
 
         /** Runs one tick of a test body; anything thrown cleans up first so a failure never leaves a bot behind. */
@@ -1288,7 +1288,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
             }
             cleanups.clear();
             for (String name : new ArrayList<>(bots)) {
-                AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
             bots.clear();
             for (Room room : rooms) {
@@ -1311,7 +1311,7 @@ public final class OreDigOpportunisticLifecycleGameTests {
 
         void pass() {
             cleanup();
-            context.complete();
+            context.succeed();
         }
     }
 }

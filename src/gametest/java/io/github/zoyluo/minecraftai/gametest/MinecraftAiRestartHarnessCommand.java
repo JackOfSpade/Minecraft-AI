@@ -19,12 +19,11 @@ import io.github.zoyluo.minecraftai.persist.MissionRuntimeRecord;
 import io.github.zoyluo.minecraftai.runtime.IntentController;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -32,8 +31,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 /** Two-process restart probe used by the external evidence harness. */
 public final class MinecraftAiRestartHarnessCommand {
@@ -47,7 +46,7 @@ public final class MinecraftAiRestartHarnessCommand {
     private MinecraftAiRestartHarnessCommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         registerTickerOnce();
         return literal("harness")
                 .then(literal("restart-stage")
@@ -75,14 +74,14 @@ public final class MinecraftAiRestartHarnessCommand {
                                                 StringArgumentType.getString(context, "profile"))))));
     }
 
-    private static int stage(ServerCommandSource source, String name) {
+    private static int stage(CommandSourceStack source, String name) {
         var bot = AIPlayerManager.INSTANCE.getByName(name).orElse(null);
         if (bot == null) {
-            source.sendError(Text.literal("[MinecraftAi Harness] restart-stage FAIL no_bot"));
+            source.sendFailure(Component.literal("[MinecraftAi Harness] restart-stage FAIL no_bot"));
             return 0;
         }
-        bot.getInventory().clear();
-        bot.getInventory().markDirty();
+        bot.getInventory().clearContent();
+        bot.getInventory().setChanged();
         InventoryAction.giveItem(bot, new ItemStack(Items.OAK_PLANKS, 2));
         InventoryAction.giveItem(bot, new ItemStack(Items.COAL, 1));
 
@@ -90,7 +89,7 @@ public final class MinecraftAiRestartHarnessCommand {
         // The end-tick watcher pauses immediately after the first GoalStep advances revision.
         boolean activeSubmitted = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.TORCH, 4));
         boolean queuedSubmitted = GoalExecutor.INSTANCE.submit(bot, new Goal.HaveItem(Items.CRAFTING_TABLE, 1));
-        checkpointWatchBot = activeSubmitted ? bot.getUuid() : null;
+        checkpointWatchBot = activeSubmitted ? bot.getUUID() : null;
         TaskBoard.INSTANCE.clear();
         boolean ok = activeSubmitted
                 && queuedSubmitted
@@ -98,7 +97,7 @@ public final class MinecraftAiRestartHarnessCommand {
                 && GoalExecutor.INSTANCE.queuedGoalCount(bot) == 1
                 && !TaskManager.INSTANCE.isUserPaused(bot)
                 && InventoryAction.countItem(bot, Items.TORCH) == 0;
-        source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] restart-stage "
+        source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] restart-stage "
                 + (ok ? "STARTED" : "FAIL")
                 + " active=" + GoalExecutor.INSTANCE.hasActivePlan(bot)
                 + " queue=" + GoalExecutor.INSTANCE.queuedGoalCount(bot)), false);
@@ -137,21 +136,21 @@ public final class MinecraftAiRestartHarnessCommand {
         checkpointWatchBot = null;
     }
 
-    private static int stageCheckpoint(ServerCommandSource source, String name) {
+    private static int stageCheckpoint(CommandSourceStack source, String name) {
         var bot = AIPlayerManager.INSTANCE.getByName(name).orElse(null);
         if (bot == null) {
-            source.sendError(Text.literal("[MinecraftAi Harness] restart-stage-check FAIL no_bot"));
+            source.sendFailure(Component.literal("[MinecraftAi Harness] restart-stage-check FAIL no_bot"));
             return 0;
         }
         MissionRuntimeRecord beforePause = GoalExecutor.INSTANCE.captureRuntime(bot);
         MissionRecord active = beforePause.active();
         if (active == null || !GoalExecutor.INSTANCE.hasActivePlan(bot)) {
-            source.sendError(Text.literal("[MinecraftAi Harness] restart-stage-check FAIL mission_not_active"));
+            source.sendFailure(Component.literal("[MinecraftAi Harness] restart-stage-check FAIL mission_not_active"));
             return 0;
         }
         int revision = parseNonNegative(active.checkpoint().get(CHECKPOINT_REVISION));
         if (revision < 1) {
-            source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] restart-stage-check WAITING revision="
+            source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] restart-stage-check WAITING revision="
                     + revision + " step=" + GoalExecutor.INSTANCE.describeActiveStep(bot)), false);
             return 1;
         }
@@ -183,7 +182,7 @@ public final class MinecraftAiRestartHarnessCommand {
                 && pausedRuntime.userPaused()
                 && InventoryAction.countItem(bot, Items.TORCH) == 0;
         if (!nonDefaultCheckpoint || !missionShape) {
-            source.sendError(Text.literal("[MinecraftAi Harness] restart-stage-check FAIL"
+            source.sendFailure(Component.literal("[MinecraftAi Harness] restart-stage-check FAIL"
                     + " checkpoint_non_default=" + nonDefaultCheckpoint
                     + " mission_shape=" + missionShape
                     + " checkpoint=" + checkpoint));
@@ -199,7 +198,7 @@ public final class MinecraftAiRestartHarnessCommand {
         Optional<Job> claimed = TaskBoard.INSTANCE.claimNext(bot);
         boolean leaseClaimed = claimed.isPresent()
                 && claimed.get().status() == Job.Status.CLAIMED
-                && bot.getUuid().equals(claimed.get().claimant())
+                && bot.getUUID().equals(claimed.get().claimant())
                 && TaskBoard.INSTANCE.runtimeSessionId().equals(claimed.get().leaseSessionId())
                 && claimed.get().leaseId() != null;
         BotPersistence.INSTANCE.saveAll(source.getServer());
@@ -207,7 +206,7 @@ public final class MinecraftAiRestartHarnessCommand {
                 GoalExecutor.INSTANCE.captureRuntime(bot).active().checkpoint());
         boolean ok = expectedPersisted && leaseClaimed && exactAtSave
                 && BotPersistence.INSTANCE.lastSaveSucceeded();
-        source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] restart-stage-check "
+        source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] restart-stage-check "
                 + (ok ? "PASS" : "FAIL")
                 + " checkpoint_non_default=" + nonDefaultCheckpoint
                 + " checkpoint_exact_at_save=" + exactAtSave
@@ -220,7 +219,7 @@ public final class MinecraftAiRestartHarnessCommand {
         return ok ? 1 : 0;
     }
 
-    private static int check(ServerCommandSource source, String name) {
+    private static int check(CommandSourceStack source, String name) {
         var bot = AIPlayerManager.INSTANCE.getByName(name).orElse(null);
         Optional<Job> probeJob = probeJob();
         MissionRuntimeRecord restored = bot == null ? MissionRuntimeRecord.empty()
@@ -259,7 +258,7 @@ public final class MinecraftAiRestartHarnessCommand {
                         bot, IntentController.ControlOrigin.SYSTEM, "restart_probe_resume")
                 && !TaskManager.INSTANCE.isUserPaused(bot);
         boolean ok = restoredExactly && resumed;
-        source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] persistence_restart "
+        source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] persistence_restart "
                 + (ok ? "RESTORE_PASS" : "RESTORE_FAIL")
                 + " checkpoint_exact=" + checkpointExact
                 + " mission_id_exact=" + missionIdExact
@@ -273,11 +272,11 @@ public final class MinecraftAiRestartHarnessCommand {
         return ok ? 1 : 0;
     }
 
-    private static int checkProgress(ServerCommandSource source, String name) {
+    private static int checkProgress(CommandSourceStack source, String name) {
         var bot = AIPlayerManager.INSTANCE.getByName(name).orElse(null);
         Optional<Job> probeJob = probeJob();
         if (bot == null || probeJob.isEmpty()) {
-            source.sendError(Text.literal("[MinecraftAi Harness] restart-progress FAIL missing_bot_or_probe_job"));
+            source.sendFailure(Component.literal("[MinecraftAi Harness] restart-progress FAIL missing_bot_or_probe_job"));
             return 0;
         }
         String expectedMissionId = probeJob.get().params().get("mission_id");
@@ -294,7 +293,7 @@ public final class MinecraftAiRestartHarnessCommand {
                     && torches >= 4
                     && !TaskManager.INSTANCE.isUserPaused(bot)
                     && staleLeaseStillOpen;
-            source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] restart-progress "
+            source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] restart-progress "
                     + (progressed ? "PASS" : "FAIL")
                     + " mission_id=" + expectedMissionId
                     + " terminal=" + result.status()
@@ -307,13 +306,13 @@ public final class MinecraftAiRestartHarnessCommand {
         MissionRecord active = GoalExecutor.INSTANCE.captureRuntime(bot).active();
         boolean expectedStillActive = active != null && active.missionId().equals(expectedMissionId);
         if (!expectedStillActive || TaskManager.INSTANCE.isUserPaused(bot)) {
-            source.sendError(Text.literal("[MinecraftAi Harness] restart-progress FAIL mission_lost_or_paused"
+            source.sendFailure(Component.literal("[MinecraftAi Harness] restart-progress FAIL mission_lost_or_paused"
                     + " expected_mission_id=" + expectedMissionId
                     + " actual_mission_id=" + (active == null ? "none" : active.missionId())
                     + " paused=" + TaskManager.INSTANCE.isUserPaused(bot)));
             return 0;
         }
-        source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] restart-progress WAITING"
+        source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] restart-progress WAITING"
                 + " mission_id=" + expectedMissionId
                 + " revision=" + active.checkpoint().get(CHECKPOINT_REVISION)
                 + " step=" + GoalExecutor.INSTANCE.describeActiveStep(bot)
@@ -336,7 +335,7 @@ public final class MinecraftAiRestartHarnessCommand {
     private static final String EXPECTED_CHECKPOINT_FILE = "minecraftai-restart-expected-checkpoint.tsv";
 
     private static java.nio.file.Path expectedCheckpointPath(MinecraftServer server) {
-        return server.getSavePath(net.minecraft.util.WorldSavePath.ROOT)
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                 .getParent().resolve(EXPECTED_CHECKPOINT_FILE);
     }
 
@@ -380,11 +379,11 @@ public final class MinecraftAiRestartHarnessCommand {
         }
     }
 
-    private static int checkProfile(ServerCommandSource source, String name, String expectedValue) {
+    private static int checkProfile(CommandSourceStack source, String name, String expectedValue) {
         var bot = AIPlayerManager.INSTANCE.getByName(name).orElse(null);
         OperatingProfile expected = OperatingProfile.parse(expectedValue).orElse(null);
         if (bot == null || expected == null) {
-            source.sendError(Text.literal("[MinecraftAi Harness] capability_profile FAIL invalid_input"));
+            source.sendFailure(Component.literal("[MinecraftAi Harness] capability_profile FAIL invalid_input"));
             return 0;
         }
 
@@ -406,7 +405,7 @@ public final class MinecraftAiRestartHarnessCommand {
                 && decisionsMatch
                 && sideEffects.get() == expectedExecutions;
         int expectedExecutionCount = expectedExecutions;
-        source.sendFeedback(() -> Text.literal("[MinecraftAi Harness] capability_profile "
+        source.sendSuccess(() -> Component.literal("[MinecraftAi Harness] capability_profile "
                 + (ok ? "PASS" : "FAIL")
                 + " profile=" + config.profile().configValue()
                 + " executed=" + sideEffects.get()

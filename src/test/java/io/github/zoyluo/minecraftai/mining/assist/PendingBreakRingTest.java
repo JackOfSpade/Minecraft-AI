@@ -1,12 +1,13 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import net.minecraft.core.BlockPos;
 
 class PendingBreakRingTest {
     @Test
@@ -66,7 +67,7 @@ class PendingBreakRingTest {
         PendingBreakRing ring = new PendingBreakRing();
         BlockPos pos = new BlockPos(-30_000_000, -64, 29_999_999);
         ring.offer(pos.asLong());
-        assertEquals(pos, BlockPos.fromLong(ring.poll()));
+        assertEquals(pos, BlockPos.of(ring.poll()));
     }
 
     @Test
@@ -75,7 +76,7 @@ class PendingBreakRingTest {
         // A packed BlockPos is 26 bits of x, 26 of z and 12 of y. Long.MIN_VALUE decodes to x = -2^25,
         // z = 0, y = 0, and x = -33_554_432 lies beyond the 30_000_000 world border, so no real cell
         // can collide with the sentinel.
-        BlockPos decoded = BlockPos.fromLong(Long.MIN_VALUE);
+        BlockPos decoded = BlockPos.of(Long.MIN_VALUE);
         assertEquals(-33_554_432, decoded.getX());
         assertEquals(0, decoded.getZ());
     }

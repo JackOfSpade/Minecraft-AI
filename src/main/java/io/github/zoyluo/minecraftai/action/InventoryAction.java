@@ -2,25 +2,24 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.util.collection.DefaultedList;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.OptionalInt;
+import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 public final class InventoryAction {
     private InventoryAction() {
     }
 
     public static ActionResult selectHotbar(AIPlayerEntity player, int slot) {
-        if (!PlayerInventory.isValidHotbarIndex(slot)) {
+        if (!Inventory.isHotbarSlot(slot)) {
             return ActionResult.failed("slot_out_of_range");
         }
         player.getInventory().setSelectedSlot(slot);
@@ -30,12 +29,12 @@ public final class InventoryAction {
 
     public static OptionalInt findItem(AIPlayerEntity player, Item item) {
         var inventory = player.getInventory();
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            if (inventory.getMainStacks().get(slot).isOf(item)) {
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(item)) {
                 return OptionalInt.of(slot);
             }
         }
-        if (player.getEquippedStack(EquipmentSlot.OFFHAND).isOf(item)) {
+        if (player.getItemBySlot(EquipmentSlot.OFFHAND).is(item)) {
             return promoteOffhandSlot(player, 0);
         }
         return OptionalInt.empty();
@@ -46,11 +45,11 @@ public final class InventoryAction {
      * displaced from a full inventory. Callers can then use the ordinary equip/select path.
      */
     public static OptionalInt promoteOffhandSlot(AIPlayerEntity player, int offhandSlot) {
-        PlayerInventory inventory = player.getInventory();
+        Inventory inventory = player.getInventory();
         if (offhandSlot != 0) {
             return OptionalInt.empty();
         }
-        ItemStack moving = player.getEquippedStack(EquipmentSlot.OFFHAND);
+        ItemStack moving = player.getItemBySlot(EquipmentSlot.OFFHAND);
         if (moving.isEmpty()) {
             return OptionalInt.empty();
         }
@@ -58,10 +57,10 @@ public final class InventoryAction {
         if (destination < 0) {
             destination = inventory.getSelectedSlot();
         }
-        ItemStack displaced = inventory.getMainStacks().get(destination);
-        inventory.getMainStacks().set(destination, moving);
-        player.equipStack(EquipmentSlot.OFFHAND, displaced);
-        inventory.markDirty();
+        ItemStack displaced = inventory.getNonEquipmentItems().get(destination);
+        inventory.getNonEquipmentItems().set(destination, moving);
+        player.setItemSlot(EquipmentSlot.OFFHAND, displaced);
+        inventory.setChanged();
         BotLog.action(player, "promote_offhand",
                 "offhand_slot", offhandSlot,
                 "main_slot", destination,
@@ -73,29 +72,29 @@ public final class InventoryAction {
     public static int countItem(AIPlayerEntity player, Item item) {
         int count = 0;
         var inventory = player.getInventory();
-        for (ItemStack stack : inventory.getMainStacks()) {
-            if (stack.isOf(item)) {
+        for (ItemStack stack : inventory.getNonEquipmentItems()) {
+            if (stack.is(item)) {
                 count += stack.getCount();
             }
         }
-        ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
-        if (offHandStack.isOf(item)) {
+        ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
+        if (offHandStack.is(item)) {
             count += offHandStack.getCount();
         }
         return count;
     }
 
     public static int equipFromSlot(AIPlayerEntity player, int sourceSlot) {
-        PlayerInventory inventory = player.getInventory();
-        if (sourceSlot < 0 || sourceSlot >= inventory.getMainStacks().size() || inventory.getMainStacks().get(sourceSlot).isEmpty()) {
+        Inventory inventory = player.getInventory();
+        if (sourceSlot < 0 || sourceSlot >= inventory.getNonEquipmentItems().size() || inventory.getNonEquipmentItems().get(sourceSlot).isEmpty()) {
             return -1;
         }
-        if (PlayerInventory.isValidHotbarIndex(sourceSlot)) {
+        if (Inventory.isHotbarSlot(sourceSlot)) {
             if (inventory.getSelectedSlot() == sourceSlot) {
                 return sourceSlot;
             }
             inventory.setSelectedSlot(sourceSlot);
-            inventory.markDirty();
+            inventory.setChanged();
             BotLog.action(player, "equip_slot", "source_slot", sourceSlot, "hotbar_slot", sourceSlot);
             return sourceSlot;
         }
@@ -103,28 +102,28 @@ public final class InventoryAction {
         if (hotbar < 0) {
             hotbar = inventory.getSelectedSlot();
         }
-        ItemStack moving = inventory.getMainStacks().get(sourceSlot);
-        ItemStack inHotbar = inventory.getMainStacks().get(hotbar);
-        inventory.getMainStacks().set(hotbar, moving);
-        inventory.getMainStacks().set(sourceSlot, inHotbar);
+        ItemStack moving = inventory.getNonEquipmentItems().get(sourceSlot);
+        ItemStack inHotbar = inventory.getNonEquipmentItems().get(hotbar);
+        inventory.getNonEquipmentItems().set(hotbar, moving);
+        inventory.getNonEquipmentItems().set(sourceSlot, inHotbar);
         inventory.setSelectedSlot(hotbar);
-        inventory.markDirty();
+        inventory.setChanged();
         BotLog.action(player, "equip_slot", "source_slot", sourceSlot, "hotbar_slot", hotbar);
         return hotbar;
     }
 
-    public static int firstEmptyHotbar(PlayerInventory inventory) {
+    public static int firstEmptyHotbar(Inventory inventory) {
         for (int slot = 0; slot <= 8; slot++) {
-            if (inventory.getMainStacks().get(slot).isEmpty()) {
+            if (inventory.getNonEquipmentItems().get(slot).isEmpty()) {
                 return slot;
             }
         }
         return -1;
     }
 
-    private static int firstEmptyMain(PlayerInventory inventory) {
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            if (inventory.getMainStacks().get(slot).isEmpty()) {
+    private static int firstEmptyMain(Inventory inventory) {
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).isEmpty()) {
                 return slot;
             }
         }
@@ -142,29 +141,29 @@ public final class InventoryAction {
         if (countItem(player, item) < count) {
             return false;
         }
-        PlayerInventory inventory = player.getInventory();
-        int remaining = removeFromList(inventory.getMainStacks(), item, count);
+        Inventory inventory = player.getInventory();
+        int remaining = removeFromList(inventory.getNonEquipmentItems(), item, count);
         if (remaining > 0) {
-            ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
-            if (offHandStack.isOf(item)) {
+            ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
+            if (offHandStack.is(item)) {
                 int take = Math.min(remaining, offHandStack.getCount());
-                offHandStack.decrement(take);
+                offHandStack.shrink(take);
                 remaining -= take;
             }
         }
-        inventory.markDirty();
+        inventory.setChanged();
         BotLog.action(player, "remove_items", "item", item, "count", count);
         return remaining == 0;
     }
 
-    public static int removeFromList(DefaultedList<ItemStack> list, Item item, int remaining) {
+    public static int removeFromList(NonNullList<ItemStack> list, Item item, int remaining) {
         for (int slot = 0; slot < list.size() && remaining > 0; slot++) {
             ItemStack stack = list.get(slot);
-            if (!stack.isOf(item)) {
+            if (!stack.is(item)) {
                 continue;
             }
             int take = Math.min(remaining, stack.getCount());
-            stack.decrement(take);
+            stack.shrink(take);
             remaining -= take;
         }
         return remaining;
@@ -175,11 +174,11 @@ public final class InventoryAction {
             Items.CHICKEN, Items.ROTTEN_FLESH, Items.PUFFERFISH, Items.SPIDER_EYE, Items.POISONOUS_POTATO);
 
     public static int findFoodSlot(AIPlayerEntity player) {
-        PlayerInventory inventory = player.getInventory();
+        Inventory inventory = player.getInventory();
         int harmfulSlot = -1;
-        for (int slot = 0; slot < inventory.getMainStacks().size(); slot++) {
-            ItemStack stack = inventory.getMainStacks().get(slot);
-            if (stack.isEmpty() || !stack.contains(DataComponentTypes.FOOD)) {
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
+            if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) {
                 continue;
             }
             if (HARMFUL_FOODS.contains(stack.getItem())) {
@@ -191,8 +190,8 @@ public final class InventoryAction {
             return slot; // prefer safe food first (cooked meat/bread/raw beef/pork/mutton)
         }
         boolean harmfulOffhand = false;
-        ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
-        if (!offHandStack.isEmpty() && offHandStack.contains(DataComponentTypes.FOOD)) {
+        ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && offHandStack.has(DataComponents.FOOD)) {
             if (HARMFUL_FOODS.contains(offHandStack.getItem())) {
                 harmfulOffhand = true;
             } else {
@@ -208,25 +207,25 @@ public final class InventoryAction {
     public static Map<String, Integer> summarize(AIPlayerEntity player) {
         Map<String, Integer> summary = new LinkedHashMap<>();
         var inventory = player.getInventory();
-        for (ItemStack stack : inventory.getMainStacks()) {
+        for (ItemStack stack : inventory.getNonEquipmentItems()) {
             addStack(summary, stack);
         }
-        addStack(summary, player.getEquippedStack(EquipmentSlot.OFFHAND));
+        addStack(summary, player.getItemBySlot(EquipmentSlot.OFFHAND));
         return summary;
     }
 
     public static ActionResult giveItem(AIPlayerEntity player, ItemStack stack) {
         Item item = stack.getItem();
         int count = stack.getCount();
-        boolean inserted = player.getInventory().insertStack(stack);
-        player.getInventory().markDirty();
+        boolean inserted = player.getInventory().add(stack);
+        player.getInventory().setChanged();
         BotLog.action(player, "give", "item", item, "count", count, "inserted_ok", inserted);
         return inserted ? ActionResult.SUCCESS : ActionResult.failed("inventory_full");
     }
 
     /**
      * Drops an exact total {@code count} of {@code item} through the ordinary vanilla player-drop
-     * path ({@link AIPlayerEntity#dropItem}, the same thing a human player does with Q) -- main
+     * path ({@link AIPlayerEntity#drop}, the same thing a human player does with Q) -- main
      * inventory first, then offhand, mirroring {@link #removeItems}'s counting/consumption order,
      * but spawning real world {@link ItemEntity} drops instead of deleting the stacks. Used by
      * give_item/{@code GiveItemTask} to hand items to a player without any forced-pickup or
@@ -241,12 +240,12 @@ public final class InventoryAction {
         if (countItem(player, item) < count) {
             return false;
         }
-        PlayerInventory inventory = player.getInventory();
+        Inventory inventory = player.getInventory();
         java.util.List<ItemStack> chunks = new java.util.ArrayList<>();
         int remaining = count;
-        for (int slot = 0; slot < inventory.getMainStacks().size() && remaining > 0; slot++) {
-            ItemStack stack = inventory.getMainStacks().get(slot);
-            if (!stack.isOf(item)) {
+        for (int slot = 0; slot < inventory.getNonEquipmentItems().size() && remaining > 0; slot++) {
+            ItemStack stack = inventory.getNonEquipmentItems().get(slot);
+            if (!stack.is(item)) {
                 continue;
             }
             int take = Math.min(remaining, stack.getCount());
@@ -254,14 +253,14 @@ public final class InventoryAction {
             remaining -= take;
         }
         if (remaining > 0) {
-            ItemStack offHandStack = player.getEquippedStack(EquipmentSlot.OFFHAND);
-            if (offHandStack.isOf(item)) {
+            ItemStack offHandStack = player.getItemBySlot(EquipmentSlot.OFFHAND);
+            if (offHandStack.is(item)) {
                 int take = Math.min(remaining, offHandStack.getCount());
                 chunks.add(offHandStack.split(take));
                 remaining -= take;
             }
         }
-        inventory.markDirty();
+        inventory.setChanged();
         if (remaining > 0) {
             // Unreachable given the countItem check above (no other code runs mid-tick to change
             // the inventory), but never silently vanish a partially-split remainder.
@@ -272,7 +271,7 @@ public final class InventoryAction {
         }
         boolean allDropped = true;
         for (ItemStack chunk : chunks) {
-            if (player.dropItem(chunk, false, true) == null) {
+            if (player.drop(chunk, false, true) == null) {
                 // Extremely rare (event-cancelled spawn): restock this chunk rather than lose it.
                 giveItem(player, chunk);
                 allDropped = false;
@@ -298,8 +297,8 @@ public final class InventoryAction {
     public static java.util.Optional<ItemEntity> dropSlotEntity(
             AIPlayerEntity player, int slot, boolean wholeStack) {
         var inventory = player.getInventory();
-        int count = slot >= 0 && slot < inventory.size()
-                ? wholeStack ? inventory.getStack(slot).getCount() : 1 : 0;
+        int count = slot >= 0 && slot < inventory.getContainerSize()
+                ? wholeStack ? inventory.getItem(slot).getCount() : 1 : 0;
         return dropSlotEntity(player, slot, count);
     }
 
@@ -307,45 +306,45 @@ public final class InventoryAction {
     public static java.util.Optional<ItemEntity> dropSlotEntity(
             AIPlayerEntity player, int slot, int requestedCount) {
         var inventory = player.getInventory();
-        if (slot < 0 || slot >= inventory.size() || requestedCount <= 0) {
+        if (slot < 0 || slot >= inventory.getContainerSize() || requestedCount <= 0) {
             return java.util.Optional.empty();
         }
-        int count = Math.min(requestedCount, inventory.getStack(slot).getCount());
-        ItemStack removed = inventory.removeStack(slot, count);
+        int count = Math.min(requestedCount, inventory.getItem(slot).getCount());
+        ItemStack removed = inventory.removeItem(slot, count);
         if (removed.isEmpty()) {
             return java.util.Optional.empty();
         }
-        ItemEntity entity = player.dropItem(removed, false, true);
+        ItemEntity entity = player.drop(removed, false, true);
         if (entity == null) {
-            inventory.insertStack(removed);
-            inventory.markDirty();
+            inventory.add(removed);
+            inventory.setChanged();
             return java.util.Optional.empty();
         }
         BotLog.action(player, "drop", "slot", slot, "count", count,
-                "whole_stack", inventory.getStack(slot).isEmpty());
+                "whole_stack", inventory.getItem(slot).isEmpty());
         return java.util.Optional.of(entity);
     }
 
     // P0 inventory-full self-rescue: drop low-value filler blocks (cobblestone/dirt/gravel family), keeping keepEach of each (still enough for bridging/stepping blocks).
     // Mining until the inventory is full means "block broken but can't be picked up -> count doesn't increase -> mining wasted until timeout" (the hidden killer of mining tasks).
-    private static final net.minecraft.item.Item[] JUNK_ITEMS = {
-            net.minecraft.item.Items.COBBLESTONE, net.minecraft.item.Items.COBBLED_DEEPSLATE,
-            net.minecraft.item.Items.DIRT, net.minecraft.item.Items.GRAVEL, net.minecraft.item.Items.SAND,
-            net.minecraft.item.Items.DIORITE, net.minecraft.item.Items.ANDESITE,
-            net.minecraft.item.Items.GRANITE, net.minecraft.item.Items.TUFF};
+    private static final net.minecraft.world.item.Item[] JUNK_ITEMS = {
+            net.minecraft.world.item.Items.COBBLESTONE, net.minecraft.world.item.Items.COBBLED_DEEPSLATE,
+            net.minecraft.world.item.Items.DIRT, net.minecraft.world.item.Items.GRAVEL, net.minecraft.world.item.Items.SAND,
+            net.minecraft.world.item.Items.DIORITE, net.minecraft.world.item.Items.ANDESITE,
+            net.minecraft.world.item.Items.GRANITE, net.minecraft.world.item.Items.TUFF};
 
     public static boolean dropJunk(AIPlayerEntity player, int keepEach) {
         boolean droppedAny = false;
-        for (net.minecraft.item.Item junk : JUNK_ITEMS) {
+        for (net.minecraft.world.item.Item junk : JUNK_ITEMS) {
             int have = countItem(player, junk);
             if (have > keepEach && removeItems(player, junk, have - keepEach)) {
                 // Must split into chunks by max stack size when dropping: a single ItemStack/ItemEntity's count is capped at 99,
                 // dropping 2232 at once -> ItemStack.toNbt throws "range [1;99]" on save -> server crash (confirmed root cause of the geo_flow server crash).
                 int toDrop = have - keepEach;
-                int max = Math.max(1, new ItemStack(junk).getMaxCount());
+                int max = Math.max(1, new ItemStack(junk).getMaxStackSize());
                 while (toDrop > 0) {
                     int chunk = Math.min(toDrop, max);
-                    player.dropItem(new ItemStack(junk, chunk), false, true);
+                    player.drop(new ItemStack(junk, chunk), false, true);
                     toDrop -= chunk;
                 }
                 BotLog.action(player, "drop_junk", "item", junk, "count", have - keepEach);
@@ -368,7 +367,7 @@ public final class InventoryAction {
                                              int requiredFreeSlots,
                                              int emergencyStoneLikeReserve) {
         int required = Math.max(0,
-                Math.min(requiredFreeSlots, player.getInventory().getMainStacks().size()));
+                Math.min(requiredFreeSlots, player.getInventory().getNonEquipmentItems().size()));
         if (freeMainSlots(player) >= required) {
             return 0;
         }
@@ -378,9 +377,9 @@ public final class InventoryAction {
         int droppedStacks = 0;
         for (int pass = 0; pass < 2 && freeMainSlots(player) < required; pass++) {
             for (int slot = 0;
-                 slot < player.getInventory().getMainStacks().size() && freeMainSlots(player) < required;
+                 slot < player.getInventory().getNonEquipmentItems().size() && freeMainSlots(player) < required;
                  slot++) {
-                ItemStack stack = player.getInventory().getMainStacks().get(slot);
+                ItemStack stack = player.getInventory().getNonEquipmentItems().get(slot);
                 if (stack.isEmpty() || !isJunk(stack.getItem())) {
                     continue;
                 }
@@ -437,7 +436,7 @@ public final class InventoryAction {
 
     private static int freeMainSlots(AIPlayerEntity player) {
         int free = 0;
-        for (ItemStack stack : player.getInventory().getMainStacks()) {
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
             if (stack.isEmpty()) {
                 free++;
             }

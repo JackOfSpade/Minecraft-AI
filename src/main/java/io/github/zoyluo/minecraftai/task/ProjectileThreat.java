@@ -2,12 +2,11 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.projectile.PersistentProjectileEntity;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.List;
 import java.util.Optional;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Detects arrows/tridents already in flight on a course that will pass close to the bot, so combat
@@ -25,20 +24,20 @@ public final class ProjectileThreat {
     private ProjectileThreat() {
     }
 
-    public record Incoming(PersistentProjectileEntity projectile, double ticksToClosestApproach) {
+    public record Incoming(AbstractArrow projectile, double ticksToClosestApproach) {
     }
 
     public static Optional<Incoming> mostImminent(AIPlayerEntity bot) {
-        List<PersistentProjectileEntity> candidates = bot.getEntityWorld().getEntitiesByClass(
-                PersistentProjectileEntity.class,
-                bot.getBoundingBox().expand(SCAN_RANGE),
+        List<AbstractArrow> candidates = bot.level().getEntitiesOfClass(
+                AbstractArrow.class,
+                bot.getBoundingBox().inflate(SCAN_RANGE),
                 projectile -> projectile.isAlive()
                         && notOwnedByBot(bot, projectile)
                         && ObservableWorldQuery.canObserveEntity(bot, projectile));
         Incoming best = null;
-        for (PersistentProjectileEntity projectile : candidates) {
+        for (AbstractArrow projectile : candidates) {
             Double ticks = ticksToClosestApproach(
-                    projectile.getEntityPos().subtract(bot.getEyePos()), projectile.getVelocity());
+                    projectile.position().subtract(bot.getEyePosition()), projectile.getDeltaMovement());
             if (ticks == null) {
                 continue;
             }
@@ -55,23 +54,23 @@ public final class ProjectileThreat {
      * a real projectile, further out than {@link #LEAD_TICKS}, or would miss outside {@link
      * #INTERCEPT_RADIUS}). Isolated from world/entity state so it is directly unit-testable.
      */
-    static Double ticksToClosestApproach(Vec3d relativePosition, Vec3d velocityPerTick) {
-        double speedSquared = velocityPerTick.lengthSquared();
+    static Double ticksToClosestApproach(Vec3 relativePosition, Vec3 velocityPerTick) {
+        double speedSquared = velocityPerTick.lengthSqr();
         if (speedSquared < 1.0E-6D) {
             return null;
         }
-        double t = -relativePosition.dotProduct(velocityPerTick) / speedSquared;
+        double t = -relativePosition.dot(velocityPerTick) / speedSquared;
         if (t < 0.0D || t > LEAD_TICKS) {
             return null;
         }
-        Vec3d closestOffset = relativePosition.add(velocityPerTick.multiply(t));
-        if (closestOffset.lengthSquared() > INTERCEPT_RADIUS_SQUARED) {
+        Vec3 closestOffset = relativePosition.add(velocityPerTick.scale(t));
+        if (closestOffset.lengthSqr() > INTERCEPT_RADIUS_SQUARED) {
             return null;
         }
         return t;
     }
 
-    private static boolean notOwnedByBot(AIPlayerEntity bot, PersistentProjectileEntity projectile) {
+    private static boolean notOwnedByBot(AIPlayerEntity bot, AbstractArrow projectile) {
         Entity owner = projectile.getOwner();
         return owner != bot;
     }

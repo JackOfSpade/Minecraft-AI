@@ -1,17 +1,16 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 
 public final class Standability {
     private static final Map<CacheKey, Boolean> CACHE = new ConcurrentHashMap<>(4096);
@@ -29,8 +28,8 @@ public final class Standability {
         CACHE.clear();
     }
 
-    public static boolean isStandable(ServerWorld world, BlockPos pos) {
-        CacheKey key = new CacheKey(world.getRegistryKey().getValue().toString(), version, pos);
+    public static boolean isStandable(ServerLevel world, BlockPos pos) {
+        CacheKey key = new CacheKey(world.dimension().identifier().toString(), version, pos);
         Boolean cached = CACHE.get(key);
         if (cached != null) {
             return cached;
@@ -46,11 +45,11 @@ public final class Standability {
      * just dug or been walled in) without evicting every other bot's cached results, which is what
      * {@link #clearCache()} does.
      */
-    public static boolean isStandableFresh(ServerWorld world, BlockPos pos) {
+    public static boolean isStandableFresh(ServerLevel world, BlockPos pos) {
         return compute(world, pos);
     }
 
-    public static Optional<BlockPos> findNearestStandable(ServerWorld world,
+    public static Optional<BlockPos> findNearestStandable(ServerLevel world,
                                                           BlockPos origin,
                                                           int horizontalRadius,
                                                           int verticalDown,
@@ -69,11 +68,11 @@ public final class Standability {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
                         continue;
                     }
-                    Optional<BlockPos> candidate = findStandableInColumn(world, origin.add(dx, 0, dz), verticalDown, verticalUp);
+                    Optional<BlockPos> candidate = findStandableInColumn(world, origin.offset(dx, 0, dz), verticalDown, verticalUp);
                     if (candidate.isEmpty()) {
                         continue;
                     }
-                    double distance = candidate.get().getSquaredDistance(origin);
+                    double distance = candidate.get().distSqr(origin);
                     if (distance < bestDistance) {
                         best = candidate.get();
                         bestDistance = distance;
@@ -81,7 +80,7 @@ public final class Standability {
                 }
             }
             if (best != null) {
-                return Optional.of(best.toImmutable());
+                return Optional.of(best.immutable());
             }
         }
         return Optional.empty();
@@ -107,7 +106,7 @@ public final class Standability {
      * standable shore/surface cell (or fail outright), never dive through the water column to the
      * seabed. Dedicated swim-follow code is the only path allowed to enter water on purpose.
      */
-    public static Optional<SnappedGoal> findNearestStandableForGoal(ServerWorld world,
+    public static Optional<SnappedGoal> findNearestStandableForGoal(ServerLevel world,
                                                                      BlockPos origin,
                                                                      int horizontalRadius,
                                                                      int nearVerticalDown,
@@ -129,7 +128,7 @@ public final class Standability {
         NEAR, DEEP
     }
 
-    private static Optional<BlockPos> findNearestInWindow(ServerWorld world, BlockPos origin,
+    private static Optional<BlockPos> findNearestInWindow(ServerLevel world, BlockPos origin,
                                                            int horizontalRadius, int verticalDown, int verticalUp) {
         return scanWindowInShells(origin, horizontalRadius, verticalDown, verticalUp, pos -> isStandable(world, pos));
     }
@@ -164,11 +163,11 @@ public final class Standability {
                         if (!horizontalOnShell && Math.abs(dy) != shell) {
                             continue;
                         }
-                        BlockPos candidate = origin.add(dx, dy, dz);
+                        BlockPos candidate = origin.offset(dx, dy, dz);
                         if (!standable.test(candidate)) {
                             continue;
                         }
-                        double distSq = candidate.getSquaredDistance(origin);
+                        double distSq = candidate.distSqr(origin);
                         int horizontalSq = dx * dx + dz * dz;
                         // Ties: the goal's own column first (a goal offered on a solid block means "stand
                         // on top of it", which callers such as the surface-water search rely on to
@@ -181,7 +180,7 @@ public final class Standability {
                                 || (candidate.getY() == best.getY()
                                 && (dx < bestDx || (dx == bestDx && dz < bestDz)))))));
                         if (better) {
-                            best = candidate.toImmutable();
+                            best = candidate.immutable();
                             bestDistSq = distSq;
                             bestHorizontalSq = horizontalSq;
                             bestDx = dx;
@@ -198,7 +197,7 @@ public final class Standability {
         return Optional.ofNullable(best);
     }
 
-    private static Optional<BlockPos> findNearestStandableNoFluidDescent(ServerWorld world, BlockPos origin,
+    private static Optional<BlockPos> findNearestStandableNoFluidDescent(ServerLevel world, BlockPos origin,
                                                                           int horizontalRadius, int verticalDown) {
         Optional<BlockPos> sameColumn = findStandableBelowWithoutFluid(world, origin, verticalDown);
         if (sameColumn.isPresent()) {
@@ -214,11 +213,11 @@ public final class Standability {
                         continue;
                     }
                     Optional<BlockPos> candidate =
-                            findStandableBelowWithoutFluid(world, origin.add(dx, 0, dz), verticalDown);
+                            findStandableBelowWithoutFluid(world, origin.offset(dx, 0, dz), verticalDown);
                     if (candidate.isEmpty()) {
                         continue;
                     }
-                    double distance = candidate.get().getSquaredDistance(origin);
+                    double distance = candidate.get().distSqr(origin);
                     if (distance < bestDistance) {
                         best = candidate.get();
                         bestDistance = distance;
@@ -226,7 +225,7 @@ public final class Standability {
                 }
             }
             if (best != null) {
-                return Optional.of(best.toImmutable());
+                return Optional.of(best.immutable());
             }
         }
         return Optional.empty();
@@ -238,23 +237,23 @@ public final class Standability {
      * candidate in this column at all -- the instant a fluid cell is met, instead of continuing
      * through it to whatever solid floor lies beneath.
      */
-    private static Optional<BlockPos> findStandableBelowWithoutFluid(ServerWorld world, BlockPos origin, int verticalDown) {
-        int minY = Math.max(world.getBottomY() + 1, origin.getY() - Math.max(0, verticalDown));
+    private static Optional<BlockPos> findStandableBelowWithoutFluid(ServerLevel world, BlockPos origin, int verticalDown) {
+        int minY = Math.max(world.getMinY() + 1, origin.getY() - Math.max(0, verticalDown));
         for (int y = origin.getY(); y >= minY; y--) {
             BlockPos candidate = new BlockPos(origin.getX(), y, origin.getZ());
             if (!world.getBlockState(candidate).getFluidState().isEmpty()) {
                 return Optional.empty();
             }
             if (isStandable(world, candidate)) {
-                return Optional.of(candidate.toImmutable());
+                return Optional.of(candidate.immutable());
             }
         }
         return Optional.empty();
     }
 
-    private static Optional<BlockPos> findStandableInColumn(ServerWorld world, BlockPos origin, int verticalDown, int verticalUp) {
-        int topY = world.getBottomY() + world.getHeight();
-        int minY = Math.max(world.getBottomY() + 1, origin.getY() - Math.max(0, verticalDown));
+    private static Optional<BlockPos> findStandableInColumn(ServerLevel world, BlockPos origin, int verticalDown, int verticalUp) {
+        int topY = world.getMinY() + world.getHeight();
+        int minY = Math.max(world.getMinY() + 1, origin.getY() - Math.max(0, verticalDown));
         int maxY = Math.min(topY - 2, origin.getY() + Math.max(0, verticalUp));
         int originY = Math.max(minY, Math.min(maxY, origin.getY()));
         int maxDelta = Math.max(originY - minY, maxY - originY);
@@ -267,29 +266,29 @@ public final class Standability {
             if (downY >= minY) {
                 BlockPos candidate = new BlockPos(origin.getX(), downY, origin.getZ());
                 if (isStandable(world, candidate)) {
-                    return Optional.of(candidate.toImmutable());
+                    return Optional.of(candidate.immutable());
                 }
             }
             int upY = originY + delta;
             if (delta > 0 && upY <= maxY) {
                 BlockPos candidate = new BlockPos(origin.getX(), upY, origin.getZ());
                 if (isStandable(world, candidate)) {
-                    return Optional.of(candidate.toImmutable());
+                    return Optional.of(candidate.immutable());
                 }
             }
         }
         return Optional.empty();
     }
 
-    private static boolean compute(ServerWorld world, BlockPos pos) {
-        int topY = world.getBottomY() + world.getHeight();
-        if (pos.getY() < world.getBottomY() + 1 || pos.getY() >= topY - 1) {
+    private static boolean compute(ServerLevel world, BlockPos pos) {
+        int topY = world.getMinY() + world.getHeight();
+        if (pos.getY() < world.getMinY() + 1 || pos.getY() >= topY - 1) {
             return false;
         }
 
         BlockState feet = world.getBlockState(pos);
-        BlockState head = world.getBlockState(pos.up());
-        BlockState below = world.getBlockState(pos.down());
+        BlockState head = world.getBlockState(pos.above());
+        BlockState below = world.getBlockState(pos.below());
         // "Standable" is a dry footing contract. A water cell has no collision shape and used to
         // pass the checks below whenever it had a solid lake bed, so A* emitted DROP_DOWN nodes
         // into water. Clientless fake players cannot execute normal swimming travel; NavSafety
@@ -301,40 +300,40 @@ public final class Standability {
         if (!feet.getCollisionShape(world, pos).isEmpty()) {
             return false;
         }
-        if (!head.getCollisionShape(world, pos.up()).isEmpty()) {
+        if (!head.getCollisionShape(world, pos.above()).isEmpty()) {
             return false;
         }
         if (isDangerous(feet) || isDangerous(head) || isDangerous(below)) {
             return false;
         }
         // NAV-11: Ladders/vines and other climbable blocks only need the bot standing inside them; no support below is required.
-        if (feet.isIn(BlockTags.CLIMBABLE)) {
+        if (feet.is(BlockTags.CLIMBABLE)) {
             return true;
         }
         if (below.isAir()) {
             return false;
         }
-        return below.getCollisionShape(world, pos.down()).getMax(Direction.Axis.Y) > 0.0D;
+        return below.getCollisionShape(world, pos.below()).max(Direction.Axis.Y) > 0.0D;
     }
 
     public static boolean isDangerous(BlockState state) {
         FluidState fluid = state.getFluidState();
-        return fluid.isIn(FluidTags.LAVA)
-                || state.isOf(Blocks.FIRE)
-                || state.isOf(Blocks.SOUL_FIRE)
-                || state.isOf(Blocks.CACTUS)
-                || state.isOf(Blocks.MAGMA_BLOCK)
-                || state.isOf(Blocks.CAMPFIRE)
-                || state.isOf(Blocks.SOUL_CAMPFIRE)
-                || state.isOf(Blocks.SWEET_BERRY_BUSH)
-                || state.isOf(Blocks.WITHER_ROSE)
-                || state.isOf(Blocks.POWDER_SNOW)
-                || state.isOf(Blocks.POINTED_DRIPSTONE);
+        return fluid.is(FluidTags.LAVA)
+                || state.is(Blocks.FIRE)
+                || state.is(Blocks.SOUL_FIRE)
+                || state.is(Blocks.CACTUS)
+                || state.is(Blocks.MAGMA_BLOCK)
+                || state.is(Blocks.CAMPFIRE)
+                || state.is(Blocks.SOUL_CAMPFIRE)
+                || state.is(Blocks.SWEET_BERRY_BUSH)
+                || state.is(Blocks.WITHER_ROSE)
+                || state.is(Blocks.POWDER_SNOW)
+                || state.is(Blocks.POINTED_DRIPSTONE);
     }
 
     private record CacheKey(String dimension, long version, BlockPos pos) {
         private CacheKey {
-            pos = pos.toImmutable();
+            pos = pos.immutable();
         }
     }
 }

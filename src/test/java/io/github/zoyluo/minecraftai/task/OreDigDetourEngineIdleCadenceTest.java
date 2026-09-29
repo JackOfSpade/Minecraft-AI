@@ -2,10 +2,10 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.mining.assist.DetourPhase;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

@@ -5,17 +5,16 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
-import net.minecraft.item.Items;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
-
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Real survival bucket interactions.
@@ -30,8 +29,8 @@ public final class BucketAction {
 
     /** Fill one empty bucket from an observable still-water source. */
     public static ActionResult fillWaterSource(AIPlayerEntity bot, BlockPos source) {
-        var world = bot.getEntityWorld();
-        if (!withinReach(bot, source) || !bot.canInteractWithBlockAt(source, 0.0D)) {
+        var world = bot.level();
+        if (!withinReach(bot, source) || !bot.isWithinBlockInteractionRange(source, 0.0D)) {
             return ActionResult.failed("water_source_out_of_reach");
         }
         OptionalInt slot = InventoryAction.findItem(bot, Items.BUCKET);
@@ -39,7 +38,7 @@ public final class BucketAction {
             return ActionResult.failed("missing_bucket");
         }
         InventoryAction.equipFromSlot(bot, slot.getAsInt());
-        LookAction.lookAt(bot, source.toCenterPos());
+        LookAction.lookAt(bot, source.getCenter());
 
         var lookedAt = raycastWaterSource(bot);
         if (!(lookedAt instanceof BlockHitResult hit) || !hit.getBlockPos().equals(source)) {
@@ -48,12 +47,12 @@ public final class BucketAction {
         // The source-only bucket ray is the perception boundary. Read the fluid only after the
         // same ray a player uses has actually hit this remembered source cell.
         var fluid = world.getFluidState(source);
-        if (!fluid.isIn(FluidTags.WATER) || !fluid.isStill()) {
+        if (!fluid.is(FluidTags.WATER) || !fluid.isSource()) {
             return ActionResult.failed("not_water_source");
         }
 
         int waterBefore = InventoryAction.countItem(bot, Items.WATER_BUCKET);
-        ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+        ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
         int waterAfter = InventoryAction.countItem(bot, Items.WATER_BUCKET);
         if (result.isSuccess() && waterAfter > waterBefore) {
             finish(bot, "fill_water_bucket", source);
@@ -68,16 +67,16 @@ public final class BucketAction {
      * Place water in {@code support.offset(face)} by aiming a water bucket at a real support face.
      */
     public static ActionResult placeWater(AIPlayerEntity bot, BlockPos support, Direction face) {
-        BlockPos destination = support.offset(face);
-        var world = bot.getEntityWorld();
+        BlockPos destination = support.relative(face);
+        var world = bot.level();
         if (!ObservableWorldQuery.canObserveCell(bot, destination)) {
             return ActionResult.failed("water_placement_not_visible");
         }
-        if (!withinReach(bot, support.toCenterPos().add(
-                face.getOffsetX() * 0.5D,
-                face.getOffsetY() * 0.5D,
-                face.getOffsetZ() * 0.5D))
-                || !bot.canInteractWithBlockAt(support, 0.0D)) {
+        if (!withinReach(bot, support.getCenter().add(
+                face.getStepX() * 0.5D,
+                face.getStepY() * 0.5D,
+                face.getStepZ() * 0.5D))
+                || !bot.isWithinBlockInteractionRange(support, 0.0D)) {
             return ActionResult.failed("water_support_out_of_reach");
         }
         OptionalInt slot = InventoryAction.findItem(bot, Items.WATER_BUCKET);
@@ -87,11 +86,11 @@ public final class BucketAction {
         InventoryAction.equipFromSlot(bot, slot.getAsInt());
         LookAction.lookAtBlock(bot, support, face);
 
-        double reach = bot.getBlockInteractionRange();
-        var lookedAt = bot.raycast(reach, 1.0F, false);
+        double reach = bot.blockInteractionRange();
+        var lookedAt = bot.pick(reach, 1.0F, false);
         if (!(lookedAt instanceof BlockHitResult hit)
                 || !hit.getBlockPos().equals(support)
-                || hit.getSide() != face) {
+                || hit.getDirection() != face) {
             return ActionResult.failed("water_support_face_not_visible");
         }
         // The real no-fluid ray above is the visibility boundary for supports underneath fluid.
@@ -99,13 +98,13 @@ public final class BucketAction {
             return ActionResult.failed("missing_water_support");
         }
         var destinationState = world.getBlockState(destination);
-        if (!destinationState.isAir() && !destinationState.canBucketPlace(net.minecraft.fluid.Fluids.WATER)) {
+        if (!destinationState.isAir() && !destinationState.canBeReplaced(net.minecraft.world.level.material.Fluids.WATER)) {
             return ActionResult.failed("water_destination_blocked");
         }
 
         int waterBefore = InventoryAction.countItem(bot, Items.WATER_BUCKET);
         int emptyBefore = InventoryAction.countItem(bot, Items.BUCKET);
-        ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
+        ActionResult result = InteractAction.useItemInAir(bot, InteractionHand.MAIN_HAND);
         int waterAfter = InventoryAction.countItem(bot, Items.WATER_BUCKET);
         int emptyAfter = InventoryAction.countItem(bot, Items.BUCKET);
         if (result.isSuccess() && waterAfter < waterBefore && emptyAfter > emptyBefore) {
@@ -118,30 +117,30 @@ public final class BucketAction {
     }
 
     private static boolean withinReach(AIPlayerEntity bot, BlockPos pos) {
-        return withinReach(bot, pos.toCenterPos());
+        return withinReach(bot, pos.getCenter());
     }
 
-    private static boolean withinReach(AIPlayerEntity bot, net.minecraft.util.math.Vec3d pos) {
-        double reach = bot.getBlockInteractionRange();
-        return bot.getEyePos().squaredDistanceTo(pos) <= reach * reach;
+    private static boolean withinReach(AIPlayerEntity bot, net.minecraft.world.phys.Vec3 pos) {
+        double reach = bot.blockInteractionRange();
+        return bot.getEyePosition().distanceToSqr(pos) <= reach * reach;
     }
 
     /** Matches BucketItem's SOURCE_ONLY ray so nearer flowing water does not hide its source. */
     private static HitResult raycastWaterSource(AIPlayerEntity bot) {
-        double reach = bot.getBlockInteractionRange();
-        Vec3d start = bot.getEyePos();
-        Vec3d end = start.add(bot.getRotationVec(1.0F).multiply(reach));
-        return bot.getEntityWorld().raycast(new RaycastContext(
+        double reach = bot.blockInteractionRange();
+        Vec3 start = bot.getEyePosition();
+        Vec3 end = start.add(bot.getViewVector(1.0F).scale(reach));
+        return bot.level().clip(new ClipContext(
                 start,
                 end,
-                RaycastContext.ShapeType.OUTLINE,
-                RaycastContext.FluidHandling.SOURCE_ONLY,
+                ClipContext.Block.OUTLINE,
+                ClipContext.Fluid.SOURCE_ONLY,
                 bot));
     }
 
     private static void finish(AIPlayerEntity bot, String action, BlockPos pos) {
-        bot.swingHand(Hand.MAIN_HAND);
-        bot.updateLastActionTime();
+        bot.swing(InteractionHand.MAIN_HAND);
+        bot.resetLastActionTime();
         AStarPathfinder.invalidateCache("bucket_fluid_change");
         BotLog.action(bot, action, "pos", LogFields.pos(pos));
     }

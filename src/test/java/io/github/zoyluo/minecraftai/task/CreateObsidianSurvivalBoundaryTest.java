@@ -1,12 +1,12 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -232,7 +232,7 @@ class CreateObsidianSurvivalBoundaryTest {
         BlockPos support = new BlockPos(7, 23, -4);
         for (Direction face : Direction.values()) {
             CreateObsidianTask.PourPlan plan = new CreateObsidianTask.PourPlan(support, face);
-            assertEquals(support.offset(face), plan.destination());
+            assertEquals(support.relative(face), plan.destination());
         }
     }
 

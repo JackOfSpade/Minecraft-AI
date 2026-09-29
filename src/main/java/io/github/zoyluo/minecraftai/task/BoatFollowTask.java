@@ -3,14 +3,13 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.action.BoatAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Waterborne follower.  It first tries an empty nearby boat, then crafts/launches one only when
@@ -50,7 +49,7 @@ public final class BoatFollowTask extends AbstractTask {
     private boolean waiting;
     private boolean observedTargetBoat;
     // Stuck watchdog state (see STUCK_WINDOW_TICKS).
-    private Vec3d windowStartPos;
+    private Vec3 windowStartPos;
     private float windowStartYaw;
     private int windowTicks;
     private int reverseTicksLeft;
@@ -127,8 +126,8 @@ public final class BoatFollowTask extends AbstractTask {
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        ServerPlayerEntity target = target(bot).orElse(null);
-        if (target == null || target.getEntityWorld() != bot.getEntityWorld()) {
+        ServerPlayer target = target(bot).orElse(null);
+        if (target == null || target.level() != bot.level()) {
             BoatSupport.mountedBoat(bot).ifPresent(BoatAction::stopBoat);
             waiting = true;
             phase = Phase.WAITING;
@@ -144,9 +143,9 @@ public final class BoatFollowTask extends AbstractTask {
             return;
         }
 
-        boolean targetInBoat = target.getVehicle() instanceof AbstractBoatEntity;
+        boolean targetInBoat = target.getVehicle() instanceof AbstractBoat;
         boolean targetSwimming = !targetInBoat
-                && (target.isTouchingWater() || target.isSubmergedInWater());
+                && (target.isInWater() || target.isUnderWater());
         if (targetInBoat) {
             observedTargetBoat = true;
         }
@@ -159,7 +158,7 @@ public final class BoatFollowTask extends AbstractTask {
             BotLog.action(bot, "boat_follow_target_swimming", "target", targetName);
             BoatSupport.mountedBoat(bot).ifPresent(boat -> {
                 BoatAction.stopBoat(boat);
-                bot.dismountVehicle();
+                bot.removeVehicle();
             });
             continuedFollow = new FollowTask(targetName);
             continuedFollow.start(bot);
@@ -185,7 +184,7 @@ public final class BoatFollowTask extends AbstractTask {
             return;
         }
 
-        AbstractBoatEntity mounted = BoatSupport.mountedBoat(bot).orElse(null);
+        AbstractBoat mounted = BoatSupport.mountedBoat(bot).orElse(null);
         if (mounted != null) {
             if (!targetInBoat) {
                 BoatAction.stopBoat(mounted);
@@ -198,7 +197,7 @@ public final class BoatFollowTask extends AbstractTask {
             if (reverseTicksLeft > 0) {
                 // Recovery manoeuvre from the stuck watchdog: back the hull off whatever it is
                 // wedged on, then resume normal steering (with a fresh progress window).
-                mounted.setInputs(false, false, false, true);
+                mounted.setInput(false, false, false, true);
                 reverseTicksLeft--;
                 waiting = false;
                 if (reverseTicksLeft == 0) {
@@ -271,11 +270,11 @@ public final class BoatFollowTask extends AbstractTask {
      *     otherwise physically stuck -- steerToward/setInputs alone cannot detect this, they only
      *     issue paddle input, never confirm it moved anything).
      */
-    private boolean isStuck(AbstractBoatEntity mounted) {
-        Vec3d current = mounted.getEntityPos();
+    private boolean isStuck(AbstractBoat mounted) {
+        Vec3 current = mounted.position();
         if (windowStartPos == null) {
             windowStartPos = current;
-            windowStartYaw = mounted.getYaw();
+            windowStartYaw = mounted.getYRot();
             windowTicks = 0;
             return false;
         }
@@ -284,10 +283,10 @@ public final class BoatFollowTask extends AbstractTask {
             return false;
         }
         double moved = Math.hypot(current.x - windowStartPos.x, current.z - windowStartPos.z);
-        float turned = Math.abs(net.minecraft.util.math.MathHelper.wrapDegrees(mounted.getYaw() - windowStartYaw));
+        float turned = Math.abs(net.minecraft.util.Mth.wrapDegrees(mounted.getYRot() - windowStartYaw));
         boolean progressed = moved >= STUCK_MIN_PROGRESS || turned >= STUCK_MIN_TURN;
         windowStartPos = current;
-        windowStartYaw = mounted.getYaw();
+        windowStartYaw = mounted.getYRot();
         windowTicks = 0;
         return !progressed;
     }
@@ -298,19 +297,19 @@ public final class BoatFollowTask extends AbstractTask {
      * boat / crafted boat launched from a proper shore).  Too many give-ups fail the task so the
      * owner can fall back to land or swim following.
      */
-    private void onBoatStuck(AIPlayerEntity bot, AbstractBoatEntity mounted) {
+    private void onBoatStuck(AIPlayerEntity bot, AbstractBoat mounted) {
         if (reverseAttempts < MAX_REVERSE_ATTEMPTS) {
             reverseAttempts++;
             reverseTicksLeft = REVERSE_TICKS;
             BotLog.action(bot, "boat_follow_stuck_reverse",
-                    "pos", mounted.getBlockPos().toShortString(), "attempt", reverseAttempts);
+                    "pos", mounted.blockPosition().toShortString(), "attempt", reverseAttempts);
             return;
         }
         BotLog.action(bot, "boat_follow_stuck_recovered",
-                "pos", mounted.getBlockPos().toShortString(), "boat_id", mounted.getUuid());
-        abandonedBoats.add(mounted.getUuid());
+                "pos", mounted.blockPosition().toShortString(), "boat_id", mounted.getUUID());
+        abandonedBoats.add(mounted.getUUID());
         BoatAction.stopBoat(mounted);
-        bot.dismountVehicle();
+        bot.removeVehicle();
         resetStuckWatchdog();
         reverseAttempts = 0;
         reverseTicksLeft = 0;
@@ -326,11 +325,11 @@ public final class BoatFollowTask extends AbstractTask {
     }
 
     /** @return true while the boat still needs to reach a dry shore before dismounting. */
-    private boolean leaveBoatForLand(AIPlayerEntity bot, ServerPlayerEntity target) {
+    private boolean leaveBoatForLand(AIPlayerEntity bot, ServerPlayer target) {
         return BoatSupport.leaveBoatForLand(bot, target.getX(), target.getZ(), BOAT_STOP_DISTANCE, TURN_ONLY_ANGLE);
     }
 
-    private Optional<ServerPlayerEntity> target(AIPlayerEntity bot) {
+    private Optional<ServerPlayer> target(AIPlayerEntity bot) {
         return FollowTargetResolver.resolve(bot, targetName);
     }
 

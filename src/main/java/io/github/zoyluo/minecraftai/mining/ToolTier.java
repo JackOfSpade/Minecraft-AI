@@ -1,16 +1,15 @@
 package io.github.zoyluo.minecraftai.mining;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 public final class ToolTier {
     public static final int NONE = 0;
@@ -39,14 +38,14 @@ public final class ToolTier {
         // and by convention modded ores tag themselves with these tags (e.g. new ores from mods like
         // Twilight Forest are correctly tiered with no code changes needed). If no tag matches, fall back
         // to the hand-written table below (preserves legacy behavior).
-        var state = block.getDefaultState();
-        if (state.isIn(net.minecraft.registry.tag.BlockTags.NEEDS_DIAMOND_TOOL)) {
+        var state = block.defaultBlockState();
+        if (state.is(net.minecraft.tags.BlockTags.NEEDS_DIAMOND_TOOL)) {
             return DIAMOND;
         }
-        if (state.isIn(net.minecraft.registry.tag.BlockTags.NEEDS_IRON_TOOL)) {
+        if (state.is(net.minecraft.tags.BlockTags.NEEDS_IRON_TOOL)) {
             return IRON;
         }
-        if (state.isIn(net.minecraft.registry.tag.BlockTags.NEEDS_STONE_TOOL)) {
+        if (state.is(net.minecraft.tags.BlockTags.NEEDS_STONE_TOOL)) {
             return STONE;
         }
         // Obsidian / Crying Obsidian / Ancient Debris: require a diamond pickaxe (otherwise breaking drops nothing).
@@ -81,33 +80,33 @@ public final class ToolTier {
     }
 
     public static String requiredPickaxeItemId(Set<Block> blocks) {
-        return Registries.ITEM.getId(requiredPickaxeItem(blocks)).toString();
+        return BuiltInRegistries.ITEM.getKey(requiredPickaxeItem(blocks)).toString();
     }
 
     public static String requiredPickaxeItemId(Block block) {
-        return Registries.ITEM.getId(requiredPickaxeItem(block)).toString();
+        return BuiltInRegistries.ITEM.getKey(requiredPickaxeItem(block)).toString();
     }
 
     public static int bestPickaxeTier(AIPlayerEntity bot) {
-        int best = pickaxeTier(bot.getMainHandStack());
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+        int best = pickaxeTier(bot.getMainHandItem());
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
             best = Math.max(best, pickaxeTier(stack));
         }
-        best = Math.max(best, pickaxeTier(bot.getEquippedStack(EquipmentSlot.OFFHAND)));
+        best = Math.max(best, pickaxeTier(bot.getItemBySlot(EquipmentSlot.OFFHAND)));
         return best;
     }
 
     public static boolean canHarvestWithInventory(AIPlayerEntity bot, BlockState state) {
-        if (!state.isToolRequired()) {
+        if (!state.requiresCorrectToolForDrops()) {
             return true;
         }
-        for (ItemStack stack : bot.getInventory().getMainStacks()) {
-            if (!stack.isEmpty() && stack.isSuitableFor(state) && !nearlyBroken(stack)) {
+        for (ItemStack stack : bot.getInventory().getNonEquipmentItems()) {
+            if (!stack.isEmpty() && stack.isCorrectToolForDrops(state) && !nearlyBroken(stack)) {
                 return true;
             }
         }
-        ItemStack offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
-        if (!offHandStack.isEmpty() && offHandStack.isSuitableFor(state) && !nearlyBroken(offHandStack)) {
+        ItemStack offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
+        if (!offHandStack.isEmpty() && offHandStack.isCorrectToolForDrops(state) && !nearlyBroken(offHandStack)) {
             return true;
         }
         return false;
@@ -119,7 +118,7 @@ public final class ToolTier {
     // a replacement pickaxe on the spot. This matches ToolSelector's "near-exhausted score of 0.001" at the
     // same threshold, keeping the two layers consistent.
     private static boolean nearlyBroken(ItemStack stack) {
-        return stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1;
+        return stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1;
     }
 
     private static Item pickaxeItem(int tier) {

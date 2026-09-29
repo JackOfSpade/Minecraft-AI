@@ -9,48 +9,47 @@ import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.ZombieEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import net.minecraft.text.Text;
 
 /** Live regressions for preserving a mining mission across a hostile cave opening. */
 public final class MiningHostileRecoveryGameTests {
     @GameTest(maxTicks = 40)
-    public void blindStripRotatesAtUnsupportedCaveLipBeforeFalling(TestContext context) {
+    public void blindStripRotatesAtUnsupportedCaveLipBeforeFalling(GameTestHelper context) {
         TunnelFixture fixture = quietTunnel(context, "MiningOpenDropGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos opening = fixture.workFace().east();
-        context.getWorld().setBlockState(opening, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(opening.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(opening.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(opening.down(2),
-                Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(opening, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(opening.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(opening.below(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(opening.below(2),
+                Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         // South is the already-controlled tunnel. Give the interrupted east leg one factual new
         // north head obstruction above a supported open foot cell. This test owns open-drop
         // rotation; two-solid-cell staged excavation is covered by OreDigPickupGameTests.
-        context.getWorld().setBlockState(
-                fixture.workFace().north(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(
-                fixture.workFace().north().up(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-        context.getWorld().setBlockState(
-                fixture.workFace().north().down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        context.getLevel().setBlock(
+                fixture.workFace().north(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(
+                fixture.workFace().north().above(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+        context.getLevel().setBlock(
+                fixture.workFace().north().below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
 
         MiningCursor cursor = new MiningCursor(
@@ -74,8 +73,8 @@ public final class MiningHostileRecoveryGameTests {
 
         require(context, mining.state() == TaskState.RUNNING,
                 "unsupported cave lip terminated mining: " + mining.failureReason());
-        require(context, bot.getBlockPos().equals(fixture.workFace()),
-                "blind strip stepped or fell into the cave: " + bot.getBlockPos().toShortString());
+        require(context, bot.blockPosition().equals(fixture.workFace()),
+                "blind strip stepped or fell into the cave: " + bot.blockPosition().toShortString());
         require(context, bot.getActionPack().isPathExecutorIdle()
                         && bot.getActionPack().isWalkToIdle(),
                 "blind strip left movement active toward the unsupported opening");
@@ -91,7 +90,7 @@ public final class MiningHostileRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_unmarked_straight_leg_rejects_wrong_side_and_owns_its_front_barricade", maxTicks = 40)
     public void unmarkedStraightLegRejectsWrongSideAndOwnsItsFrontBarricade(
-            TestContext context) {
+            GameTestHelper context) {
         TunnelFixture fixture = quietTunnel(context, "MiningUnmarkedBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
@@ -136,7 +135,7 @@ public final class MiningHostileRecoveryGameTests {
 
     @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_marker_only_reroute_rejects_standable_geometric_reverse_without_mutation", maxTicks = 40)
     public void markerOnlyRerouteRejectsStandableGeometricReverseWithoutMutation(
-            TestContext context) {
+            GameTestHelper context) {
         TunnelFixture fixture = quietTunnel(context, "MiningMarkerOnlyBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
         BlockPos face = fixture.workFace();
@@ -144,19 +143,19 @@ public final class MiningHostileRecoveryGameTests {
         // crossed by this east-facing marker-only reroute, so geometry alone cannot confer ownership.
         for (int distance = 1; distance <= 4; distance++) {
             BlockPos center = face.west(distance);
-            context.getWorld().setBlockState(
-                    center.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(
-                    center, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(
-                    center.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            context.getWorld().setBlockState(
-                    center.up(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            context.getLevel().setBlock(
+                    center.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(
+                    center, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(
+                    center.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            context.getLevel().setBlock(
+                    center.above(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             for (int dy = 0; dy <= 1; dy++) {
-                context.getWorld().setBlockState(
-                        center.north().up(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                context.getWorld().setBlockState(
-                        center.south().up(dy), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                context.getLevel().setBlock(
+                        center.north().above(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                context.getLevel().setBlock(
+                        center.south().above(dy), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
@@ -192,7 +191,7 @@ public final class MiningHostileRecoveryGameTests {
     // Keep it out of the short sibling batch so a neighbouring context cannot complete
     // and clear one of these deliberately retained hostiles before the final assertion.
     @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_ore_dig_retreats_and_permanently_barricades_four_hostiles", maxTicks = 500)
-    public void oreDigRetreatsAndPermanentlyBarricadesFourHostiles(TestContext context) {
+    public void oreDigRetreatsAndPermanentlyBarricadesFourHostiles(GameTestHelper context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeGT");
         AIPlayerEntity bot = fixture.bot();
         assertStrictCapabilities(context, bot);
@@ -270,7 +269,7 @@ public final class MiningHostileRecoveryGameTests {
         require(context, EmergencyShelterTask.hasShelterBlock(bot),
                 "hostile mining fixture did not expose its dirt reserve to the safety palette");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active instanceof MiningBarricadeTask,
                 "hostile strip mine chose " + (active == null ? "idle" : active.name())
@@ -295,27 +294,27 @@ public final class MiningHostileRecoveryGameTests {
                 "safety routing changed the persisted mining budget");
 
         AtomicInteger ticks = new AtomicInteger();
-        context.runAtEveryTick(() -> {
-            DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        context.failIfEver(() -> {
+            DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
             if (mining.state() == TaskState.FAILED || mining.state() == TaskState.CANCELLED) {
-                context.throwGameTestException(Text.of("mining cursor ended during hostile recovery: "
+                context.fail(Component.nullToEmpty("mining cursor ended during hostile recovery: "
                         + mining.state() + ":" + mining.failureReason()));
             }
             if (!isSealed(context, fixture.gateFeet())
-                    || !isSealed(context, fixture.gateFeet().up())
+                    || !isSealed(context, fixture.gateFeet().above())
                     || mining.state() != TaskState.RUNNING
                     || TaskManager.INSTANCE.pausedDepth(bot) != 0
                     || TaskManager.INSTANCE.getActive(bot).orElse(null) != mining) {
                 if (ticks.incrementAndGet() > 420) {
-                    context.throwGameTestException(Text.of("barricade did not seal and resume: active="
+                    context.fail(Component.nullToEmpty("barricade did not seal and resume: active="
                             + TaskManager.INSTANCE.status(bot)));
                 }
                 return;
             }
-            require(context, bot.getBlockPos().equals(fixture.retreatFeet()),
-                    "miner did not resume from the verified rear: " + bot.getBlockPos().toShortString());
-            require(context, context.getWorld().getBlockState(fixture.retreatFeet()).isAir()
-                            && context.getWorld().getBlockState(fixture.retreatFeet().up()).isAir(),
+            require(context, bot.blockPosition().equals(fixture.retreatFeet()),
+                    "miner did not resume from the verified rear: " + bot.blockPosition().toShortString());
+            require(context, context.getLevel().getBlockState(fixture.retreatFeet()).isAir()
+                            && context.getLevel().getBlockState(fixture.retreatFeet().above()).isAir(),
                     "barricade closed the known rear corridor");
             require(context, fixture.hostiles().stream().allMatch(entity -> entity.isAlive()),
                     "recovery silently converted into cave combat");
@@ -354,7 +353,7 @@ public final class MiningHostileRecoveryGameTests {
                             && !successor.containsKey("controlled_strip_rear")
                             && "3".equals(successor.get("budget_used"))
                             && "2".equals(successor.get("last_progress_budget"))
-                            && bot.getBlockPos().equals(fixture.retreatFeet())
+                            && bot.blockPosition().equals(fixture.retreatFeet())
                             && bot.getActionPack().isPathExecutorIdle()
                             && bot.getActionPack().isWalkToIdle()
                             && bot.getActionPack().isMiningIdle()
@@ -367,7 +366,7 @@ public final class MiningHostileRecoveryGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:mining_hostile_recovery_game_tests_one_block_cannot_commit_a_two_cell_mining_barricade", maxTicks = 40)
-    public void oneBlockCannotCommitATwoCellMiningBarricade(TestContext context) {
+    public void oneBlockCannotCommitATwoCellMiningBarricade(GameTestHelper context) {
         TunnelFixture fixture = hostileTunnel(context, "MiningBarricadeOneBlockGT");
         AIPlayerEntity bot = fixture.bot();
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 3));
@@ -395,7 +394,7 @@ public final class MiningHostileRecoveryGameTests {
         require(context, EmergencyShelterTask.hasShelterBlock(bot)
                         && !MiningBarricadeTask.hasMaterialsForOpenGate(bot),
                 "one-block fixture did not exercise the shelter/barricade admission boundary");
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         Map<String, String> after = mining.checkpoint();
@@ -417,7 +416,7 @@ public final class MiningHostileRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void survivalGuardPausesMissionInstanceInsteadOfFailingIt(TestContext context) {
+    public void survivalGuardPausesMissionInstanceInsteadOfFailingIt(GameTestHelper context) {
         TunnelFixture fixture = quietTunnel(context, "GuardPauseGT");
         AIPlayerEntity bot = fixture.bot();
         HoldingTask mission = new HoldingTask();
@@ -426,7 +425,7 @@ public final class MiningHostileRecoveryGameTests {
         bot.setHealth(5.0F);
         bot.hurtTime = 5;
 
-        TaskManager.INSTANCE.tickAll(context.getWorld().getServer());
+        TaskManager.INSTANCE.tickAll(context.getLevel().getServer());
 
         require(context, mission.state() == TaskState.PAUSED,
                 "survival guard destroyed mission state: "
@@ -440,16 +439,16 @@ public final class MiningHostileRecoveryGameTests {
     }
 
     @GameTest(maxTicks = 40)
-    public void pausedWorkOnlyResumesAfterThreatAndDamageClear(TestContext context) {
+    public void pausedWorkOnlyResumesAfterThreatAndDamageClear(GameTestHelper context) {
         TunnelFixture fixture = quietTunnel(context, "ResumeGateGT");
         AIPlayerEntity bot = fixture.bot();
-        ZombieEntity zombie = spawnZombie(context, fixture.workFace().north(2));
+        Zombie zombie = spawnZombie(context, fixture.workFace().north(2));
         fixture.hostiles().add(zombie);
 
         bot.setHealth(bot.getMaxHealth());
         bot.hurtTime = 0;
         Threat hostile = new Threat(Threat.Type.HOSTILE, Threat.Severity.MEDIUM,
-                zombie, zombie.getBlockPos());
+                zombie, zombie.blockPosition());
         require(context, !DangerWatcher.canResumePausedWork(bot, Optional.of(hostile)),
                 "visible hostile authorized mission resume");
 
@@ -468,17 +467,17 @@ public final class MiningHostileRecoveryGameTests {
         finish(context, fixture);
     }
 
-    private static TunnelFixture hostileTunnel(TestContext context, String name) {
+    private static TunnelFixture hostileTunnel(GameTestHelper context, String name) {
         TunnelFixture fixture = quietTunnel(context, name);
         BlockPos face = fixture.workFace();
         // Open a chamber in front while preserving four cells of factual one-wide rear tunnel.
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -7; dz <= -1; dz++) {
-                context.getWorld().setBlockState(face.add(dx, -1, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                context.getLevel().setBlock(face.offset(dx, -1, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
                 for (int dy = 0; dy <= 4; dy++) {
-                    context.getWorld().setBlockState(face.add(dx, dy, dz),
-                            Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                    context.getLevel().setBlock(face.offset(dx, dy, dz),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 }
             }
         }
@@ -490,21 +489,21 @@ public final class MiningHostileRecoveryGameTests {
         return fixture;
     }
 
-    private static TunnelFixture quietTunnel(TestContext context, String name) {
-        var world = context.getWorld();
-        world.setTimeOfDay(1000L);
-        BlockPos face = context.getAbsolutePos(new BlockPos(12, 5, 12));
+    private static TunnelFixture quietTunnel(GameTestHelper context, String name) {
+        var world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos face = context.absolutePos(new BlockPos(12, 5, 12));
         for (int dz = 0; dz <= 8; dz++) {
             BlockPos center = face.south(dz);
-            world.setBlockState(center.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(center, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(center.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            world.setBlockState(center.up(2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(center.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(center, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(center.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+            world.setBlock(center.above(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             for (int dy = 0; dy <= 1; dy++) {
-                world.setBlockState(center.east().up(dy),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(center.west().up(dy),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(center.east().above(dy),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(center.west().above(dy),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         // GameTest structures are placed in a void column. Add a broad factual ceiling so the
@@ -512,43 +511,43 @@ public final class MiningHostileRecoveryGameTests {
         // heightmap update at the spawn tick.
         for (int dx = -5; dx <= 5; dx++) {
             for (int dz = -8; dz <= 10; dz++) {
-                world.setBlockState(face.add(dx, 6, dz),
-                        Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+                world.setBlock(face.offset(dx, 6, dz),
+                        Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(face),
-                        180.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(face),
+                        180.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, face.getX() + 0.5D, face.getY(), face.getZ() + 0.5D,
+        bot.teleportTo(world, face.getX() + 0.5D, face.getY(), face.getZ() + 0.5D,
                 Set.of(), 180.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         BlockPos retreat = face.south(4);
-        return new TunnelFixture(name, bot, face.toImmutable(), retreat.toImmutable(),
-                retreat.north().toImmutable(), new ArrayList<>());
+        return new TunnelFixture(name, bot, face.immutable(), retreat.immutable(),
+                retreat.north().immutable(), new ArrayList<>());
     }
 
-    private static ZombieEntity spawnZombie(TestContext context, BlockPos feet) {
-        ZombieEntity zombie = EntityType.ZOMBIE.create(context.getWorld(), SpawnReason.COMMAND);
+    private static Zombie spawnZombie(GameTestHelper context, BlockPos feet) {
+        Zombie zombie = EntityType.ZOMBIE.create(context.getLevel(), EntitySpawnReason.COMMAND);
         if (zombie == null) {
             throw new IllegalStateException("failed to create zombie fixture");
         }
-        zombie.setPersistent();
-        zombie.refreshPositionAndAngles(feet.getX() + 0.5D, feet.getY(),
+        zombie.setPersistenceRequired();
+        zombie.snapTo(feet.getX() + 0.5D, feet.getY(),
                 feet.getZ() + 0.5D, 0.0F, 0.0F);
-        context.getWorld().spawnEntity(zombie);
+        context.getLevel().addFreshEntity(zombie);
         return zombie;
     }
 
-    private static boolean isSealed(TestContext context, BlockPos pos) {
-        var state = context.getWorld().getBlockState(pos);
-        return !state.isReplaceable()
-                && !state.getCollisionShape(context.getWorld(), pos).isEmpty();
+    private static boolean isSealed(GameTestHelper context, BlockPos pos) {
+        var state = context.getLevel().getBlockState(pos);
+        return !state.canBeReplaced()
+                && !state.getCollisionShape(context.getLevel(), pos).isEmpty();
     }
 
-    private static void assertStrictCapabilities(TestContext context, AIPlayerEntity bot) {
+    private static void assertStrictCapabilities(GameTestHelper context, AIPlayerEntity bot) {
         require(context, MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL,
                 "GameTest must run under strict_survival, got " + MinecraftAiConfig.get().profile());
         for (PrivilegedCapability capability : PrivilegedCapability.values()) {
@@ -558,23 +557,23 @@ public final class MiningHostileRecoveryGameTests {
         }
     }
 
-    private static void finish(TestContext context, TunnelFixture fixture) {
-        for (ZombieEntity hostile : fixture.hostiles()) {
+    private static void finish(GameTestHelper context, TunnelFixture fixture) {
+        for (Zombie hostile : fixture.hostiles()) {
             hostile.discard();
         }
         DangerWatcher.INSTANCE.clear(fixture.bot());
         TaskManager.INSTANCE.cancelIntentTasks(fixture.bot(), "gametest_complete");
-        AIPlayerManager.INSTANCE.despawn(fixture.bot().getEntityWorld().getServer(), fixture.name());
-        context.complete();
+        AIPlayerManager.INSTANCE.despawn(fixture.bot().level().getServer(), fixture.name());
+        context.succeed();
     }
 
     private static String encode(BlockPos pos) {
         return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 
@@ -583,7 +582,7 @@ public final class MiningHostileRecoveryGameTests {
                                  BlockPos workFace,
                                  BlockPos retreatFeet,
                                  BlockPos gateFeet,
-                                 List<ZombieEntity> hostiles) {
+                                 List<Zombie> hostiles) {
     }
 
     private static final class HoldingTask extends AbstractTask {

@@ -1,21 +1,20 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.log.BotLogWriter;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 /**
  * Fixture pieces shared by the sensing-arena GameTests ({@code MiningAssistSenseGameTests} and the OreDig /
@@ -25,8 +24,8 @@ import java.util.List;
  */
 public final class SensingArena {
     private static final int SHELL = 3;
-    private static final BlockState STONE = Blocks.STONE.getDefaultState();
-    private static final BlockState AIR = Blocks.AIR.getDefaultState();
+    private static final BlockState STONE = Blocks.STONE.defaultBlockState();
+    private static final BlockState AIR = Blocks.AIR.defaultBlockState();
 
     private SensingArena() {
     }
@@ -58,7 +57,7 @@ public final class SensingArena {
 
     /** A sealed stone box with an air interior. {@code feet} is the interior origin (the bot's feet cell). */
     public static final class Room {
-        public final ServerWorld world;
+        public final ServerLevel world;
         public final BlockPos feet;
         private final int minDx;
         private final int maxDx;
@@ -67,14 +66,14 @@ public final class SensingArena {
         private final int height;
         private final int shellH;
 
-        public Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
+        public Room(GameTestHelper context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height) {
             this(context, relY, minDx, maxDx, minDz, maxDz, height, SHELL);
         }
 
         /** {@code shellH} is the horizontal thickness of the stone around the interior (the vertical one is {@code SHELL}). */
-        public Room(TestContext context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height, int shellH) {
-            this.world = context.getWorld();
-            this.feet = context.getAbsolutePos(new BlockPos(3, relY, 3)).toImmutable();
+        public Room(GameTestHelper context, int relY, int minDx, int maxDx, int minDz, int maxDz, int height, int shellH) {
+            this.world = context.getLevel();
+            this.feet = context.absolutePos(new BlockPos(3, relY, 3)).immutable();
             this.minDx = minDx;
             this.maxDx = maxDx;
             this.minDz = minDz;
@@ -98,25 +97,25 @@ public final class SensingArena {
         private void discardEntities() {
             BlockPos low = at(minDx - shellH, -SHELL, minDz - shellH);
             BlockPos high = at(maxDx + shellH + 1, height + SHELL, maxDz + shellH + 1);
-            Box box = new Box(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
-            for (Entity entity : world.getEntitiesByClass(Entity.class, box, e -> !(e instanceof PlayerEntity))) {
+            AABB box = new AABB(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
+            for (Entity entity : world.getEntitiesOfClass(Entity.class, box, e -> !(e instanceof Player))) {
                 entity.discard();
             }
         }
 
         public BlockPos at(int dx, int dy, int dz) {
-            return feet.add(dx, dy, dz);
+            return feet.offset(dx, dy, dz);
         }
 
         public void set(int dx, int dy, int dz, Block block) {
-            world.setBlockState(at(dx, dy, dz), block.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlock(at(dx, dy, dz), block.defaultBlockState(), Block.UPDATE_ALL);
         }
 
         /** Seals the whole cross-section (interior and shell) at this X plane: a walk-only route cannot pass it. */
         public void wall(int dx) {
             for (int y = -1; y <= height; y++) {
                 for (int z = minDz - shellH; z <= maxDz + shellH; z++) {
-                    world.setBlockState(at(dx, y, z), STONE, Block.NOTIFY_ALL);
+                    world.setBlock(at(dx, y, z), STONE, Block.UPDATE_ALL);
                 }
             }
         }
@@ -133,7 +132,7 @@ public final class SensingArena {
             for (int x = x0; x <= x1; x++) {
                 for (int y = y0; y <= y1; y++) {
                     for (int z = z0; z <= z1; z++) {
-                        world.setBlockState(at(x, y, z), state, Block.NOTIFY_ALL);
+                        world.setBlock(at(x, y, z), state, Block.UPDATE_ALL);
                     }
                 }
             }

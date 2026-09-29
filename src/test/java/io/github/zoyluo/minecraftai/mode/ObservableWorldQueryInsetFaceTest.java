@@ -1,13 +1,13 @@
 package io.github.zoyluo.minecraftai.mode;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,13 +21,13 @@ class ObservableWorldQueryInsetFaceTest {
     void insetEndpointUsesDeterministicTangentsInsideTheRequestedFace() {
         BlockPos pos = new BlockPos(10, 20, 30);
 
-        assertEquals(new Vec3d(10.999D, 20.125D, 30.875D),
+        assertEquals(new Vec3(10.999D, 20.125D, 30.875D),
                 ObservableWorldQuery.insetFaceEndpoint(
                         pos, Direction.EAST, -0.375D, 0.375D));
-        assertEquals(new Vec3d(10.125D, 20.001D, 30.875D),
+        assertEquals(new Vec3(10.125D, 20.001D, 30.875D),
                 ObservableWorldQuery.insetFaceEndpoint(
                         pos, Direction.DOWN, -0.375D, 0.375D));
-        assertEquals(new Vec3d(10.125D, 20.875D, 30.999D),
+        assertEquals(new Vec3(10.125D, 20.875D, 30.999D),
                 ObservableWorldQuery.insetFaceEndpoint(
                         pos, Direction.SOUTH, -0.375D, 0.375D));
     }

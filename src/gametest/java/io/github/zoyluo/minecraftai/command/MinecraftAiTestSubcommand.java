@@ -19,30 +19,29 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
 import io.github.zoyluo.minecraftai.pathfinding.PathfindingResult;
-import net.minecraft.command.CommandRegistryAccess;
-import net.minecraft.command.argument.EntityArgumentType;
-import net.minecraft.command.argument.ItemStackArgumentType;
-import net.minecraft.command.argument.ItemStackArgument;
-import net.minecraft.entity.Entity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import net.minecraft.commands.CommandBuildContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.item.ItemArgument;
+import net.minecraft.commands.arguments.item.ItemInput;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiTestSubcommand {
     private MinecraftAiTestSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build(CommandRegistryAccess registryAccess) {
+    public static LiteralArgumentBuilder<CommandSourceStack> build(CommandBuildContext registryAccess) {
         return literal("test")
                 .then(literal("look")
                         .then(botName()
@@ -91,7 +90,7 @@ public final class MinecraftAiTestSubcommand {
                                                         .executes(MinecraftAiTestSubcommand::place))))))
                 .then(literal("give")
                         .then(botName()
-                                .then(argument("item", ItemStackArgumentType.itemStack(registryAccess))
+                                .then(argument("item", ItemArgument.item(registryAccess))
                                         .executes(context -> give(context, 64))
                                         .then(argument("count", IntegerArgumentType.integer(1, 64))
                                                 .executes(context -> give(context, IntegerArgumentType.getInteger(context, "count")))))))
@@ -104,57 +103,57 @@ public final class MinecraftAiTestSubcommand {
                                 .executes(MinecraftAiTestSubcommand::inventory)))
                 .then(literal("attack")
                         .then(botName()
-                                .then(argument("target", EntityArgumentType.entity())
+                                .then(argument("target", EntityArgument.entity())
                                         .executes(MinecraftAiTestSubcommand::attack))));
     }
 
-    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<ServerCommandSource, String> botName() {
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String> botName() {
         return argument("name", StringArgumentType.word());
     }
 
-    private static int look(CommandContext<ServerCommandSource> context) {
+    private static int look(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
-        Vec3d target = getVec3d(context);
+        Vec3 target = getVec3d(context);
         LookAction.lookAt(bot.get(), target);
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] look started"), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] look started"), false);
         return 1;
     }
 
-    private static int moveTo(CommandContext<ServerCommandSource> context) {
+    private static int moveTo(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
-        Vec3d target = getVec3d(context);
+        Vec3 target = getVec3d(context);
         MovementAction.startWalkTo(bot.get(), target);
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] moveto started"), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] moveto started"), false);
         return 1;
     }
 
-    private static int pathFind(CommandContext<ServerCommandSource> context) {
+    private static int pathFind(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
         AIPlayerEntity player = bot.get();
-        PathfindingResult result = new AStarPathfinder(player, player.getEntityWorld(), player.getBlockPos(), getBlockPos(context)).findPath();
+        PathfindingResult result = new AStarPathfinder(player, player.level(), player.blockPosition(), getBlockPos(context)).findPath();
         String message = "[Minecraft-AI] pathfind success=" + result.success()
                 + ", reason=" + result.reason()
                 + ", nodes=" + result.nodesExplored()
                 + ", ms=" + result.elapsedMs()
                 + ", length=" + result.path().size();
         if (result.success()) {
-            context.getSource().sendFeedback(() -> Text.literal(message), false);
+            context.getSource().sendSuccess(() -> Component.literal(message), false);
             return 1;
         }
-        context.getSource().sendError(Text.literal(message));
+        context.getSource().sendFailure(Component.literal(message));
         return 0;
     }
 
-    private static int pathTo(CommandContext<ServerCommandSource> context) {
+    private static int pathTo(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
@@ -162,27 +161,27 @@ public final class MinecraftAiTestSubcommand {
         return sendResult(context.getSource(), "pathto", MovementAction.startPathTo(bot.get(), getBlockPos(context)));
     }
 
-    private static int stop(CommandContext<ServerCommandSource> context) {
+    private static int stop(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
         MovementAction.stopAll(bot.get());
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] stopped"), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] stopped"), false);
         return 1;
     }
 
-    private static int jump(CommandContext<ServerCommandSource> context) {
+    private static int jump(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
         MovementAction.jumpOnce(bot.get());
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] jump queued"), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] jump queued"), false);
         return 1;
     }
 
-    private static int mine(CommandContext<ServerCommandSource> context) {
+    private static int mine(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
@@ -190,11 +189,11 @@ public final class MinecraftAiTestSubcommand {
         AIPlayerEntity player = bot.get();
         BlockPos pos = getBlockPos(context);
         MiningAction.startMining(player, pos, faceFromPlayer(player, pos));
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] mine started"), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] mine started"), false);
         return 1;
     }
 
-    private static int place(CommandContext<ServerCommandSource> context) {
+    private static int place(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
@@ -203,17 +202,17 @@ public final class MinecraftAiTestSubcommand {
         return sendResult(context.getSource(), "place", result);
     }
 
-    private static int give(CommandContext<ServerCommandSource> context, int count) throws CommandSyntaxException {
+    private static int give(CommandContext<CommandSourceStack> context, int count) throws CommandSyntaxException {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
-        ItemStackArgument itemArgument = ItemStackArgumentType.getItemStackArgument(context, "item");
-        ItemStack stack = itemArgument.createStack(count, false);
+        ItemInput itemArgument = ItemArgument.getItem(context, "item");
+        ItemStack stack = itemArgument.createItemStack(count, false);
         return sendResult(context.getSource(), "give", InventoryAction.giveItem(bot.get(), stack));
     }
 
-    private static int select(CommandContext<ServerCommandSource> context) {
+    private static int select(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
@@ -222,7 +221,7 @@ public final class MinecraftAiTestSubcommand {
         return sendResult(context.getSource(), "select", InventoryAction.selectHotbar(bot.get(), slot));
     }
 
-    private static int inventory(CommandContext<ServerCommandSource> context) {
+    private static int inventory(CommandContext<CommandSourceStack> context) {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
@@ -233,20 +232,20 @@ public final class MinecraftAiTestSubcommand {
                 : summary.entrySet().stream()
                 .map(entry -> entry.getKey() + " x " + entry.getValue())
                 .collect(Collectors.joining(", "));
-        context.getSource().sendFeedback(() -> Text.literal("[Minecraft-AI] inventory: " + text), false);
+        context.getSource().sendSuccess(() -> Component.literal("[Minecraft-AI] inventory: " + text), false);
         return summary.size();
     }
 
-    private static int attack(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+    private static int attack(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         Optional<AIPlayerEntity> bot = getBot(context);
         if (bot.isEmpty()) {
             return 0;
         }
-        Entity target = EntityArgumentType.getEntity(context, "target");
+        Entity target = EntityArgument.getEntity(context, "target");
         return sendResult(context.getSource(), "attack", InteractAction.attackEntity(bot.get(), target));
     }
 
-    private static Optional<AIPlayerEntity> getBot(CommandContext<ServerCommandSource> context) {
+    private static Optional<AIPlayerEntity> getBot(CommandContext<CommandSourceStack> context) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(context.getSource(), "command:test")) {
             return Optional.empty();
         }
@@ -255,23 +254,23 @@ public final class MinecraftAiTestSubcommand {
                 context.getSource(), name, BotAuthorizationPolicy.Operation.ADMIN, "command:test_target");
     }
 
-    private static int sendResult(ServerCommandSource source, String action, ActionResult result) {
+    private static int sendResult(CommandSourceStack source, String action, ActionResult result) {
         if (result.isSuccess() || result.isInProgress()) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] " + action + " " + result.status().name().toLowerCase()), false);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] " + action + " " + result.status().name().toLowerCase()), false);
             return 1;
         }
-        source.sendError(Text.literal("[Minecraft-AI] " + action + " failed: " + result.reason()));
+        source.sendFailure(Component.literal("[Minecraft-AI] " + action + " failed: " + result.reason()));
         return 0;
     }
 
-    private static Vec3d getVec3d(CommandContext<ServerCommandSource> context) {
-        return new Vec3d(
+    private static Vec3 getVec3d(CommandContext<CommandSourceStack> context) {
+        return new Vec3(
                 DoubleArgumentType.getDouble(context, "x"),
                 DoubleArgumentType.getDouble(context, "y"),
                 DoubleArgumentType.getDouble(context, "z"));
     }
 
-    private static BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
+    private static BlockPos getBlockPos(CommandContext<CommandSourceStack> context) {
         return new BlockPos(
                 IntegerArgumentType.getInteger(context, "x"),
                 IntegerArgumentType.getInteger(context, "y"),
@@ -279,7 +278,7 @@ public final class MinecraftAiTestSubcommand {
     }
 
     private static Direction faceFromPlayer(AIPlayerEntity player, BlockPos pos) {
-        Vec3d fromBlockToEye = player.getEyePos().subtract(pos.toCenterPos());
-        return Direction.getFacing(fromBlockToEye);
+        Vec3 fromBlockToEye = player.getEyePosition().subtract(pos.getCenter());
+        return Direction.getApproximateNearest(fromBlockToEye);
     }
 }

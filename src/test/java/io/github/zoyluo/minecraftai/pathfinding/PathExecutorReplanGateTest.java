@@ -1,12 +1,12 @@
 package io.github.zoyluo.minecraftai.pathfinding;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,7 +33,7 @@ class PathExecutorReplanGateTest {
 
     @Test
     void compatibilityConstructorIsFailClosedAndExplicitPolicyCannotEscalate() {
-        PathExecutor compatibility = new PathExecutor(List.of(), BlockPos.ORIGIN);
+        PathExecutor compatibility = new PathExecutor(List.of(), BlockPos.ZERO);
         assertFalse(compatibility.replanCanPillar(),
                 "legacy callers must not gain disposable pillars during a replan");
         assertFalse(compatibility.replanAllowDig(),
@@ -41,31 +41,31 @@ class PathExecutorReplanGateTest {
         assertTrue(compatibility.protectedStoneLikeReserve() == 0,
                 "legacy callers must retain the reserve=0 compatibility contract");
 
-        PathExecutor ordinary = new PathExecutor(List.of(), BlockPos.ORIGIN, true, true);
+        PathExecutor ordinary = new PathExecutor(List.of(), BlockPos.ZERO, true, true);
         assertTrue(ordinary.replanCanPillar());
         assertTrue(ordinary.replanAllowDig());
         assertTrue(ordinary.protectedStoneLikeReserve() == 0);
 
-        PathExecutor walkingOnly = new PathExecutor(List.of(), BlockPos.ORIGIN, false, false);
+        PathExecutor walkingOnly = new PathExecutor(List.of(), BlockPos.ZERO, false, false);
         assertFalse(walkingOnly.replanCanPillar());
         assertFalse(walkingOnly.replanAllowDig());
 
         PathExecutor scoped = new PathExecutor(
-                List.of(), BlockPos.ORIGIN, true, true, 76);
+                List.of(), BlockPos.ZERO, true, true, 76);
         assertTrue(scoped.replanCanPillar());
         assertTrue(scoped.replanAllowDig());
         assertTrue(scoped.protectedStoneLikeReserve() == 76,
                 "the executor must own the mission reserve for its entire lifetime");
 
         PathExecutor normalized = new PathExecutor(
-                List.of(), BlockPos.ORIGIN, true, true, -1);
+                List.of(), BlockPos.ZERO, true, true, -1);
         assertTrue(normalized.protectedStoneLikeReserve() == 0,
                 "negative external reserve input must normalize to the compatibility floor");
 
         PathExecutor.RouteContract routeContract =
                 PathExecutor.RouteContract.constrainedSurface(48, new BlockPos(8, 64, 8));
         PathExecutor constrained = new PathExecutor(
-                List.of(), BlockPos.ORIGIN, true, true, 12, routeContract);
+                List.of(), BlockPos.ZERO, true, true, 12, routeContract);
         assertTrue(constrained.routeContract().equals(routeContract),
                 "executor must retain the immutable route contract for every internal replan");
     }

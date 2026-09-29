@@ -1,11 +1,10 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 /**
  * Per-mission memory of which ground the bot has already dug through or walked (mining-assist design
@@ -82,16 +81,16 @@ public final class CoverageGrid {
         if (length <= 0) {
             return 1.0D;
         }
-        Direction across = dir.rotateYClockwise();
+        Direction across = dir.getClockWise();
         int sampled = 0;
         int fresh = 0;
         for (int along = 0; along < length; along += VOXEL_SIZE) {
-            BlockPos onAxis = origin.offset(dir, along);
+            BlockPos onAxis = origin.relative(dir, along);
             for (int side = -halfWidth; side <= halfWidth; side += VOXEL_SIZE) {
-                BlockPos onRow = onAxis.offset(across, side);
+                BlockPos onRow = onAxis.relative(across, side);
                 for (int up = -yBand; up <= yBand; up++) {
                     sampled++;
-                    if (!isMarked(onRow.up(up))) {
+                    if (!isMarked(onRow.above(up))) {
                         fresh++;
                     }
                 }

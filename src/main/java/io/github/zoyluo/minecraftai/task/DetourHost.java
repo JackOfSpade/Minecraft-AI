@@ -7,11 +7,10 @@ import io.github.zoyluo.minecraftai.mining.assist.ObservedReach;
 import io.github.zoyluo.minecraftai.mining.assist.SafeGate;
 import io.github.zoyluo.minecraftai.mining.assist.SafeReason;
 import io.github.zoyluo.minecraftai.mining.assist.SightingLedger;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Everything the detour engine ({@link OreDigDetourEngine}) and its start selector ({@link DetourStartSelector})
@@ -102,7 +101,7 @@ interface DetourHost {
      */
     record Anchor(BlockPos face, int stripDirIndex, int stripLegIndex, int stripStepsLeft, int stripLegLength) {
         public Anchor {
-            face = face.toImmutable();
+            face = face.immutable();
         }
 
         int y() {
@@ -113,7 +112,7 @@ interface DetourHost {
     /** A stand pose for one ore. {@code zeroTransit} is true when {@code stand} is the bot's current feet cell (no route needed). */
     record Pose(BlockPos stand, boolean zeroTransit) {
         public Pose {
-            stand = stand.toImmutable();
+            stand = stand.immutable();
         }
     }
 
@@ -182,7 +181,7 @@ interface DetourHost {
     BlockPos feet();
 
     /** The bot's eye position (distance to a block centre is the admission's eye distance). */
-    Vec3d eyePos();
+    Vec3 eyePos();
 
     /** The lowest Y a stand pose or route may use: {@code OreDigTask.MIN_Y + 1}, that is -59. Walk-only never digs down. */
     int minStandY();

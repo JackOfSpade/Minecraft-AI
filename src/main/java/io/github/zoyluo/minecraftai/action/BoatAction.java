@@ -2,20 +2,19 @@ package io.github.zoyluo.minecraftai.action;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import net.minecraft.entity.vehicle.AbstractBoatEntity;
-import net.minecraft.item.BoatItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.item.BoatItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Vanilla-facing boat interactions for clientless AI players.
@@ -31,7 +30,7 @@ public final class BoatAction {
     private BoatAction() {
     }
 
-    public record Placement(Optional<AbstractBoatEntity> boat, String reason) {
+    public record Placement(Optional<AbstractBoat> boat, String reason) {
         public boolean success() {
             return boat.isPresent();
         }
@@ -39,70 +38,70 @@ public final class BoatAction {
 
     /** Places the currently held boat item into the selected water cell through vanilla item use. */
     public static Placement placeBoatInWater(AIPlayerEntity player, BlockPos water) {
-        ServerWorld world = player.getEntityWorld();
-        if (!world.getFluidState(water).isIn(net.minecraft.registry.tag.FluidTags.WATER)) {
+        ServerLevel world = player.level();
+        if (!world.getFluidState(water).is(net.minecraft.tags.FluidTags.WATER)) {
             return new Placement(Optional.empty(), "target_not_water");
         }
-        ItemStack stack = player.getMainHandStack();
+        ItemStack stack = player.getMainHandItem();
         if (!(stack.getItem() instanceof BoatItem)) {
             return new Placement(Optional.empty(), "held_item_not_boat");
         }
-        if (player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(water))
-                > player.getBlockInteractionRange() * player.getBlockInteractionRange()) {
+        if (player.getEyePosition().distanceToSqr(Vec3.atCenterOf(water))
+                > player.blockInteractionRange() * player.blockInteractionRange()) {
             return new Placement(Optional.empty(), "water_out_of_reach");
         }
 
         Set<UUID> existing = nearbyBoats(world, water).stream()
-                .map(AbstractBoatEntity::getUuid)
+                .map(AbstractBoat::getUUID)
                 .collect(java.util.stream.Collectors.toCollection(HashSet::new));
-        LookAction.lookAt(player, Vec3d.ofCenter(water));
-        ActionResult used = InteractAction.useItemInAir(player, Hand.MAIN_HAND);
+        LookAction.lookAt(player, Vec3.atCenterOf(water));
+        ActionResult used = InteractAction.useItemInAir(player, InteractionHand.MAIN_HAND);
         if (used.isFailed()) {
             return new Placement(Optional.empty(), "boat_use_failed:" + used.reason());
         }
 
-        Optional<AbstractBoatEntity> placed = nearbyBoats(world, water).stream()
-                .filter(boat -> !existing.contains(boat.getUuid()))
-                .min(Comparator.comparingDouble(boat -> boat.squaredDistanceTo(Vec3d.ofCenter(water))));
+        Optional<AbstractBoat> placed = nearbyBoats(world, water).stream()
+                .filter(boat -> !existing.contains(boat.getUUID()))
+                .min(Comparator.comparingDouble(boat -> boat.distanceToSqr(Vec3.atCenterOf(water))));
         if (placed.isEmpty()) {
             return new Placement(Optional.empty(), "boat_not_created");
         }
-        AbstractBoatEntity boat = placed.get();
+        AbstractBoat boat = placed.get();
         BotLog.action(player, "boat_placed",
                 "water", water.toShortString(),
-                "boat_id", boat.getUuid());
+                "boat_id", boat.getUUID());
         return new Placement(Optional.of(boat), "");
     }
 
     /** Uses the normal boat interaction path; successful interaction is verified by the caller. */
-    public static ActionResult boardBoat(AIPlayerEntity player, AbstractBoatEntity boat) {
+    public static ActionResult boardBoat(AIPlayerEntity player, AbstractBoat boat) {
         if (boat == null || !boat.isAlive()) {
             return ActionResult.failed("boat_unavailable");
         }
         if (player.getVehicle() == boat) {
             return ActionResult.SUCCESS;
         }
-        if (player.squaredDistanceTo(boat) > BOARD_REACH * BOARD_REACH) {
+        if (player.distanceToSqr(boat) > BOARD_REACH * BOARD_REACH) {
             return ActionResult.failed("boat_out_of_reach");
         }
-        LookAction.lookAt(player, boat.getEntityPos().add(0.0D, boat.getHeight() * 0.5D, 0.0D));
-        ActionResult result = InteractAction.useItemOnEntity(player, boat, Hand.MAIN_HAND);
+        LookAction.lookAt(player, boat.position().add(0.0D, boat.getBbHeight() * 0.5D, 0.0D));
+        ActionResult result = InteractAction.useItemOnEntity(player, boat, InteractionHand.MAIN_HAND);
         if (result.isSuccess()) {
-            BotLog.action(player, "boat_board_requested", "boat_id", boat.getUuid());
+            BotLog.action(player, "boat_board_requested", "boat_id", boat.getUUID());
         }
         return result;
     }
 
     /** Clears all vanilla paddle inputs before a wait, dismount, or task transition. */
-    public static void stopBoat(AbstractBoatEntity boat) {
+    public static void stopBoat(AbstractBoat boat) {
         if (boat != null && boat.isAlive()) {
-            boat.setInputs(false, false, false, false);
+            boat.setInput(false, false, false, false);
         }
     }
 
-    private static java.util.List<AbstractBoatEntity> nearbyBoats(ServerWorld world, BlockPos water) {
-        return world.getEntitiesByClass(AbstractBoatEntity.class,
-                new Box(water).expand(PLACE_SCAN_RADIUS, 2.0D, PLACE_SCAN_RADIUS),
+    private static java.util.List<AbstractBoat> nearbyBoats(ServerLevel world, BlockPos water) {
+        return world.getEntitiesOfClass(AbstractBoat.class,
+                new AABB(water).inflate(PLACE_SCAN_RADIUS, 2.0D, PLACE_SCAN_RADIUS),
                 boat -> boat.isAlive());
     }
 }

@@ -8,16 +8,16 @@ import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.mode.OperatingProfile;
 import io.github.zoyluo.minecraftai.pathfinding.AStarPathfinder;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.block.ShapeContext;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 public final class BuildAction {
     // Shared with ObservableWorldQuery.FACE_SAMPLE_INSET (both sample the same 3x3 inset grid on a face).
@@ -37,13 +37,13 @@ public final class BuildAction {
     private BuildAction() {
     }
 
-    public static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face, Hand hand) {
-        double reach = player.getBlockInteractionRange();
+    public static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face, InteractionHand hand) {
+        double reach = player.blockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
                 MinecraftAiConfig.get().perception().radius(), reach);
         // Vanilla measures block interaction reach against the block's bounding box, not its
         // center. The center may be outside reach while a face inset is still a legal click.
-        ItemStack stack = player.getStackInHand(hand);
+        ItemStack stack = player.getItemInHand(hand);
         if (stack.isEmpty()) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
             return ActionResult.failed("empty_hand");
@@ -56,27 +56,27 @@ public final class BuildAction {
         if (hit == null) {
             return ActionResult.failed("support_face_not_visible");
         }
-        if (!player.canInteractWithBlockAt(against, 0.0D)) {
+        if (!player.isWithinBlockInteractionRange(against, 0.0D)) {
             return ActionResult.failed("support_out_of_reach_or_sight");
         }
-        BlockPos destination = against.offset(face);
-        var before = player.getEntityWorld().getBlockState(destination);
-        net.minecraft.util.ActionResult result = player.interactionManager.interactBlock(
+        BlockPos destination = against.relative(face);
+        var before = player.level().getBlockState(destination);
+        net.minecraft.world.InteractionResult result = player.gameMode.useItemOn(
                 player,
-                player.getEntityWorld(),
+                player.level(),
                 stack,
                 hand,
                 hit);
-        var after = player.getEntityWorld().getBlockState(destination);
-        if (result.isAccepted() && !after.equals(before)) {
-            player.swingHand(hand);
-            player.updateLastActionTime();
+        var after = player.level().getBlockState(destination);
+        if (result.consumesAction() && !after.equals(before)) {
+            player.swing(hand);
+            player.resetLastActionTime();
             AStarPathfinder.invalidateCache("block_place");
             BotEdits.notePlaced(player, destination);
             BotLog.action(player, "place", "pos", LogFields.pos(destination), "face", face, "item", item);
             return ActionResult.SUCCESS;
         }
-        String reason = result.isAccepted() ? "accepted_without_block_change" : result.getClass().getSimpleName();
+        String reason = result.consumesAction() ? "accepted_without_block_change" : result.getClass().getSimpleName();
         BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.ERROR, player, "place_failed",
                 "pos", LogFields.pos(destination), "reason", reason);
         return ActionResult.failed("interact_block_" + reason);
@@ -87,19 +87,19 @@ public final class BuildAction {
         // Do not pre-filter supports through canObserveBlock's six face-center rays. A support
         // can expose only a clickable edge. placeBlock provides the strict observation proof by
         // requiring an exact vanilla ray hit before it reads or interacts with the destination.
-        BlockPos below = pos.down();
-        ActionResult belowResult = placeBlock(player, below, Direction.UP, Hand.MAIN_HAND);
+        BlockPos below = pos.below();
+        ActionResult belowResult = placeBlock(player, below, Direction.UP, InteractionHand.MAIN_HAND);
         if (belowResult.isSuccess()) {
             return belowResult;
         }
         lastFailure = preferPlacementFailure(lastFailure, belowResult);
 
         for (Direction direction : Direction.values()) {
-            BlockPos against = pos.offset(direction.getOpposite());
+            BlockPos against = pos.relative(direction.getOpposite());
             if (against.equals(below)) {
                 continue;
             }
-            ActionResult result = placeBlock(player, against, direction, Hand.MAIN_HAND);
+            ActionResult result = placeBlock(player, against, direction, InteractionHand.MAIN_HAND);
             if (result.isSuccess()) {
                 return result;
             }
@@ -108,7 +108,7 @@ public final class BuildAction {
         if (MinecraftAiConfig.get().profile() == OperatingProfile.STRICT_SURVIVAL) {
             return lastFailure;
         }
-        ActionResult fallback = directPlaceFallback(player, pos, Hand.MAIN_HAND);
+        ActionResult fallback = directPlaceFallback(player, pos, InteractionHand.MAIN_HAND);
         if (fallback.isSuccess()) {
             return fallback;
         }
@@ -130,15 +130,15 @@ public final class BuildAction {
      * to a cell.
      */
     public static boolean canAcceptPlacementAt(AIPlayerEntity player, BlockPos pos) {
-        double reach = player.getBlockInteractionRange();
+        double reach = player.blockInteractionRange();
         double sampleRange = exactPlacementSampleRange(
                 MinecraftAiConfig.get().perception().radius(), reach);
-        BlockPos below = pos.down();
+        BlockPos below = pos.below();
         if (hasAcceptableSupportFace(player, below, Direction.UP, sampleRange)) {
             return true;
         }
         for (Direction direction : Direction.values()) {
-            BlockPos against = pos.offset(direction.getOpposite());
+            BlockPos against = pos.relative(direction.getOpposite());
             if (against.equals(below)) {
                 continue;
             }
@@ -154,7 +154,7 @@ public final class BuildAction {
                                                      Direction face,
                                                      double sampleRange) {
         return probeSupportFaceHit(player, against, face, sampleRange) != null
-                && player.canInteractWithBlockAt(against, 0.0D);
+                && player.isWithinBlockInteractionRange(against, 0.0D);
     }
 
     static ActionResult preferPlacementFailure(ActionResult current, ActionResult candidate) {
@@ -222,18 +222,18 @@ public final class BuildAction {
                                                    double sampleRange,
                                                    boolean rotate) {
         double sampleRangeSquared = sampleRange * sampleRange;
-        Vec3d eye = player.getEyePos();
-        Vec3d center = Vec3d.ofCenter(against).add(
-                face.getOffsetX() * 0.5D,
-                face.getOffsetY() * 0.5D,
-                face.getOffsetZ() * 0.5D);
+        Vec3 eye = player.getEyePosition();
+        Vec3 center = Vec3.atCenterOf(against).add(
+                face.getStepX() * 0.5D,
+                face.getStepY() * 0.5D,
+                face.getStepZ() * 0.5D);
         for (double[] offset : FACE_SAMPLE_OFFSETS) {
-            Vec3d target = switch (face.getAxis()) {
+            Vec3 target = switch (face.getAxis()) {
                 case X -> center.add(0.0D, offset[0], offset[1]);
                 case Y -> center.add(offset[0], 0.0D, offset[1]);
                 case Z -> center.add(offset[0], offset[1], 0.0D);
             };
-            if (eye.squaredDistanceTo(target) > sampleRangeSquared) {
+            if (eye.distanceToSqr(target) > sampleRangeSquared) {
                 continue;
             }
             BlockHitResult hit = rotate
@@ -243,7 +243,7 @@ public final class BuildAction {
                     || hit.getType() != HitResult.Type.BLOCK
                     || hit.getBlockPos() == null
                     || !hit.getBlockPos().equals(against)
-                    || hit.getSide() != face) {
+                    || hit.getDirection() != face) {
                 continue;
             }
             return hit;
@@ -252,9 +252,9 @@ public final class BuildAction {
     }
 
     /** The real placement's ray: turn the head to {@code target}, then vanilla's own look-direction raycast. */
-    private static BlockHitResult rotateAndRaycast(AIPlayerEntity player, Vec3d target, double sampleRange) {
+    private static BlockHitResult rotateAndRaycast(AIPlayerEntity player, Vec3 target, double sampleRange) {
         LookAction.lookAt(player, target);
-        var lookedAt = player.raycast(sampleRange, 1.0F, false);
+        var lookedAt = player.pick(sampleRange, 1.0F, false);
         return lookedAt instanceof BlockHitResult hit ? hit : null;
     }
 
@@ -264,46 +264,46 @@ public final class BuildAction {
      * same shape and fluid handling (OUTLINE, no fluids) -- built directly from the two points instead of
      * through the entity's own look vector, so it never reads or writes yaw or pitch.
      */
-    private static BlockHitResult rayTo(AIPlayerEntity player, Vec3d eye, Vec3d target, double sampleRange) {
-        Vec3d toTarget = target.subtract(eye);
-        Vec3d direction = toTarget.lengthSquared() < 1.0E-9D ? new Vec3d(0.0D, -1.0D, 0.0D) : toTarget.normalize();
-        Vec3d end = eye.add(direction.multiply(sampleRange));
-        return player.getEntityWorld().raycast(new RaycastContext(
-                eye, end, RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, player));
+    private static BlockHitResult rayTo(AIPlayerEntity player, Vec3 eye, Vec3 target, double sampleRange) {
+        Vec3 toTarget = target.subtract(eye);
+        Vec3 direction = toTarget.lengthSqr() < 1.0E-9D ? new Vec3(0.0D, -1.0D, 0.0D) : toTarget.normalize();
+        Vec3 end = eye.add(direction.scale(sampleRange));
+        return player.level().clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
     }
 
-    private static ActionResult directPlaceFallback(AIPlayerEntity player, BlockPos pos, Hand hand) {
-        double reach = player.getBlockInteractionRange();
-        if (player.getEyePos().squaredDistanceTo(pos.toCenterPos()) > reach * reach) {
+    private static ActionResult directPlaceFallback(AIPlayerEntity player, BlockPos pos, InteractionHand hand) {
+        double reach = player.blockInteractionRange();
+        if (player.getEyePosition().distanceToSqr(pos.getCenter()) > reach * reach) {
             return ActionResult.failed("target_out_of_reach");
         }
         if (!ObservableWorldQuery.canObserveCell(player, pos)) {
             return ActionResult.failed("target_not_visible");
         }
-        ItemStack stack = player.getStackInHand(hand);
+        ItemStack stack = player.getItemInHand(hand);
         if (!(stack.getItem() instanceof BlockItem blockItem)) {
             return ActionResult.failed("not_block_item");
         }
         var item = stack.getItem();
-        var existing = player.getEntityWorld().getBlockState(pos);
+        var existing = player.level().getBlockState(pos);
         // Allow replaceable cells (fluid source blocks, tall grass, etc.): capping lava is just
         // placing a block directly onto a fluid cell, a legal vanilla player action.
-        if (!existing.isAir() && !existing.isReplaceable()) {
+        if (!existing.isAir() && !existing.canBeReplaced()) {
             return ActionResult.failed("target_not_air");
         }
-        var placementState = blockItem.getBlock().getDefaultState();
-        if (!placementState.canPlaceAt(player.getEntityWorld(), pos)
-                || !player.getEntityWorld().canPlace(placementState, pos, ShapeContext.of(player))) {
+        var placementState = blockItem.getBlock().defaultBlockState();
+        if (!placementState.canSurvive(player.level(), pos)
+                || !player.level().isUnobstructed(placementState, pos, CollisionContext.of(player))) {
             return ActionResult.failed("target_blocked_or_unsupported");
         }
-        if (!player.getEntityWorld().setBlockState(pos, placementState, 3)) {
+        if (!player.level().setBlock(pos, placementState, 3)) {
             return ActionResult.failed("world_mutation_rejected");
         }
-        if (!player.getAbilities().creativeMode) {
-            stack.decrement(1);
+        if (!player.getAbilities().instabuild) {
+            stack.shrink(1);
         }
-        player.swingHand(hand);
-        player.updateLastActionTime();
+        player.swing(hand);
+        player.resetLastActionTime();
         AStarPathfinder.invalidateCache("block_place_fallback");
         BotEdits.notePlaced(player, pos);
         BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", item);

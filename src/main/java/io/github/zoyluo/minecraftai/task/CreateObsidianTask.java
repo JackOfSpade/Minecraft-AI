@@ -14,21 +14,6 @@ import io.github.zoyluo.minecraftai.mining.MiningEvidenceAudit;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.fluid.Fluids;
-import net.minecraft.item.Items;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.LightType;
-
 import java.util.Comparator;
 import java.util.ArrayDeque;
 import java.util.HashSet;
@@ -39,6 +24,20 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Creates and mines obsidian through vanilla survival interactions only.
@@ -103,17 +102,17 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
     record PourPlan(BlockPos support, Direction face) {
         PourPlan {
-            support = support.toImmutable();
+            support = support.immutable();
         }
 
         BlockPos destination() {
-            return support.offset(face);
+            return support.relative(face);
         }
     }
 
     private record ObservedSearchSolid(BlockPos pos, BlockState state) {
         private ObservedSearchSolid {
-            pos = pos.toImmutable();
+            pos = pos.immutable();
         }
     }
 
@@ -269,7 +268,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         rejectedObsidian.clear();
         rejectedPourDestinations.clear();
         clearWorkTargets();
-        lastSearchMotionPos = bot.getBlockPos().toImmutable();
+        lastSearchMotionPos = bot.blockPosition().immutable();
         if (restoredCheckpoint == null) {
             invBaseline = inventoryNow;
             collected = 0;
@@ -279,7 +278,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             budgetOffset = 0;
             servicedCollected = 0;
             pendingServiceBoundary = 0;
-            searchCursor = ObsidianSearchCursor.initial(bot.getBlockPos(), SEARCH_BASE_LEG);
+            searchCursor = ObsidianSearchCursor.initial(bot.blockPosition(), SEARCH_BASE_LEG);
             enterScan(bot);
             return;
         }
@@ -305,7 +304,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         // replacement or checkpoint restart promote that unrelated quantity into mission credit.
         collected = restoredCollected;
         if (activeBreakPos != null
-                && !bot.getEntityWorld().getBlockState(activeBreakPos).isOf(Blocks.OBSIDIAN)) {
+                && !bot.level().getBlockState(activeBreakPos).is(Blocks.OBSIDIAN)) {
             promoteActiveBreakToPickup(bot);
             if (waterSource != null) {
                 // The break may have committed immediately before the restart. Keep the live
@@ -356,21 +355,21 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return;
         }
         if (phase == Phase.RETURN_TO_RIM && returnRim != null
-                && bot.getBlockPos().equals(returnRim)) {
+                && bot.blockPosition().equals(returnRim)) {
             enterScan(bot);
             return;
         }
         if (phase == Phase.RETURN_TO_SCAN_FACE
-                || (phase == Phase.SCAN && !bot.getBlockPos().equals(scanResumeFace))) {
+                || (phase == Phase.SCAN && !bot.blockPosition().equals(scanResumeFace))) {
             BotLog.task(bot, "create_obsidian_scan_restored",
                     "face", scanResumeFace.toShortString(),
-                    "from", bot.getBlockPos().toShortString(),
+                    "from", bot.blockPosition().toShortString(),
                     "produced", searchCursor.produced());
             phase = Phase.RETURN_TO_SCAN_FACE;
             return;
         }
         if (phase == Phase.RETURN_TO_SEARCH_FACE
-                || (phase == Phase.SEARCH && !bot.getBlockPos().equals(searchCursor.face()))) {
+                || (phase == Phase.SEARCH && !bot.blockPosition().equals(searchCursor.face()))) {
             BotLog.task(bot, "create_obsidian_search_restored",
                     "face", searchCursor.face().toShortString(),
                     "leg", searchCursor.legIndex(),
@@ -401,7 +400,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             fail(timeoutReason());
             return;
         }
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
 
         HarvestCore.forcePickupNearbyAnyOf(bot, Set.of(Items.OBSIDIAN), 4.0D, 4.0D);
         int inventoryTotal = Math.max(0,
@@ -486,10 +485,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             if (phase == Phase.SCAN) {
                 miner.cancel(bot);
                 bot.getActionPack().stopAll();
-                BlockPos current = bot.getBlockPos();
-                if (!bot.getEntityWorld().getFluidState(current).isEmpty()
-                        || !bot.getEntityWorld().getFluidState(current.up()).isEmpty()
-                        || !Standability.isStandable(bot.getEntityWorld(), current)) {
+                BlockPos current = bot.blockPosition();
+                if (!bot.level().getFluidState(current).isEmpty()
+                        || !bot.level().getFluidState(current.above()).isEmpty()
+                        || !Standability.isStandable(bot.level(), current)) {
                     fail("create_obsidian_service_boundary_unsafe_pose:"
                             + current.toShortString());
                 }
@@ -539,7 +538,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return;
         }
         BlockPos found = nearestObservableFluid(bot,
-                fluid -> fluid.isIn(FluidTags.WATER) && fluid.isStill(), null);
+                fluid -> fluid.is(FluidTags.WATER) && fluid.isSource(), null);
         if (found == null) {
             fail("create_obsidian_no_water_source collected=" + collected);
             return;
@@ -549,14 +548,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             fail("create_obsidian_no_safe_water_stand pos=" + found.toShortString());
             return;
         }
-        waterTarget = found.toImmutable();
+        waterTarget = found.immutable();
         standPos = stand;
         BotLog.action(bot, "create_obsidian_water_found", "pos", waterTarget.toShortString());
         enter(Phase.APPROACH_WATER);
     }
 
     private void approachWater(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         if (waterTarget == null || !isStillWater(world, waterTarget)) {
             waterTarget = null;
             enter(Phase.FIND_WATER);
@@ -583,7 +582,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void scan(AIPlayerEntity bot) {
-        BlockPos scanFace = bot.getBlockPos().toImmutable();
+        BlockPos scanFace = bot.blockPosition().immutable();
         if (scanFace.equals(lastScannedFace)
                 && lastScannedEpoch == searchCursor.topologyEpoch()) {
             beginSearch(bot, "already_scanned_work_face");
@@ -597,7 +596,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         Set<BlockPos> deferred = new HashSet<>();
         for (int attempt = 0; attempt < 12; attempt++) {
             BlockPos found = nearestObservableCell(bot,
-                    state -> state.isOf(Blocks.OBSIDIAN),
+                    state -> state.is(Blocks.OBSIDIAN),
                     pos -> !obsidianRejected(pos) && !deferred.contains(pos));
             if (found == null) {
                 break;
@@ -609,24 +608,24 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 continue;
             }
             if (hasObservableNearbyLava(bot, found, 2)) {
-                deferred.add(found.toImmutable());
+                deferred.add(found.immutable());
                 continue;
             }
             BlockPos stand = isCurrentDirectMinePose(bot, found)
-                    ? bot.getBlockPos().toImmutable()
+                    ? bot.blockPosition().immutable()
                     : findWorkStand(bot, found, null, true);
             if (stand == null) {
                 rejectObsidian(found);
                 continue;
             }
-            obsidian = found.toImmutable();
+            obsidian = found.immutable();
             standPos = stand;
             obsidianStandHint = stand;
             lastProgressTick = totalBudget();
             BotLog.action(bot, "create_obsidian_obsidian_found",
                     "pos", obsidian.toShortString(),
                     "stand", standPos.toShortString(),
-                    "reuse_current", standPos.equals(bot.getBlockPos()));
+                    "reuse_current", standPos.equals(bot.blockPosition()));
             enter(Phase.APPROACH_OBSIDIAN);
             return;
         }
@@ -638,7 +637,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
         for (int attempt = 0; attempt < 12; attempt++) {
             BlockPos found = nearestObservableFluid(bot,
-                    fluid -> fluid.isIn(FluidTags.LAVA) && fluid.isStill(),
+                    fluid -> fluid.is(FluidTags.LAVA) && fluid.isSource(),
                     pos -> !lavaRejected(pos));
             if (found == null) {
                 break;
@@ -650,7 +649,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 rejectLava(found);
                 continue;
             }
-            lavaTarget = found.toImmutable();
+            lavaTarget = found.immutable();
             pourPlan = plan;
             standPos = stand;
             lastProgressTick = totalBudget();
@@ -672,7 +671,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         // edge from outside the danger radius; the water either exposes or converts the source,
         // after which the normal scan can continue without a hidden read.
         BlockPos clue = nearestObservableFluid(bot,
-                fluid -> fluid.isIn(FluidTags.LAVA), pos -> !lavaRejected(pos));
+                fluid -> fluid.is(FluidTags.LAVA), pos -> !lavaRejected(pos));
         if (clue == null) {
             beginSearch(bot, "no_observable_lava");
             return;
@@ -685,7 +684,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             beginSearch(bot, "unsafe_visible_lava");
             return;
         }
-        lavaClue = clue.toImmutable();
+        lavaClue = clue.immutable();
         pourPlan = controlPlan;
         standPos = controlStand;
         BotLog.action(bot, "create_obsidian_flow_control",
@@ -712,11 +711,11 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         standPos = null;
         pourPlan = null;
         rejectedPourDestinations.clear();
-        lastSearchMotionPos = bot.getBlockPos().toImmutable();
-        if (!bot.getBlockPos().equals(searchCursor.face())) {
+        lastSearchMotionPos = bot.blockPosition().immutable();
+        if (!bot.blockPosition().equals(searchCursor.face())) {
             BotLog.action(bot, "create_obsidian_search_return",
                     "reason", reason,
-                    "from", bot.getBlockPos().toShortString(),
+                    "from", bot.blockPosition().toShortString(),
                     "to", searchCursor.face().toShortString());
             enter(Phase.RETURN_TO_SEARCH_FACE);
             return;
@@ -730,7 +729,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void returnToScanFace(AIPlayerEntity bot) {
-        BlockPos current = bot.getBlockPos().toImmutable();
+        BlockPos current = bot.blockPosition().immutable();
         if (!current.equals(lastSearchMotionPos)) {
             lastSearchMotionPos = current;
             lastProgressTick = totalBudget();
@@ -753,7 +752,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void returnToSearchFace(AIPlayerEntity bot) {
-        BlockPos current = bot.getBlockPos().toImmutable();
+        BlockPos current = bot.blockPosition().immutable();
         if (!current.equals(lastSearchMotionPos)) {
             lastSearchMotionPos = current;
             lastProgressTick = totalBudget();
@@ -772,8 +771,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void search(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos current = bot.getBlockPos().toImmutable();
+        ServerLevel world = bot.level();
+        BlockPos current = bot.blockPosition().immutable();
 
         // Only actual forward displacement consumes the durable cursor. Excavating a wall does
         // not pretend that the work face moved.
@@ -830,7 +829,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
 
         BlockPos next = searchCursor.nextFace();
-        BlockPos head = next.up();
+        BlockPos head = next.above();
         boolean feetObserved = ObservableWorldQuery.canObserveCell(bot, next);
         boolean headObserved = ObservableWorldQuery.canObserveCell(bot, head);
         if (!feetObserved && !headObserved) {
@@ -843,9 +842,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         BlockState feetState = feetObserved ? world.getBlockState(next) : null;
         BlockState headState = headObserved ? world.getBlockState(head) : null;
         if ((feetObserved && (!feetState.getFluidState().isEmpty()
-                || feetState.isOf(Blocks.OBSIDIAN)))
+                || feetState.is(Blocks.OBSIDIAN)))
                 || (headObserved && (!headState.getFluidState().isEmpty()
-                || headState.isOf(Blocks.OBSIDIAN)))) {
+                || headState.is(Blocks.OBSIDIAN)))) {
             // Do not walk into a pool. This exposed cell is a newly observed topology boundary;
             // survey it from the dry face, then continue the next spiral leg if the pool is spent.
             searchCursor = searchCursor.skipBlockedLeg();
@@ -869,7 +868,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (solid != null) {
             BlockPos solidPos = solid.pos();
             BlockState state = solid.state();
-            if (state.getHardness(world, solidPos) < 0.0F) {
+            if (state.getDestroySpeed(world, solidPos) < 0.0F) {
                 searchCursor = searchCursor.skipBlockedLeg();
                 BotLog.action(bot, "create_obsidian_search_leg_blocked",
                         "pos", solidPos.toShortString(), "block", state.getBlock());
@@ -906,7 +905,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
         // The tunnel cell is open. Read its support only after the face below is observable; an
         // unsupported cave edge is surveyed but never stepped into blindly.
-        BlockPos support = next.down();
+        BlockPos support = next.below();
         if (!ObservableWorldQuery.canObserveBlock(bot, support)
                 || !Standability.isStandable(world, next)
                 || !world.getFluidState(next).isEmpty()) {
@@ -917,7 +916,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         miner.cancel(bot);
         if (bot.getActionPack().isWalkToIdle()) {
-            bot.getActionPack().startWalkTo(Vec3d.ofBottomCenter(next));
+            bot.getActionPack().startWalkTo(Vec3.atBottomCenterOf(next));
         }
     }
 
@@ -927,8 +926,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * when the just-reached face is below the configured block-light threshold.
      */
     private boolean lightSearchTrail(AIPlayerEntity bot, BlockPos previousFace) {
-        ServerWorld world = bot.getEntityWorld();
-        if (combinedSearchLight(world, bot.getBlockPos()) >= searchLightThreshold()) {
+        ServerLevel world = bot.level();
+        if (combinedSearchLight(world, bot.blockPosition()) >= searchLightThreshold()) {
             return true;
         }
         if (!hasSearchLightingResource(bot)) {
@@ -938,7 +937,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean searchLightingReady(AIPlayerEntity bot) {
-        if (combinedSearchLight(bot.getEntityWorld(), bot.getBlockPos()) >= searchLightThreshold()) {
+        if (combinedSearchLight(bot.level(), bot.blockPosition()) >= searchLightThreshold()) {
             return true;
         }
         if (!hasSearchLightingResource(bot)) {
@@ -947,7 +946,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         // A standing torch has no collision box, so vanilla permits the same floor placement used
         // by DescendToYTask/OreDigTask at the bot's current feet. This lights an initial/restored
         // dark face before SEARCH opens another wall.
-        return placeSearchTorch(bot, bot.getBlockPos());
+        return placeSearchTorch(bot, bot.blockPosition());
     }
 
     private boolean hasSearchLightingResource(AIPlayerEntity bot) {
@@ -963,7 +962,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean placeSearchTorch(AIPlayerEntity bot, BlockPos target) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         int torchSlot = InventoryAction.findItem(bot, Items.TORCH).orElse(-1);
         if (torchSlot < 0) {
             fail("create_obsidian_search_missing_torch");
@@ -971,12 +970,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         if (target == null
                 || !ObservableWorldQuery.canObserveCell(bot, target)
-                || !ObservableWorldQuery.canObserveBlock(bot, target.down())
+                || !ObservableWorldQuery.canObserveBlock(bot, target.below())
                 || !world.getBlockState(target).isAir()
-                || world.getBlockState(target.down()).getCollisionShape(
-                world, target.down()).isEmpty()
+                || world.getBlockState(target.below()).getCollisionShape(
+                world, target.below()).isEmpty()
                 || !world.getFluidState(target).isEmpty()
-                || !world.getFluidState(target.down()).isEmpty()) {
+                || !world.getFluidState(target.below()).isEmpty()) {
             fail("create_obsidian_search_no_torch_mount:"
                     + (target == null ? "none" : target.toShortString()));
             return false;
@@ -993,7 +992,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         lastProgressTick = totalBudget();
         BotLog.action(bot, "create_obsidian_search_torch",
                 "pos", target.toShortString(),
-                "face", bot.getBlockPos().toShortString(),
+                "face", bot.blockPosition().toShortString(),
                 "remaining", InventoryAction.countItem(bot, Items.TORCH));
         return true;
     }
@@ -1002,9 +1001,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         return Math.max(1, Math.min(14, MinecraftAiConfig.get().night().torchLightThreshold()));
     }
 
-    private static int combinedSearchLight(ServerWorld world, BlockPos pos) {
-        return Math.max(world.getLightLevel(LightType.BLOCK, pos),
-                world.getLightLevel(LightType.SKY, pos));
+    private static int combinedSearchLight(ServerLevel world, BlockPos pos) {
+        return Math.max(world.getBrightness(LightLayer.BLOCK, pos),
+                world.getBrightness(LightLayer.SKY, pos));
     }
 
     private BlockMiner.Status beginSearchMine(AIPlayerEntity bot, BlockPos pos) {
@@ -1031,29 +1030,29 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     /**
      * The exploration channel consumes only stone picks; iron and diamond remain mission assets.
      * For a block that needs no tool at all (dirt/gravel/sand, ...) a wood/stone pickaxe is still
-     * preferred when one is on hand, but {@link BlockState#isToolRequired()} being false means bare
+     * preferred when one is on hand, but {@link BlockState#requiresCorrectToolForDrops()} being false means bare
      * hands are always a legal fallback -- see the no-candidate branch below, which never hard-fails
      * for such a block (mirrors {@code BlockMiner}/{@code ToolSelector.equipMiningChannelTool}'s own
      * {@code isToolRequired()}-gated policy).
      */
     private static boolean equipOrdinaryMiningTool(AIPlayerEntity bot, BlockState state) {
-        int required = state.isToolRequired()
+        int required = state.requiresCorrectToolForDrops()
                 ? Math.max(ToolTier.STONE, ToolTier.requiredPickaxeTier(state.getBlock()))
                 : ToolTier.WOOD;
         int bestSlot = -1;
         int bestOffhandSlot = -1;
         int bestTier = Integer.MAX_VALUE;
         int bestRemaining = -1;
-        for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-            var stack = bot.getInventory().getMainStacks().get(slot);
+        for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+            var stack = bot.getInventory().getNonEquipmentItems().get(slot);
             int tier = ToolTier.pickaxeTier(stack);
             if (tier < required || tier > ToolTier.STONE
-                    || (state.isToolRequired() && !stack.isSuitableFor(state))
-                    || (stack.isDamageable() && stack.getDamage() >= stack.getMaxDamage() - 1)) {
+                    || (state.requiresCorrectToolForDrops() && !stack.isCorrectToolForDrops(state))
+                    || (stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1)) {
                 continue;
             }
-            int remaining = stack.isDamageable()
-                    ? stack.getMaxDamage() - stack.getDamage() : Integer.MAX_VALUE;
+            int remaining = stack.isDamageableItem()
+                    ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
             if (tier < bestTier || (tier == bestTier && remaining > bestRemaining)) {
                 bestTier = tier;
                 bestRemaining = remaining;
@@ -1061,13 +1060,13 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 bestOffhandSlot = -1;
             }
         }
-        var offHandStack = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        var offHandStack = bot.getItemBySlot(EquipmentSlot.OFFHAND);
         int offHandTier = ToolTier.pickaxeTier(offHandStack);
         if (offHandTier >= required && offHandTier <= ToolTier.STONE
-                && (!state.isToolRequired() || offHandStack.isSuitableFor(state))
-                && (!offHandStack.isDamageable() || offHandStack.getDamage() < offHandStack.getMaxDamage() - 1)) {
-            int remaining = offHandStack.isDamageable()
-                    ? offHandStack.getMaxDamage() - offHandStack.getDamage() : Integer.MAX_VALUE;
+                && (!state.requiresCorrectToolForDrops() || offHandStack.isCorrectToolForDrops(state))
+                && (!offHandStack.isDamageableItem() || offHandStack.getDamageValue() < offHandStack.getMaxDamage() - 1)) {
+            int remaining = offHandStack.isDamageableItem()
+                    ? offHandStack.getMaxDamage() - offHandStack.getDamageValue() : Integer.MAX_VALUE;
             if (offHandTier < bestTier || (offHandTier == bestTier && remaining > bestRemaining)) {
                 bestTier = offHandTier;
                 bestRemaining = remaining;
@@ -1076,7 +1075,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             }
         }
         if (bestSlot < 0 && bestOffhandSlot < 0) {
-            if (state.isToolRequired()) {
+            if (state.requiresCorrectToolForDrops()) {
                 return false;
             }
             // No wood/stone pickaxe is available, but this block needs no tool at all: failing the
@@ -1087,9 +1086,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             // mine the block. The loop above never considered a tier above STONE, so this can never
             // newly select the mission's reserved iron/diamond pickaxe; if every hotbar slot is
             // occupied, proceed with whatever is already equipped rather than aborting.
-            for (int slot = 0; slot < bot.getInventory().getMainStacks().size(); slot++) {
-                if (PlayerInventory.isValidHotbarIndex(slot)
-                        && bot.getInventory().getMainStacks().get(slot).isEmpty()) {
+            for (int slot = 0; slot < bot.getInventory().getNonEquipmentItems().size(); slot++) {
+                if (Inventory.isHotbarSlot(slot)
+                        && bot.getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
                     InventoryAction.selectHotbar(bot, slot);
                     break;
                 }
@@ -1109,7 +1108,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private void approachLavaView(AIPlayerEntity bot) {
         if (lavaClue == null
                 || !ObservableWorldQuery.canObserveCell(bot, lavaClue)
-                || !bot.getEntityWorld().getFluidState(lavaClue).isIn(FluidTags.LAVA)) {
+                || !bot.level().getFluidState(lavaClue).is(FluidTags.LAVA)) {
             lavaClue = null;
             enterScan(bot);
             return;
@@ -1135,7 +1134,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!atPourPose(bot, standPos, pourPlan, true)) {
             if (phaseAge() % 40 == 0) {
                 BotLog.action(bot, "create_obsidian_lava_approach_wait",
-                        "bot", bot.getBlockPos().toShortString(),
+                        "bot", bot.blockPosition().toShortString(),
                         "stand", standPos == null ? "none" : standPos.toShortString(),
                         "water", pourPlan == null ? "none" : pourPlan.destination().toShortString());
             }
@@ -1166,7 +1165,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             fail("create_obsidian_flow_control_failed:" + result.reason());
             return;
         }
-        waterSource = pourPlan.destination().toImmutable();
+        waterSource = pourPlan.destination().immutable();
         waterBucketBaseline = waterBefore;
         // On flat-pool terrain the pour destination can be up to 4 blocks from the clue, and
         // vanilla water only advances one block per 5 ticks: a fixed 4-tick wait would mean the
@@ -1177,7 +1176,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 Math.abs(waterSource.getX() - lavaClue.getX()),
                 Math.abs(waterSource.getZ() - lavaClue.getZ()));
         pourSpreadWaitTicks = Math.max(WATER_SPREAD_TICKS, flowDistance * 5 + 4);
-        lastPourClue = lavaClue.toImmutable();
+        lastPourClue = lavaClue.immutable();
         MiningEvidenceAudit.recordWaterPlacement(bot, observableLava);
         noteTopologyProgress();
         enter(Phase.WAIT_WATER_SPREAD);
@@ -1199,7 +1198,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void approachLava(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         if (lavaTarget == null || !isStillLava(world, lavaTarget)) {
             resetForNextScan(bot);
             return;
@@ -1240,7 +1239,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void pour(AIPlayerEntity bot) {
-        if (lavaTarget == null || !isStillLava(bot.getEntityWorld(), lavaTarget)) {
+        if (lavaTarget == null || !isStillLava(bot.level(), lavaTarget)) {
             resetForNextScan(bot);
             return;
         }
@@ -1261,7 +1260,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             resetForNextScan(bot);
             return;
         }
-        waterSource = pourPlan.destination().toImmutable();
+        waterSource = pourPlan.destination().immutable();
         waterBucketBaseline = waterBefore;
         noteTopologyProgress();
         BotLog.action(bot, "create_obsidian_water_placed",
@@ -1271,8 +1270,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void waitForFormation(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        if (lavaTarget != null && world.getBlockState(lavaTarget).isOf(Blocks.OBSIDIAN)) {
+        ServerLevel world = bot.level();
+        if (lavaTarget != null && world.getBlockState(lavaTarget).is(Blocks.OBSIDIAN)) {
             obsidian = lavaTarget;
             obsidianStandHint = standPos;
             noteTopologyProgress();
@@ -1309,27 +1308,27 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (pickupPos != null) {
             rememberVisiblePendingObsidianDrop(bot);
         }
-        if (waterSource != null && isStillWater(bot.getEntityWorld(), waterSource)) {
+        if (waterSource != null && isStillWater(bot.level(), waterSource)) {
             if (InventoryAction.countItem(bot, Items.BUCKET) <= 0) {
                 fail("create_obsidian_bucket_lost_after_pour");
                 return;
             }
-            if (bot.getBlockPos().getY() < waterSource.getY()
-                    || (bot.getBlockPos().getY() == waterSource.getY()
-                    && !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty())) {
+            if (bot.blockPosition().getY() < waterSource.getY()
+                    || (bot.blockPosition().getY() == waterSource.getY()
+                    && !bot.level().getFluidState(bot.blockPosition()).isEmpty())) {
                 // Fake players have no client buoyancy. After collecting in the protected hole,
                 // make one collision-validated adjacent rise so the eye is above the flowing
                 // sheet and the retained source face becomes ray-visible again.
-                if (!FakePlayerMotion.stepTo(bot, bot.getBlockPos().up(), "obsidian_surface")) {
+                if (!FakePlayerMotion.stepTo(bot, bot.blockPosition().above(), "obsidian_surface")) {
                     fail("create_obsidian_water_recovery_surface_blocked");
                 }
                 return;
             }
             if (obsidianStandHint != null
-                    && bot.getEntityWorld().getFluidState(obsidianStandHint).isEmpty()
-                    && bot.getEntityWorld().getFluidState(obsidianStandHint.up()).isEmpty()
-                    && !bot.getBlockPos().equals(obsidianStandHint)
-                    && isAdjacentMicroStep(bot.getBlockPos(), obsidianStandHint)) {
+                    && bot.level().getFluidState(obsidianStandHint).isEmpty()
+                    && bot.level().getFluidState(obsidianStandHint.above()).isEmpty()
+                    && !bot.blockPosition().equals(obsidianStandHint)
+                    && isAdjacentMicroStep(bot.blockPosition(), obsidianStandHint)) {
                 // Leave the water column while it still provides the legitimate upward movement,
                 // then recover from the dry remembered rim. Removing the source while suspended
                 // over the hole drops the fake player straight back to the pool floor.
@@ -1338,7 +1337,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 }
                 return;
             }
-            if (bot.getEyePos().squaredDistanceTo(waterSource.toCenterPos()) <= REACH_MARGIN_SQUARED) {
+            if (bot.getEyePosition().distanceToSqr(waterSource.getCenter()) <= REACH_MARGIN_SQUARED) {
                 bot.getActionPack().stopAll();
                 ActionResult result = BucketAction.fillWaterSource(bot, waterSource);
                 if (result.isSuccess()) {
@@ -1356,7 +1355,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 if (phaseAge() % 20 == 0) {
                     BotLog.action(bot, "create_obsidian_water_recovery_retry",
                             "water", waterSource.toShortString(),
-                            "bot", bot.getBlockPos().toShortString(),
+                            "bot", bot.blockPosition().toShortString(),
                             "reason", result.reason());
                 }
             }
@@ -1377,7 +1376,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (phaseAge() > RECOVERY_LIMIT) {
             BotLog.action(bot, "create_obsidian_water_recovery_timeout",
                     "water", waterSource == null ? "none" : waterSource.toShortString());
-            if (waterSource != null && isStillWater(bot.getEntityWorld(), waterSource)) {
+            if (waterSource != null && isStillWater(bot.level(), waterSource)) {
                 fail("create_obsidian_water_recovery_failed pos=" + waterSource.toShortString());
             } else if (waterBucketBaseline >= 0
                     && InventoryAction.countItem(bot, Items.WATER_BUCKET) < waterBucketBaseline) {
@@ -1427,7 +1426,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             // cycle and can burn the whole 153,600-tick task budget (F4); rotate the barren clue
             // out through the bounded reject ledger instead. Rejection only acts on an observed
             // still-lava cell — occlusion must not turn into a false negative.
-            if (bot.getEntityWorld().getFluidState(lastPourClue).isIn(FluidTags.LAVA)
+            if (bot.level().getFluidState(lastPourClue).is(FluidTags.LAVA)
                     && ObservableWorldQuery.canObserveCell(bot, lastPourClue)) {
                 rejectLava(lastPourClue);
                 BotLog.action(bot, "create_obsidian_barren_pour_rejected",
@@ -1435,13 +1434,13 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             }
             lastPourClue = null;
         }
-        if (obsidianStandHint != null && !bot.getBlockPos().equals(obsidianStandHint)) {
+        if (obsidianStandHint != null && !bot.blockPosition().equals(obsidianStandHint)) {
             // Source recovery can leave the fake player on the one-block-deep pool floor. Return
             // through normal path execution to the already observed dry rim before surveying the
             // remaining pool; scanning from the hole turns temporary occlusion into false no_lava.
             if (phaseAge() == FLOW_DRAIN_TICKS) {
                 BotLog.action(bot, "create_obsidian_return_rim",
-                        "from", bot.getBlockPos().toShortString(),
+                        "from", bot.blockPosition().toShortString(),
                         "to", obsidianStandHint.toShortString());
             }
             if (phaseAge() > FLOW_DRAIN_TICKS + APPROACH_LIMIT) {
@@ -1455,14 +1454,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void approachObsidian(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         if (obsidian == null) {
             resetForNextScan(bot);
             return;
         }
         // A remembered work pose can be followed without reading the now-occluded target. Only
         // after arriving do we use a fresh visibility ray and inspect the current block state.
-        if (standPos != null && bot.getBlockPos().getSquaredDistance(standPos) > 1.0D) {
+        if (standPos != null && bot.blockPosition().distSqr(standPos) > 1.0D) {
             if (phaseAge() > APPROACH_LIMIT) {
                 rejectObsidian(obsidian);
                 obsidian = null;
@@ -1515,7 +1514,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             enter(Phase.APPROACH_OBSIDIAN);
             return;
         }
-        if (!world.getBlockState(obsidian).isOf(Blocks.OBSIDIAN)) {
+        if (!world.getBlockState(obsidian).is(Blocks.OBSIDIAN)) {
             resetForNextScan(bot);
             return;
         }
@@ -1565,8 +1564,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void protectObsidian(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        if (obsidian == null || !world.getBlockState(obsidian).isOf(Blocks.OBSIDIAN)) {
+        ServerLevel world = bot.level();
+        if (obsidian == null || !world.getBlockState(obsidian).is(Blocks.OBSIDIAN)) {
             resetForNextScan(bot);
             return;
         }
@@ -1611,12 +1610,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             }
             return;
         }
-        waterSource = pourPlan.destination().toImmutable();
+        waterSource = pourPlan.destination().immutable();
         waterBucketBaseline = waterBefore;
         MiningEvidenceAudit.recordWaterPlacement(bot, observableLava);
         // Keep the stand selected against this exact pour geometry. The pre-protection mining
         // hint may be directly above the target and will be flooded by the new adjacent source.
-        obsidianStandHint = standPos.toImmutable();
+        obsidianStandHint = standPos.immutable();
         protectionPrepared = false;
         noteTopologyProgress();
         BotLog.action(bot, "create_obsidian_protection_placed",
@@ -1626,7 +1625,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void mine(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         if (obsidian == null) {
             resetForNextScan(bot);
             return;
@@ -1651,7 +1650,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     enter(Phase.APPROACH_OBSIDIAN);
                     return;
                 }
-                if (world.getBlockState(obsidian).isOf(Blocks.OBSIDIAN)
+                if (world.getBlockState(obsidian).is(Blocks.OBSIDIAN)
                         && !requireObsidianMiningTool(bot)) {
                     return;
                 }
@@ -1659,7 +1658,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 status = miner.tick(bot);
             }
         } else {
-            if (!world.getBlockState(obsidian).isOf(Blocks.OBSIDIAN)) {
+            if (!world.getBlockState(obsidian).is(Blocks.OBSIDIAN)) {
                 resetForNextScan(bot);
                 return;
             }
@@ -1722,7 +1721,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private boolean requireObsidianMiningTool(AIPlayerEntity bot) {
-        if (ToolTier.canHarvestWithInventory(bot, Blocks.OBSIDIAN.getDefaultState())) {
+        if (ToolTier.canHarvestWithInventory(bot, Blocks.OBSIDIAN.defaultBlockState())) {
             return true;
         }
         fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(Blocks.OBSIDIAN));
@@ -1739,7 +1738,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return false;
         }
         if (activeBreakPos == null) {
-            activeBreakPos = target.toImmutable();
+            activeBreakPos = target.immutable();
             activeBreakInventoryBaseline = HarvestCore.countInventoryItems(bot, Set.of(Items.OBSIDIAN));
             return true;
         }
@@ -1796,16 +1795,16 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             return;
         }
         ActionResult last = ActionResult.failed("no_visible_support_face");
-        BlockPos[] destinations = {pickupPos, pickupPos.up()};
+        BlockPos[] destinations = {pickupPos, pickupPos.above()};
         for (BlockPos destination : destinations) {
-            if (destination.equals(bot.getBlockPos())) {
+            if (destination.equals(bot.blockPosition())) {
                 continue;
             }
             for (Direction supportDirection : Direction.values()) {
-                BlockPos support = destination.offset(supportDirection);
+                BlockPos support = destination.relative(supportDirection);
                 PourPlan candidate = new PourPlan(support, supportDirection.getOpposite());
                 if (!isPourPlanUsable(bot, candidate)
-                        || !atPourPose(bot, bot.getBlockPos(), candidate, false)) {
+                        || !atPourPose(bot, bot.blockPosition(), candidate, false)) {
                     continue;
                 }
                 int waterBefore = InventoryAction.countItem(bot, Items.WATER_BUCKET);
@@ -1813,7 +1812,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                         bot, destination, null);
                 last = BucketAction.placeWater(bot, candidate.support(), candidate.face());
                 if (last.isSuccess()) {
-                    waterSource = destination.toImmutable();
+                    waterSource = destination.immutable();
                     waterBucketBaseline = waterBefore;
                     MiningEvidenceAudit.recordWaterPlacement(bot, observableLava);
                     noteTopologyProgress();
@@ -1879,7 +1878,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             // overshoots the collision box and may chase it forever. HarvestCore keeps the bot on
             // a factual stand and performs bounded in-cell nudges toward the observed entity.
             ItemEntity observed = visibleDrop.orElseThrow();
-            pickupLastSeenPos = observed.getBlockPos().toImmutable();
+            pickupLastSeenPos = observed.blockPosition().immutable();
             HarvestCore.approachDropPhysically(bot, observed);
         } else {
             boolean pursuingLastSeen = pickupLastSeenPos != null
@@ -1887,12 +1886,12 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     && HarvestCore.approachKnownPickupCell(bot, pickupLastSeenPos);
             if (!pursuingLastSeen) {
                 BlockPos pickupPose = pickupPoseForMinedObsidian(bot, pickupPos);
-                if (!bot.getBlockPos().equals(pickupPos)
+                if (!bot.blockPosition().equals(pickupPos)
                         && stepTowardPickupCell(bot, pickupPos)) {
                     // The durable break cell is the exact fallback pickup destination. A* may
                     // legitimately snap an occluded or water-filled endpoint to the nearest
                     // standable cell; bounded microsteps close the remaining gap.
-                } else if (pickupPose != null && !bot.getBlockPos().equals(pickupPose)) {
+                } else if (pickupPose != null && !bot.blockPosition().equals(pickupPose)) {
                     pathToPickupPose(bot, pickupPose, "create_obsidian_pickup_path_failed");
                 }
             }
@@ -1908,7 +1907,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
     private void rememberVisiblePendingObsidianDrop(AIPlayerEntity bot) {
         nearestPendingObsidianDrop(bot).ifPresent(drop ->
-                pickupLastSeenPos = drop.getBlockPos().toImmutable());
+                pickupLastSeenPos = drop.blockPosition().immutable());
     }
 
     /**
@@ -1921,24 +1920,24 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (pickupPos == null) {
             return Optional.empty();
         }
-        Vec3d transactionOrigin = pickupPos.toCenterPos();
-        Box search = new Box(pickupPos).expand(8.0D, 4.0D, 8.0D);
-        return bot.getEntityWorld().getEntitiesByClass(
+        Vec3 transactionOrigin = pickupPos.getCenter();
+        AABB search = new AABB(pickupPos).inflate(8.0D, 4.0D, 8.0D);
+        return bot.level().getEntitiesOfClass(
                         ItemEntity.class,
                         search,
                         entity -> entity.isAlive()
-                                && entity.getStack().isOf(Items.OBSIDIAN)
+                                && entity.getItem().is(Items.OBSIDIAN)
                                 && ObservableWorldQuery.canObserveEntity(bot, entity))
                 .stream()
                 .min(Comparator
                         .comparingDouble((ItemEntity entity) ->
-                                entity.getEntityPos().squaredDistanceTo(transactionOrigin))
+                                entity.position().distanceToSqr(transactionOrigin))
                         .thenComparingDouble(entity -> entity.distanceTo(bot)));
     }
 
     private void returnToRim(AIPlayerEntity bot) {
         BlockPos target = returnRim == null ? searchCursor.face() : returnRim;
-        if (bot.getBlockPos().equals(target)) {
+        if (bot.blockPosition().equals(target)) {
             bot.getActionPack().stopAll();
             returnRim = null;
             lastProgressTick = totalBudget();
@@ -1953,36 +1952,36 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static BlockPos pickupPoseForMinedObsidian(AIPlayerEntity bot, BlockPos minedPos) {
-        BlockPos below = minedPos.down();
+        BlockPos below = minedPos.below();
         BlockPos[] candidates = {
                 minedPos,
                 minedPos.north(), minedPos.east(), minedPos.south(), minedPos.west(),
                 below,
                 below.north(), below.east(), below.south(), below.west()
         };
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         for (BlockPos candidate : candidates) {
             if (!ObservableWorldQuery.canObserveCell(bot, candidate)
-                    || !ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.down())) {
+                    || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                    || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())) {
                 continue;
             }
             if (Standability.isStandable(world, candidate)) {
-                return candidate.toImmutable();
+                return candidate.immutable();
             }
         }
         // The break cell itself is factual task memory. Path execution still validates collision
         // before moving, so temporary LOS loss must not turn one mined block into a lost drop.
-        return minedPos.toImmutable();
+        return minedPos.immutable();
     }
 
     private BlockPos durableReturnRim(BlockPos minedPos) {
-        BlockPos lostSupport = minedPos == null ? null : minedPos.up();
+        BlockPos lostSupport = minedPos == null ? null : minedPos.above();
         if (obsidianStandHint != null && !obsidianStandHint.equals(lostSupport)) {
-            return obsidianStandHint.toImmutable();
+            return obsidianStandHint.immutable();
         }
         if (standPos != null && !standPos.equals(lostSupport)) {
-            return standPos.toImmutable();
+            return standPos.immutable();
         }
         // The search face is a persisted dry waypoint reached before interacting with this pool;
         // unlike a pose directly above the target, its support survives the target break.
@@ -1999,7 +1998,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * move.</p>
      */
     static boolean stepTowardPickupCell(AIPlayerEntity bot, BlockPos target) {
-        BlockPos from = bot.getBlockPos();
+        BlockPos from = bot.blockPosition();
         int deltaX = target.getX() - from.getX();
         int deltaY = target.getY() - from.getY();
         int deltaZ = target.getZ() - from.getZ();
@@ -2026,17 +2025,17 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         // Align one horizontal axis at the current elevation. The intermediate must be a genuine
         // safe stand; only the final collision cell may be water-filled/non-standable.
         BlockPos first = absX >= absZ && stepX != 0
-                ? from.add(stepX, 0, 0)
-                : from.add(0, 0, stepZ);
+                ? from.offset(stepX, 0, 0)
+                : from.offset(0, 0, stepZ);
         BlockPos second = first.getX() == from.getX() && stepX != 0
-                ? from.add(stepX, 0, 0)
-                : stepZ != 0 ? from.add(0, 0, stepZ) : null;
+                ? from.offset(stepX, 0, 0)
+                : stepZ != 0 ? from.offset(0, 0, stepZ) : null;
         BlockPos[] candidates = second == null || second.equals(first)
                 ? new BlockPos[]{first}
                 : new BlockPos[]{first, second};
         for (BlockPos candidate : candidates) {
             Standability.clearCache();
-            if (!Standability.isStandable(bot.getEntityWorld(), candidate)) {
+            if (!Standability.isStandable(bot.level(), candidate)) {
                 continue;
             }
             bot.getActionPack().stopAll();
@@ -2048,14 +2047,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static boolean isSafePickupCollisionCell(AIPlayerEntity bot, BlockPos target) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         BlockState feet = world.getBlockState(target);
-        BlockState head = world.getBlockState(target.up());
-        BlockState below = world.getBlockState(target.down());
-        boolean supportedOrSwimming = !below.getCollisionShape(world, target.down()).isEmpty()
-                || feet.getFluidState().isIn(FluidTags.WATER);
+        BlockState head = world.getBlockState(target.above());
+        BlockState below = world.getBlockState(target.below());
+        boolean supportedOrSwimming = !below.getCollisionShape(world, target.below()).isEmpty()
+                || feet.getFluidState().is(FluidTags.WATER);
         return feet.getCollisionShape(world, target).isEmpty()
-                && head.getCollisionShape(world, target.up()).isEmpty()
+                && head.getCollisionShape(world, target.above()).isEmpty()
                 && supportedOrSwimming
                 && !Standability.isDangerous(feet)
                 && !Standability.isDangerous(head)
@@ -2100,8 +2099,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * drop: it excludes live water, pickup, active-break and rim-return debts.
      */
     private boolean canYieldForService(AIPlayerEntity bot) {
-        BlockPos current = bot.getBlockPos();
-        ServerWorld world = bot.getEntityWorld();
+        BlockPos current = bot.blockPosition();
+        ServerLevel world = bot.level();
         return phase == Phase.SCAN
                 && waterTarget == null
                 && waterSource == null
@@ -2123,7 +2122,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 && miner.isDone()
                 && !bot.getActionPack().hasActiveActions()
                 && world.getFluidState(current).isEmpty()
-                && world.getFluidState(current.up()).isEmpty()
+                && world.getFluidState(current.above()).isEmpty()
                 && Standability.isStandable(world, current);
     }
 
@@ -2206,7 +2205,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         ObsidianSearchCursor cursor = searchCursor == null
                 ? (restoredCheckpoint == null
-                ? ObsidianSearchCursor.initial(BlockPos.ORIGIN, SEARCH_BASE_LEG)
+                ? ObsidianSearchCursor.initial(BlockPos.ZERO, SEARCH_BASE_LEG)
                 : restoredCheckpoint.searchCursor())
                 : searchCursor;
         int produced = Math.max(cursor.produced(), Math.max(0, collected));
@@ -2337,15 +2336,15 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             fail(failure + ":no_stand");
             return;
         }
-        double blockDistance = bot.getBlockPos().getSquaredDistance(target);
+        double blockDistance = bot.blockPosition().distSqr(target);
         // WalkToController intentionally solves horizontal steering only. Sending it a stand one
         // block below makes it report arrival while the bot remains balanced on the upper ledge,
         // producing an endless walk_complete loop. Vertical final steps stay with the path
         // executor, which can actually step/jump between levels.
-        if (bot.getBlockPos().getY() == target.getY()
+        if (bot.blockPosition().getY() == target.getY()
                 && blockDistance > 0.0D && blockDistance <= 2.25D) {
             if (bot.getActionPack().isWalkToIdle()) {
-                bot.getActionPack().startWalkTo(Vec3d.ofBottomCenter(target));
+                bot.getActionPack().startWalkTo(Vec3.atBottomCenterOf(target));
             }
             return;
         }
@@ -2373,9 +2372,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     "reason", "no_stand", "failure", failure);
             return;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         Standability.clearCache();
-        if (current.equals(target) || !Standability.isStandable(bot.getEntityWorld(), target)) {
+        if (current.equals(target) || !Standability.isStandable(bot.level(), target)) {
             BotLog.action(bot, "create_obsidian_pickup_no_progress_endpoint",
                     "reason", current.equals(target) ? "current_cell" : "non_standable",
                     "target", target.toShortString());
@@ -2409,7 +2408,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private void enterScan(AIPlayerEntity bot) {
-        scanResumeFace = bot.getBlockPos().toImmutable();
+        scanResumeFace = bot.blockPosition().immutable();
         enter(Phase.SCAN);
     }
 
@@ -2428,9 +2427,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 || bot.getHealth() < 10.0F) {
             return false;
         }
-        BlockPos current = bot.getBlockPos();
-        return !bot.getEntityWorld().getFluidState(current).isIn(FluidTags.LAVA)
-                && !bot.getEntityWorld().getFluidState(current.up()).isIn(FluidTags.LAVA);
+        BlockPos current = bot.blockPosition();
+        return !bot.level().getFluidState(current).is(FluidTags.LAVA)
+                && !bot.level().getFluidState(current.above()).is(FluidTags.LAVA);
     }
 
     private int phaseAge() {
@@ -2450,14 +2449,14 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                       BlockPos target,
                                       PourPlan plan,
                                       boolean avoidLava) {
-        if (expectedStand == null || bot.getBlockPos().getSquaredDistance(expectedStand) > 1.0D) {
+        if (expectedStand == null || bot.blockPosition().distSqr(expectedStand) > 1.0D) {
             return false;
         }
-        if (!Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())
-                || !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty()) {
+        if (!Standability.isStandable(bot.level(), bot.blockPosition())
+                || !bot.level().getFluidState(bot.blockPosition()).isEmpty()) {
             return false;
         }
-        if (avoidLava && hasObservableAdjacentLava(bot, bot.getBlockPos())) {
+        if (avoidLava && hasObservableAdjacentLava(bot, bot.blockPosition())) {
             return false;
         }
         if (!isDirectlyUsable(bot, target, true)) {
@@ -2471,19 +2470,19 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                       PourPlan plan,
                                       boolean avoidLava) {
         if (expectedStand == null || plan == null
-                || bot.getBlockPos().getSquaredDistance(expectedStand) > 1.0D
-                || !Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())
-                || !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty()) {
+                || bot.blockPosition().distSqr(expectedStand) > 1.0D
+                || !Standability.isStandable(bot.level(), bot.blockPosition())
+                || !bot.level().getFluidState(bot.blockPosition()).isEmpty()) {
             return false;
         }
-        if (avoidLava && hasObservableAdjacentLava(bot, bot.getBlockPos())) {
+        if (avoidLava && hasObservableAdjacentLava(bot, bot.blockPosition())) {
             return false;
         }
-        Vec3d face = plan.support().toCenterPos().add(
-                plan.face().getOffsetX() * 0.5D,
-                plan.face().getOffsetY() * 0.5D,
-                plan.face().getOffsetZ() * 0.5D);
-        return bot.getEyePos().squaredDistanceTo(face) <= REACH_MARGIN_SQUARED
+        Vec3 face = plan.support().getCenter().add(
+                plan.face().getStepX() * 0.5D,
+                plan.face().getStepY() * 0.5D,
+                plan.face().getStepZ() * 0.5D);
+        return bot.getEyePosition().distanceToSqr(face) <= REACH_MARGIN_SQUARED
                 && isPourPlanUsable(bot, plan);
     }
 
@@ -2491,20 +2490,20 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                                                     BlockPos expectedStand,
                                                     BlockPos target) {
         if (expectedStand == null || target == null
-                || bot.getBlockPos().getSquaredDistance(expectedStand) > 1.0D
-                || !Standability.isStandable(bot.getEntityWorld(), bot.getBlockPos())
-                || !bot.getEntityWorld().getFluidState(bot.getBlockPos()).isEmpty()
-                || hasObservableAdjacentLava(bot, bot.getBlockPos())) {
+                || bot.blockPosition().distSqr(expectedStand) > 1.0D
+                || !Standability.isStandable(bot.level(), bot.blockPosition())
+                || !bot.level().getFluidState(bot.blockPosition()).isEmpty()
+                || hasObservableAdjacentLava(bot, bot.blockPosition())) {
             return false;
         }
-        return bot.getEyePos().squaredDistanceTo(target.toCenterPos()) <= REACH_MARGIN_SQUARED
-                && bot.canInteractWithBlockAt(target, 0.0D);
+        return bot.getEyePosition().distanceToSqr(target.getCenter()) <= REACH_MARGIN_SQUARED
+                && bot.isWithinBlockInteractionRange(target, 0.0D);
     }
 
     private static boolean isCurrentDirectMinePose(AIPlayerEntity bot, BlockPos target) {
-        BlockPos current = bot.getBlockPos();
-        return Standability.isStandable(bot.getEntityWorld(), current)
-                && bot.getEntityWorld().getFluidState(current).isEmpty()
+        BlockPos current = bot.blockPosition();
+        return Standability.isStandable(bot.level(), current)
+                && bot.level().getFluidState(current).isEmpty()
                 && !hasObservableAdjacentLava(bot, current)
                 && isDirectlyUsable(bot, target, true);
     }
@@ -2525,22 +2524,22 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                 ? ObservableWorldQuery.canObserveCell(bot, target)
                 : ObservableWorldQuery.canObserveBlock(bot, target);
         return observable
-                && bot.getEyePos().squaredDistanceTo(target.toCenterPos()) <= REACH_MARGIN_SQUARED
-                && bot.canInteractWithBlockAt(target, 0.0D);
+                && bot.getEyePosition().distanceToSqr(target.getCenter()) <= REACH_MARGIN_SQUARED
+                && bot.isWithinBlockInteractionRange(target, 0.0D);
     }
 
     private static BlockPos findWorkStand(AIPlayerEntity bot,
                                           BlockPos target,
                                           PourPlan plan,
                                           boolean avoidLava) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (int dy = -2; dy <= 3; dy++) {
             for (int dx = -4; dx <= 4; dx++) {
                 for (int dz = -4; dz <= 4; dz++) {
                     int horizontalSquared = dx * dx + dz * dz;
-                    BlockPos candidate = target.add(dx, dy, dz);
+                    BlockPos candidate = target.offset(dx, dy, dz);
                     // A dry ledge above the pool is safe even when horizontally adjacent. The
                     // two-block ring is only required at/below the water source level.
                     boolean elevatedPourStand = plan != null
@@ -2553,39 +2552,39 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     if (!observableStandCell(bot, candidate)
                             || !Standability.isStandable(world, candidate)
                             || !world.getFluidState(candidate).isEmpty()
-                            || !world.getFluidState(candidate.up()).isEmpty()) {
+                            || !world.getFluidState(candidate.above()).isEmpty()) {
                         continue;
                     }
                     if (avoidLava && hasObservableAdjacentLava(bot, candidate)) {
                         continue;
                     }
-                    Vec3d eye = Vec3d.ofBottomCenter(candidate).add(0.0D, 1.62D, 0.0D);
-                    if (eye.squaredDistanceTo(target.toCenterPos()) > REACH_MARGIN_SQUARED) {
+                    Vec3 eye = Vec3.atBottomCenterOf(candidate).add(0.0D, 1.62D, 0.0D);
+                    if (eye.distanceToSqr(target.getCenter()) > REACH_MARGIN_SQUARED) {
                         continue;
                     }
                     if (plan != null) {
-                        Vec3d supportFace = plan.support().toCenterPos().add(
-                                plan.face().getOffsetX() * 0.5D,
-                                plan.face().getOffsetY() * 0.5D,
-                                plan.face().getOffsetZ() * 0.5D);
+                        Vec3 supportFace = plan.support().getCenter().add(
+                                plan.face().getStepX() * 0.5D,
+                                plan.face().getStepY() * 0.5D,
+                                plan.face().getStepZ() * 0.5D);
                         int waterDx = candidate.getX() - plan.destination().getX();
                         int waterDz = candidate.getZ() - plan.destination().getZ();
                         boolean sourceCanOccupyFeet = candidate.getY() <= plan.destination().getY()
                                 && waterDx * waterDx + waterDz * waterDz <= 2;
-                        if (eye.squaredDistanceTo(supportFace) > REACH_MARGIN_SQUARED
+                        if (eye.distanceToSqr(supportFace) > REACH_MARGIN_SQUARED
                                 || sourceCanOccupyFeet) {
                             continue;
                         }
                     }
-                    double distance = bot.getBlockPos().getSquaredDistance(candidate);
+                    double distance = bot.blockPosition().distSqr(candidate);
                     if (avoidLava && plan == null) {
                         // Mining from maximum reach strands the physical drop four blocks away in
                         // strict mode. Prefer the nearest safe work ring, then minimize travel.
-                        distance += candidate.getSquaredDistance(target) * 1000.0D;
+                        distance += candidate.distSqr(target) * 1000.0D;
                     }
                     if (distance < bestDistance) {
                         bestDistance = distance;
-                        best = candidate.toImmutable();
+                        best = candidate.immutable();
                     }
                 }
             }
@@ -2595,16 +2594,16 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
     private static boolean observableStandCell(AIPlayerEntity bot, BlockPos candidate) {
         return ObservableWorldQuery.canObserveCell(bot, candidate)
-                && ObservableWorldQuery.canObserveCell(bot, candidate.up())
-                && ObservableWorldQuery.canObserveBlock(bot, candidate.down());
+                && ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                && ObservableWorldQuery.canObserveBlock(bot, candidate.below());
     }
 
     private static boolean isSafeStand(AIPlayerEntity bot, BlockPos candidate, boolean avoidLava) {
         if (candidate == null
                 || !observableStandCell(bot, candidate)
-                || !Standability.isStandable(bot.getEntityWorld(), candidate)
-                || !bot.getEntityWorld().getFluidState(candidate).isEmpty()
-                || !bot.getEntityWorld().getFluidState(candidate.up()).isEmpty()) {
+                || !Standability.isStandable(bot.level(), candidate)
+                || !bot.level().getFluidState(candidate).isEmpty()
+                || !bot.level().getFluidState(candidate.above()).isEmpty()) {
             return false;
         }
         return !avoidLava || !hasObservableAdjacentLava(bot, candidate);
@@ -2624,10 +2623,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
 
         // Preferred geometry: source directly above lava, supported by an exposed wall face.
-        BlockPos direct = lava.up();
+        BlockPos direct = lava.above();
         if (!rejectedDestinations.contains(direct) && canReceiveWater(bot, direct)) {
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos support = direct.offset(direction);
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos support = direct.relative(direction);
                 Direction face = direction.getOpposite();
                 PourPlan plan = new PourPlan(support, face);
                 if (isPourPlanUsable(bot, plan)) {
@@ -2637,8 +2636,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
 
         // Open pool geometry: place the source on top of a solid rim block adjacent to the lava.
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos support = lava.offset(direction);
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos support = lava.relative(direction);
             PourPlan plan = new PourPlan(support, Direction.UP);
             if (!rejectedDestinations.contains(plan.destination())
                     && isPourPlanUsable(bot, plan)) {
@@ -2648,8 +2647,8 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
 
         // Flat pool geometry: pour on a dry floor tile and let vanilla water flow into the source.
         for (int distance = 1; distance <= 4; distance++) {
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos support = lava.offset(direction, distance).down();
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos support = lava.relative(direction, distance).below();
                 PourPlan plan = new PourPlan(support, Direction.UP);
                 if (!rejectedDestinations.contains(plan.destination())
                         && isPourPlanUsable(bot, plan)) {
@@ -2667,10 +2666,10 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!ObservableWorldQuery.canObserveBlock(bot, plan.support())) {
             return false;
         }
-        BlockState support = bot.getEntityWorld().getBlockState(plan.support());
+        BlockState support = bot.level().getBlockState(plan.support());
         return !support.isAir()
                 && support.getFluidState().isEmpty()
-                && !support.getCollisionShape(bot.getEntityWorld(), plan.support()).isEmpty()
+                && !support.getCollisionShape(bot.level(), plan.support()).isEmpty()
                 && canReceiveWater(bot, plan.destination());
     }
 
@@ -2678,17 +2677,17 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!ObservableWorldQuery.canObserveCell(bot, destination)) {
             return false;
         }
-        BlockState state = bot.getEntityWorld().getBlockState(destination);
+        BlockState state = bot.level().getBlockState(destination);
         return state.getFluidState().isEmpty()
-                && (state.isAir() || state.canBucketPlace(Fluids.WATER));
+                && (state.isAir() || state.canBeReplaced(Fluids.WATER));
     }
 
     private static boolean hasObservableAdjacentLava(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         for (Direction direction : Direction.values()) {
-            BlockPos adjacent = pos.offset(direction);
+            BlockPos adjacent = pos.relative(direction);
             if (ObservableWorldQuery.canObserveCell(bot, adjacent)
-                    && world.getFluidState(adjacent).isIn(FluidTags.LAVA)) {
+                    && world.getFluidState(adjacent).is(FluidTags.LAVA)) {
                 return true;
             }
         }
@@ -2696,9 +2695,9 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static boolean hasObservableAdjacentFluid(AIPlayerEntity bot, BlockPos pos) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         for (Direction direction : Direction.values()) {
-            BlockPos adjacent = pos.offset(direction);
+            BlockPos adjacent = pos.relative(direction);
             if (ObservableWorldQuery.canObserveCell(bot, adjacent)
                     && !world.getFluidState(adjacent).isEmpty()) {
                 return true;
@@ -2708,13 +2707,13 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     }
 
     private static boolean hasObservableNearbyLava(AIPlayerEntity bot, BlockPos pos, int radius) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos candidate = pos.add(dx, dy, dz);
+                    BlockPos candidate = pos.offset(dx, dy, dz);
                     if (ObservableWorldQuery.canObserveCell(bot, candidate)
-                            && world.getFluidState(candidate).isIn(FluidTags.LAVA)) {
+                            && world.getFluidState(candidate).is(FluidTags.LAVA)) {
                         return true;
                     }
                 }
@@ -2731,7 +2730,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private static Set<BlockPos> observableLavaForWaterPlacement(AIPlayerEntity bot,
                                                                   BlockPos waterDestination,
                                                                   BlockPos requiredLava) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         Set<BlockPos> result = new LinkedHashSet<>();
         if (waterDestination == null || !canPrePlacementWaterOccupy(bot, waterDestination)) {
             return Set.of();
@@ -2740,29 +2739,29 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         }
         ArrayDeque<WaterReach> frontier = new ArrayDeque<>();
         Map<BlockPos, Integer> bestCost = new LinkedHashMap<>();
-        BlockPos origin = waterDestination.toImmutable();
+        BlockPos origin = waterDestination.immutable();
         frontier.add(new WaterReach(origin, 0, 0));
         bestCost.put(origin, 0);
         while (!frontier.isEmpty()) {
             WaterReach reached = frontier.removeFirst();
             BlockPos cell = reached.pos();
             for (Direction direction : Direction.values()) {
-                BlockPos touching = cell.offset(direction);
+                BlockPos touching = cell.relative(direction);
                 if (ObservableWorldQuery.canObserveCell(bot, touching)
                         && isStillLava(world, touching)) {
-                    result.add(touching.toImmutable());
+                    result.add(touching.immutable());
                 }
             }
 
-            BlockPos below = cell.down();
+            BlockPos below = cell.below();
             boolean falls = reached.drops() < 1
                     && canPrePlacementWaterOccupy(bot, below);
             if (falls) {
                 int encodedCost = reached.horizontalSteps() + WATER_FLOW_REACH + 1;
                 if (bestCost.getOrDefault(below, Integer.MAX_VALUE) > encodedCost) {
-                    bestCost.put(below.toImmutable(), encodedCost);
+                    bestCost.put(below.immutable(), encodedCost);
                     frontier.addLast(new WaterReach(
-                            below.toImmutable(), reached.horizontalSteps(), reached.drops() + 1));
+                            below.immutable(), reached.horizontalSteps(), reached.drops() + 1));
                 }
                 // Vanilla prioritizes a downward opening. Conservatively do not authorize cells
                 // beyond that hole as if the same sheet also crossed it horizontally.
@@ -2771,15 +2770,15 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
             if (reached.horizontalSteps() >= WATER_FLOW_REACH) {
                 continue;
             }
-            for (Direction direction : Direction.Type.HORIZONTAL) {
-                BlockPos next = cell.offset(direction);
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos next = cell.relative(direction);
                 int nextCost = reached.horizontalSteps() + 1;
                 if (!canPrePlacementWaterOccupy(bot, next)
                         || bestCost.getOrDefault(next, Integer.MAX_VALUE) <= nextCost) {
                     continue;
                 }
-                bestCost.put(next.toImmutable(), nextCost);
-                frontier.addLast(new WaterReach(next.toImmutable(), nextCost, reached.drops()));
+                bestCost.put(next.immutable(), nextCost);
+                frontier.addLast(new WaterReach(next.immutable(), nextCost, reached.drops()));
             }
         }
         // The production target is not a privileged exception. If the pre-placement observable
@@ -2797,20 +2796,20 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!ObservableWorldQuery.canObserveCell(bot, pos)) {
             return false;
         }
-        BlockState state = bot.getEntityWorld().getBlockState(pos);
-        return state.getFluidState().isIn(FluidTags.WATER)
+        BlockState state = bot.level().getBlockState(pos);
+        return state.getFluidState().is(FluidTags.WATER)
                 || state.getFluidState().isEmpty()
-                && (state.isAir() || state.canBucketPlace(Fluids.WATER));
+                && (state.isAir() || state.canBeReplaced(Fluids.WATER));
     }
 
-    private static boolean isStillLava(ServerWorld world, BlockPos pos) {
+    private static boolean isStillLava(ServerLevel world, BlockPos pos) {
         var fluid = world.getFluidState(pos);
-        return fluid.isIn(FluidTags.LAVA) && fluid.isStill();
+        return fluid.is(FluidTags.LAVA) && fluid.isSource();
     }
 
-    private static boolean isStillWater(ServerWorld world, BlockPos pos) {
+    private static boolean isStillWater(ServerLevel world, BlockPos pos) {
         var fluid = world.getFluidState(pos);
-        return fluid.isIn(FluidTags.WATER) && fluid.isStill();
+        return fluid.is(FluidTags.WATER) && fluid.isSource();
     }
 
     /**
@@ -2820,7 +2819,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
      * boundary succeeds.
      */
     private static BlockPos nearestObservableFluid(AIPlayerEntity bot,
-                                                   Predicate<net.minecraft.fluid.FluidState> match,
+                                                   Predicate<net.minecraft.world.level.material.FluidState> match,
                                                    Predicate<BlockPos> posFilter) {
         return nearestObservableCell(bot, state -> match.test(state.getFluidState()), posFilter);
     }
@@ -2828,18 +2827,18 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
     private static BlockPos nearestObservableCell(AIPlayerEntity bot,
                                                   Predicate<BlockState> match,
                                                   Predicate<BlockPos> posFilter) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
         int range = Math.min(PROSPECT_RANGE, Math.max(1, MinecraftAiConfig.get().perception().radius()));
-        int minY = Math.max(world.getBottomY(), origin.getY() - range);
-        int maxY = Math.min(world.getBottomY() + world.getHeight() - 1, origin.getY() + range);
+        int minY = Math.max(world.getMinY(), origin.getY() - range);
+        int maxY = Math.min(world.getMinY() + world.getHeight() - 1, origin.getY() + range);
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (int x = origin.getX() - range; x <= origin.getX() + range; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = origin.getZ() - range; z <= origin.getZ() + range; z++) {
                     BlockPos candidate = new BlockPos(x, y, z);
-                    double distance = origin.getSquaredDistance(candidate);
+                    double distance = origin.distSqr(candidate);
                     if (distance >= bestDistance || distance > (double) range * range
                             || (posFilter != null && !posFilter.test(candidate))
                             || !ObservableWorldQuery.canObserveCell(bot, candidate)) {
@@ -2848,7 +2847,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
                     BlockState state = world.getBlockState(candidate);
                     if (match.test(state)) {
                         bestDistance = distance;
-                        best = candidate.toImmutable();
+                        best = candidate.immutable();
                     }
                 }
             }

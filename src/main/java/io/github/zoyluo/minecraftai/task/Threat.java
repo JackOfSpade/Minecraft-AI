@@ -1,7 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.LivingEntity;
 
 public record Threat(Type type, Severity severity, LivingEntity entity, BlockPos pos) {
     public enum Type {

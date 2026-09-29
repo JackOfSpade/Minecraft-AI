@@ -14,17 +14,6 @@ import io.github.zoyluo.minecraftai.mining.ToolTier;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -33,6 +22,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * DIGDOWN: stands in place and digs a vertical shaft, collecting N target blocks (e.g. cobblestone).
@@ -160,12 +159,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         this.targetBlock = targetBlock;
         this.targetCount = Math.max(1, targetCount);
         this.maxWorkBudget = maxWorkBudgetForTarget(
-                Registries.BLOCK.getId(targetBlock).toString(), this.targetCount);
+                BuiltInRegistries.BLOCK.getKey(targetBlock).toString(), this.targetCount);
         Map<String, String> values = checkpoint == null ? Map.of() : checkpoint;
         this.restored = DigDownCheckpoint.decode(values).orElse(null);
         this.invalidCheckpoint = !values.isEmpty()
                 && (restored == null
-                || !restored.targetBlockId().equals(Registries.BLOCK.getId(targetBlock).toString())
+                || !restored.targetBlockId().equals(BuiltInRegistries.BLOCK.getKey(targetBlock).toString())
                 || restored.targetCount() != this.targetCount);
         Set<Item> drops = new HashSet<>(HarvestCore.expectedDropsFor(Set.of(targetBlock)));
         if (targetBlock == Blocks.STONE) {
@@ -186,7 +185,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     @Override
     public String describe() {
-        return "DigDown " + net.minecraft.registry.Registries.BLOCK.getId(targetBlock).getPath()
+        return "DigDown " + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(targetBlock).getPath()
                 + " " + collected + "/" + targetCount;
     }
 
@@ -227,16 +226,16 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 || state != TaskState.RUNNING && state != TaskState.PAUSED
                 || bot.isInLava()
                 || bot.isOnFire()
-                || bot.isSubmergedInWater()
+                || bot.isUnderWater()
                 || bot.hurtTime > 0
                 || bot.getHealth() <= 8.0F
-                || !bot.getEntityWorld().getFluidState(lavaPos).isIn(FluidTags.LAVA)
+                || !bot.level().getFluidState(lavaPos).is(FluidTags.LAVA)
                 || !ObservableWorldQuery.canObserveBlock(bot, lavaPos)) {
             return false;
         }
-        BlockPos current = bot.getBlockPos();
-        if (!bot.getEntityWorld().getFluidState(current).isEmpty()
-                || !bot.getEntityWorld().getFluidState(current.up()).isEmpty()) {
+        BlockPos current = bot.blockPosition();
+        if (!bot.level().getFluidState(current).isEmpty()
+                || !bot.level().getFluidState(current.above()).isEmpty()) {
             return false;
         }
 
@@ -256,8 +255,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
         // WALLED is the existing durable "this entry is factually closed" outcome. Record the same
         // episode exclusion even when a stronger pre-existing return failure keeps its own reason.
-        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), startPos,
-                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), startPos,
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         if (transitionedToLavaReturn) {
             BotLog.danger(bot, "dig_down_observed_lava_return",
                     "at", current.toShortString(),
@@ -286,13 +285,13 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                     ? null : restored.trail().getLast();
             if (restored.resumePhase() != Phase.DESCEND
                     || restoredPose == null
-                    || bot.getBlockPos().equals(restoredPose)) {
+                    || bot.blockPosition().equals(restoredPose)) {
                 restoreCheckpoint(bot);
                 return;
             }
             BotLog.task(bot, "dig_down_descend_checkpoint_discarded",
                     "saved", restoredPose.toShortString(),
-                    "current", bot.getBlockPos().toShortString(),
+                    "current", bot.blockPosition().toShortString(),
                     "reason", "pose_moved_before_resume");
         }
         // strict_survival does not allow pre-reading underground fluids. The first attempt at an
@@ -300,8 +299,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // EpisodeMemory within the same goal triggers a physical column switch on replan. Before
         // relocation completes, no inventory baseline, trail, or checkpoint is established, so a
         // restart can safely reselect.
-        int now = bot.getEntityWorld().getServer().getTicks();
-        if (EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), bot.getBlockPos(), now)) {
+        int now = bot.level().getServer().getTickCount();
+        if (EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), bot.blockPosition(), now)) {
             prepareEntryRelocation(bot);
             return;
         }
@@ -319,9 +318,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         entryRelocationTarget = null;
         entryRelocationLastFailure = "none";
 
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        int now = bot.getEntityWorld().getServer().getTicks();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        int now = bot.level().getServer().getTickCount();
         for (int dist : ENTRY_RELOCATION_DISTANCES) {
             for (int[] direction : ENTRY_RELOCATION_DIRECTIONS) {
                 int x = feet.getX() + direction[0] * dist;
@@ -330,8 +329,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 // surface level first; a distant heightmap can resolve to a roof/tree/overhang
                 // that is technically the top block but has no reversible route from this entry.
                 addEntryRelocationCandidate(bot, world, new BlockPos(x, feet.getY(), z), now);
-                int topY = world.getTopY(
-                        net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+                int topY = world.getHeight(
+                        net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 if (topY != feet.getY()) {
                     addEntryRelocationCandidate(bot, world, new BlockPos(x, topY, z), now);
                 }
@@ -341,25 +340,25 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     }
 
     private void addEntryRelocationCandidate(AIPlayerEntity bot,
-                                             ServerWorld world,
+                                             ServerLevel world,
                                              BlockPos candidate,
                                              int now) {
-        BlockPos immutable = candidate.toImmutable();
+        BlockPos immutable = candidate.immutable();
         if (Standability.isStandable(world, immutable)
-                && !EpisodeMemory.INSTANCE.isExcluded(bot.getUuid(), immutable, now)
+                && !EpisodeMemory.INSTANCE.isExcluded(bot.getUUID(), immutable, now)
                 && !entryRelocationCandidates.contains(immutable)) {
             entryRelocationCandidates.add(immutable);
         }
     }
 
     private boolean startNextEntryRelocation(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         while (entryRelocationIndex < entryRelocationCandidates.size()) {
             BlockPos candidate = entryRelocationCandidates.get(entryRelocationIndex++);
             entryRelocationAttempts++;
             if (!Standability.isStandable(world, candidate)
                     || EpisodeMemory.INSTANCE.isExcluded(
-                    bot.getUuid(), candidate, bot.getEntityWorld().getServer().getTicks())) {
+                    bot.getUUID(), candidate, bot.level().getServer().getTickCount())) {
                 entryRelocationLastFailure = "candidate_became_unavailable";
                 continue;
             }
@@ -393,11 +392,11 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                     + ":last=relocation_timeout");
             return;
         }
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         if (entryRelocationTarget != null && current.equals(entryRelocationTarget)) {
-            if (Standability.isStandable(bot.getEntityWorld(), current)
+            if (Standability.isStandable(bot.level(), current)
                     && !EpisodeMemory.INSTANCE.isExcluded(
-                    bot.getUuid(), current, bot.getEntityWorld().getServer().getTicks())) {
+                    bot.getUUID(), current, bot.level().getServer().getTickCount())) {
                 bot.getActionPack().stopAll();
                 BotLog.action(bot, "dig_down_entry_relocation_complete",
                         "to", current.toShortString(),
@@ -422,7 +421,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         collected = 0;
         lastProgressBudget = 0;
         pickupGrace = 0;
-        startPos = bot.getBlockPos();   // remember the shaft entry, return here once enough is collected
+        startPos = bot.blockPosition();   // remember the shaft entry, return here once enough is collected
         targetY = startPos.getY();
         phase = Phase.DESCEND;
         returnStartTick = 0;
@@ -433,7 +432,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         stairDirIndex = 0;
         horizontalMode = false;
         descentTrail.clear();
-        descentTrail.add(startPos.toImmutable());
+        descentTrail.add(startPos.immutable());
         returnTrailIndex = -1;
         lastReturnPathAttemptBudget = -RETURN_PATH_RETRY;
         returnPathFallback = false;
@@ -485,7 +484,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             returnProgressWaypointIndex = returnTrailIndex;
             BlockPos waypoint = pendingReturnWaypoint();
             returnBestDistanceSquared = waypoint == null
-                    ? -1L : squaredDistance(bot.getBlockPos(), waypoint);
+                    ? -1L : squaredDistance(bot.blockPosition(), waypoint);
         }
         rememberUnusableEntry(bot, returnOutcome);
         if (promotedToReturn) {
@@ -518,7 +517,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
         if (phase == Phase.DESCEND) {
-            TrailUpdate update = rememberDescentStep(bot.getBlockPos());
+            TrailUpdate update = rememberDescentStep(bot.blockPosition());
             // A safety task is allowed to move the bot after pause().  Publish durable RETURN
             // debt now, while the last factual work cell is still known, so a paused snapshot or
             // a process restart can never reinterpret the displaced underground pose as a fresh
@@ -532,7 +531,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // returnToSurface decrements the cursor immediately after a factual micro-step. If a
             // combat/resupply task now displaces the bot, first rejoin this exact recorded cell
             // instead of skipping it and opening a long diagonal gap to the preceding waypoint.
-            BlockPos current = bot.getBlockPos();
+            BlockPos current = bot.blockPosition();
             for (int i = descentTrail.size() - 1; i >= 0; i--) {
                 if (descentTrail.get(i).equals(current)) {
                     returnTrailIndex = Math.max(returnTrailIndex, i);
@@ -544,7 +543,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // Persist the recovery lease at pause admission, before the safety task can move the
             // player. A process snapshot may happen while this task is still paused and therefore
             // never call onResume(); the aggregate hard clock is unchanged either way.
-            resetReturnProgressLease(bot.getBlockPos());
+            resetReturnProgressLease(bot.blockPosition());
         }
     }
 
@@ -559,7 +558,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         returnSafetyRecovery = true;
         returnPathFallback = false;
         lastReturnPathAttemptBudget = returnBudget() - RETURN_PATH_RETRY;
-        resetReturnProgressLease(bot.getBlockPos());
+        resetReturnProgressLease(bot.blockPosition());
     }
 
     @Override
@@ -576,7 +575,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             complete();
             return;
         }
-        TrailUpdate trailUpdate = rememberDescentStep(bot.getBlockPos());
+        TrailUpdate trailUpdate = rememberDescentStep(bot.blockPosition());
         if (trailUpdate == TrailUpdate.LIMIT) {
             failAfterExactReturn(bot, ReturnOutcome.TRAIL_LIMIT);
             return;
@@ -585,7 +584,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             failAfterExactReturn(bot, ReturnOutcome.SAFETY_INTERRUPTED);
             return;
         }
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         // pickupGrace>0 in DESCEND is a durable, already-observed horizontal-frontier settlement
         // debt. rotateStair() can fall back to digHorizontal() before horizontalMode is latched, so
         // the armed counter itself is the authority. It is not fresh mining work; service its
@@ -599,7 +598,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // A final horizontal break can land exactly on the hard boundary. Observe the now-closed
             // geometry before timing out; otherwise the drop's vanilla pickup delay is preempted by
             // up to PICKUP_GRACE_TICKS and the same entry can be retried without settling its debt.
-            if (horizontalMode && isObservedClosedHorizontalFrontier(bot, world, bot.getBlockPos())) {
+            if (horizontalMode && isObservedClosedHorizontalFrontier(bot, world, bot.blockPosition())) {
                 armHorizontalFrontierSettle(bot);
                 settleHorizontalFrontier(bot);
             } else {
@@ -619,7 +618,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // only once; afterward it flows normally through the shared primitive: miner.tick advances
         // block by block, and if the watchdog genuinely stalls, it fails cleanly at 200t and hands
         // back to replan.
-        if (!horizontalMode && startPos != null && startPos.getY() - bot.getBlockPos().getY() >= MAX_DESCENT) {
+        if (!horizontalMode && startPos != null && startPos.getY() - bot.blockPosition().getY() >= MAX_DESCENT) {
             HarvestCore.sweepPickupAnyOf(bot, targetDrops, 12.0D, 64);
             int got = Math.max(0, HarvestCore.countInventoryItems(bot, targetDrops) - invBaseline);
             if (got >= grossCollectionTarget()) {
@@ -630,7 +629,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             }
             horizontalMode = true;        // permanently switch to horizontal digging; subsequent ticks go through L236's digHorizontal decision (via miner.tick + watchdog)
             noteWorkProgress();            // give horizontal digging a clean watchdog window to start counting from
-            BotLog.action(bot, "dig_down_go_horizontal", "from", bot.getBlockPos().toShortString(),
+            BotLog.action(bot, "dig_down_go_horizontal", "from", bot.blockPosition().toShortString(),
                     "collected", collected + "/" + targetCount);
         }
 
@@ -640,7 +639,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
         // Tool gate: if the target can't be mined (no qualifying pickaxe), fail directly and let GoalExecutor backtrack to resupply a pickaxe.
-        if (!ToolTier.canHarvestWithInventory(bot, targetBlock.getDefaultState())) {
+        if (!ToolTier.canHarvestWithInventory(bot, targetBlock.defaultBlockState())) {
             failAfterExactReturn(bot, ReturnOutcome.NEED_BETTER_TOOL);
             return;
         }
@@ -672,19 +671,19 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             // blocks broken) can't be pinpointed from the failure reason alone -- log the foot
             // position, stair direction, the blocks of the next tier's three cells (head/foot/tread),
             // and whether the obstruction can be broken, to help diagnose the geometric stall point.
-            BlockPos feetNow = bot.getBlockPos();
+            BlockPos feetNow = bot.blockPosition();
             Direction dirNow = HDIRS[stairDirIndex];
-            BlockPos aheadNow = feetNow.offset(dirNow);
-            BlockPos nextNow = aheadNow.down();
-            ServerWorld worldNow = bot.getEntityWorld();
+            BlockPos aheadNow = feetNow.relative(dirNow);
+            BlockPos nextNow = aheadNow.below();
+            ServerLevel worldNow = bot.level();
             BotLog.action(bot, "dig_down_stall_dump",
                     "feet", feetNow.toShortString(),
-                    "dir", dirNow.asString(),
+                    "dir", dirNow.getSerializedName(),
                     "ahead", worldNow.getBlockState(aheadNow).getBlock().toString(),
                     "next", worldNow.getBlockState(nextNow).getBlock().toString(),
-                    "below_next", worldNow.getBlockState(nextNow.down()).getBlock().toString(),
-                    "under_feet", worldNow.getBlockState(feetNow.down()).getBlock().toString(),
-                    "can_harvest", ToolTier.canHarvestWithInventory(bot, targetBlock.getDefaultState()));
+                    "below_next", worldNow.getBlockState(nextNow.below()).getBlock().toString(),
+                    "under_feet", worldNow.getBlockState(feetNow.below()).getBlock().toString(),
+                    "can_harvest", ToolTier.canHarvestWithInventory(bot, targetBlock.defaultBlockState()));
             failAfterExactReturn(bot, ReturnOutcome.NO_PROGRESS);
             return;
         }
@@ -699,8 +698,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         }
         // DONE / FAILED / IDLE -> decide the next cell (the column underfoot).
 
-        BlockPos feet = bot.getBlockPos();
-        if (horizontalMode || feet.down().getY() <= MIN_Y) {
+        BlockPos feet = bot.blockPosition();
+        if (horizontalMode || feet.below().getY() <= MIN_Y) {
             // horizontalMode: permanently switches to horizontal digging once the MAX_DESCENT cap is
             // reached (see the one-time flag set above). Or, just above bedrock with no more room
             // downward -> switch to horizontal digging to keep collecting stone material (observed:
@@ -728,8 +727,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return;
         }
         Direction dir = HDIRS[stairDirIndex];
-        BlockPos ahead = feet.offset(dir);   // next tier's head cell (x+d, y)
-        BlockPos next = ahead.down();         // next tier's standing cell (x+d, y-1)
+        BlockPos ahead = feet.relative(dir);   // next tier's head cell (x+d, y)
+        BlockPos next = ahead.below();         // next tier's standing cell (x+d, y-1)
         if (!isViableStairDirection(bot, feet, dir)) {
             // The tread's own support may have turned out, once observable, to be an already-open
             // cavity or natural cave rather than a hazard fluid (sealed elsewhere) or solid ground.
@@ -757,7 +756,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         //     ceiling at Y+1 in front, leaving only 1 walkable cell height on the way down the stair
         //     -- a normal player can't pass through. Clearing the headroom too -> the descending
         //     tunnel is 2 cells tall and passable. firstSolid3 skips fluids to prevent a mud/water collapse.
-        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.up(), next);
+        BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.above(), next);
         if (solid != null) {
             miner.begin(bot, solid);
             miner.tick(bot); // start mining this cell immediately, don't waste a tick
@@ -769,7 +768,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // roam does (after descending, the just-broken block's drops land right within the pickup
         // radius, which also fixes the collected=0 problem).
         if (bot.getActionPack().descendInto(next)) {
-            TrailUpdate landingUpdate = rememberDescentStep(bot.getBlockPos());
+            TrailUpdate landingUpdate = rememberDescentStep(bot.blockPosition());
             if (landingUpdate == TrailUpdate.LIMIT) {
                 failAfterExactReturn(bot, ReturnOutcome.TRAIL_LIMIT);
                 return;
@@ -801,7 +800,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             fail(returnFailureReason(bot, outcome));
             return;
         }
-        if (hasReturned(startPos, bot.getBlockPos())) {
+        if (hasReturned(startPos, bot.blockPosition())) {
             settleAfterExactReturn(bot, outcome);
             return;
         }
@@ -812,8 +811,8 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         if (!shouldExcludeEntry(outcome, horizontalMode) || startPos == null) {
             return;
         }
-        EpisodeMemory.INSTANCE.exclude(bot.getUuid(), startPos,
-                bot.getEntityWorld().getServer().getTicks(), EpisodeMemory.TTL_UNREACHABLE);
+        EpisodeMemory.INSTANCE.exclude(bot.getUUID(), startPos,
+                bot.level().getServer().getTickCount(), EpisodeMemory.TTL_UNREACHABLE);
         BotLog.action(bot, "dig_down_entry_excluded",
                 "entry", startPos.toShortString(),
                 "reason", switch (outcome) {
@@ -843,7 +842,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         workBudgetAtReturn = exhaustedWorkBudget;
         returnBudgetOffset = 0;
         returnStartTick = elapsed;
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         boolean currentRecorded = !descentTrail.isEmpty()
                 && descentTrail.getLast().equals(current);
         // A safety task runs only after this task has been paused and may move the bot before the
@@ -856,7 +855,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         returnPathFallback = false;
         returnSafetyRecovery = returnOutcome == ReturnOutcome.SAFETY_INTERRUPTED;
         resetReturnProgressLease(current);
-        BotLog.action(bot, "dig_down_return_start", "from", bot.getBlockPos().toShortString(),
+        BotLog.action(bot, "dig_down_return_start", "from", bot.blockPosition().toShortString(),
                 "to", startPos.toShortString(), "trail", descentTrail.size(),
                 "outcome", returnOutcome);
     }
@@ -865,7 +864,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         if (current == null || phase != Phase.DESCEND) {
             return TrailUpdate.UNCHANGED;
         }
-        BlockPos immutable = current.toImmutable();
+        BlockPos immutable = current.immutable();
         BlockPos last = descentTrail.isEmpty() ? null : descentTrail.getLast();
         if (last == null) {
             descentTrail.add(immutable);
@@ -909,7 +908,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     }
 
     private int grossCollectionTarget() {
-        return grossCollectionTarget(Registries.BLOCK.getId(targetBlock).toString(), targetCount,
+        return grossCollectionTarget(BuiltInRegistries.BLOCK.getKey(targetBlock).toString(), targetCount,
                 startPos, targetY);
     }
 
@@ -942,7 +941,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     // reverse; only a gap in the trail falls back to a short pathfind to the next waypoint.
     private void returnToSurface(AIPlayerEntity bot) {
         miner.cancel(bot);
-        BlockPos at = bot.getBlockPos();
+        BlockPos at = bot.blockPosition();
         if (hasReturned(startPos, at)) {
             bot.getActionPack().stopAll();
             settleAfterExactReturn(bot, returnOutcome);
@@ -973,7 +972,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // successful path forever. Skip only historical intermediate cells that are no longer
         // factual landings; index 0 is the exact start debt and must never be skipped.
         while (returnTrailIndex > 0
-                && !isSafeReturnLanding(bot.getEntityWorld(), descentTrail.get(returnTrailIndex))) {
+                && !isSafeReturnLanding(bot.level(), descentTrail.get(returnTrailIndex))) {
             BlockPos skipped = descentTrail.get(returnTrailIndex);
             // A factual stair can lose only its support when a later branch cuts underneath it.
             // Skipping that ascending cell may leave the next waypoint two blocks away and make
@@ -1004,7 +1003,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // after that cell was recorded, just like an intermediate stair support. Repair it while
         // still standing on the adjacent factual waypoint; otherwise generic pathing can snap two
         // blocks down the open column and loop until RETURN_LIMIT.
-        if (!isSafeReturnLanding(bot.getEntityWorld(), waypoint)
+        if (!isSafeReturnLanding(bot.level(), waypoint)
                 && tryRepairReturnSupport(bot, waypoint)) {
             return;
         }
@@ -1012,7 +1011,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         int dy = waypoint.getY() - at.getY();
         if (!returnPathFallback
                 && isValidReturnMicroStep(at, waypoint)
-                && isSafeReturnLanding(bot.getEntityWorld(), waypoint)) {
+                && isSafeReturnLanding(bot.level(), waypoint)) {
             bot.getActionPack().stopAll();
             boolean moved = dy > 0
                     ? io.github.zoyluo.minecraftai.mode.FakePlayerMotion.jumpTo(
@@ -1022,7 +1021,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             if (moved) {
                 returnTrailIndex--;
                 returnPathFallback = false;
-                resetReturnProgressLease(bot.getBlockPos());
+                resetReturnProgressLease(bot.blockPosition());
             } else {
                 returnPathFallback = true;
                 BotLog.action(bot, "dig_down_return_path_fallback",
@@ -1077,7 +1076,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             collected = netDelivered;
             returnOutcome = ReturnOutcome.NET_DELIVERY_SHORTFALL;
         }
-        BotLog.action(bot, "dig_down_return_done", "pos", bot.getBlockPos().toShortString(),
+        BotLog.action(bot, "dig_down_return_done", "pos", bot.blockPosition().toShortString(),
                 "surfaced", "true", "outcome", returnOutcome,
                 "net_delivered", netDelivered + "/" + targetCount);
         phase = Phase.DONE;
@@ -1147,27 +1146,27 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         return (dx == 0 ? 0 : 1) + (dy == 0 ? 0 : 1) + (dz == 0 ? 0 : 1);
     }
 
-    static boolean isSafeReturnLanding(ServerWorld world, BlockPos pos) {
+    static boolean isSafeReturnLanding(ServerLevel world, BlockPos pos) {
         return world != null && pos != null
                 && Standability.isStandable(world, pos)
                 && world.getFluidState(pos).isEmpty()
-                && world.getFluidState(pos.up()).isEmpty();
+                && world.getFluidState(pos.above()).isEmpty();
     }
 
     private boolean tryRepairReturnSupport(AIPlayerEntity bot, BlockPos landing) {
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         // A level intermediate gap can still be routed around and the established skip behavior
         // preserves the mission payload. The exact origin is different: it may never be skipped,
         // so repair its support at any relative height while it is still physically reachable.
         boolean exactOrigin = startPos != null && startPos.equals(landing);
-        BlockPos current = bot.getBlockPos();
+        BlockPos current = bot.blockPosition();
         if ((!exactOrigin && landing.getY() <= current.getY())
                 || !isValidReturnMicroStep(current, landing)
                 || !bot.getActionPack().isPathExecutorIdle()
                 || !isClearReturnBody(world, landing)) {
             return false;
         }
-        BlockPos support = landing.down();
+        BlockPos support = landing.below();
         // A support equal to the current feet cell needs jump-then-place pillar semantics. A raw
         // place attempt cannot succeed while the player occupies it; leave it to exact DIG pathing.
         if (support.equals(current)) {
@@ -1177,7 +1176,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return false;
         }
         var supportState = world.getBlockState(support);
-        if (!supportState.isReplaceable()
+        if (!supportState.canBeReplaced()
                 && !supportState.getCollisionShape(world, support).isEmpty()) {
             return false;
         }
@@ -1192,18 +1191,18 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             return false;
         }
         returnPathFallback = false;
-        resetReturnProgressLease(bot.getBlockPos());
+        resetReturnProgressLease(bot.blockPosition());
         BotLog.action(bot, "dig_down_return_support_repaired",
                 "landing", landing.toShortString(),
                 "support", support.toShortString());
         return true;
     }
 
-    private static boolean isClearReturnBody(ServerWorld world, BlockPos landing) {
+    private static boolean isClearReturnBody(ServerLevel world, BlockPos landing) {
         if (world == null || landing == null) {
             return false;
         }
-        for (BlockPos cell : new BlockPos[]{landing, landing.up()}) {
+        for (BlockPos cell : new BlockPos[]{landing, landing.above()}) {
             var state = world.getBlockState(cell);
             if (!state.getFluidState().isEmpty()
                     || !state.getCollisionShape(world, cell).isEmpty()
@@ -1242,7 +1241,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         miner.cancel(bot);
         bot.getActionPack().stopAll();
         BotLog.action(bot, "dig_down_horizontal_settle_start",
-                "at", bot.getBlockPos().toShortString(),
+                "at", bot.blockPosition().toShortString(),
                 "work_budget", Math.min(workBudget(), maxWorkBudget),
                 "collected", collected + "/" + grossCollectionTarget());
     }
@@ -1275,22 +1274,22 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * tick later. Never peeks through unmined rock to manufacture an extra "closed" verdict.
      */
     private boolean isObservedClosedHorizontalFrontier(AIPlayerEntity bot,
-                                                        ServerWorld world,
+                                                        ServerLevel world,
                                                         BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int directionIndex = 0; directionIndex < HDIRS.length; directionIndex++) {
             if ((rejectedLandingDirections & 1 << directionIndex) != 0) {
                 continue;
             }
-            BlockPos side = feet.offset(HDIRS[directionIndex]);
-            if (TerrainProbe.firstNonAir(world, side, side.up()) != null) {
+            BlockPos side = feet.relative(HDIRS[directionIndex]);
+            if (TerrainProbe.firstNonAir(world, side, side.above()) != null) {
                 return false;
             }
             if (descentTrail.contains(side)) {
                 continue;
             }
-            if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.up())
-                    || !isAcceptableLanding(bot, world, side.down())) {
+            if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.above())
+                    || !isAcceptableLanding(bot, world, side.below())) {
                 continue;
             }
             return false;
@@ -1321,12 +1320,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     // behavior change (geo_deep/shaft/cave don't regress).
     // Returns true = one cell was sealed this tick (caller yields, continues next tick; BlockMiner
     // digging automatically switches back to the pickaxe).
-    private boolean sealLateralWater(AIPlayerEntity bot, ServerWorld world) {
-        BlockPos feet = bot.getBlockPos();
+    private boolean sealLateralWater(AIPlayerEntity bot, ServerLevel world) {
+        BlockPos feet = bot.blockPosition();
         // (1) Lateral: around the foot and head cells (water floods in horizontally as the staircase drifts toward the ocean).
-        for (BlockPos level : new BlockPos[]{feet, feet.up()}) {
+        for (BlockPos level : new BlockPos[]{feet, feet.above()}) {
             for (Direction d : HDIRS) {
-                if (trySealWater(bot, world, level.offset(d))) {
+                if (trySealWater(bot, world, level.relative(d))) {
                     return true;
                 }
             }
@@ -1336,7 +1335,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // [above] the shaft (observed: sealed laterally 25 times, still drowned 12 times); sealing
         // the top too keeps the bot digging in a dry 1x2 air pocket, so oxygen is no longer drained
         // by water pouring in from above.
-        return trySealWater(bot, world, feet.up(2));
+        return trySealWater(bot, world, feet.above(2));
     }
 
     // If this cell is water, seal it with a block (real-player wall-building/capping to block
@@ -1346,7 +1345,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     // next tick; BlockMiner automatically switches back to the pickaxe); no water/no block available
     // to seal -> false (hand off to downstream logic/the survival layer as a backstop -- staying
     // alive is worth more than this one cell, never get stuck over it).
-    private boolean trySealWater(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
+    private boolean trySealWater(AIPlayerEntity bot, ServerLevel world, BlockPos pos) {
         boolean lava = isLava(world, pos);
         if (!lava && !isWater(world, pos)) {
             return false;
@@ -1364,7 +1363,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         // otherwise the next miner tick removes the seal, the fluid refills it and the task consumes
         // every portable block in an endless seal/mine loop.
         miner.cancel(bot);
-        rejectSealedStairDirection(bot.getBlockPos(), pos);
+        rejectSealedStairDirection(bot.blockPosition(), pos);
         String fluidName = lava ? "lava" : "water";
         BotLog.action(bot, "dig_down_seal_water", "fluid", fluidName, "at", pos.toShortString());
         BrainCoordinator.INSTANCE.sendBotReply(bot,
@@ -1375,20 +1374,20 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     private void rejectSealedStairDirection(BlockPos feet, BlockPos sealed) {
         for (int i = 0; i < HDIRS.length; i++) {
-            BlockPos side = feet.offset(HDIRS[i]);
-            if (sealed.equals(side) || sealed.equals(side.up())) {
+            BlockPos side = feet.relative(HDIRS[i]);
+            if (sealed.equals(side) || sealed.equals(side.above())) {
                 rejectLandingDirection(feet, i);
                 return;
             }
         }
     }
 
-    private static boolean isWater(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.WATER);
+    private static boolean isWater(ServerLevel world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().is(FluidTags.WATER);
     }
 
-    private static boolean isLava(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).getFluidState().isIn(FluidTags.LAVA);
+    private static boolean isLava(ServerLevel world, BlockPos pos) {
+        return world.getBlockState(pos).getFluidState().is(FluidTags.LAVA);
     }
 
     /**
@@ -1399,9 +1398,9 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * direction for one). Rejects the direction on success so the next tick's rotateStair routes
      * around it rather than walking onto the freshly placed patch.
      */
-    private boolean trySealOpenCavityLanding(AIPlayerEntity bot, ServerWorld world,
+    private boolean trySealOpenCavityLanding(AIPlayerEntity bot, ServerLevel world,
                                               BlockPos feet, BlockPos next, int directionIndex) {
-        BlockPos hole = next.down();
+        BlockPos hole = next.below();
         if (!ObservableWorldQuery.canObserveCell(bot, hole)) {
             return false;
         }
@@ -1434,7 +1433,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
     // Staircase diagonal-down: switch to the next direction that neither touches a fluid nor lacks a
     // genuine tread support. Where a natural slope meets a cliff, ahead/next may both be air; the
     // old logic only checked water/lava and would call descendInto on the same unsupported next forever.
-    private boolean rotateStair(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private boolean rotateStair(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int i = 0; i < HDIRS.length; i++) {
             stairDirIndex = (stairDirIndex + 1) % HDIRS.length;
@@ -1457,7 +1456,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     private void ensureRejectedLandingOrigin(BlockPos origin) {
         if (rejectedLandingOrigin == null || !rejectedLandingOrigin.equals(origin)) {
-            rejectedLandingOrigin = origin.toImmutable();
+            rejectedLandingOrigin = origin.immutable();
             rejectedLandingDirections = 0;
         }
     }
@@ -1479,12 +1478,12 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * {@code stepToStandable} landing check reacts the instant that happens.
      */
     static boolean isViableStairDirection(AIPlayerEntity bot, BlockPos feet, Direction direction) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos ahead = feet.offset(direction);
-        BlockPos next = ahead.down();
-        BlockPos support = next.down();
-        if (isObservedHazardFluid(bot, ahead) || isObservedHazardFluid(bot, ahead.up())
-                || !isClearableForStair(world, ahead) || !isClearableForStair(world, ahead.up())) {
+        ServerLevel world = bot.level();
+        BlockPos ahead = feet.relative(direction);
+        BlockPos next = ahead.below();
+        BlockPos support = next.below();
+        if (isObservedHazardFluid(bot, ahead) || isObservedHazardFluid(bot, ahead.above())
+                || !isClearableForStair(world, ahead) || !isClearableForStair(world, ahead.above())) {
             return false;
         }
         if (isObservedHazardFluid(bot, next) || isObservedHazardFluid(bot, support)) {
@@ -1506,18 +1505,18 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
      * True when a landing/support cell is either not yet honestly knowable (still hidden behind
      * unmined rock, so it may not be treated as unsafe) or is genuinely observable and solid.
      */
-    private static boolean isAcceptableLanding(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
+    private static boolean isAcceptableLanding(AIPlayerEntity bot, ServerLevel world, BlockPos pos) {
         return !ObservableWorldQuery.canObserveCell(bot, pos) || isSafeSupport(world, pos);
     }
 
-    private static boolean isSafeSupport(ServerWorld world, BlockPos pos) {
+    private static boolean isSafeSupport(ServerLevel world, BlockPos pos) {
         var state = world.getBlockState(pos);
         return state.getFluidState().isEmpty()
                 && !state.getCollisionShape(world, pos).isEmpty()
                 && !Standability.isDangerous(state);
     }
 
-    private static boolean isClearableForStair(ServerWorld world, BlockPos pos) {
+    private static boolean isClearableForStair(ServerLevel world, BlockPos pos) {
         var state = world.getBlockState(pos);
         if (!state.getFluidState().isEmpty() || Standability.isDangerous(state)) {
             return false;
@@ -1525,14 +1524,14 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         if (state.getCollisionShape(world, pos).isEmpty()) {
             return true;
         }
-        return state.getHardness(world, pos) >= 0.0F && world.getBlockEntity(pos) == null;
+        return state.getDestroySpeed(world, pos) >= 0.0F && world.getBlockEntity(pos) == null;
     }
 
     // After hitting bedrock (reaching the bottom), switch to horizontal digging: mine stone material
     // cell by cell along one direction, and once through, walk in and switch columns to continue.
     // The deep layer is all deepslate, so together with the constructor counting cobbled_deepslate
     // into targetDrops, enough stone material can be gathered at Y<0 to make a furnace, no more infinite loop.
-    private void digHorizontal(AIPlayerEntity bot, ServerWorld world, BlockPos feet) {
+    private void digHorizontal(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
         ensureRejectedLandingOrigin(feet);
         for (int tries = 0; tries < HDIRS.length; tries++) {
             if ((rejectedLandingDirections & 1 << hdirIndex) != 0) {
@@ -1540,18 +1539,18 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 continue;
             }
             Direction dir = HDIRS[hdirIndex];
-            BlockPos side = feet.offset(dir);
+            BlockPos side = feet.relative(dir);
             // side/side.up are adjacent to the body (the foot/head neighbor cells); their fluid
             // state is just as naturally visible as it would be to a real player standing next to a
             // wall, so it's checked unconditionally. side.down() (the tread) remains unknowable,
             // hidden behind solid rock, until side itself is mined open -- never pre-read here;
             // stepToStandable() below rechecks it only at the exact moment a landing is actually
             // needed, which is precisely the honest, reactive "only see it once you break through" check.
-            if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.up())) {
+            if (isObservedHazardFluid(bot, side) || isObservedHazardFluid(bot, side.above())) {
                 hdirIndex = (hdirIndex + 1) % HDIRS.length; // water/lava is visibly touching the body in this direction, switch to another
                 continue;
             }
-            BlockPos solid = TerrainProbe.firstNonAir(world, side, side.up());
+            BlockPos solid = TerrainProbe.firstNonAir(world, side, side.above());
             if (solid != null) {
                 if (miner.target() == null || !miner.target().equals(solid)) {
                     miner.begin(bot, solid); // advanced by the miner.tick at the top of onTick
@@ -1579,7 +1578,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
             miner.cancel(bot);
             if (io.github.zoyluo.minecraftai.mode.FakePlayerMotion.stepToStandable(
                     bot, side, "dig_down_horizontal")) {
-                TrailUpdate stepUpdate = rememberDescentStep(bot.getBlockPos());
+                TrailUpdate stepUpdate = rememberDescentStep(bot.blockPosition());
                 if (stepUpdate == TrailUpdate.LIMIT) {
                     failAfterExactReturn(bot, ReturnOutcome.TRAIL_LIMIT);
                     return;
@@ -1608,7 +1607,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
         }
         DigDownCheckpoint live = new DigDownCheckpoint(
                 CHECKPOINT_SCHEMA,
-                Registries.BLOCK.getId(targetBlock).toString(),
+                BuiltInRegistries.BLOCK.getKey(targetBlock).toString(),
                 targetCount,
                 phase,
                 returnOutcome,
@@ -1639,7 +1638,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
     public static Optional<RestoreMetadata> inspectCheckpoint(Map<String, String> values) {
         return DigDownCheckpoint.decode(values).flatMap(checkpoint ->
-                Registries.BLOCK.getOptionalValue(Identifier.of(checkpoint.targetBlockId()))
+                BuiltInRegistries.BLOCK.getOptional(Identifier.parse(checkpoint.targetBlockId()))
                         .map(block -> new RestoreMetadata(
                                 block,
                                 checkpoint.targetCount(),
@@ -1707,10 +1706,10 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
 
         DigDownCheckpoint {
             returnOutcome = returnOutcome == null ? ReturnOutcome.COMPLETE : returnOutcome;
-            startPos = startPos == null ? null : startPos.toImmutable();
+            startPos = startPos == null ? null : startPos.immutable();
             rejectedLandingOrigin = rejectedLandingOrigin == null
-                    ? null : rejectedLandingOrigin.toImmutable();
-            trail = trail == null ? List.of() : trail.stream().map(BlockPos::toImmutable).toList();
+                    ? null : rejectedLandingOrigin.immutable();
+            trail = trail == null ? List.of() : trail.stream().map(BlockPos::immutable).toList();
         }
 
         DigDownCheckpoint(int schema,
@@ -1820,7 +1819,7 @@ public final class DigDownTask extends AbstractTask implements CheckpointableTas
                 } else {
                     return Optional.empty();
                 }
-                String blockId = Identifier.of(required(values, "target_block")).toString();
+                String blockId = Identifier.parse(required(values, "target_block")).toString();
                 int targetCount = integer(values, "target_count");
                 Phase phase = Phase.valueOf(required(values, "phase"));
                 ReturnOutcome returnOutcome = schema < RETURN_OUTCOME_CHECKPOINT_SCHEMA

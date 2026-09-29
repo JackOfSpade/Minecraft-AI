@@ -5,10 +5,9 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogCategory;
 import io.github.zoyluo.minecraftai.persist.AtomicSnapshotFile;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -65,11 +64,11 @@ public final class BotEdits {
         if (bot == null) {
             return;
         }
-        notePlaced(bot.getEntityWorld(), pos);
+        notePlaced(bot.level(), pos);
     }
 
     /** A bot placed a block at {@code pos} in {@code world}. Origin independent: safety seals count too. */
-    public static void notePlaced(ServerWorld world, BlockPos pos) {
+    public static void notePlaced(ServerLevel world, BlockPos pos) {
         if (!MiningAssistRuntime.senseConfigured() || world == null || pos == null) {
             return;
         }
@@ -89,7 +88,7 @@ public final class BotEdits {
             return;
         }
         try {
-            ledger.noteDug(botKey(bot.getUuid()), pos);
+            ledger.noteDug(botKey(bot.getUUID()), pos);
         } catch (RuntimeException exception) {
             noteFailure("note_dug", exception);
         }
@@ -104,13 +103,13 @@ public final class BotEdits {
         return ledger.wasPlaced(dimensionKey, packedPos);
     }
 
-    public static boolean wasPlaced(ServerWorld world, BlockPos pos) {
+    public static boolean wasPlaced(ServerLevel world, BlockPos pos) {
         return ledger.wasPlaced(dimensionKey(world), pos);
     }
 
     /** True when this bot has itself broken the block at {@code pos} (runtime ring). */
     public static boolean wasDug(AIPlayerEntity bot, BlockPos pos) {
-        return ledger.wasDug(botKey(bot.getUuid()), pos);
+        return ledger.wasDug(botKey(bot.getUUID()), pos);
     }
 
     /** Forgets one bot's dug ring (bot unload). The placed ledger is server-wide and stays. */
@@ -119,8 +118,8 @@ public final class BotEdits {
     }
 
     /** The dimension id used everywhere as the ledger key and for {@code poi.cavernDimensions}. */
-    public static String dimensionKey(World world) {
-        return world.getRegistryKey().getValue().toString();
+    public static String dimensionKey(Level world) {
+        return world.dimension().identifier().toString();
     }
 
     /** Stable long for a bot's dug ring. */

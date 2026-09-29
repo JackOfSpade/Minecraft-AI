@@ -8,14 +8,13 @@ import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.block.BlockState;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Builds a 2x2 infinite water source (for irrigation / water collection). Digs a 1-deep 2x2 pit
@@ -41,7 +40,7 @@ public final class IrrigateTask extends AbstractTask {
     private String note = "";
 
     public IrrigateTask(BlockPos center) {
-        this.center = center.toImmutable();
+        this.center = center.immutable();
     }
 
     @Override
@@ -70,9 +69,9 @@ public final class IrrigateTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         cells.clear();
         cells.add(center);
-        cells.add(center.offset(Direction.EAST));
-        cells.add(center.offset(Direction.SOUTH));
-        cells.add(center.offset(Direction.EAST).offset(Direction.SOUTH));
+        cells.add(center.relative(Direction.EAST));
+        cells.add(center.relative(Direction.SOUTH));
+        cells.add(center.relative(Direction.EAST).relative(Direction.SOUTH));
         phase = Phase.GOTO;
         digIndex = 0;
         digFloorPlaced = false;
@@ -94,7 +93,7 @@ public final class IrrigateTask extends AbstractTask {
     }
 
     private void goToCenter(AIPlayerEntity bot) {
-        if (bot.getEyePos().distanceTo(center.toCenterPos()) <= 4.5D) {
+        if (bot.getEyePosition().distanceTo(center.getCenter()) <= 4.5D) {
             bot.getActionPack().stopAll();
             phase = Phase.DIG;
             return;
@@ -124,11 +123,11 @@ public final class IrrigateTask extends AbstractTask {
             return;
         }
         BlockPos cell = cells.get(digIndex);
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         // The pit floor must be solid (otherwise water leaks downward); the existing ground on all sides serves as the retaining wall.
         if (!digFloorPlaced) {
-            BlockState below = world.getBlockState(cell.down());
-            if (below.isAir() || !world.getFluidState(cell.down()).isEmpty()) {
+            BlockState below = world.getBlockState(cell.below());
+            if (below.isAir() || !world.getFluidState(cell.below()).isEmpty()) {
                 OptionalInt slot = MaterialPalette.pickSacrificialBlockSlot(bot);
                 if (slot.isEmpty()) {
                     fail("irrigate_missing_floor_material");
@@ -138,7 +137,7 @@ public final class IrrigateTask extends AbstractTask {
                     fail("irrigate_floor_equip_failed");
                     return;
                 }
-                ActionResult placed = BuildAction.placeBlockAt(bot, cell.down());
+                ActionResult placed = BuildAction.placeBlockAt(bot, cell.below());
                 if (placed.isFailed()) {
                     fail("irrigate_floor_place_failed:" + placed.reason());
                     return;
@@ -189,9 +188,9 @@ public final class IrrigateTask extends AbstractTask {
     }
 
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos target) {
-        for (Direction d : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = target.offset(d).up();
-            if (Standability.isStandable(bot.getEntityWorld(), candidate)) {
+        for (Direction d : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = target.relative(d).above();
+            if (Standability.isStandable(bot.level(), candidate)) {
                 return candidate;
             }
         }

@@ -1,12 +1,12 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,9 +16,9 @@ class DigDownCheckpointTest {
     private static final BlockPos START = new BlockPos(4, 64, -3);
     private static final List<BlockPos> TRAIL = List.of(
             START,
-            START.add(1, -1, 0),
-            START.add(2, -2, 0),
-            START.add(2, -2, 1));
+            START.offset(1, -1, 0),
+            START.offset(2, -2, 0),
+            START.offset(2, -2, 1));
 
     @Test
     void returnCheckpointRoundTripsEveryDebtField() {
@@ -54,7 +54,7 @@ class DigDownCheckpointTest {
 
     @Test
     void sameHeightFarAwayIsNotACompletedReturn() {
-        assertFalse(DigDownTask.hasReturned(START, START.add(20, 0, 0)));
+        assertFalse(DigDownTask.hasReturned(START, START.offset(20, 0, 0)));
         assertTrue(DigDownTask.hasReturned(START, START));
     }
 
@@ -77,12 +77,12 @@ class DigDownCheckpointTest {
 
     @Test
     void threeAxisDiagonalAndLongJumpAreNeverMicroSteps() {
-        assertFalse(DigDownTask.isValidReturnMicroStep(START, START.add(1, 1, 1)));
-        assertFalse(DigDownTask.isValidReturnMicroStep(START, START.add(2, 0, 0)));
-        assertTrue(DigDownTask.isValidReturnMicroStep(START, START.add(1, -1, 0)));
+        assertFalse(DigDownTask.isValidReturnMicroStep(START, START.offset(1, 1, 1)));
+        assertFalse(DigDownTask.isValidReturnMicroStep(START, START.offset(2, 0, 0)));
+        assertTrue(DigDownTask.isValidReturnMicroStep(START, START.offset(1, -1, 0)));
 
         List<BlockPos> forged = new ArrayList<>(TRAIL);
-        forged.set(1, START.add(1, -1, 1));
+        forged.set(1, START.offset(1, -1, 1));
         assertFalse(DigDownTask.DigDownCheckpoint.decode(
                 checkpoint(DigDownTask.Phase.RETURN, forged, 1, 20)).isPresent(),
                 "a checkpoint may not smuggle a three-axis teleport into the factual trail");
@@ -393,7 +393,7 @@ class DigDownCheckpointTest {
                                                    int beforeThreshold, int atThreshold) {
         List<BlockPos> trail = new ArrayList<>();
         for (int step = 0; step <= depth; step++) {
-            trail.add(START.add(step, -step, 0));
+            trail.add(START.offset(step, -step, 0));
         }
         Map<String, String> values = new DigDownTask.DigDownCheckpoint(
                 schema,

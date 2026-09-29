@@ -15,15 +15,14 @@ import io.github.zoyluo.minecraftai.task.ResupplyTask;
 import io.github.zoyluo.minecraftai.task.Task;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Item;
 
 /**
  * Decides how a failed or completed mining/service step in {@link GoalExecutor} is resumed,
@@ -84,7 +83,7 @@ final class MissionRecoveryScheduler {
                 && hasRecoveredMiningChannelTool(bot, reason);
         if ((!targetToolRecovered && !channelToolRecovered)
                 || plan.getCurrent().ores().stream().noneMatch(block ->
-                ToolTier.canHarvestWithInventory(bot, block.getDefaultState()))) {
+                ToolTier.canHarvestWithInventory(bot, block.defaultBlockState()))) {
             return false;
         }
         Optional<OreDigTask.RestoreMetadata> restored = OreDigTask.inspectCheckpoint(
@@ -128,10 +127,10 @@ final class MissionRecoveryScheduler {
             return false;
         }
         return java.util.stream.Stream.concat(
-                        bot.getInventory().getMainStacks().stream(),
-                        java.util.stream.Stream.of(bot.getEquippedStack(EquipmentSlot.OFFHAND)))
+                        bot.getInventory().getNonEquipmentItems().stream(),
+                        java.util.stream.Stream.of(bot.getItemBySlot(EquipmentSlot.OFFHAND)))
                 .anyMatch(stack -> !stack.isEmpty()
-                        && requiredId.equals(Registries.ITEM.getId(stack.getItem()).toString())
+                        && requiredId.equals(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
                         && MiningServiceTask.usableDurability(stack) > 0);
     }
 
@@ -196,7 +195,7 @@ final class MissionRecoveryScheduler {
         String requiredId = reason.substring(prefix.length());
         Item requested;
         try {
-            requested = Registries.ITEM.getOptionalValue(Identifier.of(requiredId)).orElse(null);
+            requested = BuiltInRegistries.ITEM.getOptional(Identifier.parse(requiredId)).orElse(null);
         } catch (RuntimeException invalidIdentifier) {
             return false;
         }
@@ -214,7 +213,7 @@ final class MissionRecoveryScheduler {
                 || !expectedFingerprint.equals(OreDigTask.oreFingerprint(
                 metadata.orElseThrow().ores()))
                 || plan.getCurrent().ores().stream().noneMatch(block ->
-                ToolTier.canHarvestWithInventory(bot, block.getDefaultState()))) {
+                ToolTier.canHarvestWithInventory(bot, block.defaultBlockState()))) {
             return false;
         }
         Optional<Map<String, String>> debited =
@@ -669,7 +668,7 @@ final class MissionRecoveryScheduler {
     private static Optional<SettledServiceAuthority> liveServiceAuthority(
             AIPlayerEntity bot, MiningServiceTask.RestoreMetadata metadata) {
         if (bot == null || metadata == null
-                || !bot.getEntityWorld().getRegistryKey().getValue().toString()
+                || !bot.level().dimension().identifier().toString()
                 .equals(metadata.serviceDimension())) {
             return Optional.empty();
         }

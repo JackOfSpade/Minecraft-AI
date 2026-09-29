@@ -1,8 +1,8 @@
 package io.github.zoyluo.minecraftai.client.screen.ui;
 
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.resource.language.I18n;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.language.I18n;
 
 public final class Theme {
     // Backgrounds are always fully opaque (alpha=FF), to prevent the bright world behind from showing through and weakening text contrast, which would cause a "blurry" look
@@ -32,15 +32,15 @@ public final class Theme {
     private Theme() {
     }
 
-    public static void panel(DrawContext context, int x, int y, int w, int h, int bg) {
+    public static void panel(GuiGraphics context, int x, int y, int w, int h, int bg) {
         context.fill(x, y, x + w, y + h, bg);
-        context.drawHorizontalLine(x, x + w - 1, y, BORDER);
-        context.drawHorizontalLine(x, x + w - 1, y + h - 1, BORDER);
-        context.drawVerticalLine(x, y, y + h - 1, BORDER);
-        context.drawVerticalLine(x + w - 1, y, y + h - 1, BORDER);
+        context.hLine(x, x + w - 1, y, BORDER);
+        context.hLine(x, x + w - 1, y + h - 1, BORDER);
+        context.vLine(x, y, y + h - 1, BORDER);
+        context.vLine(x + w - 1, y, y + h - 1, BORDER);
     }
 
-    public static void bar(DrawContext context, int x, int y, int w, int h, float frac, int fill) {
+    public static void bar(GuiGraphics context, int x, int y, int w, int h, float frac, int fill) {
         float clamped = Math.max(0.0F, Math.min(1.0F, frac));
         panel(context, x, y, w, h, TRACK);
         int fillW = Math.max(0, Math.round((w - 2) * clamped));
@@ -49,30 +49,30 @@ public final class Theme {
         }
     }
 
-    public static void bubble(DrawContext context, int x, int y, int w, int h, int color, boolean filled) {
+    public static void bubble(GuiGraphics context, int x, int y, int w, int h, int color, boolean filled) {
         int bg = filled ? 0xFF1F2A38 : 0xFF20262F;
         context.fill(x, y, x + w, y + h, bg);
-        context.drawHorizontalLine(x, x + w - 1, y, color);
-        context.drawHorizontalLine(x, x + w - 1, y + h - 1, color);
-        context.drawVerticalLine(x, y, y + h - 1, color);
-        context.drawVerticalLine(x + w - 1, y, y + h - 1, color);
+        context.hLine(x, x + w - 1, y, color);
+        context.hLine(x, x + w - 1, y + h - 1, color);
+        context.vLine(x, y, y + h - 1, color);
+        context.vLine(x + w - 1, y, y + h - 1, color);
     }
 
     public static String tr(String key, Object... args) {
-        return I18n.translate(key, args);
+        return I18n.get(key, args);
     }
 
     /** Truncates {@code value} to fit {@code maxWidth} pixels, appending {@code "..."}, if needed.
      *  Formerly copy-pasted (byte-for-byte identical) across GoalCard/GoalView/TaskCard/ChatView. */
-    public static String trim(TextRenderer renderer, String value, int maxWidth) {
-        if (renderer.getWidth(value) <= maxWidth) {
+    public static String trim(Font renderer, String value, int maxWidth) {
+        if (renderer.width(value) <= maxWidth) {
             return value;
         }
         String suffix = "...";
         StringBuilder builder = new StringBuilder();
         for (int index = 0; index < value.length(); index++) {
             String candidate = builder.toString() + value.charAt(index) + suffix;
-            if (renderer.getWidth(candidate) > maxWidth) {
+            if (renderer.width(candidate) > maxWidth) {
                 break;
             }
             builder.append(value.charAt(index));

@@ -11,18 +11,17 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.StackWithSlot;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.StringNbtReader;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.TagParser;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.storage.NbtReadView;
-import net.minecraft.storage.NbtWriteView;
-import net.minecraft.storage.ReadView;
-import net.minecraft.util.ErrorReporter;
-import net.minecraft.util.WorldSavePath;
-
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.ItemStackWithSlot;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.world.level.storage.TagValueOutput;
+import net.minecraft.world.level.storage.ValueInput;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
@@ -212,38 +211,38 @@ public final class BotPersistence {
     public static BotRecord capture(AIPlayerEntity bot) {
         return new BotRecord(
                 bot.getGameProfile().name(),
-                bot.getEntityWorld().getRegistryKey().getValue().toString(),
-                bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), bot.getPitch(),
-                bot.interactionManager.getGameMode().asString(),
-                bot.getHealth(), bot.getHungerManager().getFoodLevel(),
+                bot.level().dimension().identifier().toString(),
+                bot.getX(), bot.getY(), bot.getZ(), bot.getYRot(), bot.getXRot(),
+                bot.gameMode.getGameModeForPlayer().getSerializedName(),
+                bot.getHealth(), bot.getFoodData().getFoodLevel(),
                 encodeInventory(bot),
-                BotMemoryStore.INSTANCE.saveString(bot.getUuid()),
+                BotMemoryStore.INSTANCE.saveString(bot.getUUID()),
                 AIPlayerManager.INSTANCE.ownerOf(bot).map(UUID::toString).orElse(""),
                 AIPlayerManager.INSTANCE.skinIndex(bot),
                 BotPlayerState.encode(bot));
     }
 
     /** Restores equipment, ender chest, XP, effects etc. (see {@link BotPlayerState}); null = old record. */
-    public static void applyPlayerState(ServerPlayerEntity player, String snbt) {
+    public static void applyPlayerState(ServerPlayer player, String snbt) {
         BotPlayerState.apply(player, snbt);
     }
 
-    public static String encodeInventory(ServerPlayerEntity player) {
-        NbtWriteView view = NbtWriteView.create(ErrorReporter.EMPTY, player.getRegistryManager());
-        player.getInventory().writeData(view.getListAppender(INVENTORY_KEY, StackWithSlot.CODEC));
-        return view.getNbt().toString();
+    public static String encodeInventory(ServerPlayer player) {
+        TagValueOutput view = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, player.registryAccess());
+        player.getInventory().save(view.list(INVENTORY_KEY, ItemStackWithSlot.CODEC));
+        return view.buildResult().toString();
     }
 
-    public static void applyInventory(ServerPlayerEntity player, String snbt) {
+    public static void applyInventory(ServerPlayer player, String snbt) {
         if (snbt == null || snbt.isBlank()) {
             return;
         }
         try {
-            NbtCompound root = StringNbtReader.readCompound(snbt);
-            ReadView view = NbtReadView.create(ErrorReporter.EMPTY, player.getRegistryManager(), root);
-            PlayerInventory playerInventory = player.getInventory();
-            playerInventory.readData(view.getTypedListView(INVENTORY_KEY, StackWithSlot.CODEC));
-            playerInventory.markDirty();
+            CompoundTag root = TagParser.parseCompoundFully(snbt);
+            ValueInput view = TagValueInput.create(ProblemReporter.DISCARDING, player.registryAccess(), root);
+            Inventory playerInventory = player.getInventory();
+            playerInventory.load(view.listOrEmpty(INVENTORY_KEY, ItemStackWithSlot.CODEC));
+            playerInventory.setChanged();
         } catch (Exception exception) {
             BotLog.error(player instanceof AIPlayerEntity bot ? bot : null, "bot_inventory_restore_failed", exception);
         }
@@ -416,7 +415,7 @@ public final class BotPersistence {
     }
 
     private Path minecraftaiDir(MinecraftServer server) {
-        return server.getSavePath(WorldSavePath.ROOT).resolve("minecraftai");
+        return server.getWorldPath(LevelResource.ROOT).resolve("minecraftai");
     }
 
     private static String buildVersion() {

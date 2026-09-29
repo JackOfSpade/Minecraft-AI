@@ -8,20 +8,19 @@ import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.RecoverDropsTask;
 import io.github.zoyluo.minecraftai.task.TaskManager;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.test.TestContext;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.text.Text;
 
 /** Deterministic death suspension coverage for active and queued mining missions. */
 public final class DeathRecoveryMissionGameTests {
@@ -31,7 +30,7 @@ public final class DeathRecoveryMissionGameTests {
     private static final int ALL_COMPLETE_ASSERT_TICK = 155;
 
     @GameTest(maxTicks = 200)
-    public void mineOreSurvivesDeathRecoveryAndPreservesQueuedHaveItem(TestContext context) {
+    public void mineOreSurvivesDeathRecoveryAndPreservesQueuedHaveItem(GameTestHelper context) {
         runScenario(
                 context,
                 "DeathMineGT",
@@ -42,7 +41,7 @@ public final class DeathRecoveryMissionGameTests {
     }
 
     @GameTest(maxTicks = 200)
-    public void haveItemSurvivesDeathRecoveryAndPreservesQueuedMineOre(TestContext context) {
+    public void haveItemSurvivesDeathRecoveryAndPreservesQueuedMineOre(GameTestHelper context) {
         runScenario(
                 context,
                 "DeathItemGT",
@@ -52,7 +51,7 @@ public final class DeathRecoveryMissionGameTests {
                 Items.RAW_IRON);
     }
 
-    private static void runScenario(TestContext context,
+    private static void runScenario(GameTestHelper context,
                                     String botName,
                                     Goal activeGoal,
                                     Item activeReward,
@@ -60,39 +59,39 @@ public final class DeathRecoveryMissionGameTests {
                                     Item queuedReward) {
         Probe probe = startSuspendedMission(context, botName, activeGoal, queuedGoal);
 
-        context.runAtTick(SUSPENDED_ASSERT_TICK, () -> assertSuspended(probe));
-        context.runAtTick(RESUMED_ASSERT_TICK, () -> {
+        context.runAtTickTime(SUSPENDED_ASSERT_TICK, () -> assertSuspended(probe));
+        context.runAtTickTime(RESUMED_ASSERT_TICK, () -> {
             assertResumed(probe);
             InventoryAction.giveItem(probe.bot(), new ItemStack(activeReward, 1));
         });
-        context.runAtTick(ACTIVE_COMPLETE_ASSERT_TICK, () -> {
+        context.runAtTickTime(ACTIVE_COMPLETE_ASSERT_TICK, () -> {
             assertActiveMissionCompletedAndQueuePromoted(probe);
             InventoryAction.giveItem(probe.bot(), new ItemStack(queuedReward, 1));
         });
-        context.runAtTick(ALL_COMPLETE_ASSERT_TICK, () -> {
+        context.runAtTickTime(ALL_COMPLETE_ASSERT_TICK, () -> {
             assertAllCompleted(probe);
             cleanup(probe);
-            context.complete();
+            context.succeed();
         });
     }
 
-    private static Probe startSuspendedMission(TestContext context,
+    private static Probe startSuspendedMission(GameTestHelper context,
                                                String botName,
                                                Goal activeGoal,
                                                Goal queuedGoal) {
-        var world = context.getWorld();
-        BlockPos cell = context.getAbsolutePos(new BlockPos(1, 2, 1));
+        var world = context.getLevel();
+        BlockPos cell = context.absolutePos(new BlockPos(1, 2, 1));
         prepareCell(world, cell);
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), botName, world, Vec3d.ofBottomCenter(cell),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), botName, world, Vec3.atBottomCenterOf(cell),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + botName));
-        bot.teleport(world, cell.getX() + 0.5D, cell.getY(), cell.getZ() + 0.5D,
+        bot.teleportTo(world, cell.getX() + 0.5D, cell.getY(), cell.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        bot.setVelocity(Vec3d.ZERO);
+        bot.setDeltaMovement(Vec3.ZERO);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(20);
-        bot.getHungerManager().setSaturationLevel(5.0F);
+        bot.getFoodData().setFoodLevel(20);
+        bot.getFoodData().setSaturation(5.0F);
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE, 1));
 
@@ -114,7 +113,7 @@ public final class DeathRecoveryMissionGameTests {
                 "death suspension published a terminal result");
 
         TaskManager.INSTANCE.assign(bot,
-                new RecoverDropsTask(bot.getBlockPos(), bot.getEntityWorld().getServer().getTicks()),
+                new RecoverDropsTask(bot.blockPosition(), bot.level().getServer().getTickCount()),
                 TaskOrigin.safety("gametest_death_recovery"));
         return new Probe(context, botName, bot, activeGoal, queuedGoal, missionId, resultBaseline);
     }
@@ -177,32 +176,32 @@ public final class DeathRecoveryMissionGameTests {
         require(probe, GoalExecutor.INSTANCE.queuedGoalCount(probe.bot()) == 0, "queue was not drained");
     }
 
-    private static void prepareCell(net.minecraft.server.world.ServerWorld world, BlockPos center) {
+    private static void prepareCell(net.minecraft.server.level.ServerLevel world, BlockPos center) {
         for (int dx = -6; dx <= 6; dx++) {
             for (int dz = -6; dz <= 6; dz++) {
                 for (int dy = -1; dy <= 3; dy++) {
-                    world.setBlockState(center.add(dx, dy, dz), Blocks.STONE.getDefaultState(), Block.NOTIFY_LISTENERS);
+                    world.setBlock(center.offset(dx, dy, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_CLIENTS);
                 }
             }
         }
-        world.setBlockState(center, Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
-        world.setBlockState(center.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_LISTENERS);
+        world.setBlock(center, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
+        world.setBlock(center.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
     }
 
     private static void cleanup(Probe probe) {
-        AIPlayerManager.INSTANCE.despawn(probe.bot().getEntityWorld().getServer(), probe.botName());
+        AIPlayerManager.INSTANCE.despawn(probe.bot().level().getServer(), probe.botName());
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 
     private static void require(Probe probe, boolean condition, String message) {
         if (!condition) {
             cleanup(probe);
-            probe.context().throwGameTestException(Text.of(message));
+            probe.context().fail(Component.nullToEmpty(message));
         }
     }
 
@@ -211,7 +210,7 @@ public final class DeathRecoveryMissionGameTests {
         return new IllegalStateException(message);
     }
 
-    private record Probe(TestContext context,
+    private record Probe(GameTestHelper context,
                          String botName,
                          AIPlayerEntity bot,
                          Goal activeGoal,

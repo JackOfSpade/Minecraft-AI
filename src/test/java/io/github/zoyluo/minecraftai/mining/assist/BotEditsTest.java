@@ -1,7 +1,6 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
 import com.google.gson.JsonParser;
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -33,7 +33,7 @@ class BotEditsTest {
         BotEdits.ledger().notePlaced(OVERWORLD, TORCH);
         assertTrue(BotEdits.wasPlaced(OVERWORLD, TORCH.asLong()));
         assertFalse(BotEdits.wasPlaced("minecraft:the_nether", TORCH.asLong()));
-        assertFalse(BotEdits.wasPlaced(OVERWORLD, TORCH.up().asLong()));
+        assertFalse(BotEdits.wasPlaced(OVERWORLD, TORCH.above().asLong()));
     }
 
     @Test
@@ -69,7 +69,7 @@ class BotEditsTest {
     void snapshotThenLoadRoundTripsThePlacedLedger(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("minecraftai").resolve(BotEditsLedger.SIDECAR_FILE_NAME);
         BotEdits.ledger().notePlaced(OVERWORLD, TORCH);
-        BotEdits.ledger().notePlaced("minecraft:the_nether", TORCH.up());
+        BotEdits.ledger().notePlaced("minecraft:the_nether", TORCH.above());
         assertTrue(BotEdits.ledger().isDirty());
 
         assertTrue(BotEdits.snapshotIfDue(5000L, file), "dirty and never written: due");
@@ -83,7 +83,7 @@ class BotEditsTest {
         assertFalse(BotEdits.wasPlaced(OVERWORLD, TORCH.asLong()));
         assertTrue(BotEdits.loadFromDisk(file));
         assertTrue(BotEdits.wasPlaced(OVERWORLD, TORCH.asLong()));
-        assertTrue(BotEdits.wasPlaced("minecraft:the_nether", TORCH.up().asLong()));
+        assertTrue(BotEdits.wasPlaced("minecraft:the_nether", TORCH.above().asLong()));
     }
 
     @Test
@@ -91,7 +91,7 @@ class BotEditsTest {
         Path file = dir.resolve(BotEditsLedger.SIDECAR_FILE_NAME);
         BotEdits.ledger().notePlaced(OVERWORLD, TORCH);
         assertTrue(BotEdits.snapshotIfDue(10_000L, file));
-        BotEdits.ledger().notePlaced(OVERWORLD, TORCH.up());
+        BotEdits.ledger().notePlaced(OVERWORLD, TORCH.above());
         assertFalse(BotEdits.snapshotIfDue(10_500L, file), "only 500 ticks since the last snapshot");
         assertTrue(BotEdits.ledger().isDirty());
         assertTrue(BotEdits.snapshotIfDue(10_000L + BotEditsLedger.SNAPSHOT_MIN_INTERVAL_TICKS, file));

@@ -4,8 +4,8 @@ import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MilkCowAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import net.minecraft.entity.passive.CowEntity;
-import net.minecraft.item.Items;
+import net.minecraft.world.entity.animal.cow.Cow;
+import net.minecraft.world.item.Items;
 
 /**
  * Milk cow task: find the nearest adult cow, approach it, and use an empty bucket to milk out `target` buckets of milk (MILK_BUCKET).
@@ -62,12 +62,12 @@ public final class MilkCowTask extends AbstractTask {
             finishOrFail("milk_no_progress" + (note.isBlank() ? "" : ":" + note));
             return;
         }
-        CowEntity cow = MilkCowAction.nearestCow(bot, SEARCH);
+        Cow cow = MilkCowAction.nearestCow(bot, SEARCH);
         if (cow == null) {
             finishOrFail("no_cow");
             return;
         }
-        if (bot.getEyePos().distanceTo(cow.getEyePos()) <= MILK_RANGE) {
+        if (bot.getEyePosition().distanceTo(cow.getEyePosition()) <= MILK_RANGE) {
             bot.getActionPack().stopMovement();
             ActionResult result = MilkCowAction.milk(bot);
             if (result.isSuccess()) {
@@ -80,9 +80,9 @@ public final class MilkCowTask extends AbstractTask {
         }
         // Walk toward the cow (the cow moves, so keep re-targeting; fall back to a straight-line walk if A* fails).
         if (bot.getActionPack().isPathExecutorIdle()) {
-            ActionResult path = bot.getActionPack().startPathTo(cow.getBlockPos());
+            ActionResult path = bot.getActionPack().startPathTo(cow.blockPosition());
             if (path.isFailed()) {
-                bot.getActionPack().startWalkTo(cow.getEntityPos());
+                bot.getActionPack().startWalkTo(cow.position());
             }
         }
     }

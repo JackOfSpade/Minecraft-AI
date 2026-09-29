@@ -1,9 +1,9 @@
 package io.github.zoyluo.minecraftai.mining.assist;
 
-import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import net.minecraft.core.BlockPos;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -138,7 +138,7 @@ class PoiEvidenceWindowTest {
     @Test
     void storedPositionsAreImmutableCopies() {
         PoiEvidenceWindow window = new PoiEvidenceWindow();
-        BlockPos.Mutable cursor = new BlockPos.Mutable(5, 6, 7);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos(5, 6, 7);
         window.observe(cursor, PoiBucket.RAIL, 0, 1, false);
         cursor.set(9, 9, 9);
         assertEquals(at(5, 6, 7), window.structuralEntries().iterator().next().pos());

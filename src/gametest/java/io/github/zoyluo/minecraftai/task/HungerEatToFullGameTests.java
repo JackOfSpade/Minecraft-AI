@@ -6,16 +6,15 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mining.MiningCursor;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,18 +28,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class HungerEatToFullGameTests {
     @GameTest(environment = "minecraftai-gametest:hunger_eat_to_full_game_tests_low_hunger_pauses_follow_eats_to_full_then_resumes", maxTicks = 400)
-    public void lowHungerPausesFollowEatsToFullThenResumes(TestContext context) {
+    public void lowHungerPausesFollowEatsToFullThenResumes(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "HungerFollowerGT", 2);
         AIPlayerEntity target = spawnOnPlatform(context, "HungerFollowTargetGT", 2);
         // Well inside FollowTask's 3.0-block STOP_DISTANCE from the start, so the bot never has to
         // path anywhere and settles into "waiting" (ActionPack idle) on the very first tick, rather
         // than sitting exactly on the stop-distance boundary -- which can stall the repath decision
         // and trip the unrelated StuckWatcher safety abort after 200 ticks.
-        target.teleport(context.getWorld(),
+        target.teleportTo(context.getLevel(),
                 bot.getX() + 1.0D, bot.getY(), bot.getZ(),
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(10);
+        bot.getFoodData().setFoodLevel(10);
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 3));
 
         FollowTask follow = new FollowTask(target.getGameProfile().name());
@@ -48,7 +47,7 @@ public final class HungerEatToFullGameTests {
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunger_follow_pause"));
 
         AtomicBoolean sawFollowPausedForEat = new AtomicBoolean();
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             if (active instanceof EatTask) {
                 if (!sawFollowPausedForEat.get()) {
@@ -58,7 +57,7 @@ public final class HungerEatToFullGameTests {
                     sawFollowPausedForEat.set(true);
                 }
                 if (active.state() == TaskState.FAILED) {
-                    context.throwGameTestException(Text.of(
+                    context.fail(Component.nullToEmpty(
                             "eat-to-full EatTask failed: " + active.failureReason()));
                 }
                 return;
@@ -69,9 +68,9 @@ public final class HungerEatToFullGameTests {
             if (active == follow) {
                 require(context, follow.state() == TaskState.RUNNING,
                         "resumed FollowTask was not RUNNING: " + follow.state());
-                require(context, bot.getHungerManager().getFoodLevel() == 20,
+                require(context, bot.getFoodData().getFoodLevel() == 20,
                         "follow resumed before the food bar reached full: "
-                                + bot.getHungerManager().getFoodLevel());
+                                + bot.getFoodData().getFoodLevel());
                 require(context, InventoryAction.countItem(bot, Items.BREAD) < 3,
                         "food reached 20 without actually consuming any bread: "
                                 + InventoryAction.countItem(bot, Items.BREAD) + " remaining");
@@ -83,21 +82,21 @@ public final class HungerEatToFullGameTests {
     }
 
     @GameTest(environment = "minecraftai-gametest:hunger_eat_to_full_game_tests_above_threshold_hunger_does_not_eat", maxTicks = 40)
-    public void aboveThresholdHungerDoesNotEat(TestContext context) {
+    public void aboveThresholdHungerDoesNotEat(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "HungerAboveThresholdGT", 2);
         AIPlayerEntity target = spawnOnPlatform(context, "HungerAboveThresholdTargetGT", 2);
-        target.teleport(context.getWorld(),
+        target.teleportTo(context.getLevel(),
                 bot.getX() + 1.0D, bot.getY(), bot.getZ(),
                 Set.of(), 0.0F, 0.0F, true);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(16); // above the default hungerEatThreshold of 14
+        bot.getFoodData().setFoodLevel(16); // above the default hungerEatThreshold of 14
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 3));
 
         FollowTask follow = new FollowTask(target.getGameProfile().name());
         TaskManager.INSTANCE.assign(bot, follow,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunger_above_threshold"));
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, active == follow,
@@ -107,27 +106,27 @@ public final class HungerEatToFullGameTests {
                 "hunger above threshold paused FollowTask even though eating should not admit");
         require(context, follow.state() == TaskState.RUNNING,
                 "FollowTask was disturbed by a no-op hunger scan: " + follow.state());
-        require(context, bot.getHungerManager().getFoodLevel() == 16,
+        require(context, bot.getFoodData().getFoodLevel() == 16,
                 "food level changed even though eating should not have started");
         despawnAndComplete(context, bot, target);
     }
 
     @GameTest(environment = "minecraftai-gametest:hunger_eat_to_full_game_tests_protected_mining_transaction_defers_eating_until_it_ends", maxTicks = 40)
-    public void protectedMiningTransactionDefersEatingUntilItEnds(TestContext context) {
+    public void protectedMiningTransactionDefersEatingUntilItEnds(GameTestHelper context) {
         AIPlayerEntity bot = spawnOnPlatform(context, "HungerProtectedTxnGT", 2);
         bot.setHealth(bot.getMaxHealth());
-        bot.getHungerManager().setFoodLevel(10); // <= eat threshold, but above critical (6): not urgent
+        bot.getFoodData().setFoodLevel(10); // <= eat threshold, but above critical (6): not urgent
         InventoryAction.giveItem(bot, new ItemStack(Items.BREAD, 3));
 
-        BlockPos activeBreak = bot.getBlockPos().east();
+        BlockPos activeBreak = bot.blockPosition().east();
         OreDigTask oreDig = new OreDigTask(Set.of(Blocks.IRON_ORE), 1,
-                oreDigCheckpoint(bot.getBlockPos(), null, activeBreak));
+                oreDigCheckpoint(bot.blockPosition(), null, activeBreak));
         TaskManager.INSTANCE.assign(bot, oreDig,
                 TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_hunger_protected_txn"));
         require(context, !bot.getActionPack().hasActiveActions(),
                 "fixture unexpectedly started an in-flight ActionPack action");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task duringTxn = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, duringTxn == oreDig,
@@ -138,7 +137,7 @@ public final class HungerEatToFullGameTests {
         require(context, oreDig.state() == TaskState.RUNNING,
                 "protected mining transaction was disturbed by a deferred hunger scan: "
                         + oreDig.state());
-        require(context, bot.getHungerManager().getFoodLevel() == 10,
+        require(context, bot.getFoodData().getFoodLevel() == 10,
                 "bot ate during a protected atomic transaction");
 
         // The transaction ends -- eating must be admitted at the next safe gap.
@@ -146,7 +145,7 @@ public final class HungerEatToFullGameTests {
         require(context, TaskManager.INSTANCE.getActive(bot).isEmpty(),
                 "fixture did not actually end the protected transaction");
 
-        DangerWatcher.INSTANCE.scanBot(context.getWorld().getServer(), bot);
+        DangerWatcher.INSTANCE.scanBot(context.getLevel().getServer(), bot);
 
         Task afterTxn = TaskManager.INSTANCE.getActive(bot).orElse(null);
         require(context, afterTxn instanceof EatTask,
@@ -188,40 +187,40 @@ public final class HungerEatToFullGameTests {
         return checkpoint;
     }
 
-    private static AIPlayerEntity spawnOnPlatform(TestContext context, String name, int relativeY) {
-        var world = context.getWorld();
-        world.setTimeOfDay(1000L);
-        BlockPos feet = context.getAbsolutePos(new BlockPos(3, relativeY, 3));
+    private static AIPlayerEntity spawnOnPlatform(GameTestHelper context, String name, int relativeY) {
+        var world = context.getLevel();
+        world.setDayTime(1000L);
+        BlockPos feet = context.absolutePos(new BlockPos(3, relativeY, 3));
         for (int dx = -3; dx <= 4; dx++) {
             for (int dz = -3; dz <= 4; dz++) {
-                BlockPos cell = feet.add(dx, 0, dz);
-                world.setBlockState(cell.down(), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-                world.setBlockState(cell.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                BlockPos cell = feet.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                world.setBlock(cell.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             }
         }
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
-                        world.getServer(), name, world, Vec3d.ofBottomCenter(feet),
-                        0.0F, 0.0F, GameMode.SURVIVAL)
+                        world.getServer(), name, world, Vec3.atBottomCenterOf(feet),
+                        0.0F, 0.0F, GameType.SURVIVAL)
                 .orElseThrow(() -> new IllegalStateException("failed to spawn " + name));
-        bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
+        bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
         return bot;
     }
 
-    private static void despawnAndComplete(TestContext context, AIPlayerEntity... bots) {
-        var server = bots[0].getEntityWorld().getServer();
+    private static void despawnAndComplete(GameTestHelper context, AIPlayerEntity... bots) {
+        var server = bots[0].level().getServer();
         for (AIPlayerEntity bot : bots) {
             String name = bot.getGameProfile().name();
             DangerWatcher.INSTANCE.clear(bot);
             AIPlayerManager.INSTANCE.despawn(server, name);
         }
-        context.complete();
+        context.succeed();
     }
 
-    private static void require(TestContext context, boolean condition, String message) {
+    private static void require(GameTestHelper context, boolean condition, String message) {
         if (!condition) {
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
     }
 }

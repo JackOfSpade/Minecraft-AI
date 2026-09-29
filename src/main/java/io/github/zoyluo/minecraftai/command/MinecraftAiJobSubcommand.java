@@ -7,22 +7,21 @@ import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.coordination.Job;
 import io.github.zoyluo.minecraftai.coordination.TaskBoard;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 
-import static net.minecraft.server.command.CommandManager.argument;
-import static net.minecraft.server.command.CommandManager.literal;
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public final class MinecraftAiJobSubcommand {
     private MinecraftAiJobSubcommand() {
     }
 
-    public static LiteralArgumentBuilder<ServerCommandSource> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build() {
         return literal("job")
                 .then(literal("post")
                         .then(argument("kind", StringArgumentType.word())
@@ -47,43 +46,43 @@ public final class MinecraftAiJobSubcommand {
                         .executes(context -> clear(context.getSource())));
     }
 
-    private static int post(ServerCommandSource source, String kind, String paramsText) {
+    private static int post(CommandSourceStack source, String kind, String paramsText) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:job_post")) {
             return 0;
         }
         UUID id = TaskBoard.INSTANCE.postGlobal(kind, parseParams(paramsText));
         io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] job posted " + id + " kind=" + kind), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] job posted " + id + " kind=" + kind), false);
         return 1;
     }
 
-    private static int list(ServerCommandSource source) {
+    private static int list(CommandSourceStack source) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:job_list")) {
             return 0;
         }
         var jobs = TaskBoard.INSTANCE.snapshot();
         if (jobs.isEmpty()) {
-            source.sendFeedback(() -> Text.literal("[Minecraft-AI] jobs: empty"), false);
+            source.sendSuccess(() -> Component.literal("[Minecraft-AI] jobs: empty"), false);
             return 0;
         }
         String text = jobs.stream()
                 .map(MinecraftAiJobSubcommand::format)
                 .collect(Collectors.joining(" | "));
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] jobs: " + text), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] jobs: " + text), false);
         return jobs.size();
     }
 
-    private static int clear(ServerCommandSource source) {
+    private static int clear(CommandSourceStack source) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:job_clear")) {
             return 0;
         }
         TaskBoard.INSTANCE.clear();
         io.github.zoyluo.minecraftai.persist.BotPersistence.INSTANCE.markDirty(source.getServer());
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] jobs cleared"), false);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] jobs cleared"), false);
         return 1;
     }
 
-    private static int tell(ServerCommandSource source, String fromBot, String targetBot, String message) {
+    private static int tell(CommandSourceStack source, String fromBot, String targetBot, String message) {
         if (!BotAuthorizationGate.INSTANCE.requireGlobalAdmin(source, "command:job_tell")) {
             return 0;
         }
@@ -94,8 +93,8 @@ public final class MinecraftAiJobSubcommand {
         }
         // Preserve the real OP/console provenance. The legacy from_bot argument is not used as an
         // identity because that would let an administrator silently impersonate a Bot.
-        boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), source.getName(), message);
-        source.sendFeedback(() -> Text.literal("[Minecraft-AI] operator tell " + (queued ? "queued" : "busy")
+        boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), source.getTextName(), message);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] operator tell " + (queued ? "queued" : "busy")
                 + " (legacy from_bot=" + fromBot + " ignored)"), false);
         return queued ? 1 : 0;
     }

@@ -2,8 +2,7 @@ package io.github.zoyluo.minecraftai.mining.assist;
 
 import java.util.Arrays;
 import java.util.Objects;
-
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 /**
  * The ring of view-ray free lengths and the openness statistics derived from it (design 3.3, 6.3).
@@ -124,7 +123,7 @@ public final class FreeRunStats {
     public boolean isValid(int latticeIdx, int nowTick, long eyeCellNow) {
         Objects.checkIndex(latticeIdx, SIZE);
         return entryValid(latticeIdx, nowTick,
-                BlockPos.unpackLongX(eyeCellNow), BlockPos.unpackLongY(eyeCellNow), BlockPos.unpackLongZ(eyeCellNow));
+                BlockPos.getX(eyeCellNow), BlockPos.getY(eyeCellNow), BlockPos.getZ(eyeCellNow));
     }
 
     /** Number of valid entries. */
@@ -220,9 +219,9 @@ public final class FreeRunStats {
     }
 
     private Scan scan(int nowTick, long eyeCellNow, double radius) {
-        int ex = BlockPos.unpackLongX(eyeCellNow);
-        int ey = BlockPos.unpackLongY(eyeCellNow);
-        int ez = BlockPos.unpackLongZ(eyeCellNow);
+        int ex = BlockPos.getX(eyeCellNow);
+        int ey = BlockPos.getY(eyeCellNow);
+        int ez = BlockPos.getZ(eyeCellNow);
         int count = 0;
         double sumL = 0.0D;
         double sumL3 = 0.0D;
@@ -251,9 +250,9 @@ public final class FreeRunStats {
         if (age < 0L || age > MAX_AGE_TICKS) {
             return false;
         }
-        long dx = (long) BlockPos.unpackLongX(eyeCell[i]) - ex;
-        long dy = (long) BlockPos.unpackLongY(eyeCell[i]) - ey;
-        long dz = (long) BlockPos.unpackLongZ(eyeCell[i]) - ez;
+        long dx = (long) BlockPos.getX(eyeCell[i]) - ex;
+        long dy = (long) BlockPos.getY(eyeCell[i]) - ey;
+        long dz = (long) BlockPos.getZ(eyeCell[i]) - ez;
         return dx * dx + dy * dy + dz * dz <= MAX_EYE_SHIFT_SQ;
     }
 

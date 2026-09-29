@@ -5,11 +5,10 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashSet;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * Repays a sealed shelter's cancellation debt on {@link FollowTask}'s behalf, before it resumes
@@ -44,12 +43,12 @@ final class ShelterExitDebtRepayer {
      * if there was no debt (or one was just fully repaid this tick), so the caller should continue
      * its own ordinary follow routing.
      */
-    boolean repay(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed) {
+    boolean repay(AIPlayerEntity bot, ServerPlayer target, int elapsed) {
         if (shelterExitDebt == null) {
             return false;
         }
         if (!shelterExitDebt.matchesDimension(bot)
-                || !bot.getBlockPos().equals(shelterExitDebt.anchor())) {
+                || !bot.blockPosition().equals(shelterExitDebt.anchor())) {
             finish(bot);
             return false;
         }
@@ -85,7 +84,7 @@ final class ShelterExitDebtRepayer {
             return true;
         }
         Standability.clearCache();
-        if (!Standability.isStandable(bot.getEntityWorld(), egress)
+        if (!Standability.isStandable(bot.level(), egress)
                 || !FakePlayerMotion.stepToStandable(bot, egress, "follow_shelter_exit")) {
             rejectedShelterEgress.add(egress);
             activeShelterEgress = null;
@@ -105,7 +104,7 @@ final class ShelterExitDebtRepayer {
         return waiting;
     }
 
-    private BlockPos selectShelterEgress(AIPlayerEntity bot, ServerPlayerEntity target) {
+    private BlockPos selectShelterEgress(AIPlayerEntity bot, ServerPlayer target) {
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos candidate : shelterExitDebt.egressCandidates()) {
@@ -118,7 +117,7 @@ final class ShelterExitDebtRepayer {
                 rejectedShelterEgress.add(candidate);
                 continue;
             }
-            double targetDistance = candidate.getSquaredDistance(target.getBlockPos());
+            double targetDistance = candidate.distSqr(target.blockPosition());
             if (best == null || targetDistance < bestDistance) {
                 best = candidate;
                 bestDistance = targetDistance;
@@ -128,25 +127,25 @@ final class ShelterExitDebtRepayer {
     }
 
     private static BlockPos firstShelterExitObstruction(AIPlayerEntity bot, BlockPos egress) {
-        if (!isPassableShelterExitCell(bot, egress.up())) {
-            return egress.up().toImmutable();
+        if (!isPassableShelterExitCell(bot, egress.above())) {
+            return egress.above().immutable();
         }
         if (!isPassableShelterExitCell(bot, egress)) {
-            return egress.toImmutable();
+            return egress.immutable();
         }
         return null;
     }
 
     private static boolean hasSafeShelterExitSupport(AIPlayerEntity bot, BlockPos egress) {
-        var world = bot.getEntityWorld();
-        var support = world.getBlockState(egress.down());
+        var world = bot.level();
+        var support = world.getBlockState(egress.below());
         return support.getFluidState().isEmpty()
-                && !support.getCollisionShape(world, egress.down()).isEmpty()
+                && !support.getCollisionShape(world, egress.below()).isEmpty()
                 && !Standability.isDangerous(support);
     }
 
     private static boolean isPassableShelterExitCell(AIPlayerEntity bot, BlockPos position) {
-        var world = bot.getEntityWorld();
+        var world = bot.level();
         var state = world.getBlockState(position);
         return state.getFluidState().isEmpty()
                 && state.getCollisionShape(world, position).isEmpty()

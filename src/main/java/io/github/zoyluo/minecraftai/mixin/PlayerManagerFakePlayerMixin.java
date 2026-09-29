@@ -2,19 +2,19 @@ package io.github.zoyluo.minecraftai.mixin;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.network.AINetworkHandler;
-import net.minecraft.network.ClientConnection;
+import net.minecraft.network.Connection;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerManager;
-import net.minecraft.server.network.ConnectedClientData;
-import net.minecraft.server.network.ServerPlayNetworkHandler;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
+import net.minecraft.server.players.PlayerList;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
-@Mixin(PlayerManager.class)
+@Mixin(PlayerList.class)
 public abstract class PlayerManagerFakePlayerMixin {
     @Shadow
     @Final
@@ -30,11 +30,11 @@ public abstract class PlayerManagerFakePlayerMixin {
      * competes for the constructor call, so any other mod's own redirect of that call keeps working and
      * this mixin only overrides its result for our own bots.
      */
-    @ModifyVariable(method = "onPlayerConnect", at = @At("STORE"), ordinal = 0)
-    private ServerPlayNetworkHandler minecraftai$replaceNetworkHandler(ServerPlayNetworkHandler handler,
-                                                                  ClientConnection connection,
-                                                                  ServerPlayerEntity player,
-                                                                  ConnectedClientData clientData) {
+    @ModifyVariable(method = "placeNewPlayer", at = @At("STORE"), ordinal = 0)
+    private ServerGamePacketListenerImpl minecraftai$replaceNetworkHandler(ServerGamePacketListenerImpl handler,
+                                                                  Connection connection,
+                                                                  ServerPlayer player,
+                                                                  CommonListenerCookie clientData) {
         if (player instanceof AIPlayerEntity fakePlayer) {
             return new AINetworkHandler(this.server, connection, fakePlayer, clientData);
         }

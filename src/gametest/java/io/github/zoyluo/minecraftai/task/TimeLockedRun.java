@@ -1,10 +1,9 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.gametest.GameTestTimeLock;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-
 import java.util.function.BooleanSupplier;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
 
 /**
  * Runs a GameTest body that needs the world clock to itself ({@link GameTestTimeLock}) and releases the lock
@@ -25,11 +24,11 @@ final class TimeLockedRun {
      * @param body         called once per tick while the lock is held; returns true when the scenario is done
      * @param cleanup      always run once, whether the body finished or threw
      */
-    static void run(TestContext context, int maxHeldTicks, BooleanSupplier body, Runnable cleanup) {
+    static void run(GameTestHelper context, int maxHeldTicks, BooleanSupplier body, Runnable cleanup) {
         boolean[] held = {false};
         boolean[] over = {false};
         int[] heldTicks = {0};
-        context.runAtEveryTick(() -> {
+        context.failIfEver(() -> {
             if (over[0]) {
                 return;
             }
@@ -41,7 +40,7 @@ final class TimeLockedRun {
             }
             try {
                 if (++heldTicks[0] > maxHeldTicks) {
-                    context.throwGameTestException(Text.of("scenario did not finish within " + maxHeldTicks
+                    context.fail(Component.nullToEmpty("scenario did not finish within " + maxHeldTicks
                             + " ticks of holding the time lock"));
                 }
                 if (!body.getAsBoolean()) {
@@ -49,7 +48,7 @@ final class TimeLockedRun {
                 }
                 over[0] = true;
                 finish(cleanup);
-                context.complete();
+                context.succeed();
             } catch (RuntimeException | Error failure) {
                 over[0] = true;
                 finish(cleanup);

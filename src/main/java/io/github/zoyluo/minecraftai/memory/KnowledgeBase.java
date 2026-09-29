@@ -5,10 +5,9 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.WorldSavePath;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.world.level.storage.LevelResource;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -78,8 +77,8 @@ public final class KnowledgeBase {
     // ==================== Distillation (triggered by EpisodeLog.record) ====================
 
     public void distill(AIPlayerEntity bot, EpisodeLog.EpisodeEvent event, List<EpisodeLog.EpisodeEvent> all) {
-        this.server = bot.getEntityWorld().getServer();
-        UUID botId = bot.getUuid();
+        this.server = bot.level().getServer();
+        UUID botId = bot.getUUID();
         BotKnowledge k = of(botId);
         boolean dirty = false;
         switch (event.type()) {
@@ -105,7 +104,7 @@ public final class KnowledgeBase {
         // Merge into an existing danger zone: hits++ and expand radius (capped at 32)
         for (int i = 0; i < k.dangers.size(); i++) {
             DangerZone z = k.dangers.get(i);
-            if (z.center().isWithinDistance(pos, DANGER_MERGE_DIST)) {
+            if (z.center().closerThan(pos, DANGER_MERGE_DIST)) {
                 k.dangers.set(i, new DangerZone(z.x(), z.y(), z.z(),
                         Math.min(32, (z.hits() + 1) * 8 + 4), z.cause(), z.hits() + 1, event.gameTick()));
                 return true;
@@ -115,7 +114,7 @@ public final class KnowledgeBase {
         // (a marker is only placed after two deaths in the same area -- one is just bad luck)
         long priorNearby = all.stream()
                 .filter(e -> e.type() == EpisodeLog.Type.DEATH && e != event)
-                .filter(e -> e.pos().isWithinDistance(pos, DANGER_MERGE_DIST))
+                .filter(e -> e.pos().closerThan(pos, DANGER_MERGE_DIST))
                 .count();
         if (priorNearby >= 1) {
             k.dangers.add(new DangerZone(pos.getX(), pos.getY(), pos.getZ(),
@@ -127,7 +126,7 @@ public final class KnowledgeBase {
 
     private boolean distillResource(BotKnowledge k, EpisodeLog.EpisodeEvent event) {
         for (ResourcePoint r : k.resources) {
-            if (r.blockId().equals(event.detail()) && r.pos().isWithinDistance(event.pos(), 8)) {
+            if (r.blockId().equals(event.detail()) && r.pos().closerThan(event.pos(), 8)) {
                 return false; // already recorded within 8 blocks for this same resource type -> dedupe
             }
         }
@@ -155,9 +154,9 @@ public final class KnowledgeBase {
         return of(botId).resources.stream()
                 .filter(r -> r.blockId().equals(blockId))
                 .filter(r -> !isDanger(botId, r.pos()))
-                .filter(r -> r.pos().isWithinDistance(from, maxDist))
+                .filter(r -> r.pos().closerThan(from, maxDist))
                 .filter(r -> allowed.test(r.pos()))
-                .min(java.util.Comparator.comparingDouble(r -> r.pos().getSquaredDistance(from)));
+                .min(java.util.Comparator.comparingDouble(r -> r.pos().distSqr(from)));
     }
 
     /** Rich ore zone (P1 consumer-facing): &gt;=minPoints resource points with the same blockId
@@ -168,14 +167,14 @@ public final class KnowledgeBase {
     public Optional<BlockPos> richZoneNear(UUID botId, String blockId, BlockPos from, double maxDist, int minPoints, double radius) {
         List<ResourcePoint> mine = of(botId).resources.stream()
                 .filter(r -> r.blockId().equals(blockId))
-                .filter(r -> r.pos().isWithinDistance(from, maxDist))
+                .filter(r -> r.pos().closerThan(from, maxDist))
                 .toList();
         Optional<BlockPos> best = Optional.empty();
         double bestDist = Double.MAX_VALUE;
         for (ResourcePoint center : mine) {
-            long n = mine.stream().filter(r -> r.pos().isWithinDistance(center.pos(), radius)).count();
+            long n = mine.stream().filter(r -> r.pos().closerThan(center.pos(), radius)).count();
             if (n >= minPoints && !isDanger(botId, center.pos())) {
-                double d = center.pos().getSquaredDistance(from);
+                double d = center.pos().distSqr(from);
                 if (d < bestDist) {
                     bestDist = d;
                     best = Optional.of(center.pos());
@@ -187,7 +186,7 @@ public final class KnowledgeBase {
 
     public boolean isDanger(UUID botId, BlockPos pos) {
         for (DangerZone z : of(botId).dangers) {
-            if (z.center().isWithinDistance(pos, z.radius())) {
+            if (z.center().closerThan(pos, z.radius())) {
                 return true;
             }
         }
@@ -208,7 +207,7 @@ public final class KnowledgeBase {
 
     public void invalidateResource(UUID botId, BlockPos pos) {
         BotKnowledge k = of(botId);
-        if (k.resources.removeIf(r -> r.pos().isWithinDistance(pos, 4))) {
+        if (k.resources.removeIf(r -> r.pos().closerThan(pos, 4))) {
             save(botId, k);
         }
     }
@@ -217,7 +216,7 @@ public final class KnowledgeBase {
     public void invalidateResource(UUID botId, String blockId, BlockPos pos) {
         BotKnowledge k = of(botId);
         if (k.resources.removeIf(r -> r.blockId().equals(blockId)
-                && r.pos().isWithinDistance(pos, 4))) {
+                && r.pos().closerThan(pos, 4))) {
             save(botId, k);
         }
     }
@@ -247,7 +246,7 @@ public final class KnowledgeBase {
     }
 
     private Path fileFor(UUID botId) {
-        Path dir = server.getSavePath(WorldSavePath.ROOT).resolve("minecraftai");
+        Path dir = server.getWorldPath(LevelResource.ROOT).resolve("minecraftai");
         try {
             Files.createDirectories(dir);
         } catch (IOException ignored) {

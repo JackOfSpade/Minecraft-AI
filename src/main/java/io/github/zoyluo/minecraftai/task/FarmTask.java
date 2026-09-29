@@ -9,18 +9,17 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 public final class FarmTask extends AbstractTask {
     private enum Phase {
@@ -71,7 +70,7 @@ public final class FarmTask extends AbstractTask {
     /** P3: quantity-limited constructor — completes once produceItem reaches targetHarvest units (for GoalExecutor's FARM step). */
     public FarmTask(BlockPos areaCenter, int radius, Item seed, Block crop, boolean keepTending,
                     boolean harvestOnly, Item produceItem, int targetHarvest) {
-        this.areaCenter = areaCenter.toImmutable();
+        this.areaCenter = areaCenter.immutable();
         this.radius = Math.max(1, radius);
         this.seed = seed;
         this.crop = crop;
@@ -153,14 +152,14 @@ public final class FarmTask extends AbstractTask {
     private void survey(AIPlayerEntity bot) {
         targets.clear();
         current = null;
-        ServerWorld world = bot.getEntityWorld();
+        ServerLevel world = bot.level();
         boolean hasSeeds = !harvestOnly && InventoryAction.countItem(bot, seed) > 0;
-        BlockPos.stream(areaCenter.add(-radius, -1, -radius), areaCenter.add(radius, 1, radius))
-                .map(BlockPos::toImmutable)
+        BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
+                .map(BlockPos::immutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos)
-                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.up()))
+                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos.above()))
                 .forEach(pos -> addTargetIfUseful(world, pos, hasSeeds));
-        targets.sort(Comparator.comparingDouble(pos -> pos.ground().getSquaredDistance(bot.getBlockPos())));
+        targets.sort(Comparator.comparingDouble(pos -> pos.ground().distSqr(bot.blockPosition())));
         if (targets.isEmpty()) {
             if (!harvestOnly && InventoryAction.countItem(bot, seed) <= 0 && completedActions == 0) {
                 fail("missing " + seed + " x1");
@@ -192,19 +191,19 @@ public final class FarmTask extends AbstractTask {
         phase = Phase.NEXT;
     }
 
-    private void addTargetIfUseful(ServerWorld world, BlockPos ground, boolean hasSeeds) {
-        BlockPos cropPos = ground.up();
-        if (world.getBlockState(cropPos).isOf(crop) && FarmAction.isMature(world, cropPos)) {
+    private void addTargetIfUseful(ServerLevel world, BlockPos ground, boolean hasSeeds) {
+        BlockPos cropPos = ground.above();
+        if (world.getBlockState(cropPos).is(crop) && FarmAction.isMature(world, cropPos)) {
             targets.add(new FarmTarget(ground, TargetAction.HARVEST));
             return;
         }
-        if (harvestOnly || world.getBlockState(cropPos).isOf(crop) || !world.getBlockState(cropPos).isAir()) {
+        if (harvestOnly || world.getBlockState(cropPos).is(crop) || !world.getBlockState(cropPos).isAir()) {
             return;
         }
         if (!hasSeeds) {
             return;
         }
-        if (world.getBlockState(ground).isOf(Blocks.FARMLAND)) {
+        if (world.getBlockState(ground).is(Blocks.FARMLAND)) {
             targets.add(new FarmTarget(ground, TargetAction.PLANT));
             return;
         }
@@ -233,8 +232,8 @@ public final class FarmTask extends AbstractTask {
             phase = Phase.NEXT;
             return;
         }
-        BlockPos focus = current.action() == TargetAction.HARVEST ? current.ground().up() : current.ground();
-        if (bot.getEyePos().distanceTo(focus.toCenterPos()) <= 4.5D) {
+        BlockPos focus = current.action() == TargetAction.HARVEST ? current.ground().above() : current.ground();
+        if (bot.getEyePosition().distanceTo(focus.getCenter()) <= 4.5D) {
             bot.getActionPack().stopAll();
             phase = switch (current.action()) {
                 case HARVEST -> Phase.HARVEST;
@@ -290,8 +289,8 @@ public final class FarmTask extends AbstractTask {
             finishDeposit();
             return;
         }
-        basePos = BotMemoryStore.INSTANCE.of(bot.getUuid())
-                .placeIn(bot.getEntityWorld(), "base")
+        basePos = BotMemoryStore.INSTANCE.of(bot.getUUID())
+                .placeIn(bot.level(), "base")
                 .orElse(null);
         if (basePos == null) {
             note = "deposit_skipped:no_base";
@@ -303,14 +302,14 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         depositContainers.clear();
-        BlockPos.stream(basePos.add(-DEPOSIT_RADIUS, -3, -DEPOSIT_RADIUS), basePos.add(DEPOSIT_RADIUS, 4, DEPOSIT_RADIUS))
-                .map(BlockPos::toImmutable)
+        BlockPos.betweenClosedStream(basePos.offset(-DEPOSIT_RADIUS, -3, -DEPOSIT_RADIUS), basePos.offset(DEPOSIT_RADIUS, 4, DEPOSIT_RADIUS))
+                .map(BlockPos::immutable)
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
                 .forEach(depositContainers::add);
         depositContainers.sort(Comparator
                 .comparing((BlockPos pos) -> !ContainerSupport.containsItem(bot, pos, item))
-                .thenComparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())));
+                .thenComparingDouble(pos -> pos.distSqr(bot.blockPosition())));
         depositContainerIndex = 0;
         selectDepositContainer(bot);
     }
@@ -329,11 +328,11 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         depositContainerPos = depositContainers.get(depositContainerIndex++);
-        if (bot.getEyePos().squaredDistanceTo(depositContainerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(depositContainerPos.getCenter()) <= REACH_SQUARED) {
             phase = Phase.DEPOSIT_TRANSFER;
             return;
         }
-        BlockPos stand = adjacentStandPos(bot, depositContainerPos.down());
+        BlockPos stand = adjacentStandPos(bot, depositContainerPos.below());
         if (stand == null) {
             selectDepositContainer(bot);
             return;
@@ -352,7 +351,7 @@ public final class FarmTask extends AbstractTask {
             phase = Phase.DEPOSIT;
             return;
         }
-        if (bot.getEyePos().squaredDistanceTo(depositContainerPos.toCenterPos()) <= REACH_SQUARED) {
+        if (bot.getEyePosition().distanceToSqr(depositContainerPos.getCenter()) <= REACH_SQUARED) {
             bot.getActionPack().stopAll();
             phase = Phase.DEPOSIT_TRANSFER;
             return;
@@ -364,12 +363,12 @@ public final class FarmTask extends AbstractTask {
 
     private void depositTransfer(AIPlayerEntity bot) {
         if (depositContainerPos == null
-                || bot.getEyePos().squaredDistanceTo(depositContainerPos.toCenterPos()) > REACH_SQUARED
+                || bot.getEyePosition().distanceToSqr(depositContainerPos.getCenter()) > REACH_SQUARED
                 || !io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, depositContainerPos)) {
             phase = Phase.DEPOSIT;
             return;
         }
-        Inventory container = ContainerAction.resolve(bot, depositContainerPos).orElse(null);
+        Container container = ContainerAction.resolve(bot, depositContainerPos).orElse(null);
         if (container == null) {
             selectDepositContainer(bot);
             return;
@@ -379,7 +378,7 @@ public final class FarmTask extends AbstractTask {
             finishDeposit();
             return;
         }
-        ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, stack -> stack.isOf(item), maxDepositCount(bot, item));
+        ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, stack -> stack.is(item), maxDepositCount(bot, item));
         if (result.movedAny()) {
             note = "deposited " + item + " x" + result.count();
             return;
@@ -393,7 +392,7 @@ public final class FarmTask extends AbstractTask {
     }
 
     private void harvest(AIPlayerEntity bot) {
-        ActionResult result = FarmAction.harvest(bot, current.ground().up());
+        ActionResult result = FarmAction.harvest(bot, current.ground().above());
         if (result.isFailed()) {
             note = result.reason();
             phase = Phase.NEXT;
@@ -441,13 +440,13 @@ public final class FarmTask extends AbstractTask {
 
     // Whether the area has any of this crop that's "planted but not yet mature" -- if so it's worth staying
     // to wait for maturity instead of leaving right after planting (fixes real_wheat harvest=0).
-    private boolean hasImmatureCrops(AIPlayerEntity bot, ServerWorld world) {
-        return BlockPos.stream(areaCenter.add(-radius, -1, -radius), areaCenter.add(radius, 1, radius))
+    private boolean hasImmatureCrops(AIPlayerEntity bot, ServerLevel world) {
+        return BlockPos.betweenClosedStream(areaCenter.offset(-radius, -1, -radius), areaCenter.offset(radius, 1, radius))
                 .filter(ground -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground)
-                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground.up()))
+                        || io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveBlock(bot, ground.above()))
                 .anyMatch(ground -> {
-                    BlockPos cropPos = ground.up();
-                    return world.getBlockState(cropPos).isOf(crop) && !FarmAction.isMature(world, cropPos);
+                    BlockPos cropPos = ground.above();
+                    return world.getBlockState(cropPos).is(crop) && !FarmAction.isMature(world, cropPos);
                 });
     }
 
@@ -493,9 +492,9 @@ public final class FarmTask extends AbstractTask {
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = target.offset(direction).up();
-            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.getEntityWorld(), candidate)) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = target.relative(direction).above();
+            if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(bot.level(), candidate)) {
                 return candidate;
             }
         }

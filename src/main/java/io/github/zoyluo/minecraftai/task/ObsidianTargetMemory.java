@@ -1,9 +1,8 @@
 package io.github.zoyluo.minecraftai.task;
 
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashMap;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 
 /** Rejects a target only until either the observed topology changes or a bounded TTL expires. */
 final class ObsidianTargetMemory {
@@ -14,7 +13,7 @@ final class ObsidianTargetMemory {
 
     void reject(BlockPos pos, int topologyEpoch, int now, int ttl) {
         if (pos != null) {
-            rejected.put(pos.toImmutable(),
+            rejected.put(pos.immutable(),
                     new Stamp(Math.max(0, topologyEpoch), now + Math.max(1, ttl)));
         }
     }

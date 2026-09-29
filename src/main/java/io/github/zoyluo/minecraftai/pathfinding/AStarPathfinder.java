@@ -3,9 +3,6 @@ package io.github.zoyluo.minecraftai.pathfinding;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -16,6 +13,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 
 public final class AStarPathfinder {
     private static final int DEFAULT_MAX_NODES = 10_000;
@@ -52,7 +51,7 @@ public final class AStarPathfinder {
         }
     };
 
-    private final ServerWorld world;
+    private final ServerLevel world;
     private final BlockPos start;
     private final BlockPos goal;
     private final NeighborEnumerator enumerator;
@@ -67,53 +66,53 @@ public final class AStarPathfinder {
     private final long maxMillis;
     private static volatile long cacheVersion;
 
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal) {
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal) {
         this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, false);
     }
 
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal) {
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal) {
         this(bot, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, false);
     }
 
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis) {
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis) {
         this(null, world, start, goal, maxNodes, maxMillis, false);
     }
 
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis) {
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis) {
         this(bot, world, start, goal, maxNodes, maxMillis, false);
     }
 
     // NAV-9: canPillar=true allows pillaring (placing a block underfoot) to cross obstacles (passed in by callers that have blocks available).
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, boolean canPillar) {
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal, boolean canPillar) {
         this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar);
     }
 
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, boolean canPillar) {
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal, boolean canPillar) {
         this(bot, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar);
     }
 
     /** Replans with the caller's original movement-capability ceiling intact. */
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal,
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal,
                            boolean canPillar, boolean allowDig) {
         this(null, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar, allowDig);
     }
 
     /** Replans with the caller's original movement-capability ceiling intact. */
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal,
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal,
                            boolean canPillar, boolean allowDig) {
         this(bot, world, start, goal, DEFAULT_MAX_NODES, DEFAULT_MAX_MILLIS, canPillar, allowDig);
     }
 
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar) {
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar) {
         this(null, world, start, goal, maxNodes, maxMillis, canPillar, true);
     }
 
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar) {
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar) {
         this(bot, world, start, goal, maxNodes, maxMillis, canPillar, true);
     }
 
     // NAV-OPT: allowDig distinguishes between two search modes, "walk-only" and "dig-through allowed", supporting two-phase pathfinding (walk-only first, dig-through as fallback).
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
         this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
     }
 
@@ -126,19 +125,19 @@ public final class AStarPathfinder {
      * handy); OreScan.observeDangerFluid treats a null bot as "cannot observe," which safely
      * degrades to the same allow-unknown behavior as the no-bot constructors below.
      */
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
         this(bot, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
     }
 
     // Weighted constructor (the unified approach primitive uses ε=3): see the heuristicWeight comment.
-    public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
+    public AStarPathfinder(ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
         this(null, world, start, goal, maxNodes, maxMillis, canPillar, allowDig, heuristicWeight);
     }
 
-    public AStarPathfinder(AIPlayerEntity bot, ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
+    public AStarPathfinder(AIPlayerEntity bot, ServerLevel world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig, double heuristicWeight) {
         this.world = world;
-        this.start = start.toImmutable();
-        this.goal = goal.toImmutable();
+        this.start = start.immutable();
+        this.goal = goal.immutable();
         this.canPillar = canPillar;
         this.allowDig = allowDig;
         this.heuristicWeight = heuristicWeight;
@@ -194,7 +193,7 @@ public final class AStarPathfinder {
         }
         enumerator.setPathGoal(effectiveGoal);
         CacheKey cacheKey = new CacheKey(
-                world.getRegistryKey().getValue().toString(),
+                world.dimension().identifier().toString(),
                 effectiveStart, effectiveGoal,
                 (int) (maxNodes + heuristicWeight * 1000), maxMillis,
                 canPillar, allowDig, minimumY, cacheVersion);
@@ -323,7 +322,7 @@ public final class AStarPathfinder {
 
     // Goal cell "becomes standable once dug out": both the foot and head positions are (diggable solid OR already passable), with no fluid -- after digging through it becomes a legal standing position.
     private boolean isDiggableColumn(BlockPos pos) {
-        return diggableOrPassable(pos) && diggableOrPassable(pos.up());
+        return diggableOrPassable(pos) && diggableOrPassable(pos.above());
     }
 
     private boolean diggableOrPassable(BlockPos pos) {
@@ -334,7 +333,7 @@ public final class AStarPathfinder {
         if (state.getCollisionShape(world, pos).isEmpty()) {
             return true;  // already passable
         }
-        return state.getHardness(world, pos) >= 0; // diggable (bedrock's -1 is excluded)
+        return state.getDestroySpeed(world, pos) >= 0; // diggable (bedrock's -1 is excluded)
     }
 
     private static PathfindingResult cached(CacheKey key, long startTime) {
@@ -394,8 +393,8 @@ public final class AStarPathfinder {
             int minimumY,
             long version) {
         private CacheKey {
-            start = start.toImmutable();
-            goal = goal.toImmutable();
+            start = start.immutable();
+            goal = goal.immutable();
         }
     }
 

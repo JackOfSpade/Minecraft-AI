@@ -1,13 +1,12 @@
 package io.github.zoyluo.minecraftai.mining;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * S2: Single source of truth for the ore mining chain -- collapses "ore block → drop → smelted

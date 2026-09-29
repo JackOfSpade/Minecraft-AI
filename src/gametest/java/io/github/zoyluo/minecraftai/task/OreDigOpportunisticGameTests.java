@@ -18,18 +18,18 @@ import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import io.github.zoyluo.minecraftai.task.SensingArena.Room;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,7 +61,7 @@ import static io.github.zoyluo.minecraftai.task.SensingArena.hasSpawnLine;
  */
 public final class OreDigOpportunisticGameTests {
     private static final Logger LOG = LoggerFactory.getLogger("minecraftai-detour-gametest");
-    private static final BlockState STONE = Blocks.STONE.getDefaultState();
+    private static final BlockState STONE = Blocks.STONE.defaultBlockState();
     private static final String ENV_PREFIX = "minecraftai-gametest:ore_dig_opportunistic_game_tests_";
 
     // ---------------------------------------------------------------------------------------------
@@ -70,7 +70,7 @@ public final class OreDigOpportunisticGameTests {
 
     @GameTest(environment = ENV_PREFIX + "visible_valuable_in_cave_is_mined_then_bot_returns_to_exact_anchor",
             maxTicks = 1800)
-    public void visibleValuableInCaveIsMinedThenBotReturnsToExactAnchor(TestContext context) {
+    public void visibleValuableInCaveIsMinedThenBotReturnsToExactAnchor(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(10, -3, 17, -4, 4, 4);
         hub(room);
@@ -95,14 +95,14 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
         AnchorRef anchor = new AnchorRef();
         boolean[] wasActive = {false};
         boolean[] done = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -134,11 +134,11 @@ public final class OreDigOpportunisticGameTests {
                 // The detour just ended (published tuple cleared): the bot must be back at the exact anchor
                 // face, and the checkpoint's strip numbers must still be the anchor's (design 4.10, I6).
                 h.require(anchor.face != null, "detour was live but never captured an anchor");
-                h.require(bot.getBlockPos().equals(anchor.face),
-                        "bot did not return to the exact anchor: at " + bot.getBlockPos().toShortString()
+                h.require(bot.blockPosition().equals(anchor.face),
+                        "bot did not return to the exact anchor: at " + bot.blockPosition().toShortString()
                                 + ", anchor " + anchor.face.toShortString());
                 anchor.requireUnchanged(h, live, p.tick);
-                h.require(!room.world.getBlockState(candidate).isOf(Blocks.DIAMOND_ORE),
+                h.require(!room.world.getBlockState(candidate).is(Blocks.DIAMOND_ORE),
                         "the visible diamond was never mined by the detour");
                 h.assertStrict(bot, "ore_dig_opportunistic_anchor_end");
                 done[0] = true;
@@ -155,19 +155,19 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "valuable_behind_one_stone_layer_is_never_detoured", maxTicks = 1200)
-    public void valuableBehindOneStoneLayerIsNeverDetoured(TestContext context) {
+    public void valuableBehindOneStoneLayerIsNeverDetoured(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(20, -6, 6, -4, 4, 4);
         hub(room);
         BlockPos hidden = room.at(-8, 0, 0);
-        room.world.setBlockState(hidden, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        room.world.setBlock(hidden, Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
         assertFullyEnclosed(h, room, hidden);
         // dy=1 + a solid roof (not dy=0): see the giveItem/pose comment on test 1 in this file --
         // DetourHostImpl.poseFor's same-level cardinal stands can never pass hasReliableObservedDropCatch
         // for a floor-level ore, so the control must sit one level up for approachGoalFor's below-stand.
         BlockPos control = room.at(6, 1, 0);
-        room.world.setBlockState(control, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        room.world.setBlockState(room.at(6, 2, 0), STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(control, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        room.world.setBlock(room.at(6, 2, 0), STONE, Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigDetourCanaryGT", room, 0, 0);
         h.enableDetour(bot, 256);
@@ -178,11 +178,11 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -195,14 +195,14 @@ public final class OreDigOpportunisticGameTests {
                 return;
             }
             requireNotFailed(h, task);
-            h.require(room.world.getBlockState(hidden).isOf(Blocks.DIAMOND_ORE),
+            h.require(room.world.getBlockState(hidden).is(Blocks.DIAMOND_ORE),
                     "X-RAY LEAK: the sealed diamond was mined at tick " + p.tick);
             MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
             if (state != null) {
                 h.require(!state.sightings().contains(hidden),
                         "X-RAY LEAK: the sealed diamond entered the sighting ledger");
             }
-            if (!room.world.getBlockState(control).isOf(Blocks.IRON_ORE)) {
+            if (!room.world.getBlockState(control).is(Blocks.IRON_ORE)) {
                 // The open, admissible control was mined: the sensing/detour pipeline is demonstrably alive,
                 // so the fact the sealed diamond above was never touched actually proves something (I2).
                 ObservedOccupancy occupancy = state == null ? null : state.occupancyIfPresent();
@@ -223,7 +223,7 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "vein_follow_respects_cap_and_lease", maxTicks = 2200)
-    public void veinFollowRespectsCapAndLease(TestContext context) {
+    public void veinFollowRespectsCapAndLease(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(30, -3, 17, -4, 4, 4);
         hub(room);
@@ -236,8 +236,8 @@ public final class OreDigOpportunisticGameTests {
             // reliably within ordinary perception radius of a bot still working hub()'s coal near dx=0,
             // regardless of which way OreDigTask's own strip tunnel happens to head first.
             BlockPos pos = room.at(1 + i, 1, 0);
-            room.world.setBlockState(pos, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-            room.world.setBlockState(room.at(1 + i, 2, 0), STONE, Block.NOTIFY_ALL);
+            room.world.setBlock(pos, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+            room.world.setBlock(room.at(1 + i, 2, 0), STONE, Block.UPDATE_ALL);
             vein.add(pos);
         }
 
@@ -252,12 +252,12 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
         boolean[] wasActive = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -301,7 +301,7 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "lava_beside_valuable_is_skipped", maxTicks = 900)
-    public void lavaBesideValuableIsSkipped(TestContext context) {
+    public void lavaBesideValuableIsSkipped(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(40, -3, 9, -4, 4, 4);
         hub(room);
@@ -310,9 +310,9 @@ public final class OreDigOpportunisticGameTests {
         // neighbour, from the east-side below-stand's point of view) so it is still beside the ore.
         BlockPos ore = room.at(6, 1, 0);
         room.set(6, 1, 0, Blocks.IRON_ORE);
-        room.world.setBlockState(room.at(6, 2, 0), STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(room.at(6, 2, 0), STONE, Block.UPDATE_ALL);
         BlockPos lava = room.at(7, 1, 0);
-        room.world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+        room.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigDetourLavaBesideGT", room, 0, 0);
         h.enableDetour(bot, 256);
@@ -323,12 +323,12 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
         float startHealth = bot.getHealth();
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -343,7 +343,7 @@ public final class OreDigOpportunisticGameTests {
             requireNotFailed(h, task);
             h.require(bot.isAlive() && bot.getHealth() >= startHealth - 0.01F,
                     "the bot took damage: it must never have approached the lava-adjacent ore");
-            h.require(room.world.getBlockState(ore).isOf(Blocks.IRON_ORE),
+            h.require(room.world.getBlockState(ore).is(Blocks.IRON_ORE),
                     "the lava-adjacent iron was mined: SafeGate/DetourPolicy did not reject it");
             if (p.tick - p.assignedAt > 750) {
                 MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
@@ -360,7 +360,7 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "lava_exposed_by_the_break_is_sealed_or_detour_aborts", maxTicks = 1000)
-    public void lavaExposedByTheBreakIsSealedOrDetourAborts(TestContext context) {
+    public void lavaExposedByTheBreakIsSealedOrDetourAborts(GameTestHelper context) {
         // Sub-case A: no sacrificial material at all -> the seal fails (NO_BLOCK) and the engine aborts
         // fluid_unsealable cleanly (design C.5), never failing the mission (I8).
         Harness h = new Harness(context);
@@ -380,14 +380,14 @@ public final class OreDigOpportunisticGameTests {
         // _start line ever appears for this candidate within the whole 900-tick budget).
         BlockPos ore = room.at(6, 1, 0);
         room.set(6, 1, 0, Blocks.IRON_ORE);
-        room.world.setBlockState(room.at(6, 2, 0), STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(room.at(6, 2, 0), STONE, Block.UPDATE_ALL);
         BlockPos lava = room.at(7, 1, 0);
         for (Direction d : Direction.values()) {
             if (d != Direction.WEST) {
-                room.world.setBlockState(lava.offset(d), STONE, Block.NOTIFY_ALL);
+                room.world.setBlock(lava.relative(d), STONE, Block.UPDATE_ALL);
             }
         }
-        room.world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+        room.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigDetourLavaAbortGT", room, 0, 0);
         h.enableDetour(bot, 256);
@@ -395,13 +395,13 @@ public final class OreDigOpportunisticGameTests {
         // for the mission's own channel/corridor bottleneck (always stone tier, never higher).
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
         float startHealth = bot.getHealth();
         boolean[] sawBreak = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -416,10 +416,10 @@ public final class OreDigOpportunisticGameTests {
             requireNotFailed(h, task);
             h.require(bot.isAlive() && bot.getHealth() >= startHealth - 4.0F,
                     "the bot took heavy damage from the exposed lava");
-            boolean broken = !room.world.getBlockState(ore).isOf(Blocks.IRON_ORE);
+            boolean broken = !room.world.getBlockState(ore).is(Blocks.IRON_ORE);
             if (broken) {
                 sawBreak[0] = true;
-                h.require(room.world.getBlockState(lava).isOf(Blocks.LAVA),
+                h.require(room.world.getBlockState(lava).is(Blocks.LAVA),
                         "the lava was sealed although the bot carried no sacrificial material");
             }
             if (!sawBreak[0]) {
@@ -438,7 +438,7 @@ public final class OreDigOpportunisticGameTests {
 
     /** Sub-case B of scenario 5: the bot has a sacrificial block, so the exposed lava is sealed and mining goes on. */
     @GameTest(environment = ENV_PREFIX + "lava_exposed_by_the_break_is_sealed_when_material_available", maxTicks = 1000)
-    public void lavaExposedByTheBreakIsSealedWhenMaterialAvailable(TestContext context) {
+    public void lavaExposedByTheBreakIsSealedWhenMaterialAvailable(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(60, -3, 9, -4, 4, 4);
         hub(room);
@@ -450,14 +450,14 @@ public final class OreDigOpportunisticGameTests {
         // before the ore is ever mined, so the postbreak seal path never gets reached.
         BlockPos ore = room.at(6, 1, 0);
         room.set(6, 1, 0, Blocks.IRON_ORE);
-        room.world.setBlockState(room.at(6, 2, 0), STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(room.at(6, 2, 0), STONE, Block.UPDATE_ALL);
         BlockPos lava = room.at(7, 1, 0);
         for (Direction d : Direction.values()) {
             if (d != Direction.WEST) {
-                room.world.setBlockState(lava.offset(d), STONE, Block.NOTIFY_ALL);
+                room.world.setBlock(lava.relative(d), STONE, Block.UPDATE_ALL);
             }
         }
-        room.world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
+        room.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigDetourLavaSealGT", room, 0, 0);
         h.enableDetour(bot, 256);
@@ -473,7 +473,7 @@ public final class OreDigOpportunisticGameTests {
         float startHealth = bot.getHealth();
         boolean[] sawBreak = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -488,7 +488,7 @@ public final class OreDigOpportunisticGameTests {
             requireNotFailed(h, task);
             h.require(bot.isAlive() && bot.getHealth() >= startHealth - 4.0F,
                     "the bot took heavy damage from the exposed lava");
-            boolean broken = !room.world.getBlockState(ore).isOf(Blocks.IRON_ORE);
+            boolean broken = !room.world.getBlockState(ore).is(Blocks.IRON_ORE);
             if (broken) {
                 sawBreak[0] = true;
             }
@@ -496,7 +496,7 @@ public final class OreDigOpportunisticGameTests {
                 h.require(p.tick - p.assignedAt < 900, "the ore beside the hidden lava was never mined");
                 return;
             }
-            if (!room.world.getBlockState(lava).isOf(Blocks.LAVA)) {
+            if (!room.world.getBlockState(lava).is(Blocks.LAVA)) {
                 // Sealed: at most SEAL_CAP (3) sacrificial blocks, design C.5/C.3 tickPostbreak.
                 requireNotFailed(h, task);
                 h.assertStrict(bot, "ore_dig_opportunistic_lava_seal_end");
@@ -512,26 +512,26 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "lava_sighting_during_detour_returns_instead_of_evade", maxTicks = 1400)
-    public void lavaSightingDuringDetourReturnsInsteadOfEvade(TestContext context) {
+    public void lavaSightingDuringDetourReturnsInsteadOfEvade(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(70, -4, 9, -4, 4, 4);
         hub(room);
         // dy=1 + a solid roof (not dy=0): see test 1's pose comment.
         BlockPos candidate = room.at(8, 1, -3);
         room.set(8, 1, -3, Blocks.DIAMOND_ORE);
-        room.world.setBlockState(room.at(8, 2, -3), STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(room.at(8, 2, -3), STONE, Block.UPDATE_ALL);
         // A lava cell sealed on every side but the one facing the anchor, three blocks (Chebyshev) from spawn:
         // within SafeGate's lavaClearRadius(4) of the bot's own position, but not adjacent (never the immediate,
         // hook-3 "hasImmediateLava" claim path).
         BlockPos lava = room.at(3, 0, 3);
         for (Direction d : Direction.values()) {
             if (d != Direction.WEST) {
-                room.world.setBlockState(lava.offset(d), STONE, Block.NOTIFY_ALL);
+                room.world.setBlock(lava.relative(d), STONE, Block.UPDATE_ALL);
             }
         }
-        room.world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos door = lava.offset(Direction.WEST);
-        room.world.setBlockState(door, STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos door = lava.relative(Direction.WEST);
+        room.world.setBlock(door, STONE, Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigDetourLavaReturnGT", room, 0, 0);
         h.enableDetour(bot, 256);
@@ -542,13 +542,13 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
         float startHealth = bot.getHealth();
         boolean[] revealed = {false};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -570,7 +570,7 @@ public final class OreDigOpportunisticGameTests {
             MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
             boolean activeNow = state != null && state.detourOwner() == task;
             if (activeNow && !revealed[0]) {
-                room.world.setBlockState(door, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+                room.world.setBlock(door, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
                 revealed[0] = true;
                 return;
             }
@@ -591,7 +591,7 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "hazard_field_remembers_lava_after_long_sweep_gap", maxTicks = 1500)
-    public void hazardFieldRemembersLavaAfterLongSweepGap(TestContext context) {
+    public void hazardFieldRemembersLavaAfterLongSweepGap(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(80, -4, 9, -4, 4, 4);
         hub(room);
@@ -610,11 +610,11 @@ public final class OreDigOpportunisticGameTests {
         BlockPos lava = room.at(6, 0, 0);
         for (Direction d : Direction.values()) {
             if (d != Direction.WEST) {
-                room.world.setBlockState(lava.offset(d), STONE, Block.NOTIFY_ALL);
+                room.world.setBlock(lava.relative(d), STONE, Block.UPDATE_ALL);
             }
         }
-        room.world.setBlockState(lava, Blocks.LAVA.getDefaultState(), Block.NOTIFY_ALL);
-        BlockPos door = lava.offset(Direction.WEST);
+        room.world.setBlock(lava, Blocks.LAVA.defaultBlockState(), Block.UPDATE_ALL);
+        BlockPos door = lava.relative(Direction.WEST);
         // The door starts open so the initial sighting is real; a later candidate near the same cell, placed
         // well within the SafeGate's lavaClearRadius(4), must stay rejected even after the door is closed and
         // a long gap passes (I15: memory must not silently expire by time).
@@ -629,14 +629,14 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
         int[] sightedAt = {-1};
         int[] closedAt = {-1};
         int[] candidatePlacedAt = {-1};
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -658,7 +658,7 @@ public final class OreDigOpportunisticGameTests {
                 return;
             }
             if (closedAt[0] < 0) {
-                room.world.setBlockState(door, STONE, Block.NOTIFY_ALL);
+                room.world.setBlock(door, STONE, Block.UPDATE_ALL);
                 closedAt[0] = p.tick;
                 return;
             }
@@ -668,11 +668,11 @@ public final class OreDigOpportunisticGameTests {
                 if (p.tick - closedAt[0] < 500) {
                     return;
                 }
-                room.world.setBlockState(candidate, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+                room.world.setBlock(candidate, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
                 candidatePlacedAt[0] = p.tick;
                 return;
             }
-            h.require(room.world.getBlockState(candidate).isOf(Blocks.IRON_ORE),
+            h.require(room.world.getBlockState(candidate).is(Blocks.IRON_ORE),
                     "the candidate beside the remembered lava was mined: the hazard memory did not hold");
             if (p.tick - candidatePlacedAt[0] > 400) {
                 h.require(state != null && state.hazards().anyLavaWithin(lava, 1),
@@ -691,7 +691,7 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "stone_pick_and_raw_gold_block_never_fails_the_mission", maxTicks = 1200)
-    public void stonePickAndRawGoldBlockNeverFailsTheMission(TestContext context) {
+    public void stonePickAndRawGoldBlockNeverFailsTheMission(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(90, -3, 9, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see hub()'s own comment -- a floor-level target's own support
@@ -724,7 +724,7 @@ public final class OreDigOpportunisticGameTests {
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 2);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -742,7 +742,7 @@ public final class OreDigOpportunisticGameTests {
                 // the detour never chose this candidate, or it started and aborted "tool"/"tool_wear" before
                 // ever swinging (design 4.6 step 7). Either way the raw-gold block itself must be untouched,
                 // and the mission (a stone-minable coal target) is what actually finished.
-                h.require(room.world.getBlockState(rawGold).isOf(Blocks.RAW_GOLD_BLOCK),
+                h.require(room.world.getBlockState(rawGold).is(Blocks.RAW_GOLD_BLOCK),
                         "the stone-pick bot mined raw_gold_block, which needs at least an iron pick");
                 h.assertStrict(bot, "ore_dig_opportunistic_tool_iron_end");
                 h.pass();
@@ -755,7 +755,7 @@ public final class OreDigOpportunisticGameTests {
     }
 
     @GameTest(environment = ENV_PREFIX + "coal_with_only_a_wooden_pick_never_fails_the_mission", maxTicks = 900)
-    public void coalWithOnlyAWoodenPickNeverFailsTheMission(TestContext context) {
+    public void coalWithOnlyAWoodenPickNeverFailsTheMission(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(100, -3, 9, -3, 3, 4);
         // Mission target is iron_ore (wood cannot mine it in vanilla either, but the pick given below can):
@@ -776,7 +776,7 @@ public final class OreDigOpportunisticGameTests {
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.IRON_ORE), 2);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -791,7 +791,7 @@ public final class OreDigOpportunisticGameTests {
             requireNotFailed(h, task);
             // coal_ore (raw value 12) is always below detour.minValue (25): DetourPolicy.rank drops it before
             // it is ever ranked (design G.1), so it must never be approached at all.
-            h.require(room.world.getBlockState(coalCandidate).isOf(Blocks.COAL_ORE),
+            h.require(room.world.getBlockState(coalCandidate).is(Blocks.COAL_ORE),
                     "the below-minValue coal candidate was mined by the detour");
             if (task.state() == TaskState.COMPLETED) {
                 h.assertStrict(bot, "ore_dig_opportunistic_tool_coal_end");
@@ -806,7 +806,7 @@ public final class OreDigOpportunisticGameTests {
 
     @GameTest(environment = ENV_PREFIX + "gilded_blackstone_with_a_non_stone_pick_never_fails_the_mission",
             maxTicks = 900)
-    public void gildedBlackstoneWithANonStonePickNeverFailsTheMission(TestContext context) {
+    public void gildedBlackstoneWithANonStonePickNeverFailsTheMission(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(110, -3, 9, -3, 3, 4);
         // dy=1 + a solid roof (not dy=0): see hub()'s own comment -- a floor-level target's own support
@@ -830,7 +830,7 @@ public final class OreDigOpportunisticGameTests {
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 2);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -845,7 +845,7 @@ public final class OreDigOpportunisticGameTests {
             requireNotFailed(h, task);
             // gilded_blackstone is DetourPolicy.neverDetour (design M37, a bastion/build block): it must never
             // be approached at all, tool tier aside.
-            h.require(room.world.getBlockState(gilded).isOf(Blocks.GILDED_BLACKSTONE),
+            h.require(room.world.getBlockState(gilded).is(Blocks.GILDED_BLACKSTONE),
                     "gilded_blackstone was mined by the detour although it is DetourPolicy.neverDetour");
             if (task.state() == TaskState.COMPLETED) {
                 h.assertStrict(bot, "ore_dig_opportunistic_tool_gilded_end");
@@ -861,19 +861,19 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "unobserved_side_corridor_is_never_ranking_input", maxTicks = 1200)
-    public void unobservedSideCorridorIsNeverRankingInput(TestContext context) {
+    public void unobservedSideCorridorIsNeverRankingInput(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(120, -6, 6, -4, 4, 4);
         hub(room);
         // The richer, closer candidate is sealed behind one stone layer: never raycast, so its geometry (and its
         // higher value) must never outrank the poorer but OBSERVED candidate on the other side of the room.
         BlockPos richerHidden = room.at(-8, 0, 0);
-        room.world.setBlockState(richerHidden, Blocks.DIAMOND_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        room.world.setBlock(richerHidden, Blocks.DIAMOND_ORE.defaultBlockState(), Block.UPDATE_ALL);
         assertFullyEnclosed(h, room, richerHidden);
         // dy=1 + a solid roof (not dy=0): see test 1's pose comment.
         BlockPos poorerObserved = room.at(6, 1, 0);
-        room.world.setBlockState(poorerObserved, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
-        room.world.setBlockState(room.at(6, 2, 0), STONE, Block.NOTIFY_ALL);
+        room.world.setBlock(poorerObserved, Blocks.IRON_ORE.defaultBlockState(), Block.UPDATE_ALL);
+        room.world.setBlock(room.at(6, 2, 0), STONE, Block.UPDATE_ALL);
 
         AIPlayerEntity bot = h.spawn("OreDigDetourUnobservedGT", room, 0, 0);
         h.enableDetour(bot, 256);
@@ -884,11 +884,11 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 40);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -901,15 +901,15 @@ public final class OreDigOpportunisticGameTests {
                 return;
             }
             requireNotFailed(h, task);
-            h.require(room.world.getBlockState(richerHidden).isOf(Blocks.DIAMOND_ORE),
+            h.require(room.world.getBlockState(richerHidden).is(Blocks.DIAMOND_ORE),
                     "the unobserved, richer diamond was mined: unobserved geometry was used as a ranking input");
             MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
             if (state != null) {
                 h.require(!state.sightings().contains(richerHidden),
                         "the unobserved diamond entered the sighting ledger");
             }
-            if (!room.world.getBlockState(poorerObserved).isOf(Blocks.IRON_ORE)) {
-                h.require(room.world.getBlockState(richerHidden).isOf(Blocks.DIAMOND_ORE),
+            if (!room.world.getBlockState(poorerObserved).is(Blocks.IRON_ORE)) {
+                h.require(room.world.getBlockState(richerHidden).is(Blocks.DIAMOND_ORE),
                         "the observed, poorer iron was mined only after the hidden diamond, or both moved together");
                 h.assertStrict(bot, "ore_dig_opportunistic_unobserved_end");
                 h.pass();
@@ -925,7 +925,7 @@ public final class OreDigOpportunisticGameTests {
     // ---------------------------------------------------------------------------------------------
 
     @GameTest(environment = ENV_PREFIX + "verify_origin_never_detours", maxTicks = 500)
-    public void verifyOriginNeverDetours(TestContext context) {
+    public void verifyOriginNeverDetours(GameTestHelper context) {
         Harness h = new Harness(context);
         Room room = h.newRoom(130, -4, 4, -3, 3, 4);
         BlockPos candidate = room.at(3, 0, 0);
@@ -941,11 +941,11 @@ public final class OreDigOpportunisticGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.IRON_PICKAXE));
         InventoryAction.giveItem(bot, new ItemStack(Items.DIRT, 16));
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         Progress p = new Progress();
         OreDigTask task = new OreDigTask(Set.of(Blocks.COAL_ORE), 1);
 
-        context.runAtEveryTick(() -> h.guard(() -> {
+        context.failIfEver(() -> h.guard(() -> {
             if (h.done) {
                 return;
             }
@@ -957,7 +957,7 @@ public final class OreDigOpportunisticGameTests {
                 p.assignedAt = p.tick;
                 return;
             }
-            h.require(room.world.getBlockState(candidate).isOf(Blocks.DIAMOND_ORE),
+            h.require(room.world.getBlockState(candidate).is(Blocks.DIAMOND_ORE),
                     "a VERIFY-origin task's diamond was mined by a detour: the origin gate (I4) did not hold");
             MiningAssistState state = MiningAssistRegistry.getIfPresent(id);
             h.require(state == null || state.detourOwner() == null,
@@ -1000,10 +1000,10 @@ public final class OreDigOpportunisticGameTests {
     }
 
     /** Counts how many of {@code cells} are no longer their original ore (i.e. were mined). */
-    private static int minedCount(ServerWorld world, List<BlockPos> cells) {
+    private static int minedCount(ServerLevel world, List<BlockPos> cells) {
         int mined = 0;
         for (BlockPos pos : cells) {
-            if (!world.getBlockState(pos).isOf(Blocks.IRON_ORE)) {
+            if (!world.getBlockState(pos).is(Blocks.IRON_ORE)) {
                 mined++;
             }
         }
@@ -1013,7 +1013,7 @@ public final class OreDigOpportunisticGameTests {
     /** Every neighbour of {@code hidden} must be solid: the x-ray canary self-check (P0's own idiom). */
     private static void assertFullyEnclosed(Harness h, Room room, BlockPos hidden) {
         for (Direction direction : Direction.values()) {
-            BlockState neighbour = room.world.getBlockState(hidden.offset(direction));
+            BlockState neighbour = room.world.getBlockState(hidden.relative(direction));
             h.require(!neighbour.isAir(),
                     "fixture error: hidden ore at " + hidden.toShortString() + " touches air on its "
                             + direction + " face");
@@ -1079,7 +1079,7 @@ public final class OreDigOpportunisticGameTests {
 
     /** Cleanup-on-failure, strict-capability and DETOUR-mode config plumbing shared by every test. */
     private static final class Harness {
-        final TestContext context;
+        final GameTestHelper context;
         final List<String> bots = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
         final List<UUID> forced = new ArrayList<>();
@@ -1087,7 +1087,7 @@ public final class OreDigOpportunisticGameTests {
         boolean tpsOverridden;
         boolean done;
 
-        Harness(TestContext context) {
+        Harness(GameTestHelper context) {
             this.context = context;
         }
 
@@ -1098,19 +1098,19 @@ public final class OreDigOpportunisticGameTests {
         }
 
         AIPlayerEntity spawn(String name, Room room, int dx, int dz) {
-            ServerWorld world = room.world;
+            ServerLevel world = room.world;
             BlockPos feet = room.at(dx, 0, dz);
             bots.add(name);
             var spawned = AIPlayerManager.INSTANCE.spawn(
-                    world.getServer(), name, world, Vec3d.ofBottomCenter(feet), 0.0F, 0.0F, GameMode.SURVIVAL);
+                    world.getServer(), name, world, Vec3.atBottomCenterOf(feet), 0.0F, 0.0F, GameType.SURVIVAL);
             if (spawned.isEmpty()) {
                 fail("failed to spawn " + name + " (a bot of that name is still alive)");
             }
             AIPlayerEntity bot = spawned.get();
-            bot.teleport(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
+            bot.teleportTo(world, feet.getX() + 0.5D, feet.getY(), feet.getZ() + 0.5D, Set.of(), 0.0F, 0.0F, true);
             bot.setHealth(bot.getMaxHealth());
-            bot.getHungerManager().setFoodLevel(20);
-            bot.getHungerManager().setSaturationLevel(5.0F);
+            bot.getFoodData().setFoodLevel(20);
+            bot.getFoodData().setSaturation(5.0F);
             return bot;
         }
 
@@ -1122,8 +1122,8 @@ public final class OreDigOpportunisticGameTests {
             MiningAssistRuntime.install(detourConfig(raysPerTick, detourOverrides));
             MiningAssistRuntime.setTestTpsDegraded(Boolean.FALSE);
             tpsOverridden = true;
-            MiningAssistRuntime.forceEnable(bot.getUuid());
-            forced.add(bot.getUuid());
+            MiningAssistRuntime.forceEnable(bot.getUUID());
+            forced.add(bot.getUUID());
         }
 
         void enableDetour(AIPlayerEntity bot, int raysPerTick) {
@@ -1138,7 +1138,7 @@ public final class OreDigOpportunisticGameTests {
 
         void fail(String message) {
             cleanup();
-            context.throwGameTestException(Text.of(message));
+            context.fail(Component.nullToEmpty(message));
         }
 
         /** Runs one tick of a test body; anything thrown cleans up first so a failure never leaves a bot behind. */
@@ -1154,7 +1154,7 @@ public final class OreDigOpportunisticGameTests {
         void cleanup() {
             done = true;
             for (String name : new ArrayList<>(bots)) {
-                AIPlayerManager.INSTANCE.despawn(context.getWorld().getServer(), name);
+                AIPlayerManager.INSTANCE.despawn(context.getLevel().getServer(), name);
             }
             bots.clear();
             for (Room room : rooms) {
@@ -1181,7 +1181,7 @@ public final class OreDigOpportunisticGameTests {
 
         void pass() {
             cleanup();
-            context.complete();
+            context.succeed();
         }
 
         void assertStrict(AIPlayerEntity bot, String label) {

@@ -9,21 +9,20 @@ import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.ai.RangedAttackMob;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.CreeperEntity;
-import net.minecraft.entity.mob.EndermanEntity;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -68,7 +67,7 @@ public final class DangerWatcher {
     }
 
     public void clear(AIPlayerEntity bot) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         nextThreatAttemptTick.remove(id);
         nextEatAttemptTick.remove(id);
         nextResupplyAttemptTick.remove(id);
@@ -127,7 +126,7 @@ public final class DangerWatcher {
         if (Math.abs(respawn.getY() - death.getY()) > DROP_RECOVERY_MAX_VERTICAL_DELTA) {
             return new DropRecoveryDecision(false, "deep_route_without_trail");
         }
-        if (!respawn.isWithinDistance(death, DROP_RECOVERY_MAX_DISTANCE)) {
+        if (!respawn.closerThan(death, DROP_RECOVERY_MAX_DISTANCE)) {
             return new DropRecoveryDecision(false, "route_too_far");
         }
         return new DropRecoveryDecision(true, "short_clear_route");
@@ -139,11 +138,11 @@ public final class DangerWatcher {
         // a non-death reason (e.g. chunk unload), same pitfall documented in HuntTask's
         // resolveUnavailableTarget. Only zero health or Minecraft's explicit KILLED reason count.
         if (bot.getHealth() <= 0.0F || bot.getRemovalReason() == Entity.RemovalReason.KILLED) {
-            BlockPos deathPos = bot.getBlockPos();
-            long deathTick = server.getTicks();
-            int visibleHostilesAtDeath = bot.getEntityWorld()
-                    .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(8.0D),
-                            entity -> entity instanceof HostileEntity && entity.isAlive())
+            BlockPos deathPos = bot.blockPosition();
+            long deathTick = server.getTickCount();
+            int visibleHostilesAtDeath = bot.level()
+                    .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(8.0D),
+                            entity -> entity instanceof Monster && entity.isAlive())
                     .stream()
                     .filter(entity -> ObservableWorldQuery.canObserveEntity(bot, entity))
                     .toList().size();
@@ -157,9 +156,9 @@ public final class DangerWatcher {
             // entry/trail contract; for now, fail closed and immediately restart the original
             // Mission, rebuilding supplies from the surface.
             boolean dangerous = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
-                    .isDanger(bot.getUuid(), deathPos);
+                    .isDanger(bot.getUUID(), deathPos);
             DropRecoveryDecision recovery = dropRecoveryDecision(
-                    bot.getBlockPos(), deathPos, visibleHostilesAtDeath, dangerous);
+                    bot.blockPosition(), deathPos, visibleHostilesAtDeath, dangerous);
             if (recovery.allowed()) {
                 TaskManager.INSTANCE.assign(bot, new RecoverDropsTask(deathPos, deathTick), TaskOrigin.safety("recover_drops"));
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
@@ -168,7 +167,7 @@ public final class DangerWatcher {
             } else {
                 BotLog.danger(bot, "drop_recovery_skipped",
                         "death", deathPos.toShortString(),
-                        "respawn", bot.getBlockPos().toShortString(),
+                        "respawn", bot.blockPosition().toShortString(),
                         "hostiles", visibleHostilesAtDeath,
                         "reason", recovery.reason());
                 BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
@@ -206,7 +205,7 @@ public final class DangerWatcher {
                 TaskManager.INSTANCE.pauseFor(bot, "lava_escape");
             }
             TaskManager.INSTANCE.assign(bot, new LavaEscapeTask(), TaskOrigin.safety("lava_escape"));
-            BotLog.danger(bot, "lava_escape_start", "pos", bot.getBlockPos().toShortString(),
+            BotLog.danger(bot, "lava_escape_start", "pos", bot.blockPosition().toShortString(),
                     "hp", (int) bot.getHealth());
             return true;
         }
@@ -443,7 +442,7 @@ public final class DangerWatcher {
                 if (task instanceof EmergencyShelterTask) {
                     noteShelterAttempt(server, bot);
                 }
-                nextThreatAttemptTick.put(bot.getUuid(), server.getTicks() + threatCooldownTicks(top, task));
+                nextThreatAttemptTick.put(bot.getUUID(), server.getTickCount() + threatCooldownTicks(top, task));
                 BotLog.danger(bot, "threat_detected",
                         "type", top.type(),
                         "severity", top.severity(),
@@ -524,13 +523,13 @@ public final class DangerWatcher {
     }
 
     private boolean maybeResupply(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
-        boolean criticalStarvation = bot.getHungerManager().getFoodLevel()
+        boolean criticalStarvation = bot.getFoodData().getFoodLevel()
                 <= MinecraftAiConfig.get().survival().hungerCriticalThreshold();
         // A just-finished shelter has a deterministic post-combat sequence: consume carried food
         // to 20 first, then permit low-priority artifact cleanup.  A routine tool resupply must
         // not jump that recovery boundary merely because a pick happened to be selected.
         if (EmergencyShelterTask.hasPendingCleanup(bot)
-                && bot.getHungerManager().getFoodLevel() < 20
+                && bot.getFoodData().getFoodLevel() < 20
                 && InventoryAction.findFoodSlot(bot) >= 0) {
             return false;
         }
@@ -546,13 +545,13 @@ public final class DangerWatcher {
         if (active.isPresent() && (active.get() instanceof EvadeTask || active.get() instanceof CombatTask || active.get() instanceof EatTask)) {
             return false;
         }
-        int now = server.getTicks();
-        if (now < nextResupplyAttemptTick.getOrDefault(bot.getUuid(), 0)) {
+        int now = server.getTickCount();
+        if (now < nextResupplyAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
 
         ResupplyTask task = null;
-        ItemStack mainHand = bot.getMainHandStack();
+        ItemStack mainHand = bot.getMainHandItem();
         Optional<Task> paused = active.isEmpty()
                 ? TaskManager.INSTANCE.peekPaused(bot) : Optional.empty();
         // These mining tasks own an exact break/pickup/return transaction. The generic ten-percent
@@ -575,7 +574,7 @@ public final class DangerWatcher {
         // the sealed stick/stone inputs before the five-pick hand-off is complete.
         boolean taskDoesNotUseHeldTool = active.filter(CraftTask.class::isInstance).isPresent();
         if (isNearlyBroken(mainHand)
-                && mainHand.isIn(ItemTags.PICKAXES)
+                && mainHand.is(ItemTags.PICKAXES)
                 && pausedDigDownOwnsReturnDebt
                 && !taskDoesNotUseHeldTool) {
             // DigDown alone needs a generic tool to pay an exact physical RETURN debt after a
@@ -597,7 +596,7 @@ public final class DangerWatcher {
             // chain); only fall back to ResupplyTask.food() (searching storage chests) when there is
             // no prey nearby. Fixes "repeatedly resupplying for wheat and failing instead of hunting
             // when hungry".
-            if (bot.getHungerManager().getFoodLevel() <= survival.hungerEatThreshold()
+            if (bot.getFoodData().getFoodLevel() <= survival.hungerEatThreshold()
                     && InventoryAction.findFoodSlot(bot) < 0
                     && !HuntTask.hasPreyNearby(bot)) {
                 task = ResupplyTask.food();
@@ -613,7 +612,7 @@ public final class DangerWatcher {
         TaskManager.INSTANCE.assign(bot, task, criticalStarvation
                 ? TaskOrigin.safety("critical_resupply")
                 : TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "resupply"));
-        nextResupplyAttemptTick.put(bot.getUuid(), now + 200);
+        nextResupplyAttemptTick.put(bot.getUUID(), now + 200);
         BotLog.danger(bot, "resupply_started", "need", task.describe());
         return true;
     }
@@ -627,7 +626,7 @@ public final class DangerWatcher {
 
     private boolean maybeEat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
                              List<LivingEntity> hostilePressure) {
-        int foodLevel = bot.getHungerManager().getFoodLevel();
+        int foodLevel = bot.getFoodData().getFoodLevel();
         MinecraftAiConfig.Survival survival = MinecraftAiConfig.get().survival();
         boolean healingEmergency = isHealingEatTransaction(bot);
         // Cleanup is deliberately post-combat housekeeping, but it must begin with a full hunger
@@ -664,8 +663,8 @@ public final class DangerWatcher {
         if (hasNakedEatHostilePressure(bot, hostilePressure)) {
             return false;
         }
-        int now = server.getTicks();
-        if (now < nextEatAttemptTick.getOrDefault(bot.getUuid(), 0)) {
+        int now = server.getTickCount();
+        if (now < nextEatAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
         if (InventoryAction.findFoodSlot(bot) < 0) {
@@ -673,7 +672,7 @@ public final class DangerWatcher {
             if (huntForFood(server, bot, active)) {
                 return true;
             }
-            nextEatAttemptTick.put(bot.getUuid(), now + 100);
+            nextEatAttemptTick.put(bot.getUUID(), now + 100);
             return false;
         }
 
@@ -696,7 +695,7 @@ public final class DangerWatcher {
                 ? TaskOrigin.safety(healingEmergency ? "low_health_heal" : "critical_hunger")
                 : TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND,
                         shelterCleanupRecovery ? "shelter_cleanup_hunger" : "eat"));
-        nextEatAttemptTick.put(bot.getUuid(), now + (shelterCleanupRecovery ? 1 : 100));
+        nextEatAttemptTick.put(bot.getUUID(), now + (shelterCleanupRecovery ? 1 : 100));
         BotLog.danger(bot, "hunger_eat_started", "food", foodLevel, "critical", critical,
                 "healing", healingEmergency, "cleanup_recovery", shelterCleanupRecovery,
                 "hp", (int) bot.getHealth(), "interrupted_active", decision.pauseActive());
@@ -751,7 +750,7 @@ public final class DangerWatcher {
     // Layer 2 hunger chain: actively hunt for food (raw meat) when there is no food. Only dispatched
     // when not already responding to a threat (evade/combat); never dispatched when there is no prey nearby.
     private boolean huntForFood(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
-        boolean critical = bot.getHungerManager().getFoodLevel()
+        boolean critical = bot.getFoodData().getFoodLevel()
                 <= MinecraftAiConfig.get().survival().hungerCriticalThreshold();
         if (TaskManager.INSTANCE.isUserPaused(bot) && !critical) {
             return false;
@@ -764,12 +763,12 @@ public final class DangerWatcher {
                 return false; // Currently responding to a threat, don't interrupt
             }
         }
-        int now = server.getTicks();
-        if (now < nextHuntAttemptTick.getOrDefault(bot.getUuid(), 0)) {
+        int now = server.getTickCount();
+        if (now < nextHuntAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
         if (!HuntTask.hasPreyNearby(bot)) {
-            nextHuntAttemptTick.put(bot.getUuid(), now + 200); // No prey nearby, check again later
+            nextHuntAttemptTick.put(bot.getUUID(), now + 200); // No prey nearby, check again later
             return false;
         }
         if (active.isPresent()) {
@@ -778,8 +777,8 @@ public final class DangerWatcher {
         TaskManager.INSTANCE.assign(bot, new HuntTask(HUNT_FOOD_TARGET), critical
                 ? TaskOrigin.safety("critical_hunt_for_food")
                 : TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "hunt_for_food"));
-        nextHuntAttemptTick.put(bot.getUuid(), now + 400);
-        BotLog.danger(bot, "hunt_for_food_started", "food", bot.getHungerManager().getFoodLevel());
+        nextHuntAttemptTick.put(bot.getUUID(), now + 400);
+        BotLog.danger(bot, "hunt_for_food_started", "food", bot.getFoodData().getFoodLevel());
         return true;
     }
 
@@ -803,13 +802,13 @@ public final class DangerWatcher {
         // cost/benefit gate rejects low HP. Defensive Combat starts in RETREAT, counterattacks only
         // if boxed in, and owns the later safe-heal boundary.
         if (!shelterAllowed && shouldDefensivelyFightClosePressure(bot, threat, hostilePressure)) {
-            return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.getBlockPos());
+            return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.blockPosition());
         }
         // combat stuck-trap: combat repeatedly aborted as stuck (target unreachable -- e.g. a zombie below in a mineshaft/behind a wall) -> stop standing there waiting to die, switch to fleeing.
         if (canFight(bot, threat, combat, hostilePressure) && !combatStuck(bot)) {
             // Safety combat defends the interrupted work site. It binds the observed entity and
             // cannot turn into an open-ended hunt by reacquiring another mob of the same type.
-            return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.getBlockPos());
+            return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.blockPosition());
         }
         return new EvadeTask(threat);
     }
@@ -825,17 +824,17 @@ public final class DangerWatcher {
     }
 
     private boolean canAttemptShelter(MinecraftServer server, AIPlayerEntity bot) {
-        return server.getTicks() >= nextShelterAttemptTick.getOrDefault(bot.getUuid(), 0)
+        return server.getTickCount() >= nextShelterAttemptTick.getOrDefault(bot.getUUID(), 0)
                 && !shelterEpisodeActive(bot)
                 && EmergencyShelterTask.hasMaterialsForEmergencyRetreat(bot);
     }
 
     boolean shelterEpisodeActive(AIPlayerEntity bot) {
-        return shelterEpisodes.containsKey(bot.getUuid());
+        return shelterEpisodes.containsKey(bot.getUUID());
     }
 
     private void noteShelterAttempt(MinecraftServer server, AIPlayerEntity bot) {
-        nextShelterAttemptTick.put(bot.getUuid(), server.getTicks() + SHELTER_RETRY_COOLDOWN);
+        nextShelterAttemptTick.put(bot.getUUID(), server.getTickCount() + SHELTER_RETRY_COOLDOWN);
     }
 
     /** Called by the fixed-anchor owner at its exact terminal boundary. */
@@ -843,21 +842,21 @@ public final class DangerWatcher {
                              BlockPos anchor,
                              TaskState outcome,
                              String reason) {
-        if (anchor == null || bot.getEntityWorld().getServer() == null) {
+        if (anchor == null || bot.level().getServer() == null) {
             return;
         }
-        int now = bot.getEntityWorld().getServer().getTicks();
-        BlockPos fixedAnchor = anchor.toImmutable();
-        shelterEpisodes.put(bot.getUuid(), new ShelterEpisode(
+        int now = bot.level().getServer().getTickCount();
+        BlockPos fixedAnchor = anchor.immutable();
+        shelterEpisodes.put(bot.getUUID(), new ShelterEpisode(
                 fixedAnchor, now, outcome, reason == null ? "" : reason));
         // Assignment-time cooldowns can expire while a real shelter is still building/holding.
         // Start the retry clock at terminal instead; the episode latch below is stronger while the
         // same local hostile pressure remains continuous.
-        nextShelterAttemptTick.put(bot.getUuid(), now + SHELTER_RETRY_COOLDOWN);
+        nextShelterAttemptTick.put(bot.getUUID(), now + SHELTER_RETRY_COOLDOWN);
         // A shelter terminal is a new safety boundary, not another failed scheduler attempt. Let the
         // next scan immediately choose the episode-safe fallback (normally defensive Combat) rather
         // than waiting out the assignment-time threat cooldown with no active protection.
-        nextThreatAttemptTick.remove(bot.getUuid());
+        nextThreatAttemptTick.remove(bot.getUUID());
         BotLog.danger(bot, "shelter_episode_terminal",
                 "anchor", fixedAnchor.toShortString(),
                 "outcome", outcome,
@@ -865,17 +864,17 @@ public final class DangerWatcher {
     }
 
     private void refreshShelterEpisode(AIPlayerEntity bot, List<LivingEntity> hostilePressure) {
-        ShelterEpisode episode = shelterEpisodes.get(bot.getUuid());
+        ShelterEpisode episode = shelterEpisodes.get(bot.getUUID());
         if (episode == null) {
             return;
         }
-        boolean sameSite = episode.anchor().isWithinDistance(
-                bot.getBlockPos(), SHELTER_EPISODE_RADIUS);
+        boolean sameSite = episode.anchor().closerThan(
+                bot.blockPosition(), SHELTER_EPISODE_RADIUS);
         boolean hostileContinues = !hostilePressure.isEmpty();
         if (sameSite && hostileContinues) {
             return;
         }
-        shelterEpisodes.remove(bot.getUuid(), episode);
+        shelterEpisodes.remove(bot.getUUID(), episode);
         // Keep the terminal-time cooldown even when LOS flickers or the bot crosses the local
         // episode radius. Removing both latches made a failed shelter immediately eligible again.
         BotLog.danger(bot, "shelter_episode_reset",
@@ -900,14 +899,14 @@ public final class DangerWatcher {
     // (position changes), the count resets naturally.
     private boolean trappedBackoff(MinecraftServer server, AIPlayerEntity bot, Task next) {
         if (!(next instanceof EvadeTask) && !(next instanceof EmergencyShelterTask)) {
-            trapRecords.remove(bot.getUuid());
+            trapRecords.remove(bot.getUUID());
             return false;
         }
-        int now = server.getTicks();
-        BlockPos here = bot.getBlockPos().toImmutable();
-        TrapRecord rec = trapRecords.get(bot.getUuid());
-        if (rec == null || !rec.pos().isWithinDistance(here, 2.5D)) {
-            trapRecords.put(bot.getUuid(), new TrapRecord(here, 1, 0));
+        int now = server.getTickCount();
+        BlockPos here = bot.blockPosition().immutable();
+        TrapRecord rec = trapRecords.get(bot.getUUID());
+        if (rec == null || !rec.pos().closerThan(here, 2.5D)) {
+            trapRecords.put(bot.getUUID(), new TrapRecord(here, 1, 0));
             return false;
         }
         int repeat = rec.repeatCount() + 1;
@@ -918,10 +917,10 @@ public final class DangerWatcher {
         // canFight's weapon/count gate is a "is this fight worth it" calculation; in a last stand
         // there's no calculating -- fight even bare-handed, trading damage for a window to survive.
         if (repeat >= 2 && bot.hurtTime > 0) {
-            trapRecords.remove(bot.getUuid());
-            var hostile = bot.getEntityWorld().getEntitiesByClass(
-                    net.minecraft.entity.mob.HostileEntity.class,
-                    bot.getBoundingBox().expand(4.0D), e -> e.isAlive())
+            trapRecords.remove(bot.getUUID());
+            var hostile = bot.level().getEntitiesOfClass(
+                    net.minecraft.world.entity.monster.Monster.class,
+                    bot.getBoundingBox().inflate(4.0D), e -> e.isAlive())
                     .stream()
                     .filter(e -> isActiveHostileThreat(bot, e))
                     .filter(e -> !CombatCore.isMeleeForbiddenThreat(e))
@@ -939,18 +938,18 @@ public final class DangerWatcher {
             }
         }
         if (repeat < TRAP_REPEAT_LIMIT) {
-            trapRecords.put(bot.getUuid(), new TrapRecord(rec.pos(), repeat, rec.lastHelpTick()));
+            trapRecords.put(bot.getUUID(), new TrapRecord(rec.pos(), repeat, rec.lastHelpTick()));
             return false;
         }
-        nextThreatAttemptTick.put(bot.getUuid(), now + TRAP_BACKOFF_TICKS);
+        nextThreatAttemptTick.put(bot.getUUID(), now + TRAP_BACKOFF_TICKS);
         if (now - rec.lastHelpTick() >= TRAP_HELP_INTERVAL) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
                     bot.getGameProfile().name() + " is trapped at (" + here.getX() + "," + here.getY() + "," + here.getZ()
                             + ") and could not escape after repeated safety attempts. Please move me to safe open ground.");
             BotLog.danger(bot, "trapped_backoff", "pos", here.getX() + "," + here.getY() + "," + here.getZ(), "repeat", repeat);
-            trapRecords.put(bot.getUuid(), new TrapRecord(here, 0, now));
+            trapRecords.put(bot.getUUID(), new TrapRecord(here, 0, now));
         } else {
-            trapRecords.put(bot.getUuid(), new TrapRecord(here, repeat, rec.lastHelpTick()));
+            trapRecords.put(bot.getUUID(), new TrapRecord(here, repeat, rec.lastHelpTick()));
         }
         return true;
     }
@@ -961,7 +960,7 @@ public final class DangerWatcher {
         }
         MinecraftAiConfig.Night night = MinecraftAiConfig.get().night();
         if (!night.autoLight()
-                || bot.getEntityWorld().isDay()
+                || bot.level().isBrightOutside()
                 || active.isPresent()
                 || bot.getActionPack().hasActiveActions()) {
             return false;
@@ -975,14 +974,14 @@ public final class DangerWatcher {
         if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
-        int now = server.getTicks();
-        if (now < nextNightAttemptTick.getOrDefault(bot.getUuid(), 0)) {
+        int now = server.getTickCount();
+        if (now < nextNightAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
         // Bots never sleep: whether the night is skipped is decided by the human players alone (vanilla
         // sleep vote). At night an idle bot only tops up lighting with torches, to prevent mob spawns.
-        if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) <= 0) {
-            nextNightAttemptTick.put(bot.getUuid(), now + 600);
+        if (InventoryAction.countItem(bot, net.minecraft.world.item.Items.TORCH) <= 0) {
+            nextNightAttemptTick.put(bot.getUUID(), now + 600);
             return false;
         }
         if (skipAutoLightOnSurface(bot, now, "night_task")) {
@@ -990,7 +989,7 @@ public final class DangerWatcher {
         }
         Task task = LightAreaTask.automatic(8, 8);
         TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "night_task"));
-        nextNightAttemptTick.put(bot.getUuid(), now + 600);
+        nextNightAttemptTick.put(bot.getUUID(), now + 600);
         BotLog.danger(bot, "night_task_started", "task", task.name());
         return true;
     }
@@ -1003,12 +1002,12 @@ public final class DangerWatcher {
      * {@link SurfaceCheck}). Explicit light_area requests never come through here.
      */
     private boolean skipAutoLightOnSurface(AIPlayerEntity bot, int now, String reflex) {
-        if (!SurfaceCheck.isOnSurface(bot.getEntityWorld(), bot.getBlockPos())) {
+        if (!SurfaceCheck.isOnSurface(bot.level(), bot.blockPosition())) {
             return false;
         }
-        nextNightAttemptTick.put(bot.getUuid(), now + SURFACE_RECHECK_TICKS);
-        if (now >= nextSurfaceSkipLogTick.getOrDefault(bot.getUuid(), 0)) {
-            nextSurfaceSkipLogTick.put(bot.getUuid(), now + SURFACE_SKIP_LOG_TICKS);
+        nextNightAttemptTick.put(bot.getUUID(), now + SURFACE_RECHECK_TICKS);
+        if (now >= nextSurfaceSkipLogTick.getOrDefault(bot.getUUID(), 0)) {
+            nextSurfaceSkipLogTick.put(bot.getUUID(), now + SURFACE_SKIP_LOG_TICKS);
             BotLog.danger(bot, "auto_light_skipped", "reason", "surface", "reflex", reflex);
         }
         return true;
@@ -1033,11 +1032,11 @@ public final class DangerWatcher {
         if (io.github.zoyluo.minecraftai.goal.GoalExecutor.INSTANCE.hasActivePlan(bot)) {
             return false;
         }
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
         int threshold = MinecraftAiConfig.get().night().torchLightThreshold();
-        if (world.isSkyVisible(feet)
-                || world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) >= threshold) {
+        if (world.canSeeSky(feet)
+                || world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) >= threshold) {
             return false;
         }
         // Block light alone also fires in broad daylight under a leaf canopy: isSkyVisible is
@@ -1046,15 +1045,15 @@ public final class DangerWatcher {
         // block light OR sky light reduced by the current ambient darkness, the same value vanilla
         // uses for spawn eligibility -- stays high there during the day (ambient darkness ~0) and
         // only drops at night, so require it to actually be spawn-dark too.
-        int combinedLight = world.getLightLevel(feet, world.getAmbientDarkness());
+        int combinedLight = world.getMaxLocalRawBrightness(feet, world.getSkyDarken());
         if (combinedLight >= threshold) {
             return false;
         }
-        if (InventoryAction.countItem(bot, net.minecraft.item.Items.TORCH) <= 0) {
+        if (InventoryAction.countItem(bot, net.minecraft.world.item.Items.TORCH) <= 0) {
             return false; // Can't light anything without a torch -- GoalPlanner's deep-mining prerequisite covers stocking torches
         }
-        int now = server.getTicks();
-        if (now < nextNightAttemptTick.getOrDefault(bot.getUuid(), 0)) {
+        int now = server.getTickCount();
+        if (now < nextNightAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false; // Reuses the night-time throttle to avoid dispatching on every scan
         }
         if (skipAutoLightOnSurface(bot, now, "dark_area_light")) {
@@ -1062,9 +1061,9 @@ public final class DangerWatcher {
         }
         TaskManager.INSTANCE.assign(bot, LightAreaTask.automatic(8, 8),
                 TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "dark_area_light"));
-        nextNightAttemptTick.put(bot.getUuid(), now + 600);
+        nextNightAttemptTick.put(bot.getUUID(), now + 600);
         BotLog.danger(bot, "dark_area_lit",
-                "light", world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet),
+                "light", world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet),
                 "combined_light", combinedLight);
         return true;
     }
@@ -1082,27 +1081,27 @@ public final class DangerWatcher {
         // dark + same-cell was misjudged as trapped, getting "rescued" to the surface and aborting
         // the task (observed two consecutive aborts in testing after the nav-suite canvas change).
         if (active.isPresent() && (!"move".equals(active.get().name()) || active.get().isWaiting())) {
-            darkStuckRecords.remove(bot.getUuid());
+            darkStuckRecords.remove(bot.getUUID());
             return false;
         }
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        boolean darkUnderground = !world.isSkyVisible(feet)
-                && world.getLightLevel(net.minecraft.world.LightType.BLOCK, feet) < 8;
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        boolean darkUnderground = !world.canSeeSky(feet)
+                && world.getBrightness(net.minecraft.world.level.LightLayer.BLOCK, feet) < 8;
         if (!darkUnderground) {
-            darkStuckRecords.remove(bot.getUuid());
+            darkStuckRecords.remove(bot.getUUID());
             return false;
         }
-        int now = server.getTicks();
-        PosRecord rec = darkStuckRecords.get(bot.getUuid());
+        int now = server.getTickCount();
+        PosRecord rec = darkStuckRecords.get(bot.getUUID());
         if (rec == null || !rec.pos().equals(feet)) {
-            darkStuckRecords.put(bot.getUuid(), new PosRecord(feet, now));
+            darkStuckRecords.put(bot.getUUID(), new PosRecord(feet, now));
             return false;
         }
         if (now - rec.sinceTick() < DARK_STUCK_TICKS) {
             return false; // Not stuck long enough yet
         }
-        darkStuckRecords.remove(bot.getUuid());
+        darkStuckRecords.remove(bot.getUUID());
         if (!escapeToSurface(bot)) {
             return false; // No open-sky standable spot above (rare); hand off to other logic
         }
@@ -1114,29 +1113,29 @@ public final class DangerWatcher {
         // the goal after retreating.
         BotLog.danger(bot, "dark_trap_escape",
                 "from", feet.getX() + "," + feet.getY() + "," + feet.getZ());
-        if (now >= nextEscapeHelpTick.getOrDefault(bot.getUuid(), 0)) {
+        if (now >= nextEscapeHelpTick.getOrDefault(bot.getUUID(), 0)) {
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
                     bot.getGameProfile().name() + " was trapped in a dark cave too long and returned to the surface to avoid hostile spawns. The unfinished task will resume later.");
-            nextEscapeHelpTick.put(bot.getUuid(), now + TRAP_HELP_INTERVAL);
+            nextEscapeHelpTick.put(bot.getUUID(), now + TRAP_HELP_INTERVAL);
         }
         return true;
     }
 
     // teleport upward to the nearest open-sky standable spot directly above (life-saving fallback, resets fallDistance).
     private boolean escapeToSurface(AIPlayerEntity bot) {
-        var world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
-        int top = world.getBottomY() + world.getHeight();
+        var world = bot.level();
+        BlockPos feet = bot.blockPosition();
+        int top = world.getMinY() + world.getHeight();
         for (int dy = 1; feet.getY() + dy < top - 1 && dy <= 120; dy++) {
-            BlockPos cand = feet.up(dy);
+            BlockPos cand = feet.above(dy);
             if (io.github.zoyluo.minecraftai.pathfinding.Standability.isStandable(world, cand)
-                    && world.isSkyVisible(cand)) {
+                    && world.canSeeSky(cand)) {
                 return io.github.zoyluo.minecraftai.mode.CapabilityRuntime.run(
                         bot, io.github.zoyluo.minecraftai.mode.PrivilegedCapability.EMERGENCY_TELEPORT,
                         "danger_dark_trap_surface", () -> {
                             bot.getActionPack().stopAll();
-                            bot.teleport(world, cand.getX() + 0.5D, cand.getY(), cand.getZ() + 0.5D,
-                                    java.util.Collections.emptySet(), bot.getYaw(), bot.getPitch(), true);
+                            bot.teleportTo(world, cand.getX() + 0.5D, cand.getY(), cand.getZ() + 0.5D,
+                                    java.util.Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
                         });
             }
         }
@@ -1186,31 +1185,31 @@ public final class DangerWatcher {
     }
 
     private static List<LivingEntity> observableActiveHostilePressure(AIPlayerEntity bot) {
-        return bot.getEntityWorld()
-                .getEntitiesByClass(
+        return bot.level()
+                .getEntitiesOfClass(
                         LivingEntity.class,
-                        bot.getBoundingBox().expand(CombatCore.hostilePressureScanRange()),
+                        bot.getBoundingBox().inflate(CombatCore.hostilePressureScanRange()),
                         entity -> isActiveHostileThreat(bot, entity)
                                 && ObservableWorldQuery.canObserveEntity(bot, entity)
                                 && CombatCore.isWithinHostilePressureEnvelope(bot, entity));
     }
 
     /**
-     * Some mobs are implemented as {@link HostileEntity} without being unconditionally hostile.
+     * Some mobs are implemented as {@link Monster} without being unconditionally hostile.
      * An unprovoked Enderman can stand in a cave indefinitely and must not pause a survival
      * mission or trigger a shelter that changes the local fluid boundary. Once it is angry or has
      * selected this bot as its target, it is treated exactly like every other hostile mob.
      */
     static boolean isActiveHostileThreat(AIPlayerEntity bot, LivingEntity entity) {
-        if (!(entity instanceof HostileEntity) || !entity.isAlive()) {
+        if (!(entity instanceof Monster) || !entity.isAlive()) {
             return false;
         }
-        if (entity instanceof EndermanEntity enderman) {
+        if (entity instanceof EnderMan enderman) {
             // isAngry() is only a broad tracked flag: an Enderman targeting another player or mob
             // also sets it. shouldAngerAt() binds persistent/universal anger to this exact bot and
             // remains factual if teleportation temporarily clears the live target reference.
             return enderman.getTarget() == bot
-                    || enderman.shouldAngerAt(bot, bot.getEntityWorld());
+                    || enderman.isAngryAt(bot, bot.level());
         }
         return true;
     }
@@ -1267,7 +1266,7 @@ public final class DangerWatcher {
     }
 
     private boolean canAssignThreatTask(MinecraftServer server, AIPlayerEntity bot, Threat threat) {
-        return server.getTicks() >= nextThreatAttemptTick.getOrDefault(bot.getUuid(), 0);
+        return server.getTickCount() >= nextThreatAttemptTick.getOrDefault(bot.getUUID(), 0);
     }
 
     private static int threatCooldownTicks(Threat threat, Task task) {
@@ -1278,19 +1277,19 @@ public final class DangerWatcher {
     }
 
     private static boolean isNearlyBroken(ItemStack stack) {
-        if (stack.isEmpty() || !stack.isDamageable()) {
+        if (stack.isEmpty() || !stack.isDamageableItem()) {
             return false;
         }
         int max = stack.getMaxDamage();
         if (max <= 0) {
             return false;
         }
-        return max - stack.getDamage() <= max * 0.10D;
+        return max - stack.getDamageValue() <= max * 0.10D;
     }
 
     private static boolean isHealingEatTransaction(AIPlayerEntity bot) {
         return bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
-                && bot.getHungerManager().getFoodLevel() < 20
+                && bot.getFoodData().getFoodLevel() < 20
                 && InventoryAction.findFoodSlot(bot) >= 0;
     }
 
@@ -1300,12 +1299,12 @@ public final class DangerWatcher {
 
     private static boolean isHostileBacked(Threat threat) {
         return isHostilePressure(threat)
-                && threat.entity() instanceof HostileEntity
+                && threat.entity() instanceof Monster
                 && threat.entity().isAlive();
     }
 
     private static boolean isCreeperThreat(Threat threat) {
-        return threat.entity() instanceof CreeperEntity;
+        return threat.entity() instanceof Creeper;
     }
 
     /**
@@ -1346,7 +1345,7 @@ public final class DangerWatcher {
             return 0.0D;
         }
         double melee = Math.max(1.0D,
-                hostile.getAttributeValue(EntityAttributes.ATTACK_DAMAGE));
+                hostile.getAttributeValue(Attributes.ATTACK_DAMAGE));
         return hostile instanceof RangedAttackMob ? Math.max(4.0D, melee) : melee;
     }
 
@@ -1357,12 +1356,12 @@ public final class DangerWatcher {
 
     /** A completed escape is a new safety boundary; its assignment-time debounce must not linger. */
     void noteEvadeCompleted(AIPlayerEntity bot) {
-        nextThreatAttemptTick.remove(bot.getUuid());
+        nextThreatAttemptTick.remove(bot.getUUID());
     }
 
     /** Task-owned safety progress starts a new boundary; stale generic backoff must not leak on. */
     private void noteThreatOwned(AIPlayerEntity bot) {
-        UUID id = bot.getUuid();
+        UUID id = bot.getUUID();
         nextThreatAttemptTick.remove(id);
         trapRecords.remove(id);
     }
@@ -1385,7 +1384,7 @@ public final class DangerWatcher {
         // resumed its water mission while a Creeper was still visible at fifteen blocks; sorting
         // Creepers first keeps every shelter/combat branch below aligned with the no-melee policy.
         hostiles.sort(Comparator
-                .comparing((LivingEntity mob) -> !(mob instanceof CreeperEntity))
+                .comparing((LivingEntity mob) -> !(mob instanceof Creeper))
                 .thenComparing(mob -> meleeModeActive || CombatCore.isRangedThreat(mob) ? 0 : 1)
                 .thenComparingDouble(bot::distanceTo));
         for (LivingEntity mob : hostiles) {
@@ -1399,28 +1398,28 @@ public final class DangerWatcher {
             // only when this observed, reachable hostile actually exists, and keep its direction.
             if (bot.getHealth() < 6.0F) {
                 return Optional.of(new Threat(
-                        Threat.Type.LOW_HP, Threat.Severity.HIGH, mob, mob.getBlockPos()));
+                        Threat.Type.LOW_HP, Threat.Severity.HIGH, mob, mob.blockPosition()));
             }
-            Threat.Severity severity = mob instanceof CreeperEntity
+            Threat.Severity severity = mob instanceof Creeper
                     ? Threat.Severity.HIGH : Threat.Severity.MEDIUM;
-            return Optional.of(new Threat(Threat.Type.HOSTILE, severity, mob, mob.getBlockPos()));
+            return Optional.of(new Threat(Threat.Type.HOSTILE, severity, mob, mob.blockPosition()));
         }
-        if (bot.isSubmergedInWater() && bot.getAir() < 50) {
-            return Optional.of(new Threat(Threat.Type.DROWNING, Threat.Severity.MEDIUM, null, bot.getBlockPos()));
+        if (bot.isUnderWater() && bot.getAirSupply() < 50) {
+            return Optional.of(new Threat(Threat.Type.DROWNING, Threat.Severity.MEDIUM, null, bot.blockPosition()));
         }
-        Optional<BlockPos> lava = BlockPos.stream(bot.getBlockPos().add(-2, -1, -2), bot.getBlockPos().add(2, 1, 2))
+        Optional<BlockPos> lava = BlockPos.betweenClosedStream(bot.blockPosition().offset(-2, -1, -2), bot.blockPosition().offset(2, 1, 2))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
                 .filter(pos -> {
-                    BlockState state = bot.getEntityWorld().getBlockState(pos);
-                    return state.getFluidState().isIn(FluidTags.LAVA);
+                    BlockState state = bot.level().getBlockState(pos);
+                    return state.getFluidState().is(FluidTags.LAVA);
                 })
-                .map(BlockPos::toImmutable)
+                .map(BlockPos::immutable)
                 .findFirst();
         if (lava.isPresent()) {
             return Optional.of(new Threat(Threat.Type.LAVA, Threat.Severity.HIGH, null, lava.get()));
         }
-        if (bot.fallDistance > 5.0F && !bot.isOnGround()) {
-            return Optional.of(new Threat(Threat.Type.FALLING, Threat.Severity.LOW, null, bot.getBlockPos()));
+        if (bot.fallDistance > 5.0F && !bot.onGround()) {
+            return Optional.of(new Threat(Threat.Type.FALLING, Threat.Severity.LOW, null, bot.blockPosition()));
         }
         return Optional.empty();
     }
@@ -1458,12 +1457,12 @@ public final class DangerWatcher {
      */
     static Optional<BlockPos> observedLavaInThreatBox(AIPlayerEntity bot, BlockPos freshBreakOre) {
         boolean oreJustBroken = freshBreakOre != null
-                && bot.getEntityWorld().getBlockState(freshBreakOre).isAir();
-        return BlockPos.stream(bot.getBlockPos().add(-2, -1, -2), bot.getBlockPos().add(2, 1, 2))
+                && bot.level().getBlockState(freshBreakOre).isAir();
+        return BlockPos.betweenClosedStream(bot.blockPosition().offset(-2, -1, -2), bot.blockPosition().offset(2, 1, 2))
                 .filter(pos -> ObservableWorldQuery.canObserveBlock(bot, pos))
-                .filter(pos -> bot.getEntityWorld().getBlockState(pos).getFluidState().isIn(FluidTags.LAVA))
+                .filter(pos -> bot.level().getBlockState(pos).getFluidState().is(FluidTags.LAVA))
                 .filter(pos -> !(oreJustBroken && isFaceNeighbour(freshBreakOre, pos)))
-                .map(BlockPos::toImmutable)
+                .map(BlockPos::immutable)
                 .findFirst();
     }
 
@@ -1477,6 +1476,6 @@ public final class DangerWatcher {
 
     /** P1 (design 4.4 item 5): whether the threat scheduler is still inside its assignment-time cooldown. */
     boolean threatCooldownActive(AIPlayerEntity bot, int nowTick) {
-        return nowTick < nextThreatAttemptTick.getOrDefault(bot.getUuid(), 0);
+        return nowTick < nextThreatAttemptTick.getOrDefault(bot.getUUID(), 0);
     }
 }

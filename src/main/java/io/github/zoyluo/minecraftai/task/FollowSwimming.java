@@ -5,14 +5,6 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.FakePlayerMotion;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -20,6 +12,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 
 /**
  * The swimming half of {@link FollowTask}: everything the bot does while the player it follows is
@@ -123,7 +122,7 @@ final class FollowSwimming {
 
     /** True while the bot is in (or touching) water, i.e. this class owns its movement. */
     static boolean inWater(AIPlayerEntity bot) {
-        return isSwimCell(bot.getEntityWorld(), bot.getBlockPos());
+        return isSwimCell(bot.level(), bot.blockPosition());
     }
 
     // ---- following a swimming player ---------------------------------------------------------
@@ -133,10 +132,10 @@ final class FollowSwimming {
      *
      * @return true when the bot deliberately made no progress this tick (waiting)
      */
-    boolean follow(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed, double stopDistance) {
-        ServerWorld world = bot.getEntityWorld();
+    boolean follow(AIPlayerEntity bot, ServerPlayer target, int elapsed, double stopDistance) {
+        ServerLevel world = bot.level();
         observeAir(bot, world);
-        if (!isSwimCell(world, bot.getBlockPos())) {
+        if (!isSwimCell(world, bot.blockPosition())) {
             waiting = enterWater(bot, target, elapsed, stopDistance);
             return waiting;
         }
@@ -145,10 +144,10 @@ final class FollowSwimming {
         return waiting;
     }
 
-    private boolean swimAfter(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed, double stopDistance) {
-        ServerWorld world = bot.getEntityWorld();
-        boolean submerged = bot.isSubmergedInWater();
-        int air = bot.getAir();
+    private boolean swimAfter(AIPlayerEntity bot, ServerPlayer target, int elapsed, double stopDistance) {
+        ServerLevel world = bot.level();
+        boolean submerged = bot.isUnderWater();
+        int air = bot.getAirSupply();
         if (submerged && air <= FollowOxygen.RESCUE_AIR) {
             // NavSafetyNet's drowning rescue owns the bot from here (its lease ends at this air
             // level); make no move that could undo one of its steps.
@@ -193,7 +192,7 @@ final class FollowSwimming {
      *
      * @return true when the bot deliberately made no progress this tick (waiting)
      */
-    private boolean ascendWhileSubmerged(AIPlayerEntity bot, ServerWorld world, int elapsed, int air,
+    private boolean ascendWhileSubmerged(AIPlayerEntity bot, ServerLevel world, int elapsed, int air,
                                          double blocksToAir) {
         if (Double.isInfinite(blocksToAir)) {
             // No known way to breathe: never dive on. Hand a low-air bot to the rescue.
@@ -209,7 +208,7 @@ final class FollowSwimming {
 
     private void updateAscending(AIPlayerEntity bot, int air, double rate, boolean submerged, double blocksToAir) {
         if (ascending) {
-            if (FollowOxygen.mayResumeDive(air, bot.getMaxAir(), rate)) {
+            if (FollowOxygen.mayResumeDive(air, bot.getMaxAirSupply(), rate)) {
                 ascending = false;
                 BotLog.action(bot, "follow_swim_resume_dive", "air", air);
             }
@@ -229,18 +228,18 @@ final class FollowSwimming {
 
     // ---- oxygen ------------------------------------------------------------------------------
 
-    private void observeAir(AIPlayerEntity bot, ServerWorld world) {
-        loss.observe(bot.getAir(), bot.isSubmergedInWater(), world.getServer().getTicks());
+    private void observeAir(AIPlayerEntity bot, ServerLevel world) {
+        loss.observe(bot.getAirSupply(), bot.isUnderWater(), world.getServer().getTickCount());
     }
 
     /** Air lost per tick while submerged: zero under a long breathing effect, otherwise measured. */
     private double lossRate(AIPlayerEntity bot) {
-        StatusEffectInstance water = bot.getStatusEffect(StatusEffects.WATER_BREATHING);
-        if (water != null && FollowOxygen.effectCoversDive(water.isInfinite(), water.getDuration())) {
+        MobEffectInstance water = bot.getEffect(MobEffects.WATER_BREATHING);
+        if (water != null && FollowOxygen.effectCoversDive(water.isInfiniteDuration(), water.getDuration())) {
             return 0.0D;
         }
-        StatusEffectInstance conduit = bot.getStatusEffect(StatusEffects.CONDUIT_POWER);
-        if (conduit != null && FollowOxygen.effectCoversDive(conduit.isInfinite(), conduit.getDuration())) {
+        MobEffectInstance conduit = bot.getEffect(MobEffects.CONDUIT_POWER);
+        if (conduit != null && FollowOxygen.effectCoversDive(conduit.isInfiniteDuration(), conduit.getDuration())) {
             return 0.0D;
         }
         return loss.lossPerTick();
@@ -250,11 +249,11 @@ final class FollowSwimming {
      * Distance the bot must swim to breathe: the free water column above its head when there is one,
      * otherwise the length of a bounded water route to the nearest cell with air (throttled).
      */
-    private double blocksToAir(AIPlayerEntity bot, ServerWorld world, int elapsed) {
-        BlockPos eye = BlockPos.ofFloored(bot.getEyePos());
+    private double blocksToAir(AIPlayerEntity bot, ServerLevel world, int elapsed) {
+        BlockPos eye = BlockPos.containing(bot.getEyePosition());
         for (int dy = 0; dy <= VERTICAL_AIR_SCAN; dy++) {
-            BlockPos cell = eye.up(dy);
-            if (world.getFluidState(cell).isIn(FluidTags.WATER)) {
+            BlockPos cell = eye.above(dy);
+            if (world.getFluidState(cell).is(FluidTags.WATER)) {
                 continue;
             }
             if (!world.getBlockState(cell).getCollisionShape(world, cell).isEmpty()) {
@@ -264,7 +263,7 @@ final class FollowSwimming {
         }
         if (elapsed >= nextAirRouteTick) {
             nextAirRouteTick = elapsed + AIR_ROUTE_COOLDOWN_TICKS;
-            Optional<List<BlockPos>> path = SwimRoute.search(world, bot.getBlockPos(), bot.getBlockPos(),
+            Optional<List<BlockPos>> path = SwimRoute.search(world, bot.blockPosition(), bot.blockPosition(),
                     SwimRoute.Goal.AIR, 0.0D);
             airRouteBlocks = path.map(cells -> (double) cells.size()).orElse(Double.POSITIVE_INFINITY);
         }
@@ -272,8 +271,8 @@ final class FollowSwimming {
     }
 
     /** One step toward air: straight up when the column is open, else along a water route to it. */
-    private boolean ascendStep(AIPlayerEntity bot, ServerWorld world, int elapsed) {
-        BlockPos above = bot.getBlockPos().up();
+    private boolean ascendStep(AIPlayerEntity bot, ServerLevel world, int elapsed) {
+        BlockPos above = bot.blockPosition().above();
         if (isSafeSwimCell(world, above)
                 && FakePlayerMotion.swimStepTo(bot, above, "follow_swim_surface")) {
             clearRoute();
@@ -283,41 +282,41 @@ final class FollowSwimming {
             if (elapsed < nextRouteSearchTick) {
                 return false;
             }
-            searchRoute(bot, world, bot.getBlockPos(), SwimRoute.Goal.AIR, elapsed, 0.0D);
+            searchRoute(bot, world, bot.blockPosition(), SwimRoute.Goal.AIR, elapsed, 0.0D);
         }
         return stepAlongRoute(bot, "follow_swim_surface");
     }
 
     // ---- swimming after the player -----------------------------------------------------------
 
-    private boolean swimStepToward(AIPlayerEntity bot, ServerPlayerEntity target, boolean allowDown) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos current = bot.getBlockPos();
-        BlockPos goal = target.getBlockPos();
-        double before = current.getSquaredDistance(goal);
+    private boolean swimStepToward(AIPlayerEntity bot, ServerPlayer target, boolean allowDown) {
+        ServerLevel world = bot.level();
+        BlockPos current = bot.blockPosition();
+        BlockPos goal = target.blockPosition();
+        double before = current.distSqr(goal);
         List<BlockPos> choices = new ArrayList<>(6);
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            choices.add(current.offset(direction));
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            choices.add(current.relative(direction));
         }
-        choices.add(current.up());
+        choices.add(current.above());
         if (allowDown) {
-            choices.add(current.down());
+            choices.add(current.below());
         }
         return choices.stream()
                 .filter(candidate -> isSafeSwimCell(world, candidate))
-                .filter(candidate -> candidate.getSquaredDistance(goal) + 0.01D < before)
-                .sorted(Comparator.comparingDouble(candidate -> candidate.getSquaredDistance(goal)))
+                .filter(candidate -> candidate.distSqr(goal) + 0.01D < before)
+                .sorted(Comparator.comparingDouble(candidate -> candidate.distSqr(goal)))
                 .anyMatch(candidate -> FakePlayerMotion.swimStepTo(bot, candidate, "follow_swim"));
     }
 
     /** A greedy step is blocked (an island, a wall): follow a bounded water route around it. */
-    private boolean routeStepToward(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed) {
-        ServerWorld world = bot.getEntityWorld();
+    private boolean routeStepToward(AIPlayerEntity bot, ServerPlayer target, int elapsed) {
+        ServerLevel world = bot.level();
         if (route == null || routeGoal != SwimRoute.Goal.APPROACH || elapsed >= routeExpiryTick) {
             if (elapsed < nextRouteSearchTick) {
                 return false;
             }
-            searchRoute(bot, world, target.getBlockPos(), SwimRoute.Goal.APPROACH, elapsed, 0.0D);
+            searchRoute(bot, world, target.blockPosition(), SwimRoute.Goal.APPROACH, elapsed, 0.0D);
         }
         return stepAlongRoute(bot, "follow_swim_route");
     }
@@ -331,8 +330,8 @@ final class FollowSwimming {
      * @return true when this class owned the tick (the caller must not run land follow), false when
      *         the bot is not in water or no way out is known (the caller falls back to land logic)
      */
-    boolean exitWaterForLand(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed, double standoff) {
-        ServerWorld world = bot.getEntityWorld();
+    boolean exitWaterForLand(AIPlayerEntity bot, ServerPlayer target, int elapsed, double standoff) {
+        ServerLevel world = bot.level();
         observeAir(bot, world);
         if (!needsWaterExit(bot, target, standoff)) {
             // Dry, or wading through shallows that land follow can handle itself (its pathfinder, stop
@@ -341,8 +340,8 @@ final class FollowSwimming {
             ascending = false;
             return false;
         }
-        boolean submerged = bot.isSubmergedInWater();
-        int air = bot.getAir();
+        boolean submerged = bot.isUnderWater();
+        int air = bot.getAirSupply();
         if (submerged && air <= FollowOxygen.RESCUE_AIR) {
             NavSafetyNet.INSTANCE.clearFollowSwim(bot);
             bot.getActionPack().stopMovement();
@@ -369,7 +368,7 @@ final class FollowSwimming {
                 waiting = true;
                 return true;
             }
-            searchRoute(bot, world, target.getBlockPos(), SwimRoute.Goal.EXIT, elapsed, standoff);
+            searchRoute(bot, world, target.blockPosition(), SwimRoute.Goal.EXIT, elapsed, standoff);
             if (route == null) {
                 exitFailedUntilTick = elapsed + 40;
                 return false;
@@ -382,10 +381,10 @@ final class FollowSwimming {
     // ---- entering the water ------------------------------------------------------------------
 
     /** @return true when waiting (nothing to do this tick) */
-    private boolean enterWater(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed, double stopDistance) {
+    private boolean enterWater(AIPlayerEntity bot, ServerPlayer target, int elapsed, double stopDistance) {
         clearRoute();
         if (ascending) {
-            if (!FollowOxygen.mayResumeDive(bot.getAir(), bot.getMaxAir(), lossRate(bot))) {
+            if (!FollowOxygen.mayResumeDive(bot.getAirSupply(), bot.getMaxAirSupply(), lossRate(bot))) {
                 bot.getActionPack().stopMovement();
                 return true;
             }
@@ -399,7 +398,7 @@ final class FollowSwimming {
         if (edge == null) {
             return approachOnLand(bot, target, elapsed);
         }
-        if (canStepInto(bot.getBlockPos(), edge.water())) {
+        if (canStepInto(bot.blockPosition(), edge.water())) {
             NavSafetyNet.INSTANCE.renewFollowSwim(bot);
             bot.getActionPack().stopAll();
             boolean moved = FakePlayerMotion.swimStepTo(bot, edge.water(), "follow_swim_enter");
@@ -414,7 +413,7 @@ final class FollowSwimming {
                 if (!String.valueOf(path.reason()).contains("throttled")) {
                     markBad(edge);
                 }
-                bot.getActionPack().startWalkTo(edge.shore().toCenterPos(), 1.0D);
+                bot.getActionPack().startWalkTo(edge.shore().getCenter(), 1.0D);
             }
             nextPathTick = elapsed + PATH_REPATH_TICKS;
         }
@@ -422,7 +421,7 @@ final class FollowSwimming {
     }
 
     /** No water edge in sight: close in on the swimmer over dry land so water comes into view. */
-    private boolean approachOnLand(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed) {
+    private boolean approachOnLand(AIPlayerEntity bot, ServerPlayer target, int elapsed) {
         if (elapsed < nextApproachTick) {
             return !bot.getActionPack().hasActiveActions();
         }
@@ -431,7 +430,7 @@ final class FollowSwimming {
             BotLog.action(bot, "follow_swim_no_water_edge");
         }
         BlockPos destination = Standability.findNearestStandable(
-                bot.getEntityWorld(), target.getBlockPos(), APPROACH_SHORE_RADIUS, 8, 4).orElse(null);
+                bot.level(), target.blockPosition(), APPROACH_SHORE_RADIUS, 8, 4).orElse(null);
         if (destination == null) {
             bot.getActionPack().stopMovement();
             return true;
@@ -440,14 +439,14 @@ final class FollowSwimming {
         return path.isFailed();
     }
 
-    private Entry currentEntry(AIPlayerEntity bot, ServerPlayerEntity target, int elapsed) {
-        ServerWorld world = bot.getEntityWorld();
+    private Entry currentEntry(AIPlayerEntity bot, ServerPlayer target, int elapsed) {
+        ServerLevel world = bot.level();
         if (elapsed >= nextBadShoreForgetTick) {
             badShores.clear();
             nextBadShoreForgetTick = elapsed + BAD_SHORE_FORGET_TICKS;
         }
         if (entry != null && entryTargetPos != null
-                && target.getBlockPos().getSquaredDistance(entryTargetPos) <= ENTRY_RETARGET_DISTANCE_SQUARED
+                && target.blockPosition().distSqr(entryTargetPos) <= ENTRY_RETARGET_DISTANCE_SQUARED
                 && BoatSupport.isWater(world, entry.water())
                 && NavSafetyNet.isDryStandableCell(world, entry.shore())) {
             return entry;
@@ -458,7 +457,7 @@ final class FollowSwimming {
         }
         nextEntryScanTick = elapsed + ENTRY_SCAN_COOLDOWN_TICKS;
         entry = findEntry(bot, target);
-        entryTargetPos = target.getBlockPos();
+        entryTargetPos = target.blockPosition();
         if (entry != null) {
             BotLog.action(bot, "follow_swim_water_edge", "shore", entry.shore().toShortString(),
                     "water", entry.water().toShortString());
@@ -471,36 +470,36 @@ final class FollowSwimming {
      * toward the player. Cheap block-state tests first; the raycast visibility check only runs for
      * the few best candidates.
      */
-    private Entry findEntry(AIPlayerEntity bot, ServerPlayerEntity target) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos origin = bot.getBlockPos();
-        BlockPos goal = target.getBlockPos();
+    private Entry findEntry(AIPlayerEntity bot, ServerPlayer target) {
+        ServerLevel world = bot.level();
+        BlockPos origin = bot.blockPosition();
+        BlockPos goal = target.blockPosition();
         Standability.clearCache();
         record Scored(Entry entry, double cost) {
         }
         List<Scored> candidates = new ArrayList<>();
-        for (BlockPos cell : BlockPos.iterate(
-                origin.add(-ENTRY_RADIUS, -ENTRY_DOWN, -ENTRY_RADIUS),
-                origin.add(ENTRY_RADIUS, ENTRY_UP, ENTRY_RADIUS))) {
+        for (BlockPos cell : BlockPos.betweenClosed(
+                origin.offset(-ENTRY_RADIUS, -ENTRY_DOWN, -ENTRY_RADIUS),
+                origin.offset(ENTRY_RADIUS, ENTRY_UP, ENTRY_RADIUS))) {
             if (!BoatSupport.isWater(world, cell)) {
                 continue;
             }
-            BlockPos above = cell.up();
+            BlockPos above = cell.above();
             if (!world.getFluidState(above).isEmpty()
                     || !world.getBlockState(above).getCollisionShape(world, above).isEmpty()
                     || Standability.isDangerous(world.getBlockState(cell))) {
                 continue;
             }
-            BlockPos water = cell.toImmutable();
-            for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos water = cell.immutable();
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
                 for (int rise = 0; rise <= 1; rise++) {
-                    BlockPos shore = water.offset(direction).up(rise);
+                    BlockPos shore = water.relative(direction).above(rise);
                     if (badShores.contains(shore) || !NavSafetyNet.isDryStandableCell(world, shore)) {
                         continue;
                     }
-                    double cost = Math.sqrt(shore.getSquaredDistance(origin))
-                            + 0.75D * Math.sqrt(water.getSquaredDistance(goal));
-                    candidates.add(new Scored(new Entry(shore.toImmutable(), water), cost));
+                    double cost = Math.sqrt(shore.distSqr(origin))
+                            + 0.75D * Math.sqrt(water.distSqr(goal));
+                    candidates.add(new Scored(new Entry(shore.immutable(), water), cost));
                 }
             }
         }
@@ -536,15 +535,15 @@ final class FollowSwimming {
 
     // ---- water routes ------------------------------------------------------------------------
 
-    private void searchRoute(AIPlayerEntity bot, ServerWorld world, BlockPos target,
+    private void searchRoute(AIPlayerEntity bot, ServerLevel world, BlockPos target,
                              SwimRoute.Goal goal, int elapsed, double standoff) {
         nextRouteSearchTick = elapsed + ROUTE_COOLDOWN_TICKS;
         routeSearches++;
         Standability.clearCache();
-        Optional<List<BlockPos>> found = SwimRoute.search(world, bot.getBlockPos(), target, goal, standoff);
+        Optional<List<BlockPos>> found = SwimRoute.search(world, bot.blockPosition(), target, goal, standoff);
         if (found.isPresent() && !found.get().isEmpty()) {
             route = found.get();
-            routeStart = bot.getBlockPos().toImmutable();
+            routeStart = bot.blockPosition().immutable();
             routeGoal = goal;
             routeExpiryTick = elapsed + ROUTE_LIFETIME_TICKS;
             routeFailures = 0;
@@ -557,8 +556,8 @@ final class FollowSwimming {
         if (route == null) {
             return false;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         int index = route.indexOf(feet);
         if (index < 0 && !feet.equals(routeStart)) {
             clearRoute();
@@ -594,15 +593,15 @@ final class FollowSwimming {
      * walking, not swimming -- however wet its feet are.
      */
     static boolean isSwimming(AIPlayerEntity bot) {
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         if (!isSwimCell(world, feet)) {
             return false;
         }
-        if (bot.isSubmergedInWater()) {
+        if (bot.isUnderWater()) {
             return true;
         }
-        BlockPos below = feet.down();
+        BlockPos below = feet.below();
         return world.getBlockState(below).getCollisionShape(world, below).isEmpty();
     }
 
@@ -613,12 +612,12 @@ final class FollowSwimming {
      * never "standable", and its start snap only reaches a dry neighbour): there the bot would sit
      * forever, so it wades out along a water route.
      */
-    private static boolean needsWaterExit(AIPlayerEntity bot, ServerPlayerEntity target, double standoff) {
+    private static boolean needsWaterExit(AIPlayerEntity bot, ServerPlayer target, double standoff) {
         if (isSwimming(bot)) {
             return true;
         }
-        ServerWorld world = bot.getEntityWorld();
-        BlockPos feet = bot.getBlockPos();
+        ServerLevel world = bot.level();
+        BlockPos feet = bot.blockPosition();
         if (!isSwimCell(world, feet)) {
             return false;
         }
@@ -629,14 +628,14 @@ final class FollowSwimming {
     }
 
     /** A dry, standable cell one step away (same level, one up, one down) that land follow's start snap can reach. */
-    static boolean hasDryFootingWithinOneStep(ServerWorld world, BlockPos feet) {
+    static boolean hasDryFootingWithinOneStep(ServerLevel world, BlockPos feet) {
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if ((dx == 0 && dz == 0 && dy == 0) || (dy != 0 && Math.abs(dx) + Math.abs(dz) > 1)) {
                         continue;
                     }
-                    if (Standability.isStandableFresh(world, feet.add(dx, dy, dz))) {
+                    if (Standability.isStandableFresh(world, feet.offset(dx, dy, dz))) {
                         return true;
                     }
                 }
@@ -645,17 +644,17 @@ final class FollowSwimming {
         return false;
     }
 
-    static boolean isSwimCell(ServerWorld world, BlockPos pos) {
-        return BoatSupport.isWater(world, pos) || BoatSupport.isWater(world, pos.up());
+    static boolean isSwimCell(ServerLevel world, BlockPos pos) {
+        return BoatSupport.isWater(world, pos) || BoatSupport.isWater(world, pos.above());
     }
 
-    static boolean isSafeSwimCell(ServerWorld world, BlockPos pos) {
+    static boolean isSafeSwimCell(ServerLevel world, BlockPos pos) {
         if (!isSwimCell(world, pos)
                 || !world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()
-                || !world.getBlockState(pos.up()).getCollisionShape(world, pos.up()).isEmpty()) {
+                || !world.getBlockState(pos.above()).getCollisionShape(world, pos.above()).isEmpty()) {
             return false;
         }
-        return !world.getFluidState(pos).isIn(FluidTags.LAVA)
-                && !world.getFluidState(pos.up()).isIn(FluidTags.LAVA);
+        return !world.getFluidState(pos).is(FluidTags.LAVA)
+                && !world.getFluidState(pos.above()).is(FluidTags.LAVA);
     }
 }

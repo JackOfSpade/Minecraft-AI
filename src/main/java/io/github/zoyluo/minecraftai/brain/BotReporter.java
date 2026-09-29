@@ -31,8 +31,8 @@ public final class BotReporter {
             return;
         }
         ReportState state = new ReportState(status.name(), 25);
-        states.put(bot.getUuid(), state);
-        report(bot, state, "Starting " + summary(status) + ".", bot.getEntityWorld().getServer().getTicks(), true);
+        states.put(bot.getUUID(), state);
+        report(bot, state, "Starting " + summary(status) + ".", bot.level().getServer().getTickCount(), true);
     }
 
     public void onStatus(MinecraftServer server, AIPlayerEntity bot, TaskStatus status) {
@@ -40,32 +40,32 @@ public final class BotReporter {
             return;
         }
         if (status.name().equals("idle")) {
-            states.remove(bot.getUuid());
+            states.remove(bot.getUUID());
             return;
         }
-        ReportState state = states.computeIfAbsent(bot.getUuid(),
+        ReportState state = states.computeIfAbsent(bot.getUUID(),
                 ignored -> new ReportState(status.name(), 25));
         if (!state.taskName.equals(status.name())) {
             state.taskName = status.name();
             state.nextMilestone = 25;
-            report(bot, state, "Starting " + summary(status) + ".", server.getTicks(), true);
+            report(bot, state, "Starting " + summary(status) + ".", server.getTickCount(), true);
         }
         switch (status.state()) {
             case RUNNING -> reportProgress(server, bot, status, state);
-            case PAUSED -> report(bot, state, "Pausing " + summary(status) + " for now.", server.getTicks(), false);
+            case PAUSED -> report(bot, state, "Pausing " + summary(status) + " for now.", server.getTickCount(), false);
             case COMPLETED -> {
                 String prefix = GoalExecutor.INSTANCE.hasActivePlan(bot) ? "Step complete: " : "Completed: ";
-                report(bot, state, prefix + summary(status) + ".", server.getTicks(), true);
-                states.remove(bot.getUuid());
+                report(bot, state, prefix + summary(status) + ".", server.getTickCount(), true);
+                states.remove(bot.getUUID());
             }
             case FAILED -> {
                 report(bot, state, "Could not complete " + summary(status) + ". "
-                        + ReasonText.friendly(status.failureReason()), server.getTicks(), true);
-                states.remove(bot.getUuid());
+                        + ReasonText.friendly(status.failureReason()), server.getTickCount(), true);
+                states.remove(bot.getUUID());
             }
             case CANCELLED -> {
-                report(bot, state, "Cancelled: " + summary(status) + ".", server.getTicks(), true);
-                states.remove(bot.getUuid());
+                report(bot, state, "Cancelled: " + summary(status) + ".", server.getTickCount(), true);
+                states.remove(bot.getUUID());
             }
             default -> {
             }
@@ -73,8 +73,8 @@ public final class BotReporter {
     }
 
     public void onCleared(AIPlayerEntity bot) {
-        states.remove(bot.getUuid());
-        taskReportSequences.remove(bot.getUuid());
+        states.remove(bot.getUUID());
+        taskReportSequences.remove(bot.getUUID());
     }
 
     public void clearAll() {
@@ -83,7 +83,7 @@ public final class BotReporter {
     }
 
     public long taskReportSequence(AIPlayerEntity bot) {
-        return taskReportSequences.getOrDefault(bot.getUuid(), 0L);
+        return taskReportSequences.getOrDefault(bot.getUUID(), 0L);
     }
 
     public void onGoalMessage(AIPlayerEntity bot, String text) {
@@ -107,7 +107,7 @@ public final class BotReporter {
         }
         int milestone = state.nextMilestone;
         state.nextMilestone += 25;
-        report(bot, state, progressText(status, milestone), server.getTicks(), false);
+        report(bot, state, progressText(status, milestone), server.getTickCount(), false);
     }
 
     private void report(AIPlayerEntity bot, ReportState state, String text, int tick, boolean force) {
@@ -119,7 +119,7 @@ public final class BotReporter {
         }
         state.lastText = text;
         state.lastTick = tick;
-        taskReportSequences.merge(bot.getUuid(), 1L, Long::sum);
+        taskReportSequences.merge(bot.getUUID(), 1L, Long::sum);
         BrainCoordinator.INSTANCE.sendBotReply(bot, text);
     }
 
