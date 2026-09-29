@@ -47,6 +47,11 @@ public final class BotLog {
         submit(LogCategory.ACTION, Level.INFO, bot, event, null, null, kv);
     }
 
+    /** Action-category line attributed to a bot by name, for flushes that run after the bot entity is gone. */
+    public static void actionNamed(String botName, String event, Object... kv) {
+        submit(LogCategory.ACTION, Level.INFO, botName == null || botName.isBlank() ? "-" : botName, event, null, null, kv);
+    }
+
     public static void perception(AIPlayerEntity bot, String event, Object... kv) {
         submit(LogCategory.PERCEPTION, Level.DEBUG, bot, event, null, null, kv);
     }

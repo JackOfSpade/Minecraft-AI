@@ -19,10 +19,26 @@ package io.github.zoyluo.minecraftai.observe;
  * </ul>
  * A sample is one server tick (about 50 ms), so the defaults are 0.5 s / 2 s to confirm and a 5 s / 2 s
  * dwell. Not thread-safe by itself; {@link TpsGuard} synchronizes access.
+ *
+ * <p><b>Why these thresholds.</b> The value fed in is an EMA of the interval between consecutive
+ * {@code END_SERVER_TICK} calls, not of the work done per tick. The server paces itself at 50 ms, so a healthy
+ * server reads about 50 ms and can never read lower: the metric has a floor of 50 ms. This pack's normal, merely
+ * busy operation reads 53-59 ms (52.87-56.9 in the measured session). The thresholds therefore sit outside that
+ * band, both reachable from either side:</p>
+ * <ul>
+ *   <li>{@link #ENTER_MS} 62.5 ms = 16 TPS: sustained throughput below 16 TPS is genuinely degraded;</li>
+ *   <li>{@link #EXIT_MS} 58 ms: above the healthy floor and inside the pack's normal band, so a server that has
+ *       recovered to its usual load leaves the degraded state, yet 4.5 ms below {@link #ENTER_MS} so noise near
+ *       one threshold cannot trip the other.</li>
+ * </ul>
+ * (An earlier draft used exit 48 ms, which is below the 50 ms floor: the latch could never have left the
+ * degraded state and the mining-assist gate would have stayed denied for good.)
  */
 public final class TpsDegradationLatch {
-    public static final double ENTER_MS = 55.0D;
-    public static final double EXIT_MS = 48.0D;
+    /** 16 TPS. Strictly above this (as a smoothed average) for {@link #ENTER_SAMPLES} samples means degraded. */
+    public static final double ENTER_MS = 62.5D;
+    /** At or below this (as a smoothed average) for {@link #EXIT_SAMPLES} samples, after the dwell, means recovered. */
+    public static final double EXIT_MS = 58.0D;
     public static final int ENTER_SAMPLES = 10;
     public static final int EXIT_SAMPLES = 40;
     public static final int MIN_DEGRADED_SAMPLES = 100;

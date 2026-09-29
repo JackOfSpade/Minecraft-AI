@@ -82,19 +82,184 @@ public final class HarvestCore {
                                                      int horizontalRadius, int down, int up,
                                                      Predicate<BlockPos> posFilter,
                                                      boolean allowObservableCellFallback) {
+        NearestScan scan = beginNearestScan(bot, targetBlocks, horizontalRadius, down, up, posFilter, allowObservableCellFallback);
+        scan.step(Long.MAX_VALUE);
+        return scan.result();
+    }
+
+    /**
+     * Starts the same search as {@link #nearestReachableBlock(AIPlayerEntity, Set, int, int, int, Predicate, boolean)}
+     * (which is just this plus one unbounded {@link NearestScan#step}) as a resumable scan. The capability decision
+     * is taken once here. A caller on the server thread advances it a couple of milliseconds per tick, so a radius-48
+     * survey (about 170,000 positions, 90-165 ms cold in the strict profile) never lands as one server tick.
+     */
+    public static NearestScan beginNearestScan(AIPlayerEntity bot, Set<Block> targetBlocks,
+                                               int horizontalRadius, int down, int up,
+                                               Predicate<BlockPos> posFilter,
+                                               boolean allowObservableCellFallback) {
         CapabilityDecision scanDecision = CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "harvest_nearest_blocks");
         CapabilityTally.INSTANCE.record(bot.getUuid(), PrivilegedCapability.HIDDEN_BLOCK_SCAN, scanDecision.allowed());
-        BlockPos origin = bot.getBlockPos();
-        return firstWalkReachable(bot, origin,
-                BlockPos.stream(origin.add(-horizontalRadius, -down, -horizontalRadius), origin.add(horizontalRadius, up, horizontalRadius))
-                        .filter(pos -> scanDecision.allowed() || withinObservationReach(bot, pos))
-                        .filter(pos -> canObserveHarvestTarget(
-                                bot, pos, allowObservableCellFallback))
-                        .filter(pos -> targetBlocks.contains(bot.getEntityWorld().getBlockState(pos).getBlock()))
-                        .filter(pos -> posFilter == null || posFilter.test(pos))
-                        .map(BlockPos::toImmutable)
-                        .map(pos -> targetChoice(bot, pos))
-                        .filter(choice -> choice != null));
+        return new NearestScan(bot, targetBlocks, horizontalRadius, down, up, posFilter,
+                allowObservableCellFallback, scanDecision.allowed());
+    }
+
+    /**
+     * Resumable nearest-reachable-block search. Phase 1 walks the cube and collects candidate positions that pass
+     * the unchanged observability rules (the capability-denied sphere pre-filter, then the observation check, and
+     * only then the block-state read, exactly as the old stream did). Phase 2 orders them near to far and verifies
+     * the nearest {@link #REACH_VERIFY_LIMIT} usable ones with the walk-reachability A*; one A* (up to
+     * {@link #REACH_MAX_MILLIS} ms) is the most any single {@link #step} spends there, and it always ends the step.
+     * The result equals the old synchronous stream: the same filters, the same x-fastest/z-slowest tie order, the
+     * same 8-candidate verification limit (counting only positions that produced a usable standing choice).
+     */
+    public static final class NearestScan {
+        private static final int CLOCK_CHECK_MASK = 63; // read the clock every 64 positions
+
+        private final AIPlayerEntity bot;
+        private final Set<Block> targetBlocks;
+        private final Predicate<BlockPos> posFilter;
+        private final boolean allowObservableCellFallback;
+        private final boolean hiddenScanAllowed;
+        private final BlockPos origin;
+        private final int startTick;
+        private final int minX;
+        private final int minY;
+        private final int minZ;
+        private final int sizeX;
+        private final int sizeY;
+        private final long total;
+        private long index;
+
+        private final java.util.ArrayList<BlockPos> candidates = new java.util.ArrayList<>();
+        private boolean enumerated;
+        private int verifyIndex;
+        private int verified;
+        private TargetChoice result;
+        private boolean done;
+        private int steps;
+        private long maxStepNanos;
+        private long totalNanos;
+
+        private NearestScan(AIPlayerEntity bot, Set<Block> targetBlocks, int horizontalRadius, int down, int up,
+                            Predicate<BlockPos> posFilter, boolean allowObservableCellFallback, boolean hiddenScanAllowed) {
+            this.bot = bot;
+            this.targetBlocks = targetBlocks;
+            this.posFilter = posFilter;
+            this.allowObservableCellFallback = allowObservableCellFallback;
+            this.hiddenScanAllowed = hiddenScanAllowed;
+            this.origin = bot.getBlockPos();
+            this.startTick = bot.getEntityWorld().getServer() == null ? 0 : bot.getEntityWorld().getServer().getTicks();
+            this.minX = origin.getX() - horizontalRadius;
+            this.minY = origin.getY() - down;
+            this.minZ = origin.getZ() - horizontalRadius;
+            this.sizeX = 2 * horizontalRadius + 1;
+            this.sizeY = down + up + 1;
+            long sizeZ = 2L * horizontalRadius + 1L;
+            this.total = (long) sizeX * sizeY * sizeZ;
+        }
+
+        public int startTick() {
+            return startTick;
+        }
+
+        public BlockPos origin() {
+            return origin;
+        }
+
+        public boolean isDone() {
+            return done;
+        }
+
+        /** The nearest reachable target, or null; meaningful once {@link #isDone}. */
+        public TargetChoice result() {
+            return result;
+        }
+
+        public int steps() {
+            return steps;
+        }
+
+        public long maxStepNanos() {
+            return maxStepNanos;
+        }
+
+        public long totalNanos() {
+            return totalNanos;
+        }
+
+        /**
+         * Advances for about {@code budgetNanos} (one candidate batch or one A* may overshoot it).
+         *
+         * @return true once the search is finished
+         */
+        public boolean step(long budgetNanos) {
+            if (done) {
+                return true;
+            }
+            long start = System.nanoTime();
+            long deadline = budgetNanos >= Long.MAX_VALUE - start ? Long.MAX_VALUE : start + budgetNanos;
+            steps++;
+            try {
+                if (!enumerated) {
+                    enumerate(deadline);
+                    if (!enumerated) {
+                        return false;
+                    }
+                    candidates.sort(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)));                }
+                verify(deadline);
+                return done;
+            } finally {
+                long spent = System.nanoTime() - start;
+                maxStepNanos = Math.max(maxStepNanos, spent);
+                totalNanos += spent;
+            }
+        }
+
+        private void enumerate(long deadline) {
+            var world = bot.getEntityWorld();
+            BlockPos.Mutable cursor = new BlockPos.Mutable();
+            int visited = 0;
+            while (index < total) {
+                long i = index++;
+                int x = (int) (i % sizeX);
+                long rest = i / sizeX;
+                int y = (int) (rest % sizeY);
+                int z = (int) (rest / sizeY);
+                cursor.set(minX + x, minY + y, minZ + z);
+                if ((hiddenScanAllowed || withinObservationReach(bot, cursor))
+                        && canObserveHarvestTarget(bot, cursor, allowObservableCellFallback)
+                        && targetBlocks.contains(world.getBlockState(cursor).getBlock())
+                        && (posFilter == null || posFilter.test(cursor))) {
+                    candidates.add(cursor.toImmutable());
+                }
+                if ((++visited & CLOCK_CHECK_MASK) == 0 && System.nanoTime() >= deadline) {
+                    return;
+                }
+            }
+            enumerated = true;
+        }
+
+        private void verify(long deadline) {
+            while (!done) {
+                if (verified >= REACH_VERIFY_LIMIT || verifyIndex >= candidates.size()) {
+                    done = true;
+                    return;
+                }
+                if (System.nanoTime() >= deadline) {
+                    return; // out of budget: the next tick continues with the next candidate
+                }
+                TargetChoice choice = targetChoice(bot, candidates.get(verifyIndex++));
+                if (choice == null) {
+                    continue;
+                }
+                verified++;
+                if (isWalkReachable(bot, choice)) { // the expensive unit: one A*, up to REACH_MAX_MILLIS
+                    result = choice;
+                    done = true;
+                    return;
+                }
+            }
+        }
     }
 
     public static void startMining(AIPlayerEntity bot, BlockPos targetPos) {

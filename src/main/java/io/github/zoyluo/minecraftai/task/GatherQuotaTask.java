@@ -139,7 +139,8 @@ public final class GatherQuotaTask extends AbstractTask {
     private int lastScanTick = -100;
     private int lastProspectTick = -100; // Treeless-area fallback: tick of the last wide-range tree prospect (throttled)
     private OreProspector.Scan prospectScan;  // in-flight budgeted prospect scan (null when none)
-    private OreProspector.Scan exploreScan;   // in-flight budgeted en-route explore scan (null when none)
+    private OreProspector.Scan exploreScan;   // in-flight budgeted en-route explore scan (null when none); only meaningful in Phase.EXPLORE
+    private HarvestCore.NearestScan surveyScan; // in-flight budgeted wide (radius > SEARCH_RADIUS) survey scan; only meaningful in Phase.SURVEY
     // Elevation-difference tolerance: previous prospect target + a blacklist of unreachable
     // targets. Re-entering prospect means the previous target wasn't harvested (if it had been,
     // nearby SURVEY would have taken over and prospect wouldn't run again) → blacklist it and move
@@ -271,6 +272,7 @@ public final class GatherQuotaTask extends AbstractTask {
         phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
         prospectScan = null;
         exploreScan = null;
+        surveyScan = null;
         stockpileTask = null;
         pickupOrigin = null;
         pickupStatBeforeHarvest = pickedUpAccepted(bot);
@@ -292,6 +294,7 @@ public final class GatherQuotaTask extends AbstractTask {
     protected void onResume(AIPlayerEntity bot) {
         prospectScan = null; // a scan begun before the pause reflects a stale position
         exploreScan = null;
+        surveyScan = null;
         if (!countBrokenBlocks) {
             refreshCountSoFar(bot);
         }
@@ -379,6 +382,15 @@ public final class GatherQuotaTask extends AbstractTask {
                     return; // Both already set phase=ROAM/EXPLORE internally (walking to a new patch / heading outward to explore); no more self-checks while moving
                 }
             }
+        }
+        // A budgeted scan only means something while its phase is current. Dropping them here, whatever code
+        // path changed the phase (exploreMove's exits, escapeBarrenArea, pause/resume, swimming, ...), means no
+        // exit from EXPLORE (or SURVEY) can leave a stale scan behind to be resumed from an old position.
+        if (phase != Phase.EXPLORE) {
+            exploreScan = null;
+        }
+        if (phase != Phase.SURVEY) {
+            surveyScan = null;
         }
         switch (phase) {
             case SURVEY -> survey(bot);
@@ -804,6 +816,7 @@ public final class GatherQuotaTask extends AbstractTask {
             exploreTarget = null;
             searchRadius = SEARCH_RADIUS;
             lastScanTick = -100;
+            exploreScan = null; // every exit from EXPLORE drops its en-route scan
             phase = Phase.SURVEY;
             return;
         }
@@ -824,6 +837,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 bot.getActionPack().stopAll();
                 exploreTarget = null;
                 searchRadius = SEARCH_RADIUS;
+                exploreScan = null; // every exit from EXPLORE drops its en-route scan
                 phase = Phase.SURVEY;
                 return;
             }
@@ -841,6 +855,7 @@ public final class GatherQuotaTask extends AbstractTask {
             bot.getActionPack().stopAll();
             exploreTarget = null;
             searchRadius = SEARCH_RADIUS;
+            exploreScan = null; // every exit from EXPLORE drops its en-route scan
             phase = Phase.SURVEY;
             return;
         }
@@ -859,6 +874,7 @@ public final class GatherQuotaTask extends AbstractTask {
                 excludeExploreHint(bot, "no_path");
                 exploreTarget = null;
                 searchRadius = SEARCH_RADIUS;
+                exploreScan = null; // every exit from EXPLORE drops its en-route scan
                 phase = Phase.SURVEY;
                 return;
             }
@@ -890,19 +906,41 @@ public final class GatherQuotaTask extends AbstractTask {
         // F1: throttle large-radius scans to avoid scanning a 48-block cube every tick and
         // dragging down TPS.
         int now = bot.getEntityWorld().getServer().getTicks();
-        if (searchRadius > SEARCH_RADIUS && now - lastScanTick < LARGE_SCAN_THROTTLE_TICKS) {
+        if (surveyScan != null && scanIsStale(bot, surveyScan.startTick(), surveyScan.origin(), SCAN_STALE_DISTANCE_SQ)) {
+            surveyScan = null;
+        }
+        if (surveyScan == null && searchRadius > SEARCH_RADIUS && now - lastScanTick < LARGE_SCAN_THROTTLE_TICKS) {
             return;
         }
-        lastScanTick = now;
         // Where the unreachable blacklist takes effect: coordinates blacklisted by goToTarget
         // (repeated failures against the same target) are filtered out of the candidate
         // stream — survey no longer repeatedly relocks onto the same unreachable tree (observed
         // on real_wood: relock → GOTO fails → relock, ping-ponging all the way to the 6001t
         // timeout).
         java.util.UUID botId = bot.getUuid();
-        HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, harvestBlocks, searchRadius, SEARCH_DOWN, SEARCH_UP,
-                pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, now),
-                needsCellObservation());
+        var surveyServer = bot.getEntityWorld().getServer();
+        HarvestCore.TargetChoice choice;
+        if (searchRadius > SEARCH_RADIUS) {
+            // The wide survey (radius 32/48: ~170,000 positions, 90-165 ms cold) is a resumable scan advanced a
+            // couple of milliseconds per tick, like the prospect below, instead of one server tick.
+            if (surveyScan == null) {
+                lastScanTick = now;
+                surveyScan = HarvestCore.beginNearestScan(bot, harvestBlocks, searchRadius, SEARCH_DOWN, SEARCH_UP,
+                        pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, surveyServer.getTicks()),
+                        needsCellObservation());
+            }
+            if (!surveyScan.step(SCAN_STEP_BUDGET_NANOS)) {
+                return; // still scanning: hold position, this scan resumes first on the next tick
+            }
+            choice = surveyScan.result();
+            surveyScan = null;
+        } else {
+            surveyScan = null; // the radius was reset while a wide scan was in flight: that scan is obsolete
+            lastScanTick = now;
+            choice = HarvestCore.nearestReachableBlock(bot, harvestBlocks, searchRadius, SEARCH_DOWN, SEARCH_UP,
+                    pos -> !EpisodeMemory.INSTANCE.isExcluded(botId, pos, now),
+                    needsCellObservation());
+        }
         if (choice == null) {
             if (countBrokenBlocks) {
                 // An exact break request is deliberately a small, nearby gesture. Do not surface,
@@ -988,9 +1026,23 @@ public final class GatherQuotaTask extends AbstractTask {
 
     /** A budgeted scan is only meaningful while the bot stays where it began; otherwise it is dropped and redone. */
     private static boolean scanIsStale(AIPlayerEntity bot, OreProspector.Scan scan, double maxDistanceSq) {
+        return scanIsStale(bot, scan.startTick(), scan.origin(), maxDistanceSq);
+    }
+
+    private static boolean scanIsStale(AIPlayerEntity bot, int startTick, BlockPos origin, double maxDistanceSq) {
         int now = bot.getEntityWorld().getServer().getTicks();
-        return now - scan.startTick() > SCAN_STALE_TICKS
-                || bot.getBlockPos().getSquaredDistance(scan.origin()) > maxDistanceSq;
+        return now - startTick > SCAN_STALE_TICKS
+                || bot.getBlockPos().getSquaredDistance(origin) > maxDistanceSq;
+    }
+
+    /** Test hook: true while a budgeted wide survey scan is in flight (ProspectScanBudgetGameTests). */
+    boolean surveyScanActive() {
+        return surveyScan != null;
+    }
+
+    /** Test hook: true while a budgeted en-route explore scan is in flight (ProspectScanBudgetGameTests). */
+    boolean exploreScanActive() {
+        return exploreScan != null;
     }
 
     // Dig-approach: when a cliff-face/elevation-difference tree is GOAL_UNREACHABLE by plain

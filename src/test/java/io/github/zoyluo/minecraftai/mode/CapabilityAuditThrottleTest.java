@@ -124,4 +124,41 @@ final class CapabilityAuditThrottleTest {
         assertTrue(summary.contexts().size() <= CapabilityAuditThrottle.MAX_SUMMARY_CONTEXTS);
         assertEquals(20, summary.count());
     }
+
+    @Test
+    void aLoneRepeatIsReportedByTheSweepWithinTheWindowPlusOneSweepPeriod() {
+        CapabilityAuditThrottle t = new CapabilityAuditThrottle();
+        assertTrue(deny(t, "ctx", 0).logDecision());
+        // One single repeat, then silence: observe() alone would never report it.
+        assertFalse(deny(t, "ctx", 10).logDecision());
+        int window = CapabilityAuditThrottle.SUMMARY_INTERVAL_TICKS;
+        assertTrue(t.drainDue(10 + window - 1).isEmpty(), "the window has not run its full length yet");
+        List<CapabilityAuditThrottle.Summary> due = t.drainDue(10 + window);
+        assertEquals(1, due.size());
+        assertEquals(1, due.get(0).count());
+        assertTrue(t.drainDue(10 + 2 * window).isEmpty(), "reported once, not again");
+        assertTrue(t.drainAll(10 + 2 * window).isEmpty());
+    }
+
+    @Test
+    void sweepIgnoresKeysWithoutAPendingRepeat() {
+        CapabilityAuditThrottle t = new CapabilityAuditThrottle();
+        deny(t, "ctx", 0);
+        assertTrue(t.drainDue(100_000).isEmpty(), "a first occurrence has nothing pending");
+    }
+
+    @Test
+    void drainAllFlushesEveryBotAndLeavesNothingPending() {
+        CapabilityAuditThrottle t = new CapabilityAuditThrottle();
+        UUID other = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        deny(t, "ctx", 0);
+        deny(t, "ctx", 1);
+        t.observe(other, SCAN, false, DENIED, "ctx", 0, false);
+        t.observe(other, SCAN, false, DENIED, "ctx", 1, false);
+        t.observe(other, SCAN, false, DENIED, "ctx", 2, false);
+        List<CapabilityAuditThrottle.Summary> all = t.drainAll(5);
+        assertEquals(2, all.size());
+        assertEquals(3, all.stream().mapToInt(CapabilityAuditThrottle.Summary::count).sum());
+        assertTrue(t.drainAll(6).isEmpty());
+    }
 }

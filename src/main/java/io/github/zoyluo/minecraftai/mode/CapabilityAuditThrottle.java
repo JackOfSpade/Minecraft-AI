@@ -21,8 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>A <b>repeat</b> of an already-seen combination is not logged individually. It is counted per
  *       (bot, capability, allowed, reason); once a window of {@link #SUMMARY_INTERVAL_TICKS} has passed since the
  *       first counted repeat, the next repeat of that key returns a {@link Summary} (count, window length, the
- *       contexts that repeated) for the caller to log, and a new window starts. Pending counts are flushed by
- *       {@link #drain} when the bot goes away.</li>
+ *       contexts that repeated) for the caller to log, and a new window starts. A lone repeat that no later
+ *       repeat pushes out is reported by the periodic {@link #drainDue} sweep, and pending counts are flushed by
+ *       {@link #drain} when a bot goes away and {@link #drainAll} on a world boundary, shutdown or reload.</li>
  *   <li>Decisions the caller marks {@code alwaysAudit} (manual and emergency teleports) are always logged in full.</li>
  * </ul>
  * Before this existed the same bot logged one INFO line per (capability, context) every 5 s forever, which was 18%
@@ -89,6 +90,39 @@ public final class CapabilityAuditThrottle {
             }
             return Outcome.QUIET;
         }
+    }
+
+    /**
+     * Summaries for every pending key whose window has run for at least {@link #SUMMARY_INTERVAL_TICKS}. Called on
+     * a periodic sweep so a lone repeat (a single count after the first occurrence, which {@link #observe} only
+     * reports when a later repeat arrives) is still reported within a bounded time: the window length plus the
+     * sweep period.
+     */
+    public List<Summary> drainDue(int nowTick) {
+        List<Summary> out = new ArrayList<>();
+        for (var e : entries.entrySet()) {
+            Entry entry = e.getValue();
+            synchronized (entry) {
+                if (entry.repeatCount > 0 && nowTick - entry.windowStartTick >= SUMMARY_INTERVAL_TICKS) {
+                    out.add(takeSummary(e.getKey(), entry, nowTick));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Summaries for every pending key of every bot; call before the whole table is cleared (world boundary, shutdown, reload). */
+    public List<Summary> drainAll(int nowTick) {
+        List<Summary> out = new ArrayList<>();
+        for (var e : entries.entrySet()) {
+            Entry entry = e.getValue();
+            synchronized (entry) {
+                if (entry.repeatCount > 0) {
+                    out.add(takeSummary(e.getKey(), entry, nowTick));
+                }
+            }
+        }
+        return out;
     }
 
     /** Summaries for every pending (counted but not yet reported) key of one bot; call when the bot goes away. */
